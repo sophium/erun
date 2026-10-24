@@ -9,11 +9,7 @@ import type { AppState } from '@/app/state';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-// noContextsShellSetupHint names the shell-config file and the kubectl
-// install command for the host's own platform. The Windows branch matters
-// because this dialog IS the documented Windows getting-started path
-// (erun-docs/docs/getting-started/first-environment.md): a Windows reader who
-// gets macOS-only shell/package-manager advice here has nowhere else to look.
+// noContextsShellSetupHint matches the host platform: this dialog is the Windows getting-started path.
 function noContextsShellSetupHint(): string {
   if (isWindowsPlatform) {
     return 'set KUBECONFIG under your account environment variables (Start menu → "Edit environment variables for your account"), then restart ERun. If kubectl is not yet installed, install it with `winget install -e --id Kubernetes.kubectl`.';
@@ -24,9 +20,6 @@ function noContextsShellSetupHint(): string {
   return "set KUBECONFIG in ~/.profile (or ~/.bashrc) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with your distribution's package manager (e.g. `apt install kubectl`).";
 }
 
-// noContextsBody also names the in-app route that skips local kubectl
-// entirely — a managed cloud cluster ERun provisions — since that route
-// exists today but was never surfaced from this dialog.
 function noContextsBody(): string {
   return (
     'ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. ' +

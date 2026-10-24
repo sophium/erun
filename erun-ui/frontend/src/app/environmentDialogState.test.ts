@@ -14,8 +14,7 @@ import {
 } from './environmentDialogState';
 import { defaultEnvironmentDialog, type EnvironmentDialogState } from './state';
 
-// A submittable baseline: every other required field filled so each test
-// below isolates the one condition it is checking.
+// Every required field filled, so each test isolates one condition.
 function submittableDialog(): EnvironmentDialogState {
   return {
     ...defaultEnvironmentDialog(),
@@ -67,9 +66,7 @@ test('not selecting the hosted registry still requires a container registry as b
   assert.equal(missingRequiredFieldReason(dialog), 'Select a container registry.');
 });
 
-// A reading whose only node has no request capacity left, which is what makes
-// the capacity message non-empty: the scheduler has nothing to admit a pod
-// with, so a new one stays Pending wherever it is placed.
+// A node with no request capacity left, so the capacity message is non-empty.
 function schedulerExhaustedNodeStatus(): UIRuntimeResourceStatus {
   const metric = (unit: string): UIRuntimeResourceMetric => ({
     total: 0,
@@ -104,12 +101,7 @@ test('the runtime-capacity requirement is asked of a pod-backed env', () => {
 });
 
 test('the runtime-capacity requirement is skipped for a host env', () => {
-  // The submit gate enables Create for a host env by skipping the cluster-shaped
-  // blockers, so this has to stay empty for the same env. A host env has no pod
-  // to size and createHostEnvConfig records no runtime resources at all, so a
-  // message here would refuse a Create that the host form renders no field to
-  // clear -- a dead end whose only exit is closing the dialog. Both the gate and
-  // submit call this helper, which is what keeps them from disagreeing again.
+  // A host env has no pod to size, so the gate and submit must both leave this empty.
   const dialog: EnvironmentDialogState = {
     ...submittableDialog(),
     envType: 'host',

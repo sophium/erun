@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sophium/erun/erun-common"
 )
 
 func relayTestSettings(t *testing.T, env map[string]string, existing string) (map[string]any, string) {
@@ -23,9 +21,6 @@ func relayTestSettings(t *testing.T, env map[string]string, existing string) (ma
 	return readTestJSON(t, path), string(data)
 }
 
-// A configured gateway relays the model list (which makes the catalog
-// selectable), the default model and the model's context window into settings;
-// the credential stays in the pod environment and never reaches a file.
 func TestRelayRuntimeClaudeSettingsRelaysAGatewaysRouting(t *testing.T) {
 	_, raw := relayTestSettings(t, map[string]string{
 		"ANTHROPIC_BASE_URL":             "https://openrouter.ai/api",
@@ -47,8 +42,6 @@ func TestRelayRuntimeClaudeSettingsRelaysAGatewaysRouting(t *testing.T) {
 	}
 }
 
-// An install with no gateway and no Bedrock must land in exactly the settings
-// shape it had, apart from the session settings every pod gets.
 func TestRelayRuntimeClaudeSettingsWritesNoRoutingWithoutARelay(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, "")
 	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "AWS_REGION", "availableModels"} {
@@ -58,14 +51,12 @@ func TestRelayRuntimeClaudeSettingsWritesNoRoutingWithoutARelay(t *testing.T) {
 	}
 }
 
-// Bedrock is relayed for an AWS environment with a region; the use flags are
-// present-or-absent to Claude Code, so a disabled one is removed, never "0".
 func TestRelayRuntimeClaudeSettingsRelaysBedrock(t *testing.T) {
 	settings, _ := relayTestSettings(t, map[string]string{
 		"ERUN_CLOUD_PROVIDER_ALIAS": "operator@aws", "ERUN_CLOUD_REGION": "eu-west-2",
 		"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_MANTLE": "0",
 	}, `{"env": {"CLAUDE_CODE_USE_MANTLE": "0"}}`)
-	env := settings["env"].(map[string]any)
+	env := testJSONObject(t, settings["env"])
 	if env["CLAUDE_CODE_USE_BEDROCK"] != "1" || env["AWS_REGION"] != "eu-west-2" || env["ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION"] != "eu-west-2" ||
 		env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] != "32000" || env["MAX_THINKING_TOKENS"] != "1024" {
 		t.Fatalf("unexpected Bedrock relay: %v", env)
@@ -75,10 +66,7 @@ func TestRelayRuntimeClaudeSettingsRelaysBedrock(t *testing.T) {
 	}
 }
 
-// settings.json lives on the persistent volume, so a pod redeployed off the
-// gateway would otherwise keep launching the gateway's model. This pod predates
-// the ownership record: its earlier relay evidently ran (both token defaults are
-// there), so what it wrote goes and what the operator wrote stays.
+// This pod predates the ownership record but both token defaults show its relay ran.
 func TestRelayRuntimeClaudeSettingsRemovesWhatItRelayedAfterLeavingTheGateway(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, `{
   "theme": "dark",
@@ -103,9 +91,6 @@ func TestRelayRuntimeClaudeSettingsRemovesWhatItRelayedAfterLeavingTheGateway(t 
 	}
 }
 
-// A settings file the relay never touched owns nothing, and once the record
-// exists an entry the relay did not write survives even under a name it could
-// own.
 func TestRelayRuntimeClaudeSettingsNeverRemovesTheOperatorsOwnEntries(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, `{"env": {"ANTHROPIC_MODEL": "sonnet", "MAX_THINKING_TOKENS": "4096"}, "availableModels": ["sonnet"]}`)
 	for _, kept := range []string{`"ANTHROPIC_MODEL": "sonnet"`, `"MAX_THINKING_TOKENS": "4096"`, "availableModels"} {
@@ -126,9 +111,6 @@ func TestRelayRuntimeClaudeSettingsNeverRemovesTheOperatorsOwnEntries(t *testing
 	}
 }
 
-// The hooks are the writer the AI-session status model needs: every binding is
-// installed with the event it reports, a reboot replaces its own block rather
-// than stacking another, and an operator's own hook on the same event is kept.
 func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	writeAssetFile(t, path, `{"permissions": {"allow": ["Bash"]}, "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "printf 'operator hook\n'"}]}]}}`)
@@ -138,30 +120,36 @@ func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 		}
 	}
 	settings := readTestJSON(t, path)
-	permissions := settings["permissions"].(map[string]any)
+	permissions := testJSONObject(t, settings["permissions"])
 	if permissions["defaultMode"] != "bypassPermissions" || permissions["allow"] == nil || settings["skipDangerousModePermissionPrompt"] != true {
 		t.Fatalf("unexpected permission settings: %v", settings)
 	}
-	hooks := settings["hooks"].(map[string]any)
-	for _, binding := range eruncommon.AISessionHookBindings() {
-		ours := runtimeAISessionHookCommands(hooks[binding.ToolEvent].([]any))
+	hooks := testJSONObject(t, settings["hooks"])
+	for _, binding := range AISessionHookBindings() {
+		ours := runtimeAISessionHookCommands(t, testJSONArray(t, hooks[binding.ToolEvent]))
 		if len(ours) != 1 {
 			t.Fatalf("%s should carry exactly one AI-session report, got %d", binding.ToolEvent, len(ours))
 		}
-		if !strings.Contains(ours[0], eruncommon.AISessionHookVerbPath+" --event "+string(binding.ModelEvent)+" --tool claude") {
+		if !strings.Contains(ours[0], AISessionHookVerbPath+" --event "+string(binding.ModelEvent)+" --tool claude") {
 			t.Fatalf("%s should report %s, got %q", binding.ToolEvent, binding.ModelEvent, ours[0])
 		}
 	}
-	if len(hooks["Stop"].([]any)) != 2 {
+	if len(testJSONArray(t, hooks["Stop"])) != 2 {
 		t.Fatalf("the operator's own Stop hook must be kept beside ours: %v", hooks["Stop"])
 	}
 }
 
-func runtimeAISessionHookCommands(blocks []any) []string {
+func runtimeAISessionHookCommands(t *testing.T, blocks []any) []string {
+	t.Helper()
 	var commands []string
 	for _, block := range blocks {
 		if isRuntimeAISessionHookBlock(block) {
-			commands = append(commands, block.(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string))
+			hook := testJSONObject(t, testJSONArray(t, testJSONObject(t, block)["hooks"])[0])
+			command, ok := hook["command"].(string)
+			if !ok {
+				t.Fatalf("want a hook command string, got %T", hook["command"])
+			}
+			commands = append(commands, command)
 		}
 	}
 	return commands

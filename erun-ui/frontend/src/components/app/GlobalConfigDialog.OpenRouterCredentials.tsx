@@ -3,14 +3,7 @@ import * as React from 'react';
 
 import type { UIGatewayCredentialStatus } from '@/uiOpenRouterTypes';
 
-// GatewayCredentialFields shows which gateway credential a deploy will deliver,
-// and lets the operator replace it.
-//
-// There is no Secret to name and no entry within one to pick: the credential is
-// one erun-level value, and erun delivers it into every environment's namespace
-// itself. What is left for an operator to care about is which key is in play —
-// so that is what this shows, identified by its last few characters rather than
-// by its value.
+// GatewayCredentialFields identifies the key in play by its suffix, never its value.
 export function GatewayCredentialFields({
   status,
   disabled,
@@ -94,8 +87,7 @@ export function GatewayCredentialFields({
         >
           {source === undefined ? 'Set a key' : 'Use a different key'}
         </Button>
-        {/* Only offered when it would change something: with nothing saved, the
-            machine's own key is already what a deploy delivers. */}
+        {/* With nothing saved, the machine's own key is already delivered. */}
         {source === 'saved' ? (
           <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClear}>
             Use this machine&apos;s key
@@ -109,12 +101,7 @@ export function GatewayCredentialFields({
   );
 }
 
-// credentialSummary names the key in play without revealing it. The hint is a
-// suffix, so two keys can be told apart and neither can be used.
-//
-// A key that exists but belongs to another gateway is its own case. Reporting it
-// as "no key found" would contradict what the operator can see in their own
-// Claude Code settings, so the summary says which situation they are in.
+// A key belonging to another gateway is reported as such, not as missing.
 function credentialSummary(status: UIGatewayCredentialStatus | undefined): string {
   const suffix = status?.hint ? ` ${status.hint}` : '';
   if (status?.source === 'saved') {
@@ -129,9 +116,6 @@ function credentialSummary(status: UIGatewayCredentialStatus | undefined): strin
   return 'No gateway key found';
 }
 
-// credentialHelperText says what happens to the key, whichever state is shown:
-// the delivery, and the reason a key on this machine is not reused, are both
-// things an operator cannot see for themselves.
 function credentialHelperText(status: UIGatewayCredentialStatus | undefined): string {
   const delivery =
     'ERun delivers this key into every environment that uses the gateway. Its value never enters a chart value, a saved config, or a launch command.';

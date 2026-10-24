@@ -27,11 +27,7 @@ func stubRuntimeDeployment(t *testing.T, raw string, found bool) *[]string {
 	return &calls
 }
 
-// TestReadGatewayRoutingReportsAPodStillOnASwitchedOffGateway is the operator's
-// report: the gateway was switched off in ERun settings (the catalog keeps its
-// models but has no base URL), and the running pod still routes to the gateway.
-// Before this existed nothing could say so — the switch looked like it did
-// nothing, because only a redeploy applies it.
+// A gateway switched off in settings (catalog without base URL) while the pod still routes to it.
 func TestReadGatewayRoutingReportsAPodStillOnASwitchedOffGateway(t *testing.T) {
 	calls := stubRuntimeDeployment(t, testRuntimeDeploymentWithGateway, true)
 	switchedOff := &config.OpenRouterConfig{
@@ -86,7 +82,6 @@ func TestReadGatewayRoutingAgreesWhenThePodMatches(t *testing.T) {
 	stubRuntimeDeployment(t, testRuntimeDeploymentWithGateway, true)
 	env := config.EnvConfig{Name: "build", KubernetesContext: "erun-build"}
 
-	// A trailing slash is the same endpoint, not a reason to redeploy.
 	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &config.OpenRouterConfig{BaseURL: testGatewayURL + "/"})
 	if err != nil {
 		t.Fatal(err)

@@ -10,31 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// ProjectConfigGitIgnoreFix is the one-line remedy for a gitignored
-// .erun/config.yaml: a bare ".erun/" directory ignore cannot be negated per
-// file in git, so the fix carves the file back out with a glob instead of a
-// bare directory pattern.
+// ProjectConfigGitIgnoreFix is the remedy: git cannot negate a file inside a bare
+// ignored directory, so the directory pattern must become a glob.
 const ProjectConfigGitIgnoreFix = `replace a bare ".erun/" ignore with ".erun/*" plus "!.erun/config.yaml"`
 
-// ProjectConfigGitIgnored reports whether projectRoot's per-project config
-// file (.erun/config.yaml) exists on disk and, if so, whether it is excluded
-// by the project's own gitignore rules. erun-docs/reference/configuration.md
-// documents this file as the per-project layer, "edited by team in PRs" — a
-// gitignored copy is invisible to `git status` and therefore to every
-// teammate but the one machine that wrote it, so a build or deploy driven by
-// it works there and nowhere else. This shells out to `git check-ignore`
-// rather than reimplementing gitignore's own matching rules (nested files,
-// negation-inside-an-ignored-directory, .git/info/exclude) a second time.
-//
-// A detection failure (no git repository, git missing) reports present=false
-// silently: the caller already resolved the config from disk, so a git error
-// here should not add noise on top of that.
+// ProjectConfigGitIgnored reports whether .erun/config.yaml exists and git ignores
+// it; detection failures report present=false silently.
 func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ignored bool, err error) {
-	configFilePath, pathErr := projectConfigPath(projectRoot)
-	if pathErr != nil {
-		return false, false, nil
-	}
-	if _, statErr := os.Stat(configFilePath); statErr != nil {
+	if !projectConfigFileExists(projectRoot) {
 		return false, false, nil
 	}
 
@@ -52,10 +35,16 @@ func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ign
 	return true, false, runErr
 }
 
-// WarnIfProjectConfigGitIgnored traces a one-line warning when projectRoot's
-// per-project config resolves from disk but git would never track it, so the
-// caller's resolution is reproducible only on this machine. Detection errors
-// stay silent — see ProjectConfigGitIgnored.
+func projectConfigFileExists(projectRoot string) bool {
+	configFilePath, err := projectConfigPath(projectRoot)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(configFilePath)
+	return err == nil
+}
+
+// WarnIfProjectConfigGitIgnored traces a warning when the project config is gitignored.
 func WarnIfProjectConfigGitIgnored(ctx core.Context, projectRoot string) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return

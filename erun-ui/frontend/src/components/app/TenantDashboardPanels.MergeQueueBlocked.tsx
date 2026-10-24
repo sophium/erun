@@ -1,7 +1,3 @@
-// MergeQueueBlockedAlert/MergeQueueOverrideForm, split out of
-// TenantDashboardPanels.Reviews.tsx to keep that file under eslint's 500-line
-// max-lines cap (see TenantDashboardPanels.Reviews.tsx's own header comment
-// for the same pattern against TenantDashboardPanels.tsx).
 import { Button, FieldLabel, Textarea } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
@@ -22,20 +18,12 @@ import type { UITenantDashboardReview } from '@/types';
 import { InlineAlert } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
-// blockedReviewName prefers the queue row's own display name over the bare id
-// (recognition over recall) — the row is normally already loaded since it is
-// the head of the same queue the operator just tried to advance.
 function blockedReviewName(mergeQueue: UITenantDashboardReview[], reviewId: string): string {
   return mergeQueue.find((review) => review.reviewId === reviewId)?.name ?? reviewId;
 }
 
-// MergeQueueBlockedAlert is AdvanceMergeQueue's unresolved-thread refusal
-// rendered as a state with a way forward, not a dead end (AGENTS.md "Smooth,
-// Seamless, No Dead Ends"): it names the review and the count, offers "View
-// discussion" (openReviewDetail, the same navigation a review row's own click
-// uses) as the primary route, and — only for a caller the platform actually
-// grants the distinct override route to — an "Override anyway" affordance
-// that demands a reason before it will act.
+// MergeQueueBlockedAlert renders the unresolved-thread refusal with a route to
+// the discussion and, only when the platform grants it, an override.
 export function MergeQueueBlockedAlert({
   canOverride,
   mergeQueue,
@@ -94,10 +82,7 @@ export function MergeQueueBlockedAlert({
   );
 }
 
-// MergeQueueOverrideForm is the reason-required, audited escape from the
-// gate: the platform records the reason and the caller's identity, so the
-// control asks for that reason explicitly rather than treating the override
-// as a plain confirm click. See erun-backend-api AGENTS.md "Merge Queue".
+// MergeQueueOverrideForm requires a reason because the platform audits overrides.
 function MergeQueueOverrideForm({
   repository,
   targetBranch,

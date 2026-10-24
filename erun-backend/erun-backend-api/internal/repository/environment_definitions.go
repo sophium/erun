@@ -11,8 +11,7 @@ import (
 
 const environmentDefinitionColumns = `tenant_id, environment_id, revision, definition, written_by_user_id, created_at, updated_at`
 
-// EnvironmentDefinitionRepository owns the definition store: one row per
-// environment, replaced on each upload with its revision advanced.
+// EnvironmentDefinitionRepository stores one definition row per environment.
 type EnvironmentDefinitionRepository struct {
 	txs *TxManager
 }
@@ -21,21 +20,13 @@ func NewEnvironmentDefinitionRepository(txs *TxManager) *EnvironmentDefinitionRe
 	return &EnvironmentDefinitionRepository{txs: txs}
 }
 
-// Upsert stores definition as the environment's current one, advancing the
-// revision by one — or writing revision 1 for an environment that has none yet,
-// which is how registration writes the definition alongside the adopt call.
-//
-// The increment is done in SQL rather than read-then-write so two uploads that
-// overlap cannot both publish the same revision: the row is locked by the
-// upsert, and the second waits and then advances past the first.
+// Upsert stores definition and advances its revision (1 for a new row). The
+// increment is in SQL so overlapping uploads cannot publish the same revision.
 func (r *EnvironmentDefinitionRepository) Upsert(ctx context.Context, environmentID string, definition json.RawMessage) (model.EnvironmentDefinition, error) {
 	var stored model.EnvironmentDefinition
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		// The tenant and the writer are both database-defaulted from the
-		// transaction's security context (erun_current_tenant_id /
-		// erun_current_user_id), so the insert names neither. Requiring the
-		// context here is what makes that safe: an unwired caller fails as an
-		// internal error rather than writing a row with no owner.
+		// tenant and writer are database-defaulted from the security context, so
+		// require one rather than write an ownerless row.
 		if _, err := security.RequiredFromContext(ctx); err != nil {
 			return ErrMissingSecurityContext
 		}
@@ -51,12 +42,8 @@ func (r *EnvironmentDefinitionRepository) Upsert(ctx context.Context, environmen
 	return stored, err
 }
 
-// Get returns the stored definition for one environment.
-//
-// It is scoped explicitly by the caller's tenant id rather than left to RLS:
-// erun_operations' policy is unconditional, so an OPERATIONS caller naming
-// another tenant's environment id would otherwise read that tenant's
-// definition — the same reasoning AISessionRepository.List records.
+// Get returns one environment's stored definition. tenant_id is filtered
+// explicitly because erun_operations' RLS policy is unconditional.
 func (r *EnvironmentDefinitionRepository) Get(ctx context.Context, environmentID string) (model.EnvironmentDefinition, error) {
 	var stored model.EnvironmentDefinition
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

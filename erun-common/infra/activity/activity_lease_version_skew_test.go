@@ -6,11 +6,7 @@ import (
 	"testing"
 )
 
-// An exclusive lease take against an environment whose MCP edge predates the
-// exclusive-claim mechanism gets the go-sdk's own raw JSON-schema rejection
-// of "exclusive"/"orchestrator" as unknown arguments -- indistinguishable
-// from a caller typo. This is the exact wire text reported against erun
-// 1.0.201.
+// The go-sdk's raw schema rejection from an edge that predates exclusive claims.
 const rawExclusiveLeaseSchemaError = `MCP tools/call failed: invalid params: validating "arguments": validating root: unexpected additional properties ["orchestrator" "exclusive"] (code -32602)`
 
 func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *testing.T) {
@@ -32,12 +28,12 @@ func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *tes
 
 func TestDescribeExclusiveActivityLeaseVersionSkewLeavesOtherFailuresAlone(t *testing.T) {
 	notExclusive := errors.New(rawExclusiveLeaseSchemaError)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", false, notExclusive); got != notExclusive {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", false, notExclusive); !errors.Is(got, notExclusive) || got.Error() != notExclusive.Error() {
 		t.Fatalf("a non-exclusive call must pass its error through unchanged, got %v", got)
 	}
 
 	unrelated := errors.New(`MCP tools/call failed: invalid params: validating "arguments": validating "name": value is required (code -32602)`)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, unrelated); got != unrelated {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, unrelated); !errors.Is(got, unrelated) || got.Error() != unrelated.Error() {
 		t.Fatalf("a genuinely malformed call must pass its error through unchanged, got %v", got)
 	}
 

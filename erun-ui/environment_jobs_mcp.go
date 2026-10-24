@@ -7,15 +7,13 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// loadEnvironmentJobsFromMCP lists an environment's retained jobs from its own
-// pod, the only place a remote-agent/runtime env's jobs actually run. Reads
-// are idle-probed so watching the Jobs tab never holds an otherwise-idle env
-// awake.
-func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]eruncommon.EnvironmentJob, error) {
+// loadEnvironmentJobsFromMCP is idle-probed so the Jobs tab never holds an env awake.
+func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]jobstate.EnvironmentJob, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
@@ -35,20 +33,18 @@ func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([
 		return nil, err
 	}
 	var payload struct {
-		Jobs []eruncommon.EnvironmentJob `json:"jobs"`
+		Jobs []jobstate.EnvironmentJob `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
 	if payload.Jobs == nil {
-		return []eruncommon.EnvironmentJob{}, nil
+		return []jobstate.EnvironmentJob{}, nil
 	}
 	return payload.Jobs, nil
 }
 
-// readEnvironmentJobOutputFromMCP pages through one job's captured output on
-// the pod that ran it.
-func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error) {
+func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
@@ -81,9 +77,8 @@ func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer strin
 	return output, nil
 }
 
-// cancelEnvironmentJobFromMCP signals the job's work on the pod that runs it.
-// Not idle-probed: cancelling a job is a real action, not a diagnostic read.
-func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error) {
+// cancelEnvironmentJobFromMCP is not idle-probed: cancelling is a real action.
+func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
@@ -117,10 +112,7 @@ func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, p
 	return payload.Cancel, nil
 }
 
-// formatJobMCPError translates the "runtime image predates the job_* MCP
-// tools" failure into one user-facing line pointing at the fix, mirroring
-// formatIdleStopMCPError. Any other error passes through raw so a real
-// cluster-side failure still reaches the user.
+// formatJobMCPError explains the "runtime image predates the job_* tools" failure.
 func formatJobMCPError(tool string, err error) error {
 	if err == nil {
 		return nil

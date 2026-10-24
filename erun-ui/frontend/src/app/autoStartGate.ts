@@ -4,10 +4,8 @@ import { LoadEnvironmentConfig } from '../../wailsjs/go/main/App';
 import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from './environmentType';
 import type { RootState } from './store';
 
-// The gate decides whether opening an env may spawn the ERun tab — which is what
-// lets erun open start a stopped EC2 host — so the desktop can prompt before
-// incurring a cloud start. It skips the backend round-trip whenever local state
-// already answers, keeping the common path instant.
+// Decides whether opening an env may spawn the ERun tab (which can start a
+// stopped cloud host), answering locally when possible.
 
 export type AutoStartGateVerdict = 'proceed' | 'skip-erun' | 'prompt';
 
@@ -17,12 +15,8 @@ export async function resolveAutoStartGate(
 ): Promise<AutoStartGateVerdict> {
   const env = findTenantEnvironment(getState(), selection);
   const autoStartPolicy = env?.autoStart;
-  // A host env has no pod and no cluster for `erun open` to enter — the CLI
-  // refuses it and points at the directory itself — so there is no ERun tab to
-  // spawn and no cloud context to start. Opening a host env is a shell in its
-  // own directory, which is the Local tab. Resolving that here rather than
-  // letting StartSession fail keeps the refusal out of the tab-spawn path,
-  // where a rejected spawn is swallowed and reads as a tab that silently died.
+  // Host envs have nothing for `erun open` to enter; resolved here because a
+  // rejected tab spawn is swallowed silently.
   if (environmentTypeIsHost(env?.type)) {
     return 'skip-erun';
   }
@@ -47,8 +41,7 @@ async function wouldClickStartCloudContext(selection: UISelection): Promise<bool
     const status = config.cloudContext?.status ?? '';
     return status !== '' && wouldAutoStartCloudContext(status);
   } catch {
-    // On read failure, fall back to the normal open path so the real error
-    // surfaces to the user instead of being hidden behind a silent skip.
+    // On read failure, take the normal path so the real error surfaces.
     return false;
   }
 }

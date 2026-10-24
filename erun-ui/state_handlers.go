@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -16,21 +15,14 @@ import (
 )
 
 func (a *App) LoadState() (uiState, error) {
-	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, model.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
-			// A fresh install with no tool config at all is not a distinct
-			// state from "initialized but zero tenants configured" — both
-			// recover the same way, from the sidebar's own "Initialize
-			// environment" affordance, so this returns the identical shape
-			// stateFromListResult uses for that case (non-nil empty Tenants,
-			// no Message) rather than a separate CLI-only instruction the
-			// desktop cannot carry out. Tenants must be non-nil: the frontend
-			// range-iterates it unconditionally on boot, and a nil slice
-			// marshals to JSON `null`, which throws there.
+			// No config is the same state as zero tenants. Tenants must be non-nil: the
+			// frontend iterates it on boot and a nil slice marshals to null.
 			info := a.deps.resolveBuildInfo()
 			suggestions, notices := a.runtimeVersionSuggestions(info, "", "")
 			return uiState{
@@ -41,15 +33,8 @@ func (a *App) LoadState() (uiState, error) {
 			}, nil
 		}
 		if errors.Is(err, config.ErrConfigCorrupted) {
-			// A torn or genuinely corrupt config file is not "zero
-			// environments configured" -- rendering it that way tells the
-			// operator their tenants are gone when they are merely unread,
-			// and the underlying yaml error is an implementation detail that
-			// must not reach the browser (it crosses the headless HTTP
-			// bridge as a raw response/console message otherwise). Return a
-			// successful, degraded state instead of propagating err, so the
-			// sidebar can render a distinct "could not read configuration"
-			// notice rather than the empty-state affordance above.
+			// An unreadable config returns a degraded state, not err: it must not read as
+			// "no tenants", and the yaml error must not reach the browser.
 			info := a.deps.resolveBuildInfo()
 			return uiState{
 				Tenants:          []uiTenant{},
@@ -77,7 +62,7 @@ func (a *App) LoadState() (uiState, error) {
 	return state, nil
 }
 
-func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (registrypkg.RuntimeRegistryVersions, error) {
+func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (model.RuntimeRegistryVersions, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -92,9 +77,7 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 	return a.deps.resolveImageRegistry(ctx, namespace, repository)
 }
 
-// runtimeRegistryNamespace resolves the registry an env's runtime image was
-// last published to, so the version picker offers versions from where
-// `erun deploy` actually pushed rather than the hardcoded default.
+// runtimeRegistryNamespace returns where `erun deploy` last pushed the runtime image.
 func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
@@ -137,8 +120,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 		suggestions = append(suggestions, got...)
 		notices = appendVersionNotice(notices, notice)
 	}
-	// Tenant images are thin wrappers rebuilt from the canonical ERun image, so
-	// its channel-latest is also a valid deploy target for the env.
+	// Tenant images are rebuilt from the canonical image, so its channel-latest is deployable too.
 	if tenantImage != config.DefaultRuntimeImageName {
 		got, notice := a.suggestionsForImage(info, "ERun", defaultImage, "", "")
 		suggestions = append(suggestions, got...)
@@ -147,9 +129,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 	return suggestions, notices
 }
 
-// suggestionsForImage resolves one image's deployable versions, returning a
-// notice instead of silently dropping the source when listing fails (private
-// image needs auth, or the registry is unreachable).
+// suggestionsForImage returns a notice rather than dropping the source when listing fails.
 func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
 	versions, err := a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)
 	if err != nil {
@@ -177,9 +157,6 @@ func appendVersionNotice(notices []uiVersionNotice, notice *uiVersionNotice) []u
 	return append(notices, *notice)
 }
 
-// environmentDiscoveryRegistries lists the registries the version picker offers
-// versions from, so a suggestion can come from any registry the env could pull
-// from and carry its source.
 func (a *App) environmentDiscoveryRegistries(tenant, environment string) []string {
 	registries := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
@@ -303,7 +280,7 @@ func mcpEndpointForOpenResult(result config.OpenResult) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
 }
 
-func mcpEndpointForListEnvironment(environment eruncommon.ListEnvironmentResult) string {
+func mcpEndpointForListEnvironment(environment lifecycle.ListEnvironmentResult) string {
 	port := environment.LocalPorts.MCP
 	if port <= 0 {
 		return ""
@@ -338,9 +315,6 @@ func listKubernetesContexts() ([]string, error) {
 	return contexts, nil
 }
 
-// wrapKubectlError surfaces kubectl's stderr in the error so the dialog shows
-// the real failure reason instead of the bare "exit status 1" that
-// exec.Cmd.Output() yields by default.
 func wrapKubectlError(err error) error {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -385,12 +359,7 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
-// errMissingTenantOrEnvironment names which of tenant/environment a Wails
-// binding needed but was called with empty, the operation, and the fix.
-// Every binding here acts on the environment the frontend currently has
-// selected, so a blank value means it was invoked with no selection --
-// select an environment in the sidebar before retrying. Returns nil when
-// both are set, so callers can use it as their whole guard clause.
+// errMissingTenantOrEnvironment returns nil when both are set, so it can be a caller's whole guard.
 func errMissingTenantOrEnvironment(operation, tenant, environment string) error {
 	var missing []string
 	if strings.TrimSpace(tenant) == "" {

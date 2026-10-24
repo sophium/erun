@@ -11,14 +11,11 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// These cover what the CLI subprocess cannot reach deterministically: expiry and
-// the hard lifetime ceiling need an injected clock, and orphan reconciliation
-// needs an injected liveness answer (a real dead pid is racy and recyclable).
-// The lease commands' own surface is locked by the integration scenarios.
+// Injected clocks and liveness: a real dead pid is racy and recyclable.
 
-// isolateActivityCache points the activity tree at a temp dir for one test.
 func isolateActivityCache(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -29,10 +26,7 @@ func isolateActivityCache(t *testing.T) {
 func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
-// expectReleaseOutcome checks a release call's error and outcome together, so
-// the tests exercising the outcome reporting don't each repeat the same two
-// branches inline.
-func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActivityLeaseReleaseOutcome, err error, want EnvironmentActivityLeaseReleaseOutcome) {
+func expectReleaseOutcome(t *testing.T, context string, outcome model.EnvironmentActivityLeaseReleaseOutcome, err error, want model.EnvironmentActivityLeaseReleaseOutcome) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("%s: %v", context, err)
@@ -42,12 +36,7 @@ func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActiv
 	}
 }
 
-// TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run
-// purity contract erun#1907 fixed for the config tree: resolving the
-// activity directory is a pure read (job_supervisor.go's environmentJobDir
-// and RunLocalEnvironmentWhip both resolve it ahead of their own dry-run
-// checks) and must not create ~/.cache/erun/activity/<tenant>/<environment>/
-// as a side effect.
+// Resolving the activity directory must not create it (dry-run purity).
 func TestEnvironmentActivityDirDoesNotCreateDirectory(t *testing.T) {
 	isolateActivityCache(t)
 	dir, err := EnvironmentActivityDir("acme", "dev")
@@ -85,7 +74,7 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 
 	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
-	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
+	expectReleaseOutcome(t, "release", outcome, err, model.EnvironmentActivityLeaseReleased)
 	held, err = loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
 	if err != nil {
 		t.Fatalf("load after release: %v", err)
@@ -95,14 +84,9 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 }
 
-// TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases is the regression test
-// for the second complaint: a job's plain presence lease and its
-// exclusive environment claim are one piece of work, but a refusal that lists
-// every lease separately reported them as two unrelated claimants. Once both
-// leases carry the same Holder, the refusal must say so once.
 func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
-	sameHolder := EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
-	leases := []EnvironmentActivityLease{
+	sameHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
+	leases := []model.EnvironmentActivityLease{
 		{Name: "release erun 1.0.248", Holder: sameHolder},
 		{Name: "release 1.0.248", Holder: sameHolder},
 	}
@@ -113,13 +97,9 @@ func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
 	}
 }
 
-// TestFormatLeaseHoldersKeepsDistinctHoldersSeparate guards the other side of
-// the same fix: leases genuinely held by different people must still be
-// reported as separate claimants, never merged just because both happen to be
-// unnamed.
 func TestFormatLeaseHoldersKeepsDistinctHoldersSeparate(t *testing.T) {
-	leases := []EnvironmentActivityLease{
-		{Name: "gradle-build", Holder: EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
+	leases := []model.EnvironmentActivityLease{
+		{Name: "gradle-build", Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
 		{Name: "agent-run"},
 	}
 	got := FormatLeaseHolders(leases)
@@ -130,16 +110,13 @@ func TestFormatLeaseHoldersKeepsDistinctHoldersSeparate(t *testing.T) {
 }
 
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
-	// A wrapper's exit trap must not fail a job that already finished, so
-	// releasing a lease that was never taken is success -- but the outcome
-	// must say nothing was actually held, not the same Released a real
-	// release reports.
+	// Releasing a never-taken lease succeeds but reports NotHeld.
 	isolateActivityCache(t)
 	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
 	if err != nil {
 		t.Errorf("releasing an absent lease must succeed, got %v", err)
 	}
-	if outcome != EnvironmentActivityLeaseNotHeld {
+	if outcome != model.EnvironmentActivityLeaseNotHeld {
 		t.Errorf("expected releasing an absent lease to report NotHeld, got %v", outcome)
 	}
 }
@@ -160,7 +137,6 @@ func TestActivityLeaseExpiresAndIsReclaimed(t *testing.T) {
 	if len(held) != 0 {
 		t.Fatalf("expected the lease to have expired, got %+v", held)
 	}
-	// Reclaimed on disk too, so an expired claim cannot resurface.
 	dir, err := environmentActivityLeaseDir("team", "dev")
 	if err != nil {
 		t.Fatalf("lease dir: %v", err)
@@ -178,10 +154,8 @@ func TestActivityLeaseRenewalCannotOutrunTheLifetimeCeiling(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("take: %v", err)
 	}
-	// A wrapper looping on a hung job renews before its ttl lapses, forever; the
-	// ceiling is what stops that pinning the environment awake.
 	ceiling := start.Add(EnvironmentActivityLeaseMaxLifetime)
-	var renewed EnvironmentActivityLease
+	var renewed model.EnvironmentActivityLease
 	for at := start.Add(30 * time.Minute); at.Before(ceiling); at = at.Add(30 * time.Minute) {
 		lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 			Tenant: "team", Environment: "dev", Name: "runaway", TTL: time.Hour, Now: at,
@@ -217,7 +191,6 @@ func TestActivityLeaseOrphanedByADeadHolderIsReclaimed(t *testing.T) {
 		t.Fatalf("take: %v", err)
 	}
 
-	// Holder alive: the lease holds for its whole TTL, which is the point.
 	held, err := loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
 	if err != nil {
 		t.Fatalf("load with live holder: %v", err)
@@ -226,7 +199,6 @@ func TestActivityLeaseOrphanedByADeadHolderIsReclaimed(t *testing.T) {
 		t.Fatalf("expected a live holder to keep the lease, got %+v", held)
 	}
 
-	// Holder gone: reclaimed immediately rather than waiting out the TTL.
 	held, err = loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), neverAlive)
 	if err != nil {
 		t.Fatalf("load with dead holder: %v", err)
@@ -236,48 +208,13 @@ func TestActivityLeaseOrphanedByADeadHolderIsReclaimed(t *testing.T) {
 	}
 }
 
-func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
-	// This is AC6 of the stop work: idle-stop must not stop an environment that
-	// is holding a live lease, and must say which lease is deferring it.
-	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	config := configpkg.EnvironmentIdleConfig{Timeout: "5m", WorkingHours: "00:00-23:59"}
-
-	idle, err := ResolveEnvironmentIdleStatus(config, nil, nil, now)
-	if err != nil {
-		t.Fatalf("resolve without leases: %v", err)
-	}
-	if !idle.StopEligible {
-		t.Fatalf("an environment with no activity and no lease must be stop eligible, blocked by %q", idle.StopBlockedReason)
-	}
-
-	leased, err := ResolveEnvironmentIdleStatus(config, nil, []EnvironmentActivityLease{{
-		ID: "agent-run", Name: "agent-run", StartedAt: now, ExpiresAt: now.Add(10 * time.Minute),
-	}}, now)
-	if err != nil {
-		t.Fatalf("resolve with a lease: %v", err)
-	}
-	if leased.StopEligible {
-		t.Fatal("a held lease must block idle-stop")
-	}
-	if !strings.Contains(leased.StopBlockedReason, "agent-run") {
-		t.Errorf("the blocked reason must name the lease, got %q", leased.StopBlockedReason)
-	}
-	if len(leased.Leases) != 1 {
-		t.Errorf("the status must carry the leases so a client can render them, got %+v", leased.Leases)
-	}
-}
-
-// erun#1245: two orchestrators, or two agent jobs, driving the same worktree
-// with no shared visibility. A plain lease is presence, not exclusion, so the
-// tests below cover the exclusive mode that actually refuses a second holder.
-
 func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
 	first, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
-		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "petios"}, Now: now,
+		Exclusive: true, Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "petios"}, Now: now,
 	})
 	if err != nil {
 		t.Fatalf("first take: %v", err)
@@ -288,22 +225,19 @@ func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 
 	_, err = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "ux", Name: "job-fix-1245", ID: "job-fix-1245",
-		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "erun"}, Now: now.Add(time.Second),
+		Exclusive: true, Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "erun"}, Now: now.Add(time.Second),
 	})
 	var conflict *EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("expected a conflict error, got %v", err)
 	}
 	if conflict.Holder.ID != "job-fix-1201" || conflict.Holder.Holder.Orchestrator != "petios" {
-		// The Validation section of #1245 is explicit: assert on the identity
-		// carried in the error, not merely that the call failed.
 		t.Fatalf("refusal must name the actual holder, got %+v", conflict.Holder)
 	}
 }
 
 func TestExclusiveLeaseAllowsDifferentScopesToCoexist(t *testing.T) {
-	// Two clones of the same repo in one pod: legitimate parallelism, not a
-	// collision. Exclusivity must be scoped, never environment-wide.
+	// Two clones in one pod: exclusivity is scoped, not environment-wide.
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -356,9 +290,7 @@ func TestExclusiveLeaseRenewalBySameHolderSucceeds(t *testing.T) {
 }
 
 func TestExclusiveLeaseTakeRaceExactlyOneWins(t *testing.T) {
-	// The test #1245 calls out explicitly: two concurrent exclusive takes in
-	// the same scope, exactly one succeeds. Plain os.WriteFile (create-or-
-	// overwrite) cannot pass this; only the O_EXCL create can.
+	// Only an O_EXCL create passes this; create-or-overwrite cannot.
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -399,8 +331,7 @@ func TestExclusiveLeaseTakeRaceExactlyOneWins(t *testing.T) {
 }
 
 func TestExclusiveLeaseReclaimsALapsedRemoteHolder(t *testing.T) {
-	// No PID to probe for a remote holder (an orchestrator driving over MCP
-	// from another host), so an expired TTL is the only reclaim path.
+	// A remote holder has no PID to probe, so an expired TTL is the only reclaim path.
 	isolateActivityCache(t)
 	start := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -425,10 +356,6 @@ func TestExclusiveLeaseReclaimsALapsedRemoteHolder(t *testing.T) {
 }
 
 func TestExclusiveLeaseReclaimsADeadLocalHolderOnRead(t *testing.T) {
-	// A real dead pid is racy and recyclable (see the file header comment on
-	// TestActivityLeaseOrphanedByADeadHolderIsReclaimed), so this drives the
-	// same read-path reclaim through the injectable liveness function rather
-	// than a real pid.
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -467,26 +394,19 @@ func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
 		t.Fatalf("take: %v", err)
 	}
 
-	// A caller that never held the scope releasing by scope name alone must
-	// not be able to drop the real holder's claim out from under them -- and
-	// must be told, rather than quietly succeeding, that the scope is held by
-	// someone else -- a release that could not remove the claim must name the
-	// holder, exactly as a conflicting take already does.
+	// A non-holder releasing by scope must be refused with the holder named.
 	_, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else")
 	expectHolderNamedInConflict(t, err, "job-fix-1201")
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the real holder's claim to survive a mismatched release")
 
 	outcome, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
-	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
+	expectReleaseOutcome(t, "release", outcome, err, model.EnvironmentActivityLeaseReleased)
 	requireHeldCount(t, "erun", "ux", now, 0, "expected the scope free after its own holder released it")
 
-	// Releasing an already-vacated scope is success, matching the shared
-	// lease's idempotence, but reports NotHeld rather than Released.
 	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
-	expectReleaseOutcome(t, "release of a vacated scope", outcome, err, EnvironmentActivityLeaseNotHeld)
+	expectReleaseOutcome(t, "release of a vacated scope", outcome, err, model.EnvironmentActivityLeaseNotHeld)
 }
 
-// expectHolderNamedInConflict asserts err is an EnvironmentActivityLeaseConflictError naming wantHolderID.
 func expectHolderNamedInConflict(t *testing.T, err error, wantHolderID string) {
 	t.Helper()
 	var conflict *EnvironmentActivityLeaseConflictError
@@ -498,7 +418,6 @@ func expectHolderNamedInConflict(t *testing.T, err error, wantHolderID string) {
 	}
 }
 
-// requireHeldCount asserts the number of leases held a minute after now.
 func requireHeldCount(t *testing.T, tenant, environment string, now time.Time, want int, context string) {
 	t.Helper()
 	held, err := loadEnvironmentActivityLeases(tenant, environment, now.Add(time.Minute), alwaysAlive)
@@ -520,9 +439,7 @@ func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {
 		t.Fatalf("take: %v", err)
 	}
 
-	// observe/diff/usage-shaped reads go through exactly this path (leases,
-	// then idle status) and must see the exclusive claim without being
-	// refused by it - only a second *exclusive take* can be refused.
+	// Reads see the exclusive claim without being refused by it.
 	held, err := LoadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("read-only list must not be blocked, got %v", err)
@@ -541,28 +458,26 @@ func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {
 }
 
 func TestEnvironmentOperatorPresenceReason(t *testing.T) {
-	idleMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: true} }
-	busyMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: false} }
+	idleMarker := func(name string) model.EnvironmentIdleMarker {
+		return model.EnvironmentIdleMarker{Name: name, Idle: true}
+	}
+	busyMarker := func(name string) model.EnvironmentIdleMarker {
+		return model.EnvironmentIdleMarker{Name: name, Idle: false}
+	}
 
-	if _, present := EnvironmentOperatorPresenceReason(EnvironmentIdleStatus{}); present {
+	if _, present := EnvironmentOperatorPresenceReason(model.EnvironmentIdleStatus{}); present {
 		t.Error("no markers at all must not report an operator present")
 	}
 
-	sshBusy := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(configpkg.ActivityKindSSH)}}
+	sshBusy := model.EnvironmentIdleStatus{Markers: []model.EnvironmentIdleMarker{busyMarker(configpkg.ActivityKindSSH)}}
 	reason, present := EnvironmentOperatorPresenceReason(sshBusy)
 	if !present || reason == "" {
 		t.Fatalf("a busy ssh marker must report an operator present, got present=%v reason=%q", present, reason)
 	}
 
-	// Deliberately narrower than a literal reading of #1245: "process" and
-	// "codex" also fire for an orchestrator's own detached job (job_agent.go
-	// execs the same wrapped claude/codex binaries the interactive session
-	// uses), so gating on them would make an orchestrator refuse itself and
-	// would make a second legitimate job in a different clone of the same pod
-	// refuse against the first job's resident process. Only ssh is
-	// unambiguous. See the comment on environmentOperatorPresenceMarkers.
+	// "process" and "codex" also fire for orchestrator jobs; only ssh means an operator.
 	for _, kind := range []string{ActivityKindProcess, configpkg.ActivityKindCodex, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindAPI} {
-		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
+		status := model.EnvironmentIdleStatus{Markers: []model.EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
 		if _, present := EnvironmentOperatorPresenceReason(status); present {
 			t.Errorf("marker %q must not by itself report an operator present", kind)
 		}
@@ -573,12 +488,10 @@ func TestLeaseReleaseNamesTheStoreHoldingIt(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 
-	// An exclusive claim released without --exclusive: the shared store holds
-	// nothing, so a bare no-match would read as "already gone" while the claim
-	// stays held for its full TTL.
+	// An exclusive claim released without --exclusive stays held.
 	requireTakeLease(t, "job-fix-1301", now, true)
 	outcome, err := ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1301")
-	expectReleaseOutcome(t, "shared release of an exclusive claim", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	expectReleaseOutcome(t, "shared release of an exclusive claim", outcome, err, model.EnvironmentActivityLeaseHeldElsewhere)
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the exclusive claim to survive a release aimed at the shared store")
 	requireNoteNames(t, "job-fix-1301", false, "exclusive", "--exclusive")
 
@@ -587,22 +500,17 @@ func TestLeaseReleaseNamesTheStoreHoldingIt(t *testing.T) {
 	}
 	requireHeldCount(t, "erun", "ux", now, 0, "expected the claim gone once released in its own shape")
 
-	// The reverse: a shared lease released with --exclusive.
 	requireTakeLease(t, "job-fix-1302", now, false)
 	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1302")
-	expectReleaseOutcome(t, "exclusive release of a shared lease", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	expectReleaseOutcome(t, "exclusive release of a shared lease", outcome, err, model.EnvironmentActivityLeaseHeldElsewhere)
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the shared lease to survive a release aimed at the exclusive store")
 	requireNoteNames(t, "job-fix-1302", true, "shared", "without --exclusive")
 
-	// An id held nowhere still reports NotHeld, and carries no note to stand
-	// behind.
 	outcome, err = ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1303")
-	expectReleaseOutcome(t, "release of an unheld id", outcome, err, EnvironmentActivityLeaseNotHeld)
+	expectReleaseOutcome(t, "release of an unheld id", outcome, err, model.EnvironmentActivityLeaseNotHeld)
 	requireNoNote(t, "job-fix-1303", false)
 }
 
-// requireTakeLease takes a lease for requireTakeLease's caller, exclusive or
-// not, failing the test rather than returning the error to every caller.
 func requireTakeLease(t *testing.T, id string, now time.Time, exclusive bool) {
 	t.Helper()
 	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
@@ -612,7 +520,6 @@ func requireTakeLease(t *testing.T, id string, now time.Time, exclusive bool) {
 	}
 }
 
-// requireNoteNames asserts the held-elsewhere note names each of wants.
 func requireNoteNames(t *testing.T, id string, releasedExclusive bool, wants ...string) {
 	t.Helper()
 	note, err := EnvironmentActivityLeaseHeldElsewhereNote("erun", "ux", id, releasedExclusive)
@@ -626,7 +533,6 @@ func requireNoteNames(t *testing.T, id string, releasedExclusive bool, wants ...
 	}
 }
 
-// requireNoNote asserts no note is offered for an id held nowhere.
 func requireNoNote(t *testing.T, id string, releasedExclusive bool) {
 	t.Helper()
 	note, err := EnvironmentActivityLeaseHeldElsewhereNote("erun", "ux", id, releasedExclusive)

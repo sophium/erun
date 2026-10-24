@@ -111,13 +111,7 @@ func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleStopFallsBackToCanonicalImage and
-// TestEnvLifecycleDeleteFallsBackToCanonicalImage lock the stop/delete image
-// fallback: an environment that was bootstrapped onto the canonical
-// erun-devops image at deploy time (because the tenant never published its
-// own <tenant>-devops image) is still running that image, so its stop/delete
-// Jobs must name it too — not the tenant's own image, which the registry
-// already confirmed does not exist and which would only ImagePullBackOff.
+// A bootstrapped environment's stop/delete Jobs must run the canonical image.
 func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	checker := &stubImageChecker{missing: true}
@@ -171,8 +165,6 @@ func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	}
 }
 
-// stubMachineIdentityRevoker records the revocations a delete performed, so a
-// test can tell "the identity was revoked" from "the delete succeeded".
 type stubMachineIdentityRevoker struct {
 	revoked []string
 	err     error
@@ -183,17 +175,7 @@ func (s *stubMachineIdentityRevoker) Revoke(_ context.Context, environmentID str
 	return s.err
 }
 
-// TestEnvLifecycleDeleteRevokesTheEnvironmentPlatformIdentity is the shape of
-// "an environment delete leaves nothing usable behind": an environment
-// provisioned with its own platform identity has that identity revoked as part
-// of the delete, rather than the delete succeeding while a credential that can
-// still mint tokens outlives the environment it was minted for.
-//
-// It covers both halves of the ordering that makes the revocation recoverable:
-// the revoke happens after the namespace teardown (until the pod is gone the
-// credential is still the one the environment uses) and before the row removal
-// (which is the last thing holding the environment's id, so a failure
-// afterwards would have no retryable record naming what was not revoked).
+// Revocation happens after namespace teardown and before row removal.
 func TestEnvLifecycleDeleteRevokesTheEnvironmentPlatformIdentity(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
@@ -214,11 +196,6 @@ func TestEnvLifecycleDeleteRevokesTheEnvironmentPlatformIdentity(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleDeleteBlocksWhenRevokingThePlatformIdentityFails: a delete
-// that cannot revoke must not delete the row anyway. Deleting it would orphan
-// the identity with nothing left naming it -- the row is the last record of the
-// environment's id, which is the only thing the revocation is derived from --
-// so the attempt blocks and is retried instead, with the reason named.
 func TestEnvLifecycleDeleteBlocksWhenRevokingThePlatformIdentityFails(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
@@ -242,9 +219,6 @@ func TestEnvLifecycleDeleteBlocksWhenRevokingThePlatformIdentityFails(t *testing
 	}
 }
 
-// TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed: a remote-agent/local-agent
-// row (or a runtime row that never successfully deployed) has no namespace to
-// tear down, so delete is a plain row removal.
 func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
 	rows := &stubRowDeleter{}
@@ -262,9 +236,6 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleDeleteMarksBlockedOnJobFailure: a failed teardown must not
-// silently forget an environment whose namespace may still exist, or leave it
-// claiming `running` (#1140) — it moves to deletion-blocked naming why.
 func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
@@ -282,10 +253,7 @@ func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess pins the
-// interaction #1140 is about: `erun delete` exits 0 (and the Job reports
-// succeeded) even when the remote namespace teardown itself failed, so a
-// clean Job outcome alone must not be trusted to hard-delete the row.
+// `erun delete` exits 0 even when namespace teardown failed.
 func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *testing.T) {
 	blocker := `namespace "acme-prod" did not finish terminating within 20m0s:` + "\n" +
 		"NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances"
@@ -306,9 +274,6 @@ func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *test
 	}
 }
 
-// TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched: a failure before
-// the Job even runs (e.g. a transient Kubernetes API error creating it) must
-// not leave the row claiming `running` either.
 func TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched(t *testing.T) {
 	runner := &stubLifecycleRunner{err: errors.New("create job: connection refused")}
 	rows := &stubRowDeleter{}
@@ -323,9 +288,6 @@ func TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched(t *testing.T) {
 	}
 }
 
-// jsonQuote renders s as a JSON string literal, so blocker-detail fixtures
-// with embedded newlines/quotes stay valid JSON without importing
-// encoding/json into a table of ad hoc test fixtures.
 func jsonQuote(s string) string {
 	encoded, err := json.Marshal(s)
 	if err != nil {
@@ -334,9 +296,6 @@ func jsonQuote(s string) string {
 	return string(encoded)
 }
 
-// TestEnvLifecycleStopRecordsUsageEvent and TestEnvLifecycleDeleteRecordsUsageEvent
-// lock the metering hook for #605: a successful stop/delete records the event,
-// a failed one does not.
 func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
@@ -374,9 +333,6 @@ func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable: an
-// environment placed on a context but no resolver configured must fail
-// clearly rather than running the stop Job unauthenticated (#1112).
 func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)
@@ -392,9 +348,6 @@ func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T)
 	}
 }
 
-// TestEnvLifecycleStopThreadsThePlacementCredential: the stop Job's placement
-// carries the live-resolved token, the target cluster's kubernetes context
-// name, and its server URL.
 func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	credentials := stubLifecycleCredentials{token: "live-token"}
@@ -411,16 +364,11 @@ func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 	if got.AdminToken != "live-token" || got.KubernetesContext != "prod-cluster" || got.ServerURL != "https://203.0.113.10:6443" {
 		t.Fatalf("stop job placement = %+v", got)
 	}
-	// The credential is asked for on behalf of the tenant that owns the
-	// environment — the argument the credential read is keyed on — not on
-	// behalf of whoever is running the Job.
 	if got.TenantID != "tenant-1" {
 		t.Fatalf("stop job placement TenantID = %q, want tenant-1", got.TenantID)
 	}
 }
 
-// TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable mirrors the
-// stop case for delete.
 func TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}

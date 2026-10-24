@@ -11,36 +11,16 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// These tests lock the repair for the failure that has no other witness: an
-// environment that was open loses the port-forward carrying its MCP edge, and
-// nothing starts a replacement. Both shapes are covered, because both produce
-// the same silence. The pod replacement usually makes kubectl exit outright and
-// free the local port (dropped), which every check reads as an environment
-// nobody opened; occasionally the listener outlives its far end (stale), which
-// every check that stops at the listener reads as healthy.
-//
-// The behaviours below are the contract: a dropped forward and a bound-but-dead
-// one are both re-established, a working one is left alone, an environment that
-// was never opened is not touched at all, a repair that cannot succeed reports
-// instead of looping, and an environment the operator stopped is not woken by
-// any of it.
-
 const forwardRepairTestPort = 17500
 
-// forwardRepairProbe is the environment's side of the sweep: whether anything
-// holds its local port, whether its edge answers, and how many rebinds the
-// desktop has asked for. hold, when set, keeps a rebind in flight until the
-// test releases it; repairs, when set, makes a rebind actually work, which is
-// what `erun open --reconnect` does when the runtime is there to reconnect to.
+// hold keeps a rebind in flight until released; repairs makes a rebind succeed.
 type forwardRepairProbe struct {
-	mu sync.Mutex
-	// forwardDropped is the ordinary shape of the failure: kubectl exited with
-	// the pod it targeted, so nothing holds the local port at all. The zero
-	// value is the rarer one — a listener that is still bound.
+	mu             sync.Mutex
 	forwardDropped bool
 	edgeAnswers    bool
 	repairs        bool
@@ -97,12 +77,11 @@ func forwardRepairTestApp(
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
-			// "fresh" is configured and has no recorded forward: the environment
-			// nobody opened, which the sweep must leave entirely alone.
+			// "fresh" has no recorded forward: never opened here.
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			"erun/fresh":  {Name: "fresh", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
@@ -113,27 +92,22 @@ func forwardRepairTestApp(
 		resolveCLIPath:      func() string { return "/tmp/erun" },
 		canConnectLocalPort: func(int) bool { return probe.bound() },
 		canReachMCPEndpoint: func(int) bool { return probe.answers() },
-		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 			if !probe.answers() {
-				return activity.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+				return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 			}
-			return activity.EnvironmentIdleStatus{
-				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			return model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
 		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
 			return probe.reconnect()
 		},
 		readRuntimeRunState: readRunState,
-		// Only "erun/fresh" (no seeded forward) ever reaches this: every other
-		// selection in this file has a forward state file seeded above, so it
-		// resolves through the reachable/outage branches this file exists to
-		// test and never falls back to a pod probe. Idle-and-not-busy is a
-		// neutral default so that fallback answering does not itself look like
-		// a failure in tests that do not care about it.
+		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
-			data, err := json.Marshal(activity.EnvironmentIdleStatus{
-				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			data, err := json.Marshal(model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			})
 			if err != nil {
 				return "", err
@@ -141,9 +115,8 @@ func forwardRepairTestApp(
 			return string(data), nil
 		},
 	})
-	// A non-nil ctx un-gates the rebind (it no-ops while ctx is nil); the
-	// emitter must be stubbed alongside it or emits reach the real Wails
-	// runtime outside a lifecycle context.
+	// A non-nil ctx un-gates the rebind; stub the emitter so emits avoid the real
+	// Wails runtime.
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
 	t.Cleanup(func() { app.shutdown(context.Background()) })
@@ -154,9 +127,8 @@ func forwardRepairSelection() uiSelection {
 	return uiSelection{Tenant: "erun", Environment: "remote"}
 }
 
-// sweepUntilRebindSettles runs one sweep and waits for whatever rebind it
-// started to finish, so the next sweep is not silently suppressed by the
-// in-flight latch. Bounded by a real condition, never by a fixed sleep.
+// sweepUntilRebindSettles waits for the started rebind so the in-flight latch
+// does not suppress the next sweep.
 func sweepUntilRebindSettles(t *testing.T, app *App) environmentActivityState {
 	t.Helper()
 	return sweepEnvUntilRebindSettles(t, app, forwardRepairSelection())
@@ -192,11 +164,6 @@ func waitForReconnects(t *testing.T, probe *forwardRepairProbe, want int) {
 	t.Fatalf("rebind count = %d, want %d", probe.count(), want)
 }
 
-// TestDroppedForwardIsRestarted is the common case, and the one that used to be
-// silent: a pod replacement takes the forward with it, so the local port is
-// free and the environment answers nobody. The sweep that finds it starts a
-// replacement, and once that lands the environment is reachable again with the
-// episode closed behind it.
 func TestDroppedForwardIsRestarted(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
@@ -210,8 +177,6 @@ func TestDroppedForwardIsRestarted(t *testing.T) {
 	}
 	waitForReconnects(t, probe, 1)
 
-	// The replacement is up. The environment answers again, and no further
-	// rebinds are spent on it.
 	state = sweepUntilRebindSettles(t, app)
 	if !state.reachable || !state.observed {
 		t.Fatalf("a restarted forward makes the environment reachable and observed, got %+v", state)
@@ -224,9 +189,6 @@ func TestDroppedForwardIsRestarted(t *testing.T) {
 	}
 }
 
-// TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps is the idempotency
-// half: two sweeps landing while one repair is still running must not put two
-// forwards on one local port.
 func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
@@ -234,9 +196,6 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	app.observeEnvironmentActivity(forwardRepairSelection())
 	waitForReconnects(t, probe, 1)
 
-	// The repair is still in flight. A second sweep must not race it for the
-	// port — one rebind per environment at a time is what keeps two forwards
-	// off one local port.
 	app.observeEnvironmentActivity(forwardRepairSelection())
 	close(probe.hold)
 	waitForReconnects(t, probe, 1)
@@ -245,16 +204,7 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	}
 }
 
-// TestUnopenedEnvironmentIsProbedButNeverRebound is the guard the dropped case
-// makes load-bearing: "no forward is bound" describes an environment nobody
-// opened here and an environment whose forward just died equally well, and
-// only the second may trigger the rebind/reconnect machinery this file exists
-// to test. It no longer describes "reports nothing" — an environment nobody
-// opened here can still be busy right now (a CLI orchestrator, an agent
-// driving it over MCP from another machine), so the sweep asks it directly
-// over its runtime pod instead of leaving it silent. What must stay true is
-// that this read-only ask never feeds the forward-repair episode: no rebind,
-// no outage, because there was never a forward here to repair.
+// An unopened environment may be asked over its pod but never feeds a repair.
 func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
@@ -277,11 +227,6 @@ func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	}
 }
 
-// TestStaleForwardIsReestablishedWithoutDuplicatingIt is the rarer shape: the
-// forward keeps its local port bound while its far end is gone, so every check
-// that stops at the listener calls it healthy. The sweep re-establishes it, and
-// a second sweep landing while that repair is still running does not start a
-// competing one for the same local port.
 func TestStaleForwardIsReestablishedWithoutDuplicatingIt(t *testing.T) {
 	probe := &forwardRepairProbe{hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
@@ -306,11 +251,6 @@ func TestStaleForwardIsReestablishedWithoutDuplicatingIt(t *testing.T) {
 	}
 }
 
-// TestServingForwardIsLeftAlone covers the other half of "detect it honestly":
-// a forward that carries traffic is never restarted, including when the idle
-// question itself fails. An edge that replies at all is a live tunnel, and
-// restarting one on the strength of a failed query would trade an outage
-// nobody repairs for an outage the desktop causes.
 func TestServingForwardIsLeftAlone(t *testing.T) {
 	probe := &forwardRepairProbe{edgeAnswers: true}
 	app, _ := forwardRepairTestApp(t, probe, nil)
@@ -328,11 +268,9 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 		t.Fatalf("a working forward was restarted %d times, want 0", got)
 	}
 
-	// The fussy-edge case: the tunnel carries traffic, but the idle query
-	// against it fails. That is a question the environment declined, not a
-	// forward pointed at a vanished pod.
-	app.deps.loadIdleStatus = func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-		return activity.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
+	// The tunnel carries traffic but the idle query fails.
+	app.deps.loadIdleStatus = func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+		return model.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
 	}
 	state := sweepUntilRebindSettles(t, app)
 	if !state.reachable || state.observed {
@@ -346,11 +284,6 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 	}
 }
 
-// TestUnrepairableForwardReportsInsteadOfLooping locks the bound, on the shape
-// that produces it most often: a dropped forward the repair cannot bring back
-// stops being retried and starts being reported — once — and the row renders it
-// as an outage rather than as an environment nobody opened. Recovering ends the
-// episode and retires the report.
 func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
@@ -364,7 +297,6 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, forwardRepairAttempts)
 	}
 
-	// Attempts are spent. From here the sweep reports and stops spending.
 	for range 3 {
 		state := sweepUntilRebindSettles(t, app)
 		if !state.outage {
@@ -378,13 +310,9 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, forwardRepairAttempts)
 	}
 
-	// The message has to name which failure it is: a port nothing holds and a
-	// port held by something silent send a reader to different places.
 	assertOneOutageNotification(t, emits, "is gone and nothing holds the port")
 }
 
-// assertOneOutageNotification checks the one report an episode gets, and that
-// it describes the fault it found rather than the family it belongs to.
 func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault string) {
 	t.Helper()
 	notes := notificationsFromSource(emits, notificationSourceForwardOutage)
@@ -399,8 +327,6 @@ func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault strin
 	}
 }
 
-// TestUnrepairableStaleForwardReportsItsOwnFault is the sibling: the same bound
-// and the same single report, described as the fault it actually is.
 func TestUnrepairableStaleForwardReportsItsOwnFault(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
@@ -411,10 +337,6 @@ func TestUnrepairableStaleForwardReportsItsOwnFault(t *testing.T) {
 	assertOneOutageNotification(t, emits, "holds the local port but its edge never answers")
 }
 
-// TestRecoveredForwardEndsTheEpisode is the other side of the bound: an
-// exhausted episode must not be a permanent verdict. A forward that carries
-// traffic again retires its report, and the next failure is repaired from zero
-// rather than reported on sight.
 func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
@@ -440,12 +362,8 @@ func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	}
 }
 
-// TestStoppedEnvironmentIsNotResurrected is the guard on the repair's blast
-// radius, and it applies to the dropped shape most of all: stopping an
-// environment frees its local port, so a stop is indistinguishable from the
-// failure this repair exists for unless the cluster is asked. A stopped
-// environment's forward is *supposed* to be dead, and repairing it would undo
-// the operator's own stop and rewrite it as an outage.
+// A stop frees the local port exactly like the failure, so only the cluster
+// can tell them apart.
 func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string

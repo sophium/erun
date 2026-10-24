@@ -5,10 +5,6 @@ import type * as React from 'react';
 import type { ThemePreference } from './theme';
 import { ThemeToggle } from './ThemeToggle';
 
-// ConsoleHeader carries the current section title, the signed-in identity, and
-// the two identity-scoped actions (theme, sign out) — the desktop equivalent
-// keeps window controls and status here; the console has neither, so this bar
-// is deliberately just identity chrome plus the page title.
 export function ConsoleHeader({
   title,
   identityLabel,

@@ -120,11 +120,7 @@ describe('EnrollUserForm', () => {
 
   it('states the first user of a tenant with no users will receive TenantAdmin, before submitting', async () => {
     mockTenantsAndUsers(() => undefined);
-    // The target defaults to ownTenantId, and 'other-tenant' is seeded with
-    // userCount: 0 above -- exercising the default-target path (rather than
-    // driving the Radix Select popover, which jsdom does not render
-    // interactively) is enough to prove the notice reacts to the resolved
-    // target tenant's own count.
+    // Uses the default target: jsdom cannot drive the Radix Select popover.
     renderWithStore(
       <EnrollUserForm token="dev-token" ownTenantId="other-tenant" tenantType="OPERATIONS" />,
     );

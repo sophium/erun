@@ -8,28 +8,16 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// gitHubBypassNotice is the stderr a real `git push` to a protected branch
-// produces when the pushing credential holds a bypass grant -- copied from the
-// shape reported against erun's own merge-queue pushes, including the blank
-// remote lines GitHub separates the listed rules with.
+// gitHubBypassNotice is the real stderr shape, including blank separator lines.
 const gitHubBypassNotice = "remote: Bypassed rule violations for refs/heads/main:\n" +
 	"remote: \n" +
 	"remote: - Changes must be made through a pull request.\n" +
 	"remote: \n"
 
-// TestPushWorkingTreeBranchReportsAGitHubRulesetBypass reproduces the blind
-// spot this exists to close: the push succeeds, GitHub says on stderr that it
-// was admitted by a bypass rather than by the rules, and erun reported nothing
-// at all. The push captured stderr into a buffer to interpolate it into a
-// failure message and discarded that buffer on success, so a bypassed push and
-// a compliant one read identically in erun's own output -- and GitHub's remote
-// line, the only other trace, was captured too.
-//
-// Driven through the RunGit seam rather than a real remote: no real repository
-// can be made to answer a push with a ruleset bypass, so the seam is the only
-// way to hold the report to account.
+// No real remote can produce a bypass, so this drives the RunGit seam.
 func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 	var out bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &out, &out)}
@@ -40,12 +28,11 @@ func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 			if _, err := fmt.Fprint(stderr, gitHubBypassNotice); err != nil {
 				t.Fatalf("writing the stub push's stderr: %v", err)
 			}
-			// A bypass is not a failure: GitHub admits the push.
 			return nil
 		},
 	}
 
-	result, err := PushWorkingTreeBranch(ctx, t.TempDir(), PushWorkingTreeBranchParams{Branch: "main"}, deps)
+	result, err := PushWorkingTreeBranch(ctx, t.TempDir(), model.PushWorkingTreeBranchParams{Branch: "main"}, deps)
 	if err != nil {
 		t.Fatalf("a bypassed push still succeeds, so it must not be reported as an error: %v", err)
 	}
@@ -61,9 +48,6 @@ func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 	}
 }
 
-// TestPushWorkingTreeBranchStaysSilentWhenNoRuleWasBypassed is the other half:
-// the report is keyed on GitHub actually saying a rule was bypassed, so every
-// ordinary push stays as quiet as it was.
 func TestPushWorkingTreeBranchStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 	var out bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &out, &out)}
@@ -78,7 +62,7 @@ func TestPushWorkingTreeBranchStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 		},
 	}
 
-	if _, err := PushWorkingTreeBranch(ctx, t.TempDir(), PushWorkingTreeBranchParams{Branch: "feature/widget"}, deps); err != nil {
+	if _, err := PushWorkingTreeBranch(ctx, t.TempDir(), model.PushWorkingTreeBranchParams{Branch: "feature/widget"}, deps); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if got := out.String(); strings.Contains(got, "bypassing") {
@@ -121,9 +105,6 @@ func TestParseRulesetBypassNotice(t *testing.T) {
 			stderr: "remote: Resolving deltas: 100% (3/3), completed with 3 local objects.\nremote: \nTo github.com:sophium/erun.git\n",
 		},
 		{
-			// A notice with no rule list under it still reports, with an empty
-			// list: GitHub saying a bypass happened is the fact that matters,
-			// and a ruleset that lists nothing still bypassed something.
 			name:    "a notice with no rules listed still reports",
 			stderr:  "remote: Bypassed rule violations for refs/heads/main:\n",
 			wantOK:  true,

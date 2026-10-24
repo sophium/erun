@@ -1,18 +1,10 @@
--- Retention sweep for AI session status rows. See erun-backend-db/AGENTS.md,
--- "AI Sessions" for the design these bounds implement.
---
--- Required variable: dry_run (true|false). Run via:
---   psql -v ON_ERROR_STOP=1 -v dry_run=true|false -f ai_sessions.sql "$ERUN_DATABASE_URL"
+-- Retention sweep for AI session status rows; see erun-backend-db/AGENTS.md, "AI Sessions".
+-- Requires psql variable dry_run (true|false).
 
 SET ROLE erun_operations;
 
--- ai_sessions: 14-day age bound on occurred_at or 500-most-recent-per-
--- (tenant, environment) count cap, either bound prunes, applied only to
--- rows whose last reported event is 'exit'. A session still turn-start/
--- tool-use/turn-end/notify is live resolved status and is exempt regardless
--- of age -- the same "don't delete a live row" shape as comments' OPEN-thread
--- exemption. Nothing references ai_sessions, so no guard is needed beyond
--- the bound itself.
+-- ai_sessions: 14-day age or 500-per-(tenant, environment) cap, exited sessions only;
+-- a live session is exempt regardless of age.
 WITH exited_ranked AS (
   SELECT tenant_id, environment_id, session_id, occurred_at,
          row_number() OVER (PARTITION BY tenant_id, environment_id ORDER BY occurred_at DESC) AS rn
@@ -23,12 +15,8 @@ SELECT 'ai_sessions' AS table_name, count(*) AS eligible_for_deletion
 FROM exited_ranked
 WHERE rn > 500 OR occurred_at < now() - interval '14 days';
 
--- Record the run: eligible count, tagged with the dry_run flag this
--- invocation ran under. deleted_count is 0 for a dry run or the same
--- eligible count for a real run -- the delete below uses the identical
--- predicate, and retention.sh holds a session-scoped advisory lock for the
--- whole sweep, so nothing else can change eligibility between this count and
--- that delete.
+-- deleted_count equals eligible_count on a real run: the delete repeats this predicate under
+-- retention.sh's sweep-wide advisory lock.
 WITH exited_ranked AS (
   SELECT tenant_id, environment_id, session_id, occurred_at,
          row_number() OVER (PARTITION BY tenant_id, environment_id ORDER BY occurred_at DESC) AS rn

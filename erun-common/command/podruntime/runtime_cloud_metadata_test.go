@@ -7,14 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// fakeIMDS serves the two reads the boot makes. With v2 it requires the token a
-// PUT hands out; without it, the PUT is rejected the way an IMDSv1-only
-// instance rejects it and plain reads are served.
 func fakeIMDS(t *testing.T, v2 bool, requests *atomic.Int32) string {
 	t.Helper()
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +41,6 @@ func fakeIMDS(t *testing.T, v2 bool, requests *atomic.Int32) string {
 	return server.URL
 }
 
-// A deploy from a host with no cloud context for the environment renders the
-// chart's ERUN_CLOUD_REGION and ERUN_CLOUD_INSTANCE_ID empty. On an AWS node the
-// boot must still record the instance's own region and id, or idle stop can
-// never stop the host ("cloud host region or instance id is not available").
 func TestRuntimeBootFillsAnUninjectedRegionAndInstanceIDFromIMDS(t *testing.T) {
 	for _, v2 := range []bool{true, false} {
 		var requests atomic.Int32
@@ -73,15 +65,13 @@ func TestRuntimeBootFillsAnUninjectedRegionAndInstanceIDFromIMDS(t *testing.T) {
 			t.Fatal(err)
 		}
 		var root config.ERunConfig
-		readTestYAML(t, eruncommon.RuntimeRootConfigPath(boot.configHome()), &root)
+		readTestYAML(t, config.RuntimeRootConfigPath(boot.configHome()), &root)
 		if len(root.CloudContexts) != 1 || root.CloudContexts[0].InstanceID != "i-0abc123" || root.CloudContexts[0].Region != "eu-west-2" {
 			t.Fatalf("v2=%v: the boot config should record the instance's cloud context, got %+v", v2, root.CloudContexts)
 		}
 	}
 }
 
-// An injected value is the chart's word and is never probed for, and an
-// environment that is not on AWS has no instance metadata to ask.
 func TestRuntimeBootProbesIMDSOnlyForAnUninjectedValueOnAWS(t *testing.T) {
 	var requests atomic.Int32
 	endpoint := fakeIMDS(t, true, &requests)
@@ -103,8 +93,6 @@ func TestRuntimeBootProbesIMDSOnlyForAnUninjectedValueOnAWS(t *testing.T) {
 	}
 }
 
-// Where nothing answers, the token request times out and the plain read is not
-// tried: one bounded wait, not two.
 func TestRuntimeIMDSTimeoutDoesNotFallBackToAPlainRead(t *testing.T) {
 	var reads atomic.Int32
 	release := make(chan struct{})

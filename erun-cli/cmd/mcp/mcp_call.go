@@ -10,15 +10,18 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/spf13/cobra"
 )
 
-func newMCPCallCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newMCPCallCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, tool, arguments string
 	cmd := &cobra.Command{
 		Use:   "call",
@@ -36,17 +39,17 @@ func newMCPCallCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPCallCommand(cmd.Context(), shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), tool, arguments)
+			return runMCPCallCommand(cmd.Context(), clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), tool, arguments)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addMCPEdgeScopeFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&tool, "tool", "", "Name of the tool to call, as listed by 'erun mcp tools'")
 	cmd.Flags().StringVar(&arguments, "args", "", "Tool arguments as a JSON object (default: no arguments)")
 	return cmd
 }
 
-func newMCPToolsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newMCPToolsCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "tools",
@@ -59,15 +62,15 @@ func newMCPToolsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPToolsCommand(cmd.Context(), shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runMCPToolsCommand(cmd.Context(), clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addMCPEdgeScopeFlags(cmd, &tenant, &environment)
 	return cmd
 }
 
-func newMCPTokenCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newMCPTokenCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -82,10 +85,10 @@ func newMCPTokenCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPTokenCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runMCPTokenCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addMCPEdgeScopeFlags(cmd, &tenant, &environment)
 	return cmd
 }
@@ -105,7 +108,7 @@ type mcpTokenResult struct {
 	Token       string `json:"token"`
 }
 
-func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, tool, arguments string) error {
+func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, tool, arguments string) error {
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
 		return fmt.Errorf("--tool is required; run `erun mcp tools` to list the environment's tools")
@@ -114,35 +117,33 @@ func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen
 	if err != nil {
 		return err
 	}
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
 
-	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, tool, shared.CompactMCPArguments(toolArguments))
+	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, tool, envcall.CompactMCPArguments(toolArguments))
 	if commandCtx.DryRun {
 		return nil
 	}
 
-	// Not an idle probe: this command calls a caller-named tool, and whether that
-	// tool is read-only is not something the CLI can know generically — its own
-	// help text says as much ("A tool can change the environment").
-	result, err := shared.CallMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
+	// Not an idle probe: the named tool may change the environment.
+	result, err := envcall.CallMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
 	if err != nil {
 		if tool == "activity_lease_take" {
 			exclusive, _ := toolArguments["exclusive"].(bool)
 			err = activity.DescribeExclusiveActivityLeaseVersionSkew(target.Tenant, target.Environment, exclusive, err)
 		}
-		return shared.McpEdgeErrorWithExitCode(target, err)
+		return envcall.McpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(result)
 	}
 	return writeMCPCallText(commandCtx, result)
 }
 
-func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
+func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
@@ -154,37 +155,35 @@ func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 
 	list, err := listMCPToolsWithReattach(ctx, commandCtx, target)
 	if err != nil {
-		return shared.McpEdgeErrorWithExitCode(target, err)
+		return envcall.McpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(list)
 	}
 	return writeMCPToolsText(commandCtx, target, list)
 }
 
-// listMCPToolsWithReattach is listMCPTools's counterpart to
-// callMCPToolWithReattach: the same one-shot reattach-then-retry for a
-// dropped or stale channel.
-func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target shared.McpEdgeTarget) (mcp.MCPToolListResult, error) {
-	list := func() (mcp.MCPToolListResult, error) {
+// listMCPToolsWithReattach reattaches once on a dropped or stale channel.
+func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target envcall.McpEdgeTarget) (model.MCPToolListResult, error) {
+	list := func() (model.MCPToolListResult, error) {
 		return mcp.ListMCPTools(ctx, mcp.MCPToolListParams{
 			Endpoint:      target.Endpoint,
-			MintToken:     shared.McpEdgeTokenMinter(target),
+			MintToken:     envcall.McpEdgeTokenMinter(target),
 			ClientVersion: shared.CurrentBuildInfo().Version,
 			IdleProbe:     true,
 		})
 	}
 	result, err := list()
 	if err != nil && errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
-		if reattachErr := shared.ReattachEnvironmentMCPChannel(commandCtx, target.Tenant, target.Environment); reattachErr == nil {
+		if reattachErr := envcall.ReattachEnvironmentMCPChannel(commandCtx, target.Tenant, target.Environment); reattachErr == nil {
 			result, err = list()
 		}
 	}
 	return result, err
 }
 
-func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
+func runMCPTokenCommand(commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
@@ -199,7 +198,7 @@ func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver
 	if err != nil {
 		return err
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(mcpTokenResult{
 			Tenant:      target.Tenant,
 			Environment: target.Environment,
@@ -229,7 +228,7 @@ func parseMCPToolArguments(raw string) (map[string]any, error) {
 	return arguments, nil
 }
 
-func writeMCPCallText(ctx core.Context, result mcp.MCPToolCallResult) error {
+func writeMCPCallText(ctx core.Context, result model.MCPToolCallResult) error {
 	if text := strings.TrimRight(result.Text, "\n"); text != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, text); err != nil {
 			return err
@@ -244,7 +243,7 @@ func writeMCPCallText(ctx core.Context, result mcp.MCPToolCallResult) error {
 	return err
 }
 
-func writeMCPToolsText(ctx core.Context, target shared.McpEdgeTarget, list mcp.MCPToolListResult) error {
+func writeMCPToolsText(ctx core.Context, target envcall.McpEdgeTarget, list model.MCPToolListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Tools on %s/%s (%s):\n", target.Tenant, target.Environment, target.Endpoint); err != nil {
 		return err
 	}
@@ -275,9 +274,6 @@ func firstMCPDescriptionLine(description string) string {
 	return strings.TrimSpace(line)
 }
 
-// mcpToolArgumentSummary renders a tool's input schema as its property names,
-// required ones marked, so text output stays scannable while --output json keeps
-// the full schema.
 func mcpToolArgumentSummary(schema json.RawMessage) string {
 	if len(schema) == 0 {
 		return ""

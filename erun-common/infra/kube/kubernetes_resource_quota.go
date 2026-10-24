@@ -6,27 +6,18 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// resourceQuotaName and limitRangeName are deterministic per namespace, so a
-// re-applied deploy updates the same objects instead of accumulating copies.
+// Deterministic names make a re-applied deploy update the same objects.
 const (
 	resourceQuotaName = "erun-quota"
 	limitRangeName    = "erun-limits"
 )
 
-// namespaceResourceQuotaManifest renders the ResourceQuota + LimitRange YAML
-// for one namespace's cap. The LimitRange supplies a default/defaultRequest so
-// a pod that declares no resources of its own (nothing in this namespace is
-// assumed to) still gets sane values instead of the ResourceQuota rejecting it
-// outright for omitting requests. `default` (the limit) equals the namespace
-// cap: that only bounds an unsized container and costs nothing at scheduling
-// time. `defaultRequest` must not follow the cap the same way — a request is a
-// reservation, and a defaultRequest equal to the cap turns the quota into a
-// minimum node size for the whole namespace (#1076), so it is instead the
-// small fixed value in DefaultLimitRangeDefaultRequestCPU/Memory, independent
-// of how large the cap is configured.
-func namespaceResourceQuotaManifest(namespace string, quota config.NamespaceResourceQuota) string {
+// The LimitRange defaults unsized pods so the quota does not reject them. defaultRequest
+// is a small fixed value: a request equal to the cap would make the cap a minimum node size.
+func namespaceResourceQuotaManifest(namespace string, quota model.NamespaceResourceQuota) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -61,10 +52,8 @@ spec:
 	)
 }
 
-// TraceApplyKubernetesResourceQuota records the dry-run plan for the namespace
-// cap, mirroring TraceEnsureKubernetesNamespace. A zero quota traces nothing —
-// deploy applies no ResourceQuota/LimitRange when the env has no cap configured.
-func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace string, quota config.NamespaceResourceQuota) {
+// TraceApplyKubernetesResourceQuota traces the namespace cap; a zero quota traces nothing.
+func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace string, quota model.NamespaceResourceQuota) {
 	if quota.IsZero() || strings.TrimSpace(namespace) == "" {
 		return
 	}
@@ -76,11 +65,8 @@ func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace 
 	ctx.TraceCommand("", "kubectl", args...)
 }
 
-// EnsureKubernetesResourceQuota applies (creates or updates) the namespace's
-// ResourceQuota + LimitRange from quota. A zero quota is a no-op, so an
-// environment with no cap configured deploys exactly as it did before this
-// existed.
-func EnsureKubernetesResourceQuota(contextName, namespace string, quota config.NamespaceResourceQuota) error {
+// EnsureKubernetesResourceQuota applies the namespace's ResourceQuota and LimitRange; a zero quota is a no-op.
+func EnsureKubernetesResourceQuota(contextName, namespace string, quota model.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil
 	}

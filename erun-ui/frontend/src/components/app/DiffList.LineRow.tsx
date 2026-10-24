@@ -6,13 +6,7 @@ import type { DiffLine } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
 
-// lineRevealKey is the identity a revealed comment affordance follows across a
-// re-read: the line's own environment, file and number -- what the affordance is
-// anchored to and what the reader pointed at, rather than the element the
-// pointer happened to be over when the panel last answered. Empty for a row
-// that offers no affordance, matching DiffLineCommentAction's own reason for
-// rendering nothing there: a hunk header line, or a directory with no tenant to
-// anchor a review comment to.
+// lineRevealKey identifies a line across re-reads; empty for rows with no affordance.
 function lineRevealKey(envKey: string, tenant: string, filePath: string, line: DiffLine): string {
   if (tenant === '' || line.kind === 'meta' || line.newLine === undefined) {
     return '';
@@ -20,17 +14,8 @@ function lineRevealKey(envKey: string, tenant: string, filePath: string, line: D
   return `${envKey}|${filePath}:${String(line.newLine)}`;
 }
 
-// DiffLineRow renders one line of a hunk. It is a component rather than an
-// inline map body because it publishes the reveal key below and reads
-// `revealedLine` back, and both the shared function-size and complexity budgets
-// (eslint.config.mjs) put that past what the hunk body may hold.
-//
-// `data-reveal-key` is how the panel finds the line under the pointer when the
-// reader moves it, without re-deriving anything from the DOM: it is the same
-// value the panel stores, so a moved pointer and a stored reveal can never
-// disagree. It is rendered on every row, empty included, so that a row with no
-// affordance is still a hit -- moving onto one has to end the reader's reveal,
-// not fall through to the row above it.
+// `data-reveal-key` is rendered on every row, empty included, so moving onto a
+// row with no affordance ends the reveal.
 export function DiffLineRow({
   line,
   envKey,
@@ -58,15 +43,8 @@ export function DiffLineRow({
         line.kind === 'meta' && 'bg-muted text-muted-foreground',
       )}
     >
-      {/* Leads the row: a trailing column sits past the content width, so
-          on any diff wider than the panel the affordance was only
-          reachable by scrolling right. */}
-      {/* A line comment anchors to a hosted review record on the tenant's
-          platform, so it is offered only where there is a tenant to anchor
-          to. A directory has none (that is what makes it a directory
-          rather than an environment), and an affordance that opened a
-          tenant-scoped dialog with no tenant would be worse than its
-          absence. */}
+      {/* Leads the row so it stays reachable on diffs wider than the panel. */}
+      {/* A directory has no tenant to anchor a review comment to. */}
       {tenant === '' ? null : (
         <DiffLineCommentAction
           filePath={filePath}

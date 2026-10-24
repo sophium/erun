@@ -32,12 +32,11 @@ param()
 
 $ErrorActionPreference = "Stop"
 
-# winres version must match the one wails v2 vendors, so the emitted resource is
-# byte-for-byte what `wails build` would produce. Bump this in lockstep with the
-# wails upgrade (see erun-ui/go.mod -> github.com/wailsapp/wails/v2).
+# Must match the winres version wails v2 vendors (erun-ui/go.mod) so the resource
+# is byte-identical to `wails build` output.
 $WinresVersion = "v0.3.1"
 
-# Resolve the toolchain even from a shell with a stale in-memory PATH (mirrors build.ps1).
+# Resolve the toolchain despite a stale in-memory PATH.
 $persisted = ([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User')) -join ';'
 $env:Path = $persisted + ';' + $env:Path + ';' + (Join-Path $env:USERPROFILE 'go\bin')
 
@@ -49,10 +48,8 @@ function Require-Cmd($name, $hint) {
 Require-Cmd go "Install with: scoop install go" | Out-Null
 $magickCmd = Require-Cmd magick "Install with: scoop install imagemagick"
 
-# The Scoop (portable) ImageMagick build has no registry keys, so magick.exe
-# can't locate its coder DLLs when invoked via a shim. Point it at its own
-# install dir explicitly. Resolve the real exe behind any Scoop shim, then set
-# the module/config paths and put the dir on PATH so dependent CORE_RL_*.dll load.
+# Portable Scoop ImageMagick has no registry keys; point it at its own install dir
+# so its coder DLLs load.
 $magickExe = $magickCmd.Source
 $shimFile = [IO.Path]::ChangeExtension($magickExe, ".shim")
 if (Test-Path $shimFile) {
@@ -78,9 +75,8 @@ Write-Host ">> icon.ico from appicon.png ..."
 & $magickExe $AppIcon -define icon:auto-resize=256,128,96,64,48,32,16 $IcoPath
 if ($LASTEXITCODE -ne 0) { throw "magick failed to build icon.ico" }
 
-# Emit the sysos with a throwaway Go program that uses tc-hib/winres exactly as
-# wails build does (icon group at winres.RT_ICON == 3). Kept out of the repo so
-# the app module stays free of a build-only dependency.
+# A throwaway program using winres as wails does (icon group at RT_ICON == 3), kept
+# out of the repo so the app module has no build-only dependency.
 $gen = Join-Path ([IO.Path]::GetTempPath()) ("erun-genicon-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $gen | Out-Null
 try {

@@ -5,18 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray pins the JSON
-// shape a caller of the outputs_list MCP tool actually observes for a
-// directory that has never been created (the ordinary case for an
-// environment that has never written anything to it): Entries must marshal
-// to "[]", not "null" - the same nil-slice-on-empty-collection defect fixed
-// in LoadAISessionStatuses.
+// A never-created directory must marshal Entries as "[]", not "null".
 func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 
-	result, err := ResolveLocalOutputs(RuntimeOutputsParams{Dir: dir})
+	result, err := ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolve local outputs for missing dir: %v", err)
 	}
@@ -39,15 +36,13 @@ func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	}
 }
 
-// TestResolveLocalOutputsNonEmptySerializesAsArray confirms the fix above does
-// not disturb the populated case.
 func TestResolveLocalOutputsNonEmptySerializesAsArray(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	result, err := ResolveLocalOutputs(RuntimeOutputsParams{Dir: dir})
+	result, err := ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolve local outputs: %v", err)
 	}
@@ -55,7 +50,7 @@ func TestResolveLocalOutputsNonEmptySerializesAsArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
 	}
-	var roundTripped RuntimeOutputsListResult
+	var roundTripped model.RuntimeOutputsListResult
 	if err := json.Unmarshal(data, &roundTripped); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}

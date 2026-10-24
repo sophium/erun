@@ -8,14 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// The tenant dashboard only calls LoadTenantDashboard once it can resolve both
-// an API URL (from an environment) and a primary cloud alias (from the tenant
-// config, which the seeded `pw` tenant already normalizes to pw-aws — see
-// erun-common's NormalizeTenantCloudProviderAliases). None of the baseline
-// envs carry an apiUrl, so this stages one throwaway env that does, purely to
-// satisfy that gate; the RPC itself is stubbed below rather than hitting a
-// real backend, per playwright/AGENTS.md's "stub the RPC over /__erun_invoke"
-// guidance for state the seeded baseline does not carry.
+// The dashboard loads only once an env has an apiUrl, so stage one; the RPC
+// itself is stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -81,9 +75,7 @@ test.describe('tenant dashboard — audit log tab (#1205)', () => {
       await expect(firstRow).toContainText('API');
       await expect(firstRow).toContainText('subject-1');
       await expect(firstRow).toContainText('GET /v1/reviews');
-      // The MCP tool name renders, but never a recorded argument payload — a
-      // tool such as cloud_inject_aws_credentials takes credentials as
-      // arguments, and the read API never returns that column.
+      // Tool names render, but never argument payloads, which can carry credentials.
       await expect(app.tenantDashboard.auditTable()).toContainText('cloud_inject_aws_credentials');
       await expect(app.tenantDashboard.auditTable()).not.toContainText('secret');
     } finally {

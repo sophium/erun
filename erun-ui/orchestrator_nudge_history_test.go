@@ -10,11 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// nudgeOrchestratorOnce drives one pacing nudge into id's live session via the
-// real reconciler path (sendOrchestratorPacingNudge), the same way an
-// automatic pacer nudge happens in production, so these tests exercise the
-// same write-through persistence a real nudge triggers rather than poking the
-// struct directly.
+// nudgeOrchestratorOnce nudges through the real reconciler path so persistence runs.
 func nudgeOrchestratorOnce(t *testing.T, app *App, id string) {
 	t.Helper()
 	app.mu.Lock()
@@ -26,8 +22,6 @@ func nudgeOrchestratorOnce(t *testing.T, app *App, id string) {
 	app.sendOrchestratorPacingNudge(id, session.serial, time.Now(), time.Minute, orchestratorPacingSignalIdle, "", false)
 }
 
-// orchestratorAutoNudgeSnapshot reads a live session's cumulative auto-nudge
-// fields under lock.
 func orchestratorAutoNudgeSnapshot(app *App, id string) (count int, lastAtUnix int64) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -38,10 +32,6 @@ func orchestratorAutoNudgeSnapshot(app *App, id string) (count int, lastAtUnix i
 	return session.pacingAutoNudgeCount, session.pacingLastAutoNudgeAtUnix
 }
 
-// TestOrchestratorNudgeHistorySurvivesStopThenStart is the issue's first Go
-// validation criterion: a session with a non-zero pacingAutoNudgeCount that is
-// torn down and reattached (Stop then Start again, the same "reattach" shape
-// a desktop restart's boot-restore path uses) reports the same count.
 func TestOrchestratorNudgeHistorySurvivesStopThenStart(t *testing.T) {
 	orchestratorPacingNudgeSettle = 0
 	app := orchestratorTestApp(t)
@@ -62,9 +52,7 @@ func TestOrchestratorNudgeHistorySurvivesStopThenStart(t *testing.T) {
 		t.Fatalf("expected the nudges to be recorded before stop, got count=%d lastAt=%d", autoCount, lastAutoAt)
 	}
 
-	// Stop tears down the in-memory session -- the same "gone" state a
-	// desktop restart leaves behind -- so a restore afterward is a genuine
-	// reattach, not a read of the same still-live struct.
+	// Stop drops the in-memory session, so the restore is a genuine reattach.
 	if err := app.StopOrchestrator(created.ID); err != nil {
 		t.Fatalf("StopOrchestrator failed: %v", err)
 	}
@@ -82,10 +70,6 @@ func TestOrchestratorNudgeHistorySurvivesStopThenStart(t *testing.T) {
 	}
 }
 
-// TestOrchestratorNudgeHistoryFreshOrchestratorStartsAtZero is the issue's
-// paired criterion: a freshly created orchestrator (no prior record for its
-// id) reports zero, so "never nudged" stays true for one that genuinely never
-// was.
 func TestOrchestratorNudgeHistoryFreshOrchestratorStartsAtZero(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -103,11 +87,7 @@ func TestOrchestratorNudgeHistoryFreshOrchestratorStartsAtZero(t *testing.T) {
 	}
 }
 
-// TestDeleteOrchestratorClearsNudgeHistory locks in the id-reuse hazard: the
-// orchestrator id is a name-derived slug (uniqueOrchestratorID), not a uuid,
-// so deleting "agent" and creating a new orchestrator also named "agent"
-// reuses the same id. Without clearing the persisted record on delete, the
-// new orchestrator would inherit a stranger's nudge history.
+// Orchestrator ids are name-derived, so a new "agent" reuses a deleted one's id.
 func TestDeleteOrchestratorClearsNudgeHistory(t *testing.T) {
 	orchestratorPacingNudgeSettle = 0
 	app := orchestratorTestApp(t)
@@ -142,12 +122,6 @@ func TestDeleteOrchestratorClearsNudgeHistory(t *testing.T) {
 	}
 }
 
-// TestListOrchestratorsReportsHistoryForStoppedOrchestrator pins the
-// complementary gap: ListOrchestrators' "stopped" branch used to report an
-// unconditional zero pacing snapshot for any orchestrator with no live
-// session, which would have re-created the exact "Not nudged" defect this
-// issue closes every time the operator merely stopped (not restarted) a
-// nudged orchestrator.
 func TestListOrchestratorsReportsHistoryForStoppedOrchestrator(t *testing.T) {
 	orchestratorPacingNudgeSettle = 0
 	app := orchestratorTestApp(t)
@@ -177,10 +151,6 @@ func TestListOrchestratorsReportsHistoryForStoppedOrchestrator(t *testing.T) {
 	}
 }
 
-// TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed pins
-// the "unknown, not a confident zero" contract: a persisted file that exists
-// but fails to parse must not be read back as "never nudged" — it must be
-// distinguishable.
 func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -220,10 +190,6 @@ func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *te
 	}
 }
 
-// TestWriteOrchestratorNudgeHistoryEntryRefusesToClobberAnUnreadableFile pins
-// the write-side safeguard: if the existing file cannot be parsed, writing one
-// orchestrator's update must not replace it with a set containing only that
-// one entry, which would silently destroy every other orchestrator's history.
 func TestWriteOrchestratorNudgeHistoryEntryRefusesToClobberAnUnreadableFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nudge-history.json")
@@ -246,11 +212,6 @@ func TestWriteOrchestratorNudgeHistoryEntryRefusesToClobberAnUnreadableFile(t *t
 	}
 }
 
-// TestOrchestratorNudgeHistoryEntryPersistsAtomically is a light integration
-// check that writeOrchestratorNudgeHistoryEntry actually round-trips through
-// eruncommon.WriteFileAtomic (temp file + rename) rather than a plain
-// truncating write: the file exists, parses, and reads back exactly what was
-// written.
 func TestOrchestratorNudgeHistoryEntryPersistsAtomically(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "nudge-history.json")
@@ -275,7 +236,6 @@ func TestOrchestratorNudgeHistoryEntryPersistsAtomically(t *testing.T) {
 		t.Fatalf("expected the round-tripped entry to match, got %+v want %+v", got, entry)
 	}
 
-	// A second orchestrator's entry must coexist rather than replace the first.
 	other := orchestratorNudgeHistoryEntry{OrchestratorID: "other", WhipCount: 9}
 	if err := writeOrchestratorNudgeHistoryEntry(path, other); err != nil {
 		t.Fatalf("second writeOrchestratorNudgeHistoryEntry failed: %v", err)

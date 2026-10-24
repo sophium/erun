@@ -1,38 +1,22 @@
-# The erun-devops runtime image, plus the erun CLI and the emcp server it
-# ships:
-#
-#   cli-build -> cli-test     erun-common, erun-mcp, erun-cli and
-#                             erun-integration: native compile, then each
-#                             module's own lint and tests, and darwin and
-#                             windows builds of erun and emcp
-#
-# `test` is the stage erun detects, `dist` (FROM test) stamps the version and
-# compiles erun and emcp for the target, and `runtime` takes the binaries from
-# `dist`. Nothing ships unless the tests passed, and a version bump reruns only
-# `dist`. The image's init is erun itself (`erun runtime-init`).
+# `dist` builds FROM `test`, so nothing ships unless the tests passed.
 
-# Pinned tool versions. ATLAS_VERSION is shared by the test stage and the
-# runtime image, so the suites run against the atlas the image ships.
+# ATLAS_VERSION is shared so the suites run against the atlas the image ships.
 ARG HELM_VERSION=v4.2.2
 ARG TERRAFORM_VERSION=1.12.2
 ARG ATLAS_VERSION=v1.2.0
-# Keep in sync with the @playwright/test version in erun-ui/playwright/yarn.lock
-# so the installed Chromium system libraries match the browser the suite
-# downloads at run time.
+# Keep in sync with @playwright/test in erun-ui/playwright/yarn.lock.
 ARG PLAYWRIGHT_VERSION=1.63.0
 
-# Pinned to BUILDPLATFORM so the suites run natively once per build instead of
-# once per target arch under emulation.
+# Pinned to BUILDPLATFORM so the suites run natively once, not per arch under emulation.
 FROM --platform=$BUILDPLATFORM golang:1.26.0 AS cli-build
 
-# dtach for erun-mcp's attach tests, which run a real `dtach -A` session.
+# erun-mcp's attach tests run a real `dtach -A` session.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get update && apt-get install -y --no-install-recommends dtach
 
-# atlas for the integration suite's gate-merge/merge atlas.sum scenarios, which
-# run the real `atlas migrate hash` rather than a stub of its hashing.
+# The integration suite's atlas.sum scenarios run the real `atlas migrate hash`.
 ARG BUILDARCH
 ARG ATLAS_VERSION
 RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
@@ -40,8 +24,6 @@ RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-lin
 
 WORKDIR /src
 
-# Module manifests first so dependency downloads stay cached when only source
-# changes.
 COPY erun-common/go.mod erun-common/go.sum /src/erun-common/
 COPY erun-mcp/go.mod erun-mcp/go.sum /src/erun-mcp/
 COPY erun-cli/go.mod erun-cli/go.sum erun-cli/go.work erun-cli/go.work.sum /src/erun-cli/
@@ -66,14 +48,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM cli-build AS cli-test
 
-# What the suites read from the rest of the checkout: the build-context and
-# project config they check, the Dockerfiles and charts erun builds and
-# deploys and the packages it releases, the API routes and desktop/console
-# sources the surface audits enumerate, and the docs and skill pages the drift
-# checks compare against.
-# Of this image's own directory only the Dockerfile is copied: it is the one
-# file here the suites read. A new erun-devops/docker/<image> directory is added
-# here too (TestCLITestStageCopiesEveryDockerDirectory).
+# What the suites read from the rest of the checkout. Every new
+# erun-devops/docker/<image> directory is added here too.
 COPY .dockerignore .gitignore /src/
 COPY .erun/config.yaml /src/.erun/config.yaml
 COPY Formula /src/Formula
@@ -106,34 +82,31 @@ ENV GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-common && go tool golangci-lint run ./... && go test -race -count=1 ./...
+    cd erun-common && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -race -count=1 ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-mcp && go tool golangci-lint run ./... && go test -count=1 ./... && \
+    cd erun-mcp && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 ./... && \
     CGO_ENABLED=0 GOOS=darwin go build ./... && \
     CGO_ENABLED=0 GOOS=windows go build ./...
 
-# The darwin and windows builds prove the Homebrew and Scoop source builds
-# compile; erun-cli and erun-mcp compile erun-common with them.
+# The darwin and windows builds prove the Homebrew and Scoop source builds compile.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-cli && go tool golangci-lint run ./... && go test -count=1 ./... && \
+    cd erun-cli && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 ./... && \
     CGO_ENABLED=0 GOOS=darwin go build ./... && \
     CGO_ENABLED=0 GOOS=windows go build ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-integration && go tool golangci-lint run ./... && go test -count=1 -timeout=45m ./...
+    cd erun-integration && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 -timeout=45m ./...
 
-# The stage erun detects. A further part of this image would join here.
 FROM cli-test AS test
 
-# Cross-compiles with CGO disabled, so the compiler runs natively on the build
-# host. ERUN_VERSION falls back to erun-devops/VERSION for a bare docker build.
+# ERUN_VERSION falls back to erun-devops/VERSION for a bare docker build.
 FROM test AS dist
 
 COPY erun-devops/VERSION /src/erun-devops/VERSION
@@ -149,12 +122,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/cmd/shared.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd/shared.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd/shared.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
+    go build -ldflags "-X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 
-# Target-arch Go toolchain for the final image's own `go` binary (needed for
-# in-pod contribute-mode builds, e.g. erun-ui). Deliberately not pinned to
-# BUILDPLATFORM: this stage ships into the runtime image and runs no RUN
-# instructions, so sourcing it costs a per-arch layer pull, not emulation.
+# Target-arch Go for in-pod builds; not pinned to BUILDPLATFORM since it ships and runs nothing here.
 FROM golang:1.26.0 AS goroot
 
 FROM ghcr.io/sophium/erun-ubuntu:noble-20260217-1 AS runtime
@@ -179,24 +149,12 @@ ARG PLAYWRIGHT_VERSION
 
 USER root
 
-# Keep external tooling installs pinned and centralized in one layer for traceability.
-#
-# build-essential + pkg-config + libgtk-3-dev + libwebkit2gtk-4.1-dev +
-# libsoup-3.0-dev + dtach are no longer installed here -- they live in
-# erun-ubuntu now (see that Dockerfile's own comment), so this stage already
-# has them. They exist so the in-pod contribute-mode workflow can rebuild
-# erun-ui (the Wails desktop binary) and run it in headless mode against a
-# port-forward: Wails' Go bindings link against webkit2gtk on Linux via CGO,
-# and without the dev headers `go build -tags desktop,production` fails at
-# compile. Cost: roughly +400 MB on the base image. Worth it because the
-# contribute-app browser bridge is the only way to test desktop-side
-# changes without leaving the env.
+# Wails/webkit CGO build deps come from erun-ubuntu.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     apt-get update && \
     apt-get install -y git bash-completion bubblewrap dpkg-dev iproute2 procps && \
-    # ripgrep ships a musl static build for amd64 but only a gnu build for
-    # arm64 — the asymmetric triples are deliberate, not a typo.
+    # ripgrep ships musl only for amd64; the asymmetric triples are deliberate.
     case "${TARGETARCH}" in \
         amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64; rg_triple=x86_64-unknown-linux-musl ;; \
         arm64) arch=arm64; docker_arch=aarch64; node_arch=arm64; aws_arch=aarch64; rg_triple=aarch64-unknown-linux-gnu ;; \
@@ -243,19 +201,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     chown -R erun:erun /home/erun && \
     chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/rg /usr/local/bin/docker /usr/local/bin/aws
 
-# Chromium runtime libraries for the erun-ui Playwright suite. The build deps
-# in the layer above only cover compiling erun-app (Wails links webkit2gtk via
-# CGO); the headless browser the Playwright suite drives needs its
-# own shared libraries (libnss3, libnspr4, and the GTK/X/ALSA runtime set).
-# Without them, in-pod contribute-mode can build erun-ui but cannot run its
-# mandatory UI tests. Use Playwright's own dependency installer, pinned to the
-# suite's version, so the package set stays correct across Ubuntu library
-# renames (the 24.04 `t64` transition) instead of hand-maintaining a fragile
-# list. The browser binary itself is installed without root by
-# `playwright install chromium`; only these system libs need root, so they
-# belong in the image. Kept as a separate layer (not folded into the tooling
-# layer above) so a Playwright version bump invalidates only this layer, not
-# the much larger tooling install above it.
+# Chromium system libraries for the erun-ui Playwright suite, via Playwright's own installer
+# so Ubuntu library renames are tracked. Separate layer so a version bump rebuilds only this.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
@@ -265,18 +212,11 @@ COPY --from=goroot /usr/local/go /usr/local/go
 COPY --from=dist --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=dist --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
-# Directories need the execute/search bit so the unprivileged erun user can
-# enter them; the boot (`erun runtime-init`) copies each skill into
-# ~/.claude/skills and ~/.codex/skills as 0644 files. 0644 here would leave the
-# dirs un-searchable and the install would silently copy nothing.
+# 0755 because --chmod applies to directories too; the boot installs the files as 0644.
 COPY --chmod=0755 erun-skills/skills /etc/erun/skills
-# --chmod applies to the directory too, and an agents directory without the
-# execute bit cannot be entered: every agent file in it then fails to open and
-# none is installed. The boot installs the files themselves as 0644.
 COPY --chmod=0755 erun-skills/agents /etc/erun/agents
 
-# A bare `claude` runs erun, which resumes the directory's last conversation
-# and execs the real Claude Code binary the npm install left in node_modules.
+# A bare `claude` runs erun, which resumes the directory's last conversation.
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun && \
     ln -sf /usr/local/bin/erun /usr/local/bin/claude
@@ -293,10 +233,6 @@ USER erun
 
 EXPOSE 17000 17033 17022 9100
 
-# erun is PID 1: `erun runtime-init` boots the environment, reaps orphaned
-# children (the daemonised sshd's per-connection children reparent to PID 1;
-# with workspace-sync opening an SSH connection every couple of seconds, an
-# unreaped PID 1 accumulates zombies until no container on the node can fork),
-# forwards termination signals and exits with the code of what it ran.
+# erun is PID 1: it must reap sshd's orphaned children and forward signals.
 ENTRYPOINT ["erun", "runtime-init"]
 CMD ["devops"]

@@ -3,37 +3,22 @@ package main
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// The whip surface's models -- one flat list of per-target outcomes, folded
-// from both populations' eruncommon.WhipResult/WhipCandidate into the shape
-// the titlebar control renders, so a click's report reads the same whether
-// the target was an environment or an orchestrator. uiWhipTargetRef and the
-// WhipTargets population below are the selection half of the same surface:
-// what the operator can check, and what a click actually asks WhipNow to
-// push -- an explicit subset, keyed by the same Kind/ID pair a result reports
-// under, so a checked row and its eventual report row are the same identity.
+// Selection and result rows share the Kind/ID identity.
 
 const (
 	uiWhipTargetKindEnvironment  = "environment"
 	uiWhipTargetKindOrchestrator = "orchestrator"
 )
 
-// uiWhipTargetRef identifies one candidate the operator explicitly selected.
-// WhipNow takes a list of these instead of a boolean "everything" switch, so
-// an empty list is refused rather than silently read as "every target" (see
-// WhipNow's own doc comment in whip.go).
+// uiWhipTargetRef is one explicitly selected candidate; WhipNow refuses an empty list.
 type uiWhipTargetRef struct {
 	Kind string `json:"kind"` // "environment" | "orchestrator"
 	ID   string `json:"id"`
 }
 
-// uiWhipEnvironmentTarget/uiWhipOrchestratorTarget are one selectable row
-// each -- WhipTargets' population. ID matches the id a uiWhipResult reports
-// under ("tenant/environment" for an environment, the orchestrator's own id
-// otherwise), so a checked row and its eventual report row are the same
-// identity.
 type uiWhipEnvironmentTarget struct {
 	ID          string `json:"id"`
 	Tenant      string `json:"tenant"`
@@ -45,20 +30,12 @@ type uiWhipOrchestratorTarget struct {
 	Name string `json:"name"`
 }
 
-// uiWhipTargetList is WhipTargets' whole return: the current population the
-// selection surface renders as checkable rows, refreshed on demand so a
-// "select all X" click always acts on who is eligible right now rather than a
-// snapshot from when the surface opened.
 type uiWhipTargetList struct {
 	Environments  []uiWhipEnvironmentTarget  `json:"environments"`
 	Orchestrators []uiWhipOrchestratorTarget `json:"orchestrators"`
 }
 
-// WhipTargets lists every environment and orchestrator the whip selection
-// surface can offer right now. It is a pure read -- no push, no decision --
-// so the desktop can refresh it as often as the selection UI needs (on open,
-// and again on every "select all" click, and once more immediately before a
-// click actually whips) with no side effect.
+// WhipTargets lists the current whip candidates; it is a side-effect-free read.
 func (a *App) WhipTargets() (uiWhipTargetList, error) {
 	envTargets, err := a.listWhipEnvironmentTargets()
 	if err != nil {
@@ -93,7 +70,7 @@ type uiWhipReport struct {
 	Results []uiWhipResult `json:"results"`
 }
 
-func whipReportToUI(results []orchestrator.WhipResult) uiWhipReport {
+func whipReportToUI(results []model.WhipResult) uiWhipReport {
 	out := make([]uiWhipResult, 0, len(results))
 	for _, result := range results {
 		out = append(out, whipResultToUI(result))
@@ -101,9 +78,9 @@ func whipReportToUI(results []orchestrator.WhipResult) uiWhipReport {
 	return uiWhipReport{Results: out}
 }
 
-func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
+func whipResultToUI(result model.WhipResult) uiWhipResult {
 	kind := uiWhipTargetKindEnvironment
-	if result.Candidate.Kind == orchestrator.WhipTargetOrchestrator {
+	if result.Candidate.Kind == model.WhipTargetOrchestrator {
 		kind = uiWhipTargetKindOrchestrator
 	}
 	name := strings.TrimSpace(result.Candidate.Name)
@@ -112,29 +89,24 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 	}
 	ui := uiWhipResult{Kind: kind, ID: result.Candidate.ID, Name: name}
 	switch result.Decision {
-	case orchestrator.WhipDecisionNudge:
+	case model.WhipDecisionNudge:
 		if result.Pushed {
 			ui.Outcome = "pushed"
 			return ui
 		}
-		// A decided nudge that did not push is a write that was attempted and
-		// refused -- InlineAlert territory (erun-ui/AGENTS.md's Design-Language
-		// Decision Record), not a benign skip. Give it its own outcome so the
-		// badge and tone can't collapse it into the same bucket as "not alive".
+		// A refused push is a failure, not a benign skip.
 		ui.Outcome = "failed"
 		ui.Reason = "push failed"
 		ui.Error = result.Error
 		return ui
-	case orchestrator.WhipDecisionCap:
+	case model.WhipDecisionCap:
 		ui.Outcome = "capped"
 		ui.Reason = "stopped nudging after repeated silence — reply in its pane or restart it"
 		return ui
+	case model.WhipDecisionNone:
+		fallthrough
 	default:
-		if result.Reason == orchestrator.WhipReasonCallFailed {
-			// A call that was actually attempted and failed is a write that was
-			// refused, not a benign skip -- same InlineAlert-territory distinction
-			// the decided-but-refused-nudge case above already draws, so it must
-			// not collapse into whipSkipReasonText's "not alive" wording.
+		if result.Reason == model.WhipReasonCallFailed {
 			ui.Outcome = "failed"
 			ui.Reason = "call failed"
 			ui.Error = result.Error
@@ -147,19 +119,19 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 	}
 }
 
-// whipSkipReasonText renders WhipReason as the sentence an operator reads,
-// mirroring the wording erun-cli's whipResultValue and the pacing-capped
-// notice already use for the same conditions.
-func whipSkipReasonText(reason orchestrator.WhipReason) string {
+// whipSkipReasonText matches erun-cli's whipResultValue wording.
+func whipSkipReasonText(reason model.WhipReason) string {
 	switch reason {
-	case orchestrator.WhipReasonNotAlive:
+	case model.WhipReasonNotAlive:
 		return "not alive — no live session to push"
-	case orchestrator.WhipReasonUnreachable:
+	case model.WhipReasonUnreachable:
 		return "unreachable from this transport"
-	case orchestrator.WhipReasonAlreadyCapped:
+	case model.WhipReasonAlreadyCapped:
 		return "already capped — reply in its pane or restart it"
-	case orchestrator.WhipReasonFresh:
+	case model.WhipReasonFresh:
 		return "moved recently"
+	case model.WhipReasonCapCrossed, model.WhipReasonNudge, model.WhipReasonCallFailed, model.WhipReasonChannelDown:
+		fallthrough
 	default:
 		return string(reason)
 	}

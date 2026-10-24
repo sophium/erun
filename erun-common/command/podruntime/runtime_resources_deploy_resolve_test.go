@@ -4,11 +4,9 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// inPodEnv builds an env lookup matching what the runtime chart actually
-// injects into a pod: ERUN_ENV_TYPE plus the ERUN_TENANT/ERUN_ENVIRONMENT
-// identity pair.
 func inPodEnv(envType, tenant, environment string) func(string) string {
 	return func(key string) string {
 		switch key {
@@ -24,14 +22,6 @@ func inPodEnv(envType, tenant, environment string) func(string) string {
 	}
 }
 
-// TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured pins the
-// fix for an in-pod deploy of this environment's own runtime pod, with no
-// RuntimePod recorded in the (deliberately partial) in-pod env config, must
-// resolve the pod's own live cgroup memory/CPU limit rather than
-// NormalizeRuntimePodResources' package default (DefaultRuntimePodMemory /
-// DefaultRuntimePodCPU). Without the fix this returns an empty
-// RuntimePodResources, which the caller then normalizes to 16384Mi/4 — masking
-// this environment's real, deliberately-set 8192Mi/4 limit.
 func TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -41,7 +31,7 @@ func TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured(t *testi
 	})
 	env := inPodEnv("remote-agent", "erun", "ux")
 
-	got := config.ResolveRuntimePodResourcesForDeploy(config.RuntimePodResources{}, "erun", "ux", env, root)
+	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
 	if got.Memory != "8192Mi" {
 		t.Fatalf("resolved memory = %q, want the live cgroup limit 8192Mi, not the package default %q", got.Memory, config.DefaultRuntimePodMemory)
@@ -54,11 +44,6 @@ func TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured(t *testi
 	}
 }
 
-// TestResolveRuntimePodResourcesForDeployPrefersConfiguredValue proves a
-// configured value always wins: the cgroup fixture here reports a different
-// size than the configured one, and the configured one must survive
-// untouched — this fix stands in only for a field the config never carried,
-// never overrides one it did.
 func TestResolveRuntimePodResourcesForDeployPrefersConfiguredValue(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -67,7 +52,7 @@ func TestResolveRuntimePodResourcesForDeployPrefersConfiguredValue(t *testing.T)
 	})
 	env := inPodEnv("remote-agent", "erun", "ux")
 
-	configured := config.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
+	configured := model.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
 	got := config.ResolveRuntimePodResourcesForDeploy(configured, "erun", "ux", env, root)
 
 	if got != configured {
@@ -75,11 +60,6 @@ func TestResolveRuntimePodResourcesForDeployPrefersConfiguredValue(t *testing.T)
 	}
 }
 
-// TestResolveRuntimePodResourcesForDeployIgnoresCgroupOffPod covers a
-// host-side deploy (no injected identity at all): the cgroup fixture must
-// never be consulted, since a host process has no runtime pod cgroup of its
-// own to read, and letting an unrelated local cgroup leak in would be worse
-// than the default it replaces.
 func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOffPod(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -88,18 +68,13 @@ func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOffPod(t *testing.T) {
 	})
 	env := func(string) string { return "" }
 
-	got := config.ResolveRuntimePodResourcesForDeploy(config.RuntimePodResources{}, "erun", "ux", env, root)
+	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
-	if got != (config.RuntimePodResources{}) {
+	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) when not running in a runtime pod", got)
 	}
 }
 
-// TestResolveRuntimePodResourcesForDeployIgnoresCgroupOfOtherEnvironment
-// covers an in-pod deploy whose target tenant/environment does not match the
-// identity the chart injected into this pod — the cgroup limits visible here
-// belong to a different environment's pod and must never be attributed to
-// the one being deployed.
 func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOfOtherEnvironment(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -108,26 +83,15 @@ func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOfOtherEnvironment(t *t
 	})
 	env := inPodEnv("remote-agent", "erun", "build")
 
-	got := config.ResolveRuntimePodResourcesForDeploy(config.RuntimePodResources{}, "erun", "ux", env, root)
+	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
-	if got != (config.RuntimePodResources{}) {
+	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) for a mismatched tenant/environment", got)
 	}
 }
 
-// TestResolveRuntimePodResourcesForDeployRequiresRealPodIdentity pins the
-// regression this fix's first cut produced: erun-integration's own
-// in-pod-shaped deploy scenarios inject ERUN_TENANT/ERUN_ENVIRONMENT to
-// simulate pod identity, exactly like a real chart-rendered pod does, but
-// never set ERUN_ENV_TYPE — because there is no real pod, and so no real
-// cgroup, behind that simulation. Gating the cgroup read on the
-// tenant/environment pair alone made the resolved value depend on whatever
-// unrelated cgroup happened to exist on the machine running the test
-// (TestDeploy/in_pod_local_agent_component_deploy_allowed's golden started
-// reporting this environment's own live limits instead of the fixed
-// defaults the golden pins). IsInRuntimeEnvironment's ERUN_ENV_TYPE check is
-// what a real pod always carries and a same-machine simulation does not, so
-// it must gate the read even when the tenant/environment pair matches.
+// Integration scenarios simulate pod identity without ERUN_ENV_TYPE and have no real
+// cgroup, so ERUN_ENV_TYPE must gate the read.
 func TestResolveRuntimePodResourcesForDeployRequiresRealPodIdentity(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -146,9 +110,9 @@ func TestResolveRuntimePodResourcesForDeployRequiresRealPodIdentity(t *testing.T
 		}
 	}
 
-	got := config.ResolveRuntimePodResourcesForDeploy(config.RuntimePodResources{}, "erun", "ux", env, root)
+	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
-	if got != (config.RuntimePodResources{}) {
+	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) without a real ERUN_ENV_TYPE-carrying pod identity", got)
 	}
 }

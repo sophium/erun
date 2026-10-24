@@ -8,52 +8,36 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-// Stdio side of the per-environment MCP edge. An MCP client reads its server
-// config once at launch and cannot refresh a header afterwards, so a bearer
-// written into that config expires mid-session and every tool for the
-// environment fails at once. This relay removes the credential from the config
-// entirely: the client launches a command, and the bearer is minted here, per
-// request, for as long as the session runs.
+// Stdio side of the MCP edge. Clients cannot refresh a configured header, so the relay
+// mints the bearer per request instead of writing it into the client's config.
 
-// jsonRPCInternalError is the code a relay failure is reported under, so a
-// client that cannot reach the edge renders an actionable message instead of
-// seeing its pipe go quiet.
 const jsonRPCInternalError = -32603
 
 type MCPStdioProxyParams struct {
 	Endpoint      string
-	MintToken     MCPTokenMinter
+	MintToken     seam.MCPTokenMinter
 	ClientVersion string
 	In            io.Reader
 	Out           io.Writer
-	// Diagnostics carries every human-facing line. Out is JSON-RPC and nothing
-	// else: one stray byte there desynchronizes the client's parser.
+	// Diagnostics carries human-facing lines; Out must carry only JSON-RPC.
 	Diagnostics io.Writer
-	// DescribeError turns a relay failure into the message the client shows. The
-	// caller owns the recovery wording because it knows which command brings the
-	// edge back up; nil falls back to the raw error.
+	// DescribeError renders a relay failure for the client; nil uses the raw error.
 	DescribeError func(error) string
-	// LocalTools are served here rather than relayed, for work whose subject is
-	// on this host and so is out of the pod's reach.
-	LocalTools []MCPLocalTool
+	LocalTools    []MCPLocalTool
 }
 
-// RunMCPStdioProxy relays newline-delimited JSON-RPC between a client on stdin
-// and an environment's MCP edge until stdin closes. Messages are relayed one at
-// a time: a client waits for each reply before it acts on the next, and serial
-// relay keeps the edge's session bookkeeping in the order the client wrote it.
+// RunMCPStdioProxy relays newline-delimited JSON-RPC between stdin and the edge until stdin closes.
+// Serial relay keeps the edge's session bookkeeping in the client's order.
 func RunMCPStdioProxy(ctx context.Context, params MCPStdioProxyParams) error {
 	if params.In == nil || params.Out == nil {
 		return fmt.Errorf("MCP stdio proxy requires an input and an output stream")
 	}
-	// Never an idle probe: an MCP client relayed through this proxy is actively
-	// driving the environment (an agent, an operator's tool call), not asking a
-	// diagnostic question, so its calls must register as activity like any other.
-	// awaitStartup is set: unlike the typed CLI/desktop callers, a relayed
-	// client's own initialize has no active reattach behind it, and is the one
-	// call the client will not repeat later if refused (see mcpSession.awaitStartup).
+	// A relayed client is real activity, never an idle probe. awaitStartup is set because its
+	// initialize is not retried.
 	session, err := newMCPSession(params.Endpoint, params.MintToken, params.ClientVersion, false, true)
 	if err != nil {
 		return err
@@ -83,11 +67,8 @@ type mcpStdioProxy struct {
 	params  MCPStdioProxyParams
 }
 
-// relay forwards one client message and writes at most one line to stdout. A
-// failure is answered as a JSON-RPC error carrying the message's own id, so the
-// client surfaces it against the request it is waiting on; a notification has no
-// id to answer against, so it only reaches the diagnostics stream. Either way the
-// relay keeps serving — a transient edge outage must not kill the session.
+// relay writes at most one line. Failures answer with the request's id (notifications only reach
+// diagnostics), and the relay keeps serving through edge outages.
 func (p *mcpStdioProxy) relay(ctx context.Context, message []byte) error {
 	id := jsonRPCMessageID(message)
 	if tool, arguments, ok := McpLocalToolFor(message, p.params.LocalTools); ok {
@@ -111,14 +92,12 @@ func (p *mcpStdioProxy) relay(ctx context.Context, message []byte) error {
 	return nil
 }
 
-// answerLocally runs a host-served tool and replies in the client's own request
-// slot. A tool that fails answers with an error result rather than a transport
-// error, so the caller reads why and can act on it.
 func (p *mcpStdioProxy) answerLocally(ctx context.Context, id json.RawMessage, tool MCPLocalTool, arguments json.RawMessage) error {
 	if len(id) == 0 {
 		return nil
 	}
-	text, callErr := "", error(nil)
+	var text string
+	var callErr error
 	if tool.Call == nil {
 		callErr = fmt.Errorf("the %s tool is not wired on this host", tool.Name)
 	} else {
@@ -134,8 +113,7 @@ func (p *mcpStdioProxy) answerLocally(ctx context.Context, id json.RawMessage, t
 	return p.writeLine(reply)
 }
 
-// writeReply compacts before writing so a pretty-printed edge reply still
-// reaches the client as exactly one line.
+// writeReply compacts so a pretty-printed reply stays one line.
 func (p *mcpStdioProxy) writeReply(reply []byte) error {
 	compact := new(bytes.Buffer)
 	if err := json.Compact(compact, reply); err != nil {
@@ -187,8 +165,7 @@ type mcpJSONRPCErrorReply struct {
 	Error   mcpJSONRPCError `json:"error"`
 }
 
-// readJSONRPCLine returns the next message, tolerating a final line the client
-// wrote without a trailing newline before closing.
+// readJSONRPCLine tolerates a final line without a trailing newline.
 func readJSONRPCLine(reader *bufio.Reader) ([]byte, error) {
 	line, err := reader.ReadBytes('\n')
 	trimmed := bytes.TrimSpace(line)
@@ -201,9 +178,7 @@ func readJSONRPCLine(reader *bufio.Reader) ([]byte, error) {
 	return trimmed, nil
 }
 
-// jsonRPCMessageID reports the message's id, or nil when it carries none — the
-// notification case, which the protocol answers with nothing at all. A literal
-// null id is a notification too.
+// jsonRPCMessageID returns nil for a notification, including a literal null id.
 func jsonRPCMessageID(message []byte) json.RawMessage {
 	var envelope struct {
 		ID json.RawMessage `json:"id"`

@@ -12,28 +12,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// End-to-end proof that the ai_sessions retention sweep
-// (erun-backend-db/retention/ai_sessions.sql) deletes exactly the rows the
-// design in erun-backend-db/AGENTS.md ("AI Sessions") says it should, and
-// nothing else -- against the real migrated postgres:18.3 testpg provides, not
-// a mock. Locks four properties directly against persisted database state:
-//
-//  1. a session whose last event is 'exit' past the 14-day age bound is
-//     deleted.
-//  2. a session whose last event is 'exit' within the age bound survives.
-//  3. a session whose last event is anything other than 'exit' (still
-//     busy/idle/awaiting-input) is exempt regardless of age.
-//  4. exited sessions beyond the 500-most-recent-per-(tenant, environment)
-//     count cap are deleted even when every row is well within the age
-//     bound, and the cap is per-environment, not per-tenant: a second,
-//     quiet environment in the same tenant is untouched by a noisy one's
-//     count.
-//
-// It also proves dry_run=true reports the same counts but deletes nothing,
-// and that both runs record their outcome in retention_runs (eligible_count
-// and deleted_count, tagged with dry_run).
-//
-// The policy file runs through retention.sh itself in a real psql container.
+// Runs erun-backend-db/retention/ai_sessions.sql through retention.sh in a real psql
+// container; policy is in erun-backend-db/AGENTS.md ("AI Sessions").
 
 const retentionAISessionsPolicy = "ai_sessions.sql"
 
@@ -44,11 +24,8 @@ func retentionAISessionsCount(t *testing.T, db *sql.DB, query string, args ...an
 	return n
 }
 
-// retentionAISessionsEligibleSQL is ai_sessions.sql's own eligibility
-// predicate, used only to verify no row outside this test's fixtures is
-// eligible before the sweep, so the sweep-wide counts below are exactly the
-// fixtures' (the policy is platform-wide by design; the shell test had a
-// fresh database to itself).
+// retentionAISessionsEligibleSQL verifies no foreign row is eligible, since the sweep
+// is platform-wide and the counts below must be exactly the fixtures'.
 const retentionAISessionsEligibleSQL = `
 WITH exited_ranked AS (
   SELECT tenant_id, occurred_at,
@@ -60,7 +37,6 @@ SELECT count(*) FROM exited_ranked
 WHERE (rn > 500 OR occurred_at < now() - interval '14 days')
   AND tenant_id <> ALL ($1::uuid[])`
 
-// retentionAISessionsFixture holds the seeded tenants and environments.
 type retentionAISessionsFixture struct {
 	ageTenant, countTenant, env1, envNoisy, envQuiet string
 }
@@ -81,13 +57,10 @@ func TestRetentionAISessionsDeletesExactlyTheAgeAndPerEnvironmentCountBoundExite
 	f := retentionAISessionsSeed(t, db)
 	initialSessions := retentionAISessionsCheckPreconditions(t, db, f)
 
-	// --- Dry run reports the exact eligible count and deletes nothing ---
 	retentionAISessionsAssertDryRun(t, db, psql, f, initialSessions)
 
-	// --- Real run deletes exactly the eligible rows ---
 	psql.sweep(t, ctx, false)
 
-	// --- The real run recorded its outcome: eligible count, matching deleted count ---
 	eligible, deleted := retentionAISessionsLastRun(t, db, false)
 	if eligible != 6 {
 		t.Fatalf("the real run must record 6 ai_sessions eligible in retention_runs, got %d", eligible)
@@ -100,17 +73,7 @@ func TestRetentionAISessionsDeletesExactlyTheAgeAndPerEnvironmentCountBoundExite
 	retentionAISessionsAssertCountCap(t, db, f)
 }
 
-// retentionAISessionsSeed seeds the fixtures:
-// age-tenant/env1: one exited session 30 days old (past the 14-day bound,
-// eligible), one exited session 1 day old (within it, survives), one
-// turn-start session 30 days old (exempt regardless of age).
-// count-tenant, with two environments env-noisy and env-quiet: env-noisy
-// has 505 exited sessions seconds apart (5 beyond the 500-row cap,
-// eligible); env-quiet has 10 exited sessions seconds apart, all well
-// within both bounds -- proving the cap is per-(tenant, environment), not
-// per-tenant. The shell test used fixed ids in a database of its own;
-// this package shares one database, so ids are generated and tenant names
-// carry a unique suffix.
+// env-quiet shares a tenant with env-noisy to prove the cap is per (tenant, environment).
 func retentionAISessionsSeed(t *testing.T, db *sql.DB) retentionAISessionsFixture {
 	t.Helper()
 	suffix := time.Now().Format("20060102150405.000000")
@@ -147,8 +110,7 @@ FROM generate_series(1, 10) AS i`, f.countTenant, f.envQuiet)
 }
 
 func retentionAISessionsCleanup(t *testing.T, db *sql.DB, tenantIDs ...string) {
-	// environments has no ON DELETE CASCADE from tenants (ai_sessions
-	// cascades from environments), so it must go first.
+	// environments does not cascade from tenants, so it goes first.
 	for _, tenantID := range tenantIDs {
 		if _, err := db.Exec(`DELETE FROM environments WHERE tenant_id = $1`, tenantID); err != nil {
 			t.Logf("clearing retention fixture environments: %v", err)
@@ -164,7 +126,6 @@ func retentionAISessionsFixtureCount(t *testing.T, db *sql.DB, f retentionAISess
 	return retentionAISessionsCount(t, db, `SELECT count(*) FROM ai_sessions WHERE tenant_id = ANY ($1::uuid[])`, f.tenants())
 }
 
-// retentionAISessionsCheckPreconditions returns the initial ai_sessions total.
 func retentionAISessionsCheckPreconditions(t *testing.T, db *sql.DB, f retentionAISessionsFixture) int64 {
 	t.Helper()
 	if n := retentionAISessionsFixtureCount(t, db, f); n != 518 {
@@ -197,7 +158,6 @@ func retentionAISessionsAssertDryRun(t *testing.T, db *sql.DB, psql retentionPsq
 		t.Fatalf("dry run must not delete any fixture ai_sessions: now %d of 518", n)
 	}
 
-	// --- The dry run recorded its outcome: eligible count, zero deleted ---
 	eligible, deleted := retentionAISessionsLastRun(t, db, true)
 	if eligible != 6 {
 		t.Fatalf("the dry run must record 6 ai_sessions eligible in retention_runs, got %d", eligible)
@@ -212,8 +172,6 @@ func retentionAISessionsSessionCount(t *testing.T, db *sql.DB, environmentID, se
 	return retentionAISessionsCount(t, db, `SELECT count(*) FROM ai_sessions WHERE environment_id = $1 AND session_id = $2`, environmentID, sessionID)
 }
 
-// retentionAISessionsAssertAgeBound: the 30-day-old exit is gone; the
-// 1-day-old exit and the 30-day-old non-exit both survive.
 func retentionAISessionsAssertAgeBound(t *testing.T, db *sql.DB, f retentionAISessionsFixture) {
 	t.Helper()
 	if n := retentionAISessionsSessionCount(t, db, f.env1, "exit-old"); n != 0 {
@@ -227,8 +185,6 @@ func retentionAISessionsAssertAgeBound(t *testing.T, db *sql.DB, f retentionAISe
 	}
 }
 
-// retentionAISessionsAssertCountCap: env-noisy keeps exactly 500 (the 5 oldest
-// are gone); env-quiet, same tenant, is untouched -- the cap is per-environment.
 func retentionAISessionsAssertCountCap(t *testing.T, db *sql.DB, f retentionAISessionsFixture) {
 	t.Helper()
 	if n := retentionAISessionsCount(t, db, `SELECT count(*) FROM ai_sessions WHERE environment_id = $1`, f.envNoisy); n != 500 {

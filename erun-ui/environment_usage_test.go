@@ -7,10 +7,7 @@ import (
 	"time"
 )
 
-// The usage sweep's whole job is to never spend a kubectl exec on an
-// environment the activity sweep has already found unreachable, and to
-// distinguish "no pod to measure" from "measured, and it read zero" — a bare
-// 0% would read as idle-and-healthy, which is a different claim.
+// "No pod to measure" must differ from "measured zero", which reads as healthy.
 
 func TestSampleEnvironmentUsageOnceSkipsProbeWhenUnreachable(t *testing.T) {
 	probed := false
@@ -104,11 +101,6 @@ func TestSampleEnvironmentUsageOnceReportsProbeFailureNotZero(t *testing.T) {
 	}
 }
 
-// TestSeedEnvironmentUsageSnapshotsCarriesTheLastReading is the usage
-// counterpart to TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation:
-// a Redux reset that does not restart the Go process must not lose a cached
-// usage reading, and the seeded snapshot must carry both the reading and its
-// age inputs so a hover card can render staleness without a fresh probe.
 func TestSeedEnvironmentUsageSnapshotsCarriesTheLastReading(t *testing.T) {
 	observedAt := time.Now().Add(-5 * time.Minute)
 	app := &App{envUsage: map[string]environmentUsageReading{
@@ -147,10 +139,6 @@ func TestSeedEnvironmentUsageSnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 	}
 }
 
-// TestEnvUsageSnapshotCopiesRatherThanAliases mirrors
-// TestEnvActivitySnapshotCopiesRatherThanAliases: a caller assembling a read
-// model outside any a.mu section of its own must not hold a live reference
-// into a.envUsage, or a concurrent sweep write would race with its later reads.
 func TestEnvUsageSnapshotCopiesRatherThanAliases(t *testing.T) {
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
 	app := &App{envUsage: map[string]environmentUsageReading{key: {usage: uiRuntimeUsage{Available: true}}}}
@@ -172,10 +160,6 @@ func TestEnvUsageSnapshotNilWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestResetEnvironmentUsageObservationsClearsTheCache guards the headless
-// Playwright harness's fix for the shared-baseline-row race: a cached
-// reading (and its observedAt age) left by one spec must not survive into the
-// next one in the same worker.
 func TestResetEnvironmentUsageObservationsClearsTheCache(t *testing.T) {
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
 	app := &App{envUsage: map[string]environmentUsageReading{key: {usage: uiRuntimeUsage{Available: true}}}}

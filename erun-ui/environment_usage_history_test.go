@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// TestEnvironmentUsageHistorySurvivesRestart is the issue's first Go
-// validation criterion: a reading persisted before shutdown is present in a
-// freshly constructed App's envUsage (the same "gone, then reattached" shape
-// a desktop restart leaves behind -- see orchestrator_nudge_history_test.go's
-// TestOrchestratorNudgeHistorySurvivesStopThenStart), and
-// seedEnvironmentUsageSnapshots attaches it without a fresh probe.
 func TestEnvironmentUsageHistorySurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	selection := uiSelection{Tenant: "acme", Environment: "dev"}
@@ -23,9 +17,7 @@ func TestEnvironmentUsageHistorySurvivesRestart(t *testing.T) {
 	}
 	before.persistEnvironmentUsage(selection, reading)
 
-	// NewApp is the real construction path a restart takes -- go through it
-	// rather than calling loadPersistedEnvironmentUsage directly, so this
-	// exercises the same wiring the desktop actually boots with.
+	// Go through NewApp, the real restart path.
 	after := NewApp(erunUIDeps{environmentUsageHistoryPath: path})
 
 	restored, ok := after.envUsage[selectionKey(selection)]
@@ -50,9 +42,6 @@ func TestEnvironmentUsageHistorySurvivesRestart(t *testing.T) {
 	}
 }
 
-// TestEnvironmentUsageHistoryFreshEnvironmentStartsUnobserved is the paired
-// criterion: an environment with no prior record reports no reading, so "Not
-// yet observed" stays true for one that genuinely never was.
 func TestEnvironmentUsageHistoryFreshEnvironmentStartsUnobserved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	app := NewApp(erunUIDeps{environmentUsageHistoryPath: path})
@@ -62,12 +51,6 @@ func TestEnvironmentUsageHistoryFreshEnvironmentStartsUnobserved(t *testing.T) {
 	}
 }
 
-// TestEnvironmentUsageHistoryUnreadableDoesNotFabricateAReading mirrors
-// readOrchestratorNudgeHistoryEntries' contract: a file that exists but
-// cannot be parsed must not fabricate a reading from data that could not
-// actually be read. It is logged (see loadPersistedEnvironmentUsage) and
-// degrades to the same "not yet observed" state a missing file produces,
-// which is never worse than the in-memory-only behaviour this replaces.
 func TestEnvironmentUsageHistoryUnreadableDoesNotFabricateAReading(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
@@ -81,9 +64,6 @@ func TestEnvironmentUsageHistoryUnreadableDoesNotFabricateAReading(t *testing.T)
 	}
 }
 
-// TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers checks
-// the multi-environment shape a real fleet exercises: persisting one
-// environment's reading must not disturb another's already on disk.
 func TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	first := uiSelection{Tenant: "acme", Environment: "dev"}

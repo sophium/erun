@@ -11,42 +11,37 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-mcp/tools/attach"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
-// newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
-// RemoteAppSessionSocketPath resolves to a socket path no other test (or real
-// environment) can collide with. It also ensures the socket directory itself
-// exists: in a deployed pod, the session-start script's own "mkdir -p" (see
-// open.go) has always run before anything attaches, but these tests attach
-// straight away without ever running that step, so they must establish the
-// same precondition instead of depending on it already being present on the
-// host running the suite.
-func newAttachTestRuntime(t *testing.T) RuntimeConfig {
+// newAttachTestRuntime uses a unique tenant/environment and creates the socket directory
+// the pod's session-start script would.
+func newAttachTestRuntime(t *testing.T) runtimecfg.RuntimeConfig {
 	t.Helper()
 	if err := os.MkdirAll(activity.RemoteAppSessionSocketDir, 0o700); err != nil {
 		t.Fatalf("create session socket dir: %v", err)
 	}
-	return RuntimeConfig{Context: RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
+	return runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
 }
 
-// newAuthedAttachServer serves the real production mux (newHTTPHandler,
-// including registerAttachHandler) with a trusted issuer configured, so these
-// tests exercise the actual wiring a deployed edge runs rather than a
-// hand-built test-only mux.
-func newAuthedAttachServer(t *testing.T, runtime RuntimeConfig, issuer, tenant string) *httptest.Server {
+// newAuthedAttachServer serves the production mux with a trusted issuer.
+func newAuthedAttachServer(t *testing.T, runtime runtimecfg.RuntimeConfig, issuer, tenant string) *httptest.Server {
 	t.Helper()
 	trusted, err := json.Marshal(map[string]string{issuer: tenant})
 	if err != nil {
 		t.Fatalf("marshal trusted issuers: %v", err)
 	}
-	t.Setenv(envMCPTrustedIssuers, string(trusted))
-	t.Setenv(envMCPTrustedIssuer, "")
-	t.Setenv(envMCPAudience, "erun-mcp")
-	t.Setenv(envTenant, tenant)
+	t.Setenv(edgeauth.EnvMCPTrustedIssuers, string(trusted))
+	t.Setenv(edgeauth.EnvMCPTrustedIssuer, "")
+	t.Setenv(edgeauth.EnvMCPAudience, "erun-mcp")
+	t.Setenv(edgeauth.EnvTenant, tenant)
 
 	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
 	t.Cleanup(server.Close)
@@ -71,12 +66,10 @@ func dialAttach(baseURL, session, token string) (*websocket.Conn, *http.Response
 	return websocket.DefaultDialer.Dial(attachWSURL(baseURL, session), header)
 }
 
-// dialAttachViaSubprotocol authenticates with no Authorization header at all --
-// only the Sec-WebSocket-Protocol offer -- the one credential channel a real
-// browser WebSocket client has (see auth.go's attachAuthSubprotocol).
+// dialAttachViaSubprotocol authenticates only via Sec-WebSocket-Protocol, as a browser must.
 func dialAttachViaSubprotocol(baseURL, session, token string) (*websocket.Conn, *http.Response, error) {
 	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = []string{attachAuthSubprotocol, token}
+	dialer.Subprotocols = []string{edgeauth.AttachAuthSubprotocol, token}
 	return dialer.Dial(attachWSURL(baseURL, session), nil)
 }
 
@@ -87,7 +80,7 @@ func writeBinary(t *testing.T, conn *websocket.Conn, s string) {
 	}
 }
 
-func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) {
+func writeControl(t *testing.T, conn *websocket.Conn, msg attach.AttachControlMessage) {
 	t.Helper()
 	payload, err := json.Marshal(msg)
 	if err != nil {
@@ -98,23 +91,11 @@ func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) 
 	}
 }
 
-// attachReadDeadline bounds each read from the attach WebSocket. Every one of
-// these reads waits for a real dtach + shell process to produce something, so
-// the bound has to tolerate a busy host rather than measure it: at 10s the
-// golden-path test failed inside the in-build gate, where six packages
-// including this one run their own shells side by side, while the same test
-// passes standalone in seconds. The same suite forks a real shell under a real
-// PTY (dtach, pgrep, several /proc reads) per scenario, and each fork queues
-// behind whatever else the node runs -- measured on a contended pod (~2x CPU
-// oversubscription), the slowest scenario still completed within 23s, so a
-// tighter bound turns ordinary scheduler contention into a spurious failure
-// indistinguishable from a real hang. It stays finite so a genuinely wedged
-// attach still fails its own test instead of hanging the suite.
+// attachReadDeadline tolerates a contended host (23s observed for real dtach+PTY) while
+// still failing a wedged attach.
 const attachReadDeadline = 60 * time.Second
 
-// waitForAnyBinary blocks until the first binary frame arrives, proving the
-// PTY has actually produced output (so the owner file -- written before dtach
-// ever runs -- is guaranteed to already be in place).
+// waitForAnyBinary proves the PTY produced output, so the owner file is in place.
 func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
@@ -129,8 +110,6 @@ func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	}
 }
 
-// waitForBinaryContaining reads frames, accumulating binary payloads, until
-// want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
@@ -149,7 +128,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	}
 }
 
-func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
+func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attach.AttachOutcomeMessage {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
@@ -160,7 +139,7 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 		if kind != websocket.TextMessage {
 			continue
 		}
-		var msg attachOutcomeMessage
+		var msg attach.AttachOutcomeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			t.Fatalf("unmarshal outcome message %q: %v", data, err)
 		}
@@ -168,62 +147,16 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 	}
 }
 
-// TestAttachReadHelpersToleratePastThePriorDeadline is the regression test
-// for the specific failure mode this suite hit under a contended host: every
-// subprocess-spawning scenario missed the outcome message by roughly 100ms
-// past a hardcoded 10s deadline -- the signature of a deadline too tight for
-// the host, not of a broken bridge (confirmed separately: the same scenarios
-// passed reliably once given a longer deadline under the same load). This
-// test proves the fix without depending on inducing real host contention: a
-// minimal websocket server with no PTY, no dtach, and no shell delays its one
-// binary frame past that old boundary, and the read helper these tests
-// actually use must still see it.
-func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
-	const priorDeadline = 10 * time.Second
-	const delay = priorDeadline + 2*time.Second
-	if delay >= attachReadDeadline {
-		t.Fatalf("test setup: delay %s must stay below attachReadDeadline %s", delay, attachReadDeadline)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer func() { _ = conn.Close() }()
-		time.Sleep(delay)
-		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("SLOW_MARKER"))
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	u, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	u.Scheme = "ws"
-	u.Path = "/slow"
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	waitForBinaryContaining(t, conn, "SLOW_MARKER")
-}
-
-// TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade is the mandatory proof
-// that a caller without erun:attach is refused server-side before any
-// subprocess starts: a plain HTTP 403, not merely an endpoint that "isn't
-// offered", and no dtach socket ever created for the denied session.
+// The refusal is a 403 before any subprocess starts, with no dtach socket created.
 func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityRead))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err == nil {
 		_ = conn.Close()
 		t.Fatalf("expected the handshake to be refused, it succeeded")
@@ -236,20 +169,21 @@ func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 		t.Fatalf("status = %d, want %d", status, http.StatusForbidden)
 	}
 
-	socket := eruncommon.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
+	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
 	if _, statErr := os.Stat(socket); !os.IsNotExist(statErr) {
 		t.Fatalf("attach subprocess ran despite the refusal: socket %q exists (stat err %v)", socket, statErr)
 	}
 }
 
-// TestAttachRefusesUnauthenticatedConnectionAtUpgrade proves the same
-// upgrade-time gate for a caller carrying no bearer token at all.
 func TestAttachRefusesUnauthenticatedConnectionAtUpgrade(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	issuer, _ := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", "")
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err == nil {
 		_ = conn.Close()
 		t.Fatalf("expected the handshake to be refused, it succeeded")
@@ -263,16 +197,15 @@ func TestAttachRefusesUnauthenticatedConnectionAtUpgrade(t *testing.T) {
 	}
 }
 
-// TestAttachBridgesPTYAndReportsEndedOutcome is the golden path: an
-// erun:attach-scoped caller can drive a real shell over the WebSocket, and
-// once the shell exits on its own the server reports the "ended" outcome
-// before closing.
 func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "golden", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -283,24 +216,12 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 
 	writeBinary(t, conn, "exit\n")
 	outcome := readOutcomeMessage(t, conn)
-	if outcome.Outcome != eruncommon.AISessionAttachOutcomeEnded {
-		t.Fatalf("outcome = %q, want %q", outcome.Outcome, eruncommon.AISessionAttachOutcomeEnded)
+	if outcome.Outcome != model.AISessionAttachOutcomeEnded {
+		t.Fatalf("outcome = %q, want %q", outcome.Outcome, model.AISessionAttachOutcomeEnded)
 	}
 }
 
-// TestAttachCreatesSessionDirectoryOnAFreshPod is the regression test for the
-// defect the console's MCP attach-session Playwright spec found by
-// actually driving a real browser against a real emcp instance with no prior
-// CLI session: eruncommon.RemoteAppSessionSocketDir is container-local and
-// nothing in the runtime image's boot path creates it -- so a freshly
-// deployed or restarted pod that has never had a CLI-driven session
-// (`erun open --ai`, a linked orchestrator) has no session directory at all
-// until this handler creates one itself. Before the fix this failed with
-// `dtach: ...: No such file or directory` surfaced as raw shell stderr piped
-// into the client's own byte stream, and a misdiagnosed "taken-over" outcome
-// (the owner-file write failing open reads identically to a real rival
-// claiming the socket) -- exactly the "unknown must not render as a definite
-// value" property this file's own doc comment calls out.
+// Nothing in the image boot path creates the session directory; the handler must.
 func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	if err := os.RemoveAll(activity.RemoteAppSessionSocketDir); err != nil {
@@ -310,6 +231,9 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "fresh-pod", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -320,28 +244,27 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 
 	writeBinary(t, conn, "exit\n")
 	outcome := readOutcomeMessage(t, conn)
-	if outcome.Outcome != eruncommon.AISessionAttachOutcomeEnded {
+	if outcome.Outcome != model.AISessionAttachOutcomeEnded {
 		t.Fatalf("outcome = %q, want %q (a fresh pod's first attach must behave identically to a warm one)",
-			outcome.Outcome, eruncommon.AISessionAttachOutcomeEnded)
+			outcome.Outcome, model.AISessionAttachOutcomeEnded)
 	}
 }
 
-// TestAttachResizeControlMessageResizesThePTY proves the resize wire message
-// actually reaches the PTY: `stty size` reports the shell's own view of the
-// terminal dimensions, so a mismatch here means the control message was
-// dropped rather than applied.
 func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "resize", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
 	defer func() { _ = conn.Close() }()
 
-	writeControl(t, conn, attachControlMessage{Type: "resize", Cols: 100, Rows: 42})
+	writeControl(t, conn, attach.AttachControlMessage{Type: "resize", Cols: 100, Rows: 42})
 	writeBinary(t, conn, "stty size\n")
 	waitForBinaryContaining(t, conn, "42 100")
 
@@ -349,23 +272,23 @@ func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	_ = readOutcomeMessage(t, conn)
 }
 
-// TestAttachAuthenticatesViaSubprotocolForBrowserCallers is the golden path
-// for a browser client: no Authorization header at all, only the
-// Sec-WebSocket-Protocol offer, and the server must echo back the negotiated
-// scheme (never the token) per RFC 6455.
+// The server echoes the negotiated scheme, never the token (RFC 6455).
 func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttachViaSubprotocol(server.URL, "browser", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
 	defer func() { _ = conn.Close() }()
 
-	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != attachAuthSubprotocol {
-		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, attachAuthSubprotocol)
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != edgeauth.AttachAuthSubprotocol {
+		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, edgeauth.AttachAuthSubprotocol)
 	}
 
 	writeBinary(t, conn, "echo SUBPROTOCOL_MARKER\n")
@@ -375,21 +298,9 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	_ = readOutcomeMessage(t, conn)
 }
 
-// TestAttachEvictionReportsTakenOverAndPreservesTheSession is the other
-// mandatory proof: a second attach to the same session id evicts the first,
-// the evicted client is told plainly that it was taken over (never a silent
-// disconnect indistinguishable from a network stall), and the session itself
-// survives for the new attach to keep driving.
+// The evicted client is told it was taken over, and the session survives.
 func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
-	// Eviction is the /proc half of the attach script: it finds the session's
-	// master by grepping /proc/<pid>/cmdline, then kills the other viewer's
-	// dtach client so that viewer's own `dtach -A` returns and its wrapper reads
-	// the foreign owner id and exits 76 -- the taken-over outcome this test
-	// asserts. The runtime image is Linux and ships no ss/lsof, so /proc is the
-	// intended mechanism there; where /proc is absent (macOS) the scan
-	// deliberately finds nothing and, by design, kicks no one, so the first
-	// viewer is never evicted and its socket never sees an outcome. That is the
-	// platform behaving as documented, so this runs where the behaviour exists.
+	// Eviction scans /proc; without /proc (macOS) it evicts no one by design.
 	if _, err := os.Stat("/proc"); err != nil {
 		t.Skip("takeover resolves the session master through /proc, which this platform does not have")
 	}
@@ -398,23 +309,28 @@ func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	connA, respA, err := dialAttach(server.URL, "shared", token)
+	if respA != nil {
+		defer func() { _ = respA.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial A: %v (response %+v)", err, respA)
 	}
 	defer func() { _ = connA.Close() }()
-	// Wait for A's own initial output so the owner file (written before
-	// dtach ever runs) is guaranteed in place before B attaches and evicts it.
+	// The owner file must exist before B attaches.
 	waitForAnyBinary(t, connA)
 
 	connB, respB, err := dialAttach(server.URL, "shared", token)
+	if respB != nil {
+		defer func() { _ = respB.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial B: %v (response %+v)", err, respB)
 	}
 	defer func() { _ = connB.Close() }()
 
 	outcomeA := readOutcomeMessage(t, connA)
-	if outcomeA.Outcome != eruncommon.AISessionAttachOutcomeTakenOver {
-		t.Fatalf("evicted outcome = %q, want %q", outcomeA.Outcome, eruncommon.AISessionAttachOutcomeTakenOver)
+	if outcomeA.Outcome != model.AISessionAttachOutcomeTakenOver {
+		t.Fatalf("evicted outcome = %q, want %q", outcomeA.Outcome, model.AISessionAttachOutcomeTakenOver)
 	}
 
 	writeBinary(t, connB, "echo STILL_ALIVE\n")

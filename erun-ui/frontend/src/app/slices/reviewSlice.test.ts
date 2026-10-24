@@ -23,10 +23,6 @@ function diff(marker: string): DiffResult {
   return { rawDiff: marker, summary: { fileCount: 1, additions: 1, deletions: 0 } };
 }
 
-// #1178: diffByEnv is deliberately sparse (Record<string, EnvDiffState |
-// undefined>), not a plain Record. A key that was never written must read as
-// undefined -- never emptyEnvDiffState's contents mutated in place, and never
-// another environment's slot.
 test('a never-fetched environment has no entry in diffByEnv', () => {
   const state = initial();
 
@@ -41,9 +37,6 @@ test("setEnvDiff creates only the written environment's slot, defaulted from emp
   assert.equal(state.diffByEnv['c/d'], undefined);
 });
 
-// The core #1178 guarantee: writing one environment's error must never touch
-// another's slot, so a stopped environment's failure cannot blank a healthy
-// one's diff.
 test("setEnvDiffError only ever mutates the targeted environment's slot", () => {
   let state = initial();
   state = reviewReducer(state, setEnvDiff({ envKey: 'a/alpha', diff: diff('alpha-diff') }));
@@ -60,7 +53,6 @@ test("setEnvDiffError only ever mutates the targeted environment's slot", () => 
   assert.ok(beta);
   assert.equal(alpha.error, 'unreachable');
   assert.equal(alpha.errorReconnectable, true);
-  // beta's diff and error are untouched by alpha's failure.
   assert.deepEqual(beta.diff, diff('beta-diff'));
   assert.equal(beta.error, '');
   assert.equal(beta.errorReconnectable, false);
@@ -77,8 +69,6 @@ test("setEnvDiffLoading only flips the targeted environment's loading flag", () 
   assert.equal(state.diffByEnv['a/beta']?.loading, false);
 });
 
-// pruneEnvDiffs drops sections no longer in scope (e.g. switching from a
-// two-env orchestrator to a single env tab) without touching the kept ones.
 test('pruneEnvDiffs drops environments outside the kept set and leaves the rest untouched', () => {
   let state = initial();
   state = reviewReducer(state, setEnvDiff({ envKey: 'a/alpha', diff: diff('alpha-diff') }));
@@ -92,9 +82,6 @@ test('pruneEnvDiffs drops environments outside the kept set and leaves the rest 
   assert.deepEqual(state.diffByEnv['a/beta']?.diff, diff('beta-diff'));
 });
 
-// ReviewBase, ReviewCommits, scope and commit are per-repository state, so a
-// scope/commit chosen for one linked environment must never appear on
-// another's slot (#1178, item 5 of the cross-env diff panel guarantee).
 test('scope and commit selection is independent per environment', () => {
   let state = initial();
   state = reviewReducer(state, setEnvReviewScope({ envKey: 'a/alpha', scope: 'all' }));
@@ -102,8 +89,6 @@ test('scope and commit selection is independent per environment', () => {
 
   assert.equal(state.diffByEnv['a/alpha']?.scope, 'all');
   assert.equal(state.diffByEnv['a/alpha'].commit, 'deadbeef');
-  // beta was never touched, so it has no slot at all rather than inheriting
-  // alpha's scope/commit.
   assert.equal(state.diffByEnv['a/beta'], undefined);
 
   state = reviewReducer(state, setEnvReviewScope({ envKey: 'a/beta', scope: 'commit' }));

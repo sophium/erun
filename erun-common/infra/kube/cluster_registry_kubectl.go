@@ -12,12 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// forwardingLinePattern extracts the local port kubectl chose from its
-// "Forwarding from 127.0.0.1:<port> -> <remote>" startup line.
+// forwardingLinePattern matches kubectl's "Forwarding from 127.0.0.1:<port>" line.
 var forwardingLinePattern = regexp.MustCompile(`127\.0\.0\.1:(\d+)`)
 
-// kubectlContextArgs prefixes namespace/context flags shared by the registry
-// kubectl calls.
 func kubectlContextArgs(kubeContext, namespace string) []string {
 	args := make([]string, 0, 4)
 	if strings.TrimSpace(kubeContext) != "" {
@@ -29,9 +26,7 @@ func kubectlContextArgs(kubeContext, namespace string) []string {
 	return args
 }
 
-// lookupClusterIP resolves the registry Service's ClusterIP. On --dry-run it
-// traces the query and returns a placeholder so the resolved address stays
-// deterministic without touching the cluster.
+// lookupClusterIP returns a placeholder on --dry-run without touching the cluster.
 func lookupClusterIP(ctx core.Context, kubeContext, namespace, service string) (string, error) {
 	args := append(kubectlContextArgs(kubeContext, namespace), "get", "svc", service, "-o", "jsonpath={.spec.clusterIP}")
 	ctx.TraceCommand("", "kubectl", args...)
@@ -48,16 +43,12 @@ func lookupClusterIP(ctx core.Context, kubeContext, namespace, service string) (
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ClusterRegistryForwards owns the kubectl port-forward processes started to
-// reach an in-cluster registry from the host. The command that starts them must
-// Close it when the build/push/publish finishes so no forward leaks.
+// ClusterRegistryForwards owns registry port-forwards; the starting command must Close it.
 type ClusterRegistryForwards struct {
 	procs []*exec.Cmd
 }
 
-// Start forwards a free local port to svc/<service>:<remotePort> and returns the
-// port kubectl chose. On --dry-run it traces the command and returns the remote
-// port as a representative local port without forwarding.
+// Start returns the local port kubectl chose; on --dry-run it returns remotePort without forwarding.
 func (f *ClusterRegistryForwards) Start(ctx core.Context, kubeContext, namespace, service string, remotePort int) (int, error) {
 	args := append(kubectlContextArgs(kubeContext, namespace), "port-forward", "svc/"+service, fmt.Sprintf(":%d", remotePort))
 	ctx.TraceCommand("", "kubectl", args...)
@@ -94,24 +85,14 @@ func (f *ClusterRegistryForwards) Close() {
 	f.procs = nil
 }
 
-// PortForwardResult is what drainPortForwardOutput reports back once it has
-// found (or failed to find) the local port kubectl bound.
+// PortForwardResult is the local port DrainPortForwardOutput found, or why it found none.
 type PortForwardResult struct {
 	Port int
 	Err  error
 }
 
-// DrainPortForwardOutput scans kubectl port-forward's stdout for the local
-// port it bound, reports it once, and then keeps reading for the rest of the
-// process's life so a long-running forward's later "Handling connection for
-// ..." lines never fill the pipe. Stopping after the port line — as this used
-// to do by returning from the scan loop early — leaves nothing draining
-// stdout for a forward that can run for the whole build/push; once kubectl's
-// own 64KB pipe buffer fills, it blocks writing and the tunnel it was
-// providing stalls silently -- a parent that stops draining a live child's
-// output, one hop further down the stack than the docker build/push path this
-// same defect shape was found in. The loop ends on its own once the pipe
-// closes (kubectl exits or Close kills it), so no goroutine is leaked.
+// DrainPortForwardOutput reports the bound port, then keeps draining stdout for the
+// process's life: a full 64KB pipe would block kubectl and stall the tunnel.
 func DrainPortForwardOutput(stdout io.Reader, result chan<- PortForwardResult) {
 	scanner := bufio.NewScanner(stdout)
 	reported := false
@@ -137,9 +118,7 @@ func DrainPortForwardOutput(stdout io.Reader, result chan<- PortForwardResult) {
 	result <- PortForwardResult{Err: err}
 }
 
-// ClusterRegistryDepsFor builds the live resolver dependencies: an in-cluster
-// build addresses the registry directly; a host build looks up the ClusterIP and
-// port-forwards through the given manager.
+// ClusterRegistryDepsFor addresses the registry directly in-cluster, else via ClusterIP and port-forward.
 func ClusterRegistryDepsFor(ctx core.Context, forwards core.RegistryForwarder) ClusterRegistryDeps {
 	return ClusterRegistryDeps{
 		InCluster: RunningInCluster(),

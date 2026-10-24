@@ -4,23 +4,14 @@ import * as path from 'node:path';
 
 import { isolatedRoot, kubeconfigPath } from './seedRoot.js';
 
-// k3dCluster owns the opt-in, real-cluster lifecycle for the k3d e2e mode. It
-// is reached ONLY when ERUN_E2E_K3D=1; the default inert suite
-// never imports its side effects. A real local k3d cluster + built-in registry
-// stand in for "an erun-owned cluster" so the desktop's full create → build →
-// push → deploy → open → MCP flow runs against a live runtime (the coverage the
-// inert harness structurally cannot reach).
-//
-// Host preconditions (documented in erun-ui/playwright/AGENTS.md): Docker, k3d,
-// and binfmt registered for the foreign arch (erun always builds multi-arch).
+// Real-cluster lifecycle for the opt-in k3d e2e mode (ERUN_E2E_K3D=1).
+// Host preconditions are in erun-ui/playwright/AGENTS.md.
 
 export interface K3dCluster {
   clusterName: string;
   registryName: string;
   context: string;
-  // registry is the host:port reference the cluster pulls from and `erun push`
-  // publishes to (the k3d built-in registry, reachable from both the host and
-  // the cluster nodes).
+  // Reachable from both the host and the cluster nodes.
   registry: string;
 }
 
@@ -35,12 +26,10 @@ function run(bin: string, args: string[]): string {
 }
 
 export function createK3dCluster(): K3dCluster {
-  // A random suffix keeps concurrent/aborted runs from colliding. k3d registry
-  // names must start with `k3d-`.
+  // k3d registry names must start with `k3d-`.
   const suffix = Math.random().toString(36).slice(2, 8);
   const clusterName = `erun-e2e-${suffix}`;
   const registryName = `k3d-erun-e2e-reg-${suffix}`;
-  // Port 0 lets k3d pick a free host port for the registry.
   run('k3d', [
     'cluster',
     'create',
@@ -84,19 +73,13 @@ function resolveRegistryHostPort(registryName: string): string {
   return `localhost:${port}`;
 }
 
-// e2eRealClusterContext returns the kube-context of an ALREADY-RUNNING cluster to
-// drive (ERUN_E2E_REAL_CLUSTER), or "" to create a fresh k3d cluster. Targeting
-// the developer's live erun-k3s reproduces behaviour that only manifests there —
-// cached images, imported per-env SSH keys, and the WSL2 port-forward the fresh
-// k3d clusters don't exhibit (the create→deploy loop).
+// e2eRealClusterContext names an already-running cluster to drive (ERUN_E2E_REAL_CLUSTER),
+// or "" to create a fresh k3d one.
 export function e2eRealClusterContext(): string {
   return (process.env.ERUN_E2E_REAL_CLUSTER ?? '').trim();
 }
 
-// useExistingCluster points the isolated harness at an already-running cluster
-// instead of creating a k3d one: it copies the developer's kubeconfig into the
-// isolated path (so the backend drives the live cluster via KUBECONFIG) and
-// records the context for specs. No cluster is created and none is torn down.
+// useExistingCluster targets a running cluster; nothing is created or torn down.
 export function useExistingCluster(context: string): K3dCluster {
   const kubeconfig = run('kubectl', ['config', 'view', '--raw']);
   const kubePath = kubeconfigPath();
@@ -112,14 +95,11 @@ export function useExistingCluster(context: string): K3dCluster {
   return cluster;
 }
 
-// readK3dCluster loads the persisted cluster facts so specs can seed an env at
-// the live cluster.
 export function readK3dCluster(): K3dCluster {
   return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as K3dCluster;
 }
 
-// deleteK3dCluster tears down the cluster + registry. Best-effort: a failure to
-// delete must not fail the run.
+// deleteK3dCluster is best-effort.
 export function deleteK3dCluster(): void {
   // Never tear down a developer's real, pre-existing cluster (erun-k3s).
   if (e2eRealClusterContext() !== '') {

@@ -4,17 +4,12 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestIdleStatusToUICarriesFromPodProvenance is the regression for
-// erun#1216 bug 3: the idle widget rendered a confident countdown with no
-// way to tell whether the reading came from the pod's own idle monitor or
-// was assembled on the host because the pod could not be reached — the same
-// moment the sidebar might be showing the environment as unreachable.
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
-	status := activity.EnvironmentIdleStatus{StopEligible: true}
+	status := model.EnvironmentIdleStatus{StopEligible: true}
 	result := config.OpenResult{}
 
 	if ui := app.idleStatusToUI(result, status, true); !ui.FromPod {
@@ -25,9 +20,6 @@ func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	}
 }
 
-// TestLoadLocalIdleStatusReportsHostOnlyProvenance locks in the one call site
-// that is always host-only: the local fallback path never claims a live pod
-// observation.
 func TestLoadLocalIdleStatusReportsHostOnlyProvenance(t *testing.T) {
 	store := stubUIStore{envs: map[string]config.EnvConfig{
 		"acme/dev": {Name: "dev"},

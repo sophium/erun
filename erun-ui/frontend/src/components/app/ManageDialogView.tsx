@@ -269,9 +269,7 @@ function EditActions({
   );
 }
 
-// Surfaces why Save is disabled (or a deploy is at risk) right where the user
-// acts. A capacity warning still leaves Save enabled because saving only
-// persists config; it never deploys.
+// A capacity warning leaves Save enabled: saving never deploys.
 function ManageSaveBlocker({
   id,
   blockingError,

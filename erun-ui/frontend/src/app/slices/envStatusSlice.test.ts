@@ -16,10 +16,7 @@ function activity(overrides: Partial<EnvObservedActivity> = {}): EnvObservedActi
   };
 }
 
-// The sidebar's busy row clears only when envObserved flips to true (see
-// environmentRowIsBusy in Sidebar.helpers.ts). A transition that changes
-// nothing else about the observation must still be recorded, or the row can
-// never learn the environment answered.
+// The busy row clears only when envObserved flips (environmentRowIsBusy).
 test('a transition where only observed changes is not swallowed as unchanged', () => {
   const seeded = reducer(undefined, setEnvActivityForEnv({ key: 'k', activity: activity() }));
 

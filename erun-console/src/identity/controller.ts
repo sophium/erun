@@ -55,22 +55,14 @@ export interface UsersController {
   dismissTemporaryPassword: () => void;
 }
 
-// UsersScope names the tenant this controller is administering: undefined
-// (or omitted) means the caller's own tenant/org, today's unchanged default.
-// orgId/tenantId travel together deliberately -- see identityApi.ts's
-// listIdentityUsers doc for why picking one without the other renders a
-// confidently wrong page.
+// Undefined means the caller's own tenant. orgId and tenantId must travel together.
 export interface UsersScope {
   orgId: string;
   tenantId: string;
 }
 
-// resolveUsersScope turns the org-target lookup (enrollOrgTargetController's
-// useEnrollOrgTarget) into the two things useUsersController needs: `scope`
-// (only once an org id is actually known) and `ready` (whether the list read
-// may run at all -- 'default' needs no lookup, 'resolved' has one;
-// 'loading'/'error'/'unmapped' must not query with a missing orgId, which
-// would silently list the caller's own org under the scoped tenant's name).
+// `ready` is false until an org id is known: querying without one would list the
+// caller's own org under the scoped tenant's name.
 export function resolveUsersScope(
   orgTarget: OrgTarget,
   targetTenantId: string,
@@ -81,13 +73,7 @@ export function resolveUsersScope(
   return { scope: undefined, ready: orgTarget.status === 'default' };
 }
 
-// useUsersController lists, enrolls, deactivates and reactivates identities.
-// Enrolling or changing activation invalidates the list query's tag, so the
-// operator sees the effect without a manual reload. `scope` targets another
-// tenant's org and membership join (shell/ScopeSelector.tsx); `skip` is set
-// by the caller while a scoped tenant's org mapping hasn't
-// resolved yet -- querying with no orgId in that window would silently list
-// the caller's own org instead of failing loudly.
+// `skip` is set while a scoped tenant's org mapping is unresolved, for the same reason.
 export function useUsersController(
   token: string,
   scope?: UsersScope,
@@ -99,9 +85,7 @@ export function useUsersController(
   );
   const { refetch } = listQuery;
   const [enrollState, setEnrollState] = React.useState<EnrollState>({ status: 'idle' });
-  // setActive has no state slot of its own in this controller's public shape;
-  // a failed toggle surfaces through usersState the same way the list read's
-  // own failure does, mirroring the pre-RTK-Query controller's behaviour.
+  // A failed toggle surfaces through usersState.
   const [actionError, setActionError] = React.useState<string | undefined>(undefined);
   const [createIdentityUser] = useCreateIdentityUserMutation();
   const [setIdentityUserActive] = useSetIdentityUserActiveMutation();
@@ -142,9 +126,7 @@ export function useUsersController(
     [token, activeRef, createIdentityUser],
   );
 
-  // setActive resolves once the request settles, whether it succeeded or
-  // failed, so a caller gating the call behind a confirmation dialog can
-  // await it to know when to stop showing the in-flight state.
+  // Resolves on success or failure so a confirmation dialog can await it.
   const setActive = React.useCallback(
     (externalId: string, active: boolean): Promise<void> => {
       setActionError(undefined);
@@ -160,10 +142,7 @@ export function useUsersController(
     [token, activeRef, setIdentityUserActive, scopeOrgId],
   );
 
-  // dismissTemporaryPassword strips the one-time credential out of the held
-  // result once the operator has closed the dialog showing it, so it stops
-  // sitting in this controller's state — the enrolled/error messaging above
-  // it stays, only the secret itself is dropped.
+  // Drops only the one-time credential once its dialog closes.
   const dismissTemporaryPassword = React.useCallback(() => {
     setEnrollState((prev) =>
       prev.status === 'enrolled' && prev.result.temporaryPassword !== undefined
@@ -186,10 +165,7 @@ export interface OrgSettingsController {
   save: (input: UpdateOrgSettingsInput) => void;
 }
 
-// useOrgSettingsController reads the org's login/password policy once and
-// applies partial updates. `updateResult`'s own data takes precedence over
-// the read query's while a save is settling, so the form does not flicker
-// back to the pre-save value while the invalidated read query refetches.
+// The update result's data wins over the read while a save settles, avoiding a flicker.
 export function useOrgSettingsController(token: string): OrgSettingsController {
   const query = useGetOrgSettingsQuery(token);
   const [updateOrgSettings, updateResult] = useUpdateOrgSettingsMutation();
@@ -218,10 +194,7 @@ export function useOrgSettingsController(token: string): OrgSettingsController {
   return { state, save };
 }
 
-// SmtpSettingsState keeps a failed save's settings around (status 'error'
-// still carries the last-known settings) rather than replacing the form with
-// a bare error message: the operator's inputs stay editable and resubmitting
-// is the recovery path, instead of a dead end that only a page reload fixes.
+// 'error' keeps the last-known settings so the form stays editable for a retry.
 export type SmtpSettingsState =
   | { status: 'loading' }
   | { status: 'load-error'; message: string }
@@ -234,10 +207,6 @@ export interface SmtpSettingsController {
   save: (input: UpdateSmtpSettingsInput) => void;
 }
 
-// useSmtpSettingsController reads the platform's outbound-mail configuration
-// and applies updates, mirroring useOrgSettingsController's precedence rule
-// (the update result's own data wins over the read query's while a save is
-// settling).
 export function useSmtpSettingsController(token: string): SmtpSettingsController {
   const query = useGetSmtpSettingsQuery(token);
   const [updateSmtpSettings, updateResult] = useUpdateSmtpSettingsMutation();
@@ -284,9 +253,6 @@ export interface InvitesController {
   dismissCreated: () => void;
 }
 
-// useInvitesController lists, creates, and revokes invites (#1483). Creating
-// or revoking invalidates the list query's tag, the same pattern
-// useUsersController uses for enroll/deactivate.
 export function useInvitesController(token: string): InvitesController {
   const listQuery = useListInvitesQuery(token);
   const [createState, setCreateState] = React.useState<CreateInviteState>({ status: 'idle' });

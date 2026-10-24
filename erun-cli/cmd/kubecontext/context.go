@@ -6,15 +6,19 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewContextCmd(store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+func NewContextCmd(store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"context",
 		"Manage ERun cloud Kubernetes contexts",
 		newContextListCmd(store, deps),
@@ -33,14 +37,13 @@ func newContextListCmd(store cloud.CloudContextStore, deps cloud.CloudContextDep
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runContextListCommand(shared.CommandContext(cmd), store, deps)
+			return runContextListCommand(clicmd.CommandContext(cmd), store, deps)
 		},
 	}
 }
 
 func runContextListCommand(ctx core.Context, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) error {
-	// Status isn't persisted, so it must be refreshed from AWS to show the
-	// live authoritative state rather than an empty value.
+	// Status isn't persisted, so refresh it from AWS.
 	result, err := cloud.RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
 		return err
@@ -48,23 +51,20 @@ func runContextListCommand(ctx core.Context, store cloud.CloudContextStore, deps
 	return WriteCloudContextList(ctx, result)
 }
 
-func WriteCloudContextList(ctx core.Context, result cloud.CloudContextListResult) error {
+func WriteCloudContextList(ctx core.Context, result model.CloudContextListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return nil
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
 		return err
 	}
-	// A batched refresh covers every context sharing its (alias, region) and
-	// fails as one fact, so it is reported once here rather than on each row it
-	// covered -- where it repeats the whole command per context and quotes the
-	// instance IDs of every context that shared the batch.
+	// A batched refresh failure is reported once, not on every row it covered.
 	for _, failure := range result.RefreshFailures {
-		line := "  status refresh failed for alias=" + shared.QuotedValueOrNone(failure.Alias) +
-			" region=" + shared.QuotedValueOrNone(failure.Region) + ": " + failure.Message
+		line := "  status refresh failed for alias=" + textfmt.QuotedValueOrNone(failure.Alias) +
+			" region=" + textfmt.QuotedValueOrNone(failure.Region) + ": " + failure.Message
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
@@ -81,8 +81,8 @@ func WriteCloudContextList(ctx core.Context, result cloud.CloudContextListResult
 	return nil
 }
 
-func newContextInitCmd(store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
-	var params cloud.InitCloudContextParams
+func newContextInitCmd(store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+	var params model.InitCloudContextParams
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a managed cloud context",
@@ -93,7 +93,7 @@ func newContextInitCmd(store cloud.CloudContextStore, promptRunner shared.Prompt
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runContextInitCommand(shared.CommandContext(cmd), store, promptRunner, selectRunner, params, deps)
+			return runContextInitCommand(clicmd.CommandContext(cmd), store, promptRunner, selectRunner, params, deps)
 		},
 	}
 	cmd.Flags().StringVar(&params.CloudProviderAlias, "alias", "", "Cloud provider alias to use")
@@ -105,11 +105,11 @@ func newContextInitCmd(store cloud.CloudContextStore, promptRunner shared.Prompt
 	cmd.Flags().StringVar(&params.SubnetID, "subnet-id", "", "Optional EC2 subnet ID")
 	cmd.Flags().StringVar(&params.SecurityGroupID, "security-group-id", "", "Optional EC2 security group ID")
 	cmd.Flags().StringVar(&params.KeyName, "key-name", "", "Optional EC2 key pair name")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
+func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
 	var err error
 	params.CloudProviderAlias, err = contextProviderAlias(store, selectRunner, params.CloudProviderAlias)
 	if err != nil {
@@ -158,9 +158,7 @@ func newContextEnableAPIStopCmd(store cloud.CloudContextStore, deps cloud.CloudC
 	)
 }
 
-// The stop-protection flip is global at the AWS layer, so while locked even
-// the automatic idle monitor can't stop the env — the lever to hold an
-// unhealthy env up for the duration of a repair.
+// Stop protection also holds off the idle monitor.
 func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -168,8 +166,8 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.Cl
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			status, err := cloud.SetCloudContextStopProtection(ctx, store, cloud.CloudContextStopProtectionParams{
+			ctx := clicmd.CommandContext(cmd)
+			status, err := cloud.SetCloudContextStopProtection(ctx, store, model.CloudContextStopProtectionParams{
 				Name:    args[0],
 				Enabled: enabled,
 			}, deps)
@@ -179,11 +177,11 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.Cl
 			return writeCloudContext(ctx, status)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func newContextPowerCmd(use, short string, supportsForce bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, cloud.CloudContextStore, cloud.CloudContextParams, cloud.CloudContextDependencies) (config.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, cloud.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -191,8 +189,8 @@ func newContextPowerCmd(use, short string, supportsForce bool, store cloud.Cloud
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			status, err := run(ctx, store, cloud.CloudContextParams{Name: args[0], Force: force}, deps)
+			ctx := clicmd.CommandContext(cmd)
+			status, err := run(ctx, store, model.CloudContextParams{Name: args[0], Force: force}, deps)
 			if err != nil {
 				return err
 			}
@@ -202,19 +200,19 @@ func newContextPowerCmd(use, short string, supportsForce bool, store cloud.Cloud
 	if supportsForce {
 		cmd.Flags().BoolVar(&force, "force", false, "Override the working-hours start gate")
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func contextProviderAlias(store cloud.CloudContextStore, selectRunner shared.SelectRunner, alias string) (string, error) {
+func contextProviderAlias(store cloud.CloudContextStore, selectRunner prompt.SelectRunner, alias string) (string, error) {
 	alias = strings.TrimSpace(alias)
 	if alias != "" {
 		return alias, nil
 	}
-	return shared.SelectCloudAliasPrompt(store, selectRunner)
+	return cloudcli.SelectCloudAliasPrompt(store, selectRunner)
 }
 
-func promptContextInitParams(promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudContextParams) (cloud.InitCloudContextParams, error) {
+func promptContextInitParams(promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams) (model.InitCloudContextParams, error) {
 	var err error
 	if strings.TrimSpace(params.Region) == "" {
 		params.Region, err = selectOrKeepString(selectRunner, "Cloud region", cloud.CloudContextRegions(), params.Region)
@@ -233,7 +231,7 @@ func promptContextInitParams(promptRunner shared.PromptRunner, selectRunner shar
 	return params, nil
 }
 
-func selectOrKeepString(selectRunner shared.SelectRunner, label string, options []string, current string) (string, error) {
+func selectOrKeepString(selectRunner prompt.SelectRunner, label string, options []string, current string) (string, error) {
 	current = strings.TrimSpace(current)
 	if current != "" {
 		return current, nil
@@ -242,7 +240,7 @@ func selectOrKeepString(selectRunner shared.SelectRunner, label string, options 
 	return value, err
 }
 
-func selectOrKeepInt(selectRunner shared.SelectRunner, label string, options []int, current int) (int, error) {
+func selectOrKeepInt(selectRunner prompt.SelectRunner, label string, options []int, current int) (int, error) {
 	if current > 0 {
 		return current, nil
 	}
@@ -257,25 +255,25 @@ func selectOrKeepInt(selectRunner shared.SelectRunner, label string, options []i
 	return strconv.Atoi(value)
 }
 
-func writeCloudContext(ctx core.Context, status config.CloudContextStatus) error {
+func writeCloudContext(ctx core.Context, status model.CloudContextStatus) error {
 	context := status.CloudContextConfig
 	line := "  - " + context.Name
-	line += " provider=" + shared.QuotedValueOrNone(context.Provider)
-	line += " alias=" + shared.QuotedValueOrNone(context.CloudProviderAlias)
-	line += " region=" + shared.QuotedValueOrNone(context.Region)
-	line += " instance=" + shared.QuotedValueOrNone(context.InstanceID)
-	line += " type=" + shared.QuotedValueOrNone(context.InstanceType)
+	line += " provider=" + textfmt.QuotedValueOrNone(context.Provider)
+	line += " alias=" + textfmt.QuotedValueOrNone(context.CloudProviderAlias)
+	line += " region=" + textfmt.QuotedValueOrNone(context.Region)
+	line += " instance=" + textfmt.QuotedValueOrNone(context.InstanceID)
+	line += " type=" + textfmt.QuotedValueOrNone(context.InstanceType)
 	line += " disk=" + fmt.Sprintf("%dGB/%s", context.DiskSizeGB, context.DiskType)
-	line += " kube-context=" + shared.QuotedValueOrNone(context.KubernetesContext)
-	line += " status=" + shared.QuotedValueOrNone(status.Status)
+	line += " kube-context=" + textfmt.QuotedValueOrNone(context.KubernetesContext)
+	line += " status=" + textfmt.QuotedValueOrNone(status.Status)
 	if strings.TrimSpace(context.PublicIP) != "" {
-		line += " public-ip=" + shared.QuotedValueOrNone(context.PublicIP)
+		line += " public-ip=" + textfmt.QuotedValueOrNone(context.PublicIP)
 	}
 	if status.StopProtectionKnown {
 		line += " stop-protection=" + strconv.FormatBool(status.StopProtection)
 	}
 	if strings.TrimSpace(status.Message) != "" {
-		line += " message=" + shared.QuotedValueOrNone(status.Message)
+		line += " message=" + textfmt.QuotedValueOrNone(status.Message)
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)
 	return err

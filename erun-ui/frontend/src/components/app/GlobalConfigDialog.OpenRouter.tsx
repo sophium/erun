@@ -19,20 +19,9 @@ import type { UIGatewayModel, UIOpenRouterConfig, UIOpenRouterModel } from '@/ui
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-// catalogEditor returns the section's edit helper.
-//
-// Every catalog edit derives its next value from the config as it stands in the
-// store, not from the render closure it was created in. `updateGlobalConfig`
-// merges at dispatch time, but the value handed to it is built by the caller —
-// so two edits made within one render both start from the same snapshot and the
-// second overwrites the first. Removing two model rows in quick succession is
-// the case that bites: the second removal filters a list that still contains the
-// first row and puts it back. Reading current state inside the thunk is what
-// makes each edit compose with the one before it.
-//
-// The action is dispatched rather than returned: redux-thunk runs a thunk's body
-// but never dispatches what it returns, so returning it would leave every edit
-// as a function nobody calls.
+// Each edit reads current store state inside the thunk, so two edits in one
+// render compose instead of the second overwriting the first. The action is
+// dispatched because redux-thunk does not dispatch a thunk's return value.
 function catalogEditor(dispatch: AppDispatch) {
   return (change: (current: UIOpenRouterConfig) => Partial<UIOpenRouterConfig>): void => {
     dispatch((innerDispatch, getState) => {
@@ -51,9 +40,6 @@ function catalogEditor(dispatch: AppDispatch) {
   };
 }
 
-// Known Anthropic-compatible gateway endpoints. The operator picks one rather
-// than recalling a URL, and a self-hosted gateway stays reachable through the
-// other option, because its address is genuinely theirs to supply.
 const gatewayPresets: readonly { value: string; label: string }[] = [
   { value: 'https://openrouter.ai/api', label: 'OpenRouter' },
 ];
@@ -61,11 +47,8 @@ const gatewayPresets: readonly { value: string; label: string }[] = [
 const gatewayNotConfigured = '__not_configured__';
 const gatewayCustom = '__custom__';
 
-// OpenRouterSection edits the erun-level gateway catalog: one list the operator
-// maintains, which every environment then selects from. The credential is one
-// erun-level value too — this machine's own Claude Code key unless the operator
-// sets a different one — so no token value lands in config, and erun delivers
-// it into each environment that uses the gateway.
+// OpenRouterSection edits the erun-level gateway catalog. No token lands in
+// config; erun delivers the credential to each environment.
 export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const disabled = dialog.busy || dialog.configLoading;
@@ -76,8 +59,6 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   const [candidates, setCandidates] = React.useState<UIGatewayModel[]>([]);
   const [modelsError, setModelsError] = React.useState('');
 
-  // Read rather than inferred: the catalog reports the key a deploy would
-  // actually deliver, which is this machine's own when nothing else is saved.
   const { data: credentialStatus } = useGetGatewayCredentialStatusQuery(undefined);
   const [saveGatewayCredential, { isLoading: savingCredential }] =
     useSaveGatewayCredentialMutation();
@@ -108,10 +89,8 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
     }));
   };
 
-  // The gateway publishes the models it serves, so an operator picks rather
-  // than types. Fetched on demand because it reads a base URL they may still be
-  // editing, and a gateway without the endpoint is a supported configuration:
-  // the rows stay typeable and the reason is named beside the button.
+  // Fetched on demand; a gateway without the models endpoint is supported and
+  // the rows stay typeable.
   const fetchCandidates = async () => {
     setModelsError('');
     try {
@@ -122,8 +101,7 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
     }
   };
 
-  // Only ids that are usable as a launched model are offered as the default:
-  // defaulting to a blank or malformed row would launch an id the guard drops.
+  // Blank or malformed ids would be dropped at launch, so they are not offered.
   const selectable = selectableClaudeModelIds(models);
   const gatewayConfigured = (gateway.baseUrl ?? '').trim() !== '';
 
@@ -131,8 +109,7 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
     <div className="grid gap-3">
       <GatewayEndpointFields gateway={gateway} disabled={disabled} patch={patch} />
 
-      {/* Only once a gateway is chosen: a key for a gateway that does not exist
-          is a field that changes nothing. */}
+      {/* A key without a gateway changes nothing. */}
       {gatewayConfigured ? (
         <GatewayCredentialFields
           status={credentialStatus}
@@ -189,9 +166,8 @@ function GatewayEndpointFields({
 }): React.ReactElement {
   const baseUrl = (gateway.baseUrl ?? '').trim();
   const preset = gatewayPresets.find((entry) => entry.value === baseUrl);
-  // Self-hosted is held in state as well as derived, because choosing it clears
-  // the URL: without this the selection would fall back to Not configured the
-  // moment the operator picked it, taking the field away mid-entry.
+  // Held in state because choosing self-hosted clears the URL, which would
+  // otherwise derive back to Not configured.
   const [selfHosted, setSelfHosted] = React.useState(false);
   const selection =
     baseUrl === ''
@@ -220,8 +196,6 @@ function GatewayEndpointFields({
           onChange={(next) => {
             if (next === gatewayCustom) {
               setSelfHosted(true);
-              // Cleared so the operator types their own rather than editing the
-              // preset they just moved away from.
               patch({ baseUrl: '' });
               return;
             }

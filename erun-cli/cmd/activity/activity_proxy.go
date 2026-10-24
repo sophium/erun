@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -97,9 +98,7 @@ func proxySSHActivityConnection(client net.Conn, targetAddress string, recorder 
 		_ = target.Close()
 	}()
 
-	// Key activity by client IP only: kube port-forward opens a fresh ephemeral
-	// source port per stream, so keying on the full address would fragment one
-	// peer across many map entries.
+	// Key by client IP only: port-forward opens a new source port per stream.
 	clientAddress := extractRemoteHost(client.RemoteAddr())
 
 	var wg sync.WaitGroup
@@ -200,18 +199,13 @@ func (r *sshActivityRecorder) Flush() {
 	r.save(pending, pendingByClient)
 }
 
-// save records the raw byte count the network-traffic-window signal needs,
-// but marks it Seen rather than active: this proxy relays encrypted bytes
-// blind to what is inside them, so a port-forward re-establishment or a
-// background sync channel counts here exactly like a person typing. Whether
-// someone is actually at an interactive shell is decided by the in-pod
-// sampler's pty check (ScanInteractiveSSHSession), which is what advances
-// LastActivity for this same kind.
+// save marks bytes Seen, not active: the proxy cannot tell interactive traffic
+// from sync or reconnects; the in-pod pty check advances LastActivity.
 func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	if bytes <= r.idleTrafficBytes {
 		return
 	}
-	_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	_ = activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant:        r.tenant,
 		Environment:   r.environment,
 		Kind:          config.ActivityKindSSH,
@@ -221,16 +215,16 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	})
 }
 
-func clientUpdatesFromMap(byClient map[string]int64) []activity.EnvironmentActivityClientUpdate {
+func clientUpdatesFromMap(byClient map[string]int64) []model.EnvironmentActivityClientUpdate {
 	if len(byClient) == 0 {
 		return nil
 	}
-	updates := make([]activity.EnvironmentActivityClientUpdate, 0, len(byClient))
+	updates := make([]model.EnvironmentActivityClientUpdate, 0, len(byClient))
 	for address, bytes := range byClient {
 		if bytes <= 0 {
 			continue
 		}
-		updates = append(updates, activity.EnvironmentActivityClientUpdate{Address: address, Bytes: bytes})
+		updates = append(updates, model.EnvironmentActivityClientUpdate{Address: address, Bytes: bytes})
 	}
 	return updates
 }

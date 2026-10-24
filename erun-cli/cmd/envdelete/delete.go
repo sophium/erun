@@ -6,13 +6,17 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
 
-func NewDeleteCmd(store lifecycle.DeleteStore, promptRunner shared.PromptRunner, deleteNamespace lifecycle.NamespaceDeleterFunc) *cobra.Command {
+func NewDeleteCmd(store seam.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace seam.NamespaceDeleterFunc) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete TENANT ENVIRONMENT",
@@ -25,15 +29,15 @@ func NewDeleteCmd(store lifecycle.DeleteStore, promptRunner shared.PromptRunner,
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeleteCommand(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, promptRunner, deleteNamespace, args[0], args[1], yes)
+			return runDeleteCommand(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, promptRunner, deleteNamespace, args[0], args[1], yes)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt (for non-interactive callers)")
 	return cmd
 }
 
-func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunner shared.PromptRunner, deleteNamespace lifecycle.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
+func runDeleteCommand(ctx core.Context, store seam.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace seam.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
@@ -47,7 +51,7 @@ func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunne
 		}
 	}
 
-	result, err := lifecycle.RunDeleteEnvironment(ctx, lifecycle.DeleteEnvironmentParams{
+	result, err := lifecycle.RunDeleteEnvironment(ctx, model.DeleteEnvironmentParams{
 		Tenant:      tenant,
 		Environment: environment,
 	}, store, deleteNamespace)
@@ -55,7 +59,7 @@ func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunne
 		return err
 	}
 
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if result.NamespaceDeleteError != "" {
 			_, _ = fmt.Fprintf(ctx.Stderr, "warning: failed to delete namespace %q in context %q: %s\n", result.Namespace, result.KubernetesContext, result.NamespaceDeleteError)
 		}
@@ -69,9 +73,9 @@ func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunne
 	return ctx.WriteResult(result)
 }
 
-func confirmDeleteCommand(promptRunner shared.PromptRunner, expected string) error {
+func confirmDeleteCommand(promptRunner prompt.PromptRunner, expected string) error {
 	if promptRunner == nil {
-		promptRunner = shared.RunPrompt
+		promptRunner = prompt.RunPrompt
 	}
 
 	value, err := promptRunner(promptui.Prompt{

@@ -1,5 +1,2 @@
-# Agent-env overlay for __COMPONENT__ — deployed alongside the <tenant>-local
-# runtime pod. Defaults from templates/service.yaml cover a small dev-sized
-# pod; override replicas, resources, containerPort, healthCheckPath, or
-# extraEnv here if this component needs something different locally.
+# Agent-env overlay for __COMPONENT__; templates/service.yaml defaults suit a dev-sized pod.
 replicas: 1

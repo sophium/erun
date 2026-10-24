@@ -7,11 +7,7 @@ export type JobsState =
   | { status: 'ready'; jobs: Job[] }
   | { status: 'error'; message: string };
 
-// useJobsController reads the caller's own tenant's job queue -- the
-// console's counterpart to `erun job list`. Polls, because the whole point of
-// the queue is watching work in flight: a job that starts, finishes, or is
-// swept to ABANDONED has to show up without a manual refresh, and a RUNNING
-// row's elapsed time is only honest if the list behind it is current.
+// Polled so started, finished or swept jobs appear and elapsed times stay honest.
 const POLL_INTERVAL_MS = 5000;
 
 export function useJobsController(token: string, filter: JobFilter): JobsState {

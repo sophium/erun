@@ -5,18 +5,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap pins #1076:
-// the LimitRange's `default` (limit) tracks the namespace cap, but
-// `defaultRequest` must stay a small fixed value regardless of the cap. Before
-// the fix both fields echoed quota.CPU/Memory, so an unsized container's
-// inherited request equalled the whole namespace allowance.
 func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing.T) {
-	quota := config.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
+	quota := model.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
 	manifest := namespaceResourceQuotaManifest("team-dev", quota)
 
-	limitRange := manifest[strings.Index(manifest, "kind: LimitRange"):]
+	limitRange := fromMarker(t, manifest, "kind: LimitRange")
 
 	defaultBlock := limitRange[strings.Index(limitRange, "default:"):strings.Index(limitRange, "defaultRequest:")]
 	if !strings.Contains(defaultBlock, `cpu: "8"`) {
@@ -26,7 +22,7 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing
 		t.Fatalf("default memory limit should equal the namespace cap, got: %s", defaultBlock)
 	}
 
-	requestBlock := limitRange[strings.Index(limitRange, "defaultRequest:"):]
+	requestBlock := fromMarker(t, limitRange, "defaultRequest:")
 	if !strings.Contains(requestBlock, `cpu: "`+config.DefaultLimitRangeDefaultRequestCPU+`"`) {
 		t.Fatalf("defaultRequest cpu should be the fixed constant %q, not the cap, got: %s", config.DefaultLimitRangeDefaultRequestCPU, requestBlock)
 	}
@@ -41,16 +37,12 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing
 	}
 }
 
-// TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize
-// changes the cap and asserts the fixed defaultRequest constants do not move
-// with it — the property that makes an unsized container's reservation stay
-// small however large an operator configures the namespace cap to be.
 func TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize(t *testing.T) {
-	small := namespaceResourceQuotaManifest("team-dev", config.NamespaceResourceQuota{CPU: "2", Memory: "4096Mi", Storage: "20Gi"})
-	large := namespaceResourceQuotaManifest("team-prod", config.NamespaceResourceQuota{CPU: "32", Memory: "65536Mi", Storage: "200Gi"})
+	small := namespaceResourceQuotaManifest("team-dev", model.NamespaceResourceQuota{CPU: "2", Memory: "4096Mi", Storage: "20Gi"})
+	large := namespaceResourceQuotaManifest("team-prod", model.NamespaceResourceQuota{CPU: "32", Memory: "65536Mi", Storage: "200Gi"})
 
 	for _, manifest := range []string{small, large} {
-		requestBlock := manifest[strings.Index(manifest, "defaultRequest:"):]
+		requestBlock := fromMarker(t, manifest, "defaultRequest:")
 		if !strings.Contains(requestBlock, `cpu: "`+config.DefaultLimitRangeDefaultRequestCPU+`"`) {
 			t.Fatalf("defaultRequest cpu should stay fixed at %q regardless of cap, got: %s", config.DefaultLimitRangeDefaultRequestCPU, requestBlock)
 		}
@@ -58,4 +50,13 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize(t *tes
 			t.Fatalf("defaultRequest memory should stay fixed at %q regardless of cap, got: %s", config.DefaultLimitRangeDefaultRequestMemory, requestBlock)
 		}
 	}
+}
+
+func fromMarker(t *testing.T, s, marker string) string {
+	t.Helper()
+	i := strings.Index(s, marker)
+	if i < 0 {
+		t.Fatalf("missing %q in: %s", marker, s)
+	}
+	return s[i:]
 }

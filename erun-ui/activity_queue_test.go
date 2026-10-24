@@ -68,8 +68,7 @@ func TestLatestDeployFailed(t *testing.T) {
 		t.Fatal("latest deploy failed: want true")
 	}
 
-	// A newer non-deploy activity (an open retry) must not flip the verdict —
-	// the env's latest *deploy* is still the failed one.
+	// A newer non-deploy activity must not change the verdict.
 	store.start(activityQueueEntry{ID: "o1", Command: "open", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(time.Minute)})
 	if !store.latestDeployFailed("petios", "rihards-develop") {
 		t.Fatal("newer non-deploy activity must be ignored: want true")
@@ -202,8 +201,6 @@ func TestDeployQueueRecordOutputLineClipsLongLines(t *testing.T) {
 
 func TestDeployQueueRecordOutputLineIgnoresInactiveSelection(t *testing.T) {
 	store := newTestActivityQueueStore(t)
-	// No active entry for this selection: recording is a no-op and must not
-	// panic or create an entry.
 	store.recordOutputLine("ghost", "env", "orphan output")
 	if len(store.list()) != 0 {
 		t.Fatal("recording for an inactive selection should not create entries")

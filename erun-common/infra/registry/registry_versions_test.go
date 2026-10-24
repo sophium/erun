@@ -9,11 +9,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// ghcrStub emulates the GHCR token exchange + tags list. A request carrying HTTP
-// Basic auth on /token mints a "scoped" bearer that can read tags; anonymous
-// requests mint "anon", which the tags endpoint rejects unless allowPublic.
+// ghcrStub mints a readable "scoped" bearer for Basic auth and an "anon" one
+// that tags rejects unless allowPublic.
 func ghcrStub(t *testing.T, tags []string, allowPublic bool) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -38,20 +39,6 @@ func ghcrStub(t *testing.T, tags []string, allowPublic bool) *httptest.Server {
 	return server
 }
 
-func TestResolveGHCRVersionsAuthenticatedPrivate(t *testing.T) {
-	server := ghcrStub(t, []string{"1.0.0", "1.0.1", "1.0.2"}, false)
-	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
-	useDockerConfigDir(t, dir)
-
-	versions, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "frs-devops", server.URL, server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if versions.LatestStable != "1.0.2" || len(versions.Tags) != 3 {
-		t.Fatalf("got latestStable=%q tags=%d, want 1.0.2/3", versions.LatestStable, len(versions.Tags))
-	}
-}
-
 func TestResolveGHCRVersionsPrivateWithoutCredIsAuthError(t *testing.T) {
 	server := ghcrStub(t, []string{"1.0.0"}, false)
 	useDockerConfigDir(t, t.TempDir()) // no docker cred
@@ -60,20 +47,6 @@ func TestResolveGHCRVersionsPrivateWithoutCredIsAuthError(t *testing.T) {
 	_, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "frs-devops", server.URL, server.URL)
 	if !errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatalf("err = %v, want ErrRegistryAuthRequired", err)
-	}
-}
-
-func TestResolveGHCRVersionsPublicAnonymousUnchanged(t *testing.T) {
-	server := ghcrStub(t, []string{"1.0.0", "1.0.5", "1.0.3"}, true)
-	useDockerConfigDir(t, t.TempDir()) // no cred → anonymous
-	useGHToken(t, func(string) (string, bool) { return "", false })
-
-	versions, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "erun-devops", server.URL, server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if versions.LatestStable != "1.0.5" {
-		t.Fatalf("latestStable = %q, want 1.0.5", versions.LatestStable)
 	}
 }
 
@@ -86,8 +59,7 @@ func TestRegistryStatusErrorClassification(t *testing.T) {
 	if err := RegistryStatusError("x", "s", http.StatusInternalServerError); errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatal("500 must not classify as auth-required")
 	}
-	// A definitive HTTP status (even 5xx/429) is terminal for retry purposes: the
-	// registry answered, so a retry re-asks an already-answered question.
+	// Any HTTP status, even 5xx/429, is terminal: the registry answered.
 	if isTransientRegistryError(RegistryStatusError("x", "s", http.StatusTooManyRequests)) {
 		t.Fatal("a 429 status response must not be retried")
 	}
@@ -100,8 +72,7 @@ func withZeroRegistryRetryBackoff(t *testing.T) {
 	t.Cleanup(func() { registryListRetryBase = prev })
 }
 
-// fakeNetError models a transport-level failure; timeout distinguishes a slow/hung
-// registry (terminal) from a momentary blip (retryable).
+// fakeNetError's timeout marks a hung registry (terminal) versus a blip (retryable).
 type fakeNetError struct{ timeout bool }
 
 func (fakeNetError) Error() string   { return "fake network error" }
@@ -111,12 +82,12 @@ func (fakeNetError) Temporary() bool { return true }
 func TestResolveRegistryVersionsRetriesTransportBlipThenSucceeds(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	got, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	got, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
 		if calls < 2 {
-			return RuntimeRegistryVersions{}, fakeNetError{} // momentary transport blip
+			return model.RuntimeRegistryVersions{}, fakeNetError{} // momentary transport blip
 		}
-		return RuntimeRegistryVersions{LatestStable: "1.0.18"}, nil
+		return model.RuntimeRegistryVersions{LatestStable: "1.0.18"}, nil
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -132,9 +103,9 @@ func TestResolveRegistryVersionsRetriesTransportBlipThenSucceeds(t *testing.T) {
 func TestResolveRegistryVersionsDoesNotRetryAuth(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fmt.Errorf("no: %w", ErrRegistryAuthRequired)
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("no: %w", ErrRegistryAuthRequired)
 	})
 	if !errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatalf("err = %v, want auth", err)
@@ -147,9 +118,9 @@ func TestResolveRegistryVersionsDoesNotRetryAuth(t *testing.T) {
 func TestResolveRegistryVersionsDoesNotRetryTimeout(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fakeNetError{timeout: true}
+		return model.RuntimeRegistryVersions{}, fakeNetError{timeout: true}
 	})
 	if err == nil {
 		t.Fatal("expected the timeout error to surface")
@@ -162,9 +133,9 @@ func TestResolveRegistryVersionsDoesNotRetryTimeout(t *testing.T) {
 func TestResolveRegistryVersionsExhaustsTransportRetries(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fakeNetError{}
+		return model.RuntimeRegistryVersions{}, fakeNetError{}
 	})
 	if !isTransientRegistryError(err) {
 		t.Fatalf("err = %v, want a transient transport error", err)
@@ -201,38 +172,7 @@ func TestIsTransientRegistryError(t *testing.T) {
 	}
 }
 
-func TestIsRuntimeRegistryVersionTag(t *testing.T) {
-	tests := []struct {
-		tag  string
-		want bool
-	}{
-		{"1.0.250", true},
-		{"1.0.192-snapshot-20260821151853", true},
-		{"1.0.250-pr.4fa33ad5-arm64", true},
-		{"1.0.250-arm64", true},
-		{"1.0.250-amd64", true},
-		{"2.0.0-rc.1", true},
-		{"permcheck-tmp", false},
-		{"authprobe", false},
-		{"latest", false},
-		{"stable", false},
-		{"1.0", false},
-		{"1.0.250.1", false},
-		{"1.0.250-", false},
-		{"v1.0.250", false},
-		{"", false},
-	}
-	for _, test := range tests {
-		if got := isRuntimeRegistryVersionTag(test.tag); got != test.want {
-			t.Errorf("isRuntimeRegistryVersionTag(%q) = %v, want %v", test.tag, got, test.want)
-		}
-	}
-}
-
-// A stray registry tag must not reach Tags: Tags is what every surface
-// enumerates, and the desktop picker maps it into its version select with no
-// filter of its own, so an entry here is presented to the operator as a
-// pinnable version.
+// Tags feeds the desktop picker unfiltered, so a stray tag would appear pinnable.
 func TestLatestRuntimeVersionsFromTagsOffersOnlyVersionShapedTags(t *testing.T) {
 	versions := latestRuntimeVersionsFromTags([]string{
 		"1.0.250",

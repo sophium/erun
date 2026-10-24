@@ -17,25 +17,12 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// A persisted orchestrator runs as a Claude Code background agent named after
-// its orchestrator id. The agent owns the conversation: `/clear`, a compaction,
-// a desktop quit or a crash of the desktop's terminal all leave it on its own
-// current conversation, and opening the orchestrator attaches to it. Nothing on
-// the desktop's side names a conversation, so nothing here can go stale.
-//
-// The agent is addressed by its name only through an exact match over
-// `claude agents --json --all`: `claude attach <name>` matches part of a name
-// and cannot restart a stopped agent, so every command after the lookup uses
-// the agent's own id.
-//
-// Everything a restart can deliver is written to a per-orchestrator settings
-// file the agent re-reads whenever it starts (model, effort, environment). The
-// launch arguments are replayed verbatim by Claude's daemon, so a change to
-// them -- or an agent erun did not create -- needs the agent recreated, which
-// keeps its conversation by resuming the session it was on.
+// A persisted orchestrator runs as a Claude background agent named after its id;
+// the agent owns the conversation. It is looked up by exact name, then addressed by
+// id, because `claude attach <name>` matches partially and cannot restart a stopped
+// agent. Launch arguments are replayed verbatim, so changing them means recreating it.
 
-// claudeBackgroundAgent is one background session as `claude agents --json`
-// lists it. PID is absent for a stopped session.
+// claudeBackgroundAgent is one `claude agents --json` entry; PID is absent when stopped.
 type claudeBackgroundAgent struct {
 	ID        string `json:"id"`
 	PID       int    `json:"pid"`
@@ -49,8 +36,7 @@ func (agent claudeBackgroundAgent) running() bool {
 	return agent.PID > 0
 }
 
-// claudeAgentCLI is the part of the claude CLI the desktop drives an agent's
-// lifecycle through. Injectable so no test ever starts a real agent.
+// claudeAgentCLI is injectable so no test starts a real agent.
 type claudeAgentCLI interface {
 	List() ([]claudeBackgroundAgent, error)
 	Create(dir string, args []string) (string, error)
@@ -58,15 +44,11 @@ type claudeAgentCLI interface {
 	Remove(id string) error
 }
 
-// claudeAgentCommandTimeout bounds one lifecycle command. Creating an agent may
-// start Claude's background service first, which is the slow case.
+// Creating an agent may start Claude's background service first.
 const claudeAgentCommandTimeout = 90 * time.Second
 
 type execClaudeAgentCLI struct{}
 
-// newDefaultClaudeAgents is the CLI an App drives when none is injected. The
-// package's tests replace it with an in-memory fake, so a test that does not
-// care about agents still never starts a real one.
 var newDefaultClaudeAgents = func() claudeAgentCLI { return execClaudeAgentCLI{} }
 
 func (execClaudeAgentCLI) run(dir string, args ...string) ([]byte, error) {
@@ -109,9 +91,7 @@ func (cli execClaudeAgentCLI) Remove(id string) error {
 	return nil
 }
 
-// parseClaudeBackgroundAgents keeps the background entries of a `claude agents
-// --json` listing; interactive sessions are listed beside them and are never an
-// orchestrator's agent.
+// parseClaudeBackgroundAgents drops interactive sessions, which are never an orchestrator's agent.
 func parseClaudeBackgroundAgents(data []byte) ([]claudeBackgroundAgent, error) {
 	var all []claudeBackgroundAgent
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -128,14 +108,11 @@ func parseClaudeBackgroundAgents(data []byte) ([]claudeBackgroundAgent, error) {
 
 var claudeAgentCreatedPattern = regexp.MustCompile(`backgrounded\s*·\s*([0-9a-f]{6,})`)
 
-// errOrchestratorWorkspaceUntrusted is Claude refusing to start a background
-// agent in a folder nobody has trusted yet. Only an interactive session can
-// record that trust, so the remedy is the operator's.
+// errOrchestratorWorkspaceUntrusted: only an interactive session can record folder trust.
 var errOrchestratorWorkspaceUntrusted = errors.New("workspace not trusted")
 
-// parseClaudeAgentCreated reads the new agent's id out of `claude --bg`. The
-// line naming it is not always the first: Claude may start its background
-// service before it.
+// parseClaudeAgentCreated reads the new agent's id; Claude may print service
+// startup lines before it.
 func parseClaudeAgentCreated(output string, runErr error, dir string) (string, error) {
 	if strings.Contains(output, "Workspace not trusted") {
 		return "", fmt.Errorf("%w: Claude Code will not start a background agent in %s until that folder is trusted. "+
@@ -152,7 +129,6 @@ func parseClaudeAgentCreated(output string, runErr error, dir string) (string, e
 	return "", fmt.Errorf("cannot start the Claude background agent: claude --bg did not name the agent it started: %s", detail)
 }
 
-// findOrchestratorAgents returns every background agent named exactly id.
 func findOrchestratorAgents(agents []claudeBackgroundAgent, id string) []claudeBackgroundAgent {
 	var out []claudeBackgroundAgent
 	for _, agent := range agents {
@@ -163,18 +139,15 @@ func findOrchestratorAgents(agents []claudeBackgroundAgent, id string) []claudeB
 	return out
 }
 
-// orchestratorAgentSpec is everything an orchestrator's agent is launched with.
 type orchestratorAgentSpec struct {
 	id            string
 	dir           string
 	settingsPath  string
 	mcpConfigPath string
-	// effortFlags carries the one effort level the settings file cannot hold.
-	effortFlags []string
+	effortFlags   []string
 }
 
-// args is the `claude --bg` invocation. resume names the conversation a
-// recreated agent continues; a new agent passes "".
+// resume names the conversation a recreated agent continues; "" for a new agent.
 func (spec orchestratorAgentSpec) args(resume string) []string {
 	args := []string{"--bg", "-n", spec.id, "--settings", spec.settingsPath, "--mcp-config", spec.mcpConfigPath}
 	args = append(args, spec.effortFlags...)
@@ -185,17 +158,13 @@ func (spec orchestratorAgentSpec) args(resume string) []string {
 	return args
 }
 
-// fingerprint identifies the launch arguments and folder an agent was created
-// with: exactly what Claude replays on every restart and what only recreating
-// the agent changes.
+// fingerprint covers what Claude replays on restart and only recreation changes.
 func (spec orchestratorAgentSpec) fingerprint() string {
 	return filepath.Clean(spec.dir) + "\x00" + strings.Join(spec.args(""), "\x00")
 }
 
-// orchestratorAgentRecord is what erun knows about the agent it created for an
-// orchestrator. It names which agent erun made, so an agent of the same name
-// made by someone else is recognised, and the launch that agent last started
-// on, which a running agent keeps until it restarts.
+// orchestratorAgentRecord lets erun recognise an agent of the same name made by
+// someone else.
 type orchestratorAgentRecord struct {
 	AgentID     string                     `json:"agentId"`
 	Fingerprint string                     `json:"fingerprint"`
@@ -243,8 +212,6 @@ func writeOrchestratorAgentRecord(id string, record orchestratorAgentRecord) err
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// removeOrchestratorAgentFiles forgets everything erun wrote for an
-// orchestrator's agent.
 func removeOrchestratorAgentFiles(id string) {
 	for _, path := range []string{orchestratorAgentRecordPath(id), orchestratorAgentSettingsPath(id)} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -253,9 +220,7 @@ func removeOrchestratorAgentFiles(id string) {
 	}
 }
 
-// writeOrchestratorAgentSettings writes the settings file an agent reads every
-// time it starts. It carries the gateway credential when the launch routes
-// through one, so it is private to the operator.
+// writeOrchestratorAgentSettings writes a private file: it may carry the gateway credential.
 func writeOrchestratorAgentSettings(path string, launch orchestrator.OrchestratorLaunch, env []string) error {
 	settings, _ := ai.ClaudeBackgroundEffort(launch.Effort)
 	settings["model"] = launch.Model
@@ -280,10 +245,8 @@ func writeOrchestratorAgentSettings(path string, launch orchestrator.Orchestrato
 	return os.Chmod(path, 0o600)
 }
 
-// writeEmptyOrchestratorMCPConfig gives an orchestrator with nothing wired an
-// empty MCP config at its usual path, so the agent's launch arguments do not
-// change with its environment count, and an agent that starts again does not
-// pick up tools a previous wiring left behind.
+// writeEmptyOrchestratorMCPConfig keeps the launch arguments stable and drops tools
+// from a previous wiring.
 func writeEmptyOrchestratorMCPConfig(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -291,26 +254,19 @@ func writeEmptyOrchestratorMCPConfig(path string) error {
 	return os.WriteFile(path, []byte("{\n  \"mcpServers\": {}\n}\n"), 0o600)
 }
 
-// orchestratorAgentLaunch is a resolved agent ready to attach: which agent, and
-// the scope and launch it is running on.
 type orchestratorAgentLaunch struct {
 	agentID  string
 	scope    []string
 	launched orchestratorResolvedLaunch
 }
 
-// orchestratorAgentRequest is one open of an orchestrator's agent.
 type orchestratorAgentRequest struct {
 	spec     orchestratorAgentSpec
 	scope    []string
 	launched orchestratorResolvedLaunch
-	// restart stops a running agent first, so it starts again on the settings
-	// just written.
-	restart bool
+	restart  bool
 }
 
-// ensureOrchestratorAgent finds or creates the agent for one orchestrator, so
-// the caller can attach to it. The settings file has already been written.
 func (a *App) ensureOrchestratorAgent(req orchestratorAgentRequest) (orchestratorAgentLaunch, error) {
 	id := req.spec.id
 	agents, err := a.deps.claudeAgents.List()
@@ -333,9 +289,6 @@ func (a *App) ensureOrchestratorAgent(req orchestratorAgentRequest) (orchestrato
 	return a.attachableOrchestratorAgent(req, agent, record)
 }
 
-// recreateOrchestratorAgent replaces an agent whose launch arguments erun cannot
-// change in place, continuing the conversation it was on, and tells the
-// operator why.
 func (a *App) recreateOrchestratorAgent(req orchestratorAgentRequest, agent claudeBackgroundAgent, erunMadeIt bool) (orchestratorAgentLaunch, error) {
 	a.emitOrchestratorNotification("warning", req.spec.id, orchestratorAgentRecreatedNotice(req.spec.id, agent, erunMadeIt), "")
 	if err := a.removeOrchestratorAgent(agent); err != nil {
@@ -344,10 +297,8 @@ func (a *App) recreateOrchestratorAgent(req orchestratorAgentRequest, agent clau
 	return a.createOrchestratorAgent(req, agent.SessionID)
 }
 
-// attachableOrchestratorAgent readies an agent erun created with the current
-// launch arguments. A running agent is attached as it is and keeps the scope
-// and launch it last started on; a stopped one (or one a restart just stopped)
-// starts again on attach, on the settings just written.
+// attachableOrchestratorAgent: a running agent keeps the scope and launch it last
+// started on; a stopped one starts on the settings just written.
 func (a *App) attachableOrchestratorAgent(req orchestratorAgentRequest, agent claudeBackgroundAgent, record orchestratorAgentRecord) (orchestratorAgentLaunch, error) {
 	if agent.running() && req.restart {
 		if err := a.deps.claudeAgents.Stop(agent.ID); err != nil {
@@ -377,9 +328,7 @@ func (a *App) createOrchestratorAgent(req orchestratorAgentRequest, resume strin
 	return orchestratorAgentLaunch{agentID: agentID, scope: req.scope, launched: req.launched}, nil
 }
 
-// removeOrchestratorAgent stops and deletes one agent. The conversation
-// transcript is Claude's and survives, which is what lets a recreated agent
-// resume it.
+// The transcript survives deletion, which lets a recreated agent resume it.
 func (a *App) removeOrchestratorAgent(agent claudeBackgroundAgent) error {
 	if agent.running() {
 		if err := a.deps.claudeAgents.Stop(agent.ID); err != nil {
@@ -389,7 +338,6 @@ func (a *App) removeOrchestratorAgent(agent claudeBackgroundAgent) error {
 	return a.deps.claudeAgents.Remove(agent.ID)
 }
 
-// stopOrchestratorAgent stops the agent named exactly id, if one is running.
 func (a *App) stopOrchestratorAgent(id string) error {
 	agents, err := a.deps.claudeAgents.List()
 	if err != nil {
@@ -405,8 +353,6 @@ func (a *App) stopOrchestratorAgent(id string) error {
 	return nil
 }
 
-// deleteOrchestratorAgent removes every agent named exactly id and the files
-// erun kept for it.
 func (a *App) deleteOrchestratorAgent(id string) error {
 	agents, err := a.deps.claudeAgents.List()
 	if err != nil {
@@ -431,9 +377,6 @@ func orchestratorDuplicateAgentsError(id string, matches []claudeBackgroundAgent
 		len(matches), id, strings.Join(ids, ", "))
 }
 
-// orchestratorAgentRecreatedNotice says why an agent is being replaced. The
-// conversation is kept either way, which is the part the operator needs to
-// know is safe.
 func orchestratorAgentRecreatedNotice(id string, agent claudeBackgroundAgent, erunMadeIt bool) string {
 	reason := "it was not started by erun"
 	if erunMadeIt {
@@ -443,9 +386,7 @@ func orchestratorAgentRecreatedNotice(id string, agent claudeBackgroundAgent, er
 		"It continues the same conversation.", id, agent.ID, reason)
 }
 
-// orchestratorAttachCommand is the terminal command that opens an agent in the
-// desktop's PTY. It runs through the host shell for the same reason a launch
-// does: an npm claude.cmd shim only resolves there.
+// Runs through the host shell: an npm claude.cmd shim only resolves there.
 func orchestratorAttachCommand(goos, agentID string) (string, []string) {
 	shell, shellArgs := resolveLocalShellCommand(goos)
 	flag := "-lc"

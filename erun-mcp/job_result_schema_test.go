@@ -9,20 +9,10 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/jobs"
 )
 
-// A task job's Result is "whatever the task returned, captured verbatim as
-// JSON" -- an object for release, an array or scalar for others, absent for a
-// job still running or with no typed result. exec_job_status's own output
-// schema must accept every one of those shapes, not just the empty case: the
-// SDK derives that schema from EnvironmentJob.Result's Go type
-// (json.RawMessage, i.e. []byte), which the reflector renders as "array of
-// bytes" -- a shape no task's actual result value can ever satisfy.
-
-// execJobStatusOutputSchema fetches the schema the server actually publishes
-// for exec_job_status over the wire (via tools/list) and resolves it, so the
-// assertions below exercise the schema the tool really emits rather than a
-// hand-written expectation of what it should be.
+// execJobStatusOutputSchema resolves the schema actually published via tools/list.
 func execJobStatusOutputSchema(t *testing.T) *jsonschema.Resolved {
 	t.Helper()
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
@@ -55,10 +45,6 @@ func execJobStatusOutputSchema(t *testing.T) *jsonschema.Resolved {
 	return nil
 }
 
-// jobInstanceWithResult marshals a real EnvironmentJob carrying result, then
-// decodes it back into a plain any so it can be embedded in a hand-assembled
-// JobStatusResult instance -- the job shape itself comes from the production
-// type, only its result varies per case.
 func jobInstanceWithResult(t *testing.T, result json.RawMessage) any {
 	t.Helper()
 	job := finishedJobFixture("release", []string{"release"})
@@ -74,6 +60,7 @@ func jobInstanceWithResult(t *testing.T, result json.RawMessage) any {
 	return instance
 }
 
+// The reflector renders json.RawMessage as an array of bytes, which no task result satisfies.
 func TestExecJobStatusOutputSchemaAcceptsAnyResultShape(t *testing.T) {
 	resolved := execJobStatusOutputSchema(t)
 
@@ -125,10 +112,8 @@ func TestExecJobStatusOutputSchemaAcceptsAJobWithNoResult(t *testing.T) {
 	}
 }
 
-// execJobStatus calls the real tool through a real MCP session, so it
-// exercises the SDK's own output-schema validation on the way out -- the
-// exact step that failed for a finished release job.
-func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatusResult {
+// execJobStatus goes through a real session so the SDK validates the output schema.
+func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) jobs.JobStatusResult {
 	t.Helper()
 	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "exec_job_status",
@@ -144,7 +129,7 @@ func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatu
 	if err != nil {
 		t.Fatalf("marshal structured content: %v", err)
 	}
-	var out JobStatusResult
+	var out jobs.JobStatusResult
 	if err := json.Unmarshal(structured, &out); err != nil {
 		t.Fatalf("unmarshal structured content: %v", err)
 	}
@@ -154,7 +139,7 @@ func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatu
 	return out
 }
 
-func assertResultRoundTrips(t *testing.T, out JobStatusResult, want json.RawMessage) {
+func assertResultRoundTrips(t *testing.T, out jobs.JobStatusResult, want json.RawMessage) {
 	t.Helper()
 	var wantAny, gotAny any
 	if err := json.Unmarshal(want, &wantAny); err != nil {
@@ -204,30 +189,18 @@ func TestExecJobStatusRoundTripsAJobResult(t *testing.T) {
 	})
 }
 
-// The two sides of a published tool definition, named so an assertion failure
-// says which one it swept.
 const (
 	schemaSideInput  = "input"
 	schemaSideOutput = "output"
 )
 
-// publishedSchemaWire is the part of one published schema the assertions below
-// read, decoded from the generic JSON a client actually receives rather than
-// from jsonschema-go's Go model -- which is exactly the gap the defect fell
-// through: the Go tree looked fine and the bytes on the wire did not.
+// publishedSchemaWire is decoded from wire JSON, not jsonschema-go's model, which hid the defect.
 type publishedSchemaWire struct {
-	// Properties keeps each `properties.<name>` value verbatim, so a value
-	// that is the boolean `true` stays a boolean here instead of being
-	// normalized away by a Go type that cannot represent it.
-	Properties map[string]json.RawMessage `json:"properties"`
-	// AdditionalProperties keeps `additionalProperties` verbatim. A boolean
-	// is legal -- and common -- in this position, so nothing below flags it.
-	AdditionalProperties json.RawMessage `json:"additionalProperties"`
+	// Raw so a boolean `true` subschema stays visible.
+	Properties           map[string]json.RawMessage `json:"properties"`
+	AdditionalProperties json.RawMessage            `json:"additionalProperties"`
 }
 
-// publishedSchema reads one tool's published input or output schema as the wire
-// shape, returning a zero value for a tool that publishes no schema on that
-// side.
 func publishedSchema(t *testing.T, tool *mcp.Tool, side string) publishedSchemaWire {
 	t.Helper()
 	schema := tool.OutputSchema
@@ -248,10 +221,7 @@ func publishedSchema(t *testing.T, tool *mcp.Tool, side string) publishedSchemaW
 	return decoded
 }
 
-// propertyIsJSONObject reports whether a published property's schema is a JSON
-// object, which is the shape every client has to be able to read: the empty
-// schema's other spelling, the boolean `true`, is refused outright by a client
-// that validates the tool list.
+// propertyIsJSONObject: clients that validate the tool list refuse boolean subschemas.
 func propertyIsJSONObject(t *testing.T, property json.RawMessage) bool {
 	t.Helper()
 	var decoded any
@@ -262,11 +232,7 @@ func propertyIsJSONObject(t *testing.T, property json.RawMessage) bool {
 	return ok
 }
 
-// booleanSchemaValue reports a published subschema's boolean value and whether
-// it is a boolean at all, so the input-side assertion can show it saw the legal
-// booleans it must leave alone: `additionalProperties: false` is how a tool
-// rejects unknown arguments, and a blanket "no boolean in a schema" rule would
-// flag every one of them.
+// booleanSchemaValue lets the input sweep show it saw legal `additionalProperties: false`.
 func booleanSchemaValue(raw json.RawMessage) (value, isBoolean bool) {
 	if len(raw) == 0 {
 		return false, false
@@ -279,18 +245,8 @@ func booleanSchemaValue(raw json.RawMessage) (value, isBoolean bool) {
 	return boolean, ok
 }
 
-// assertSchemaPropertiesAreJSONObjects fails for every top-level
-// `properties.<name>` value in one tool's schema whose own schema is not a JSON
-// object.
-//
-// The invariant is deliberately narrow. Only `properties.<name>` VALUES are
-// examined: `additionalProperties` is not, because a boolean there is legal and
-// `false` is how a tool rejects unknown arguments. Only the top level is swept,
-// matching the output-side assertion this generalizes -- nested `properties`
-// and `items` subschemas are not read. That boundary is stated rather than
-// silent: widening it means teaching the sweep to tell a nested
-// `properties.<name>` value apart from a nested `additionalProperties` key at
-// every depth, and it is a change to both sides at once.
+// assertSchemaPropertiesAreJSONObjects checks only top-level `properties.<name>` values;
+// boolean additionalProperties is legal.
 func assertSchemaPropertiesAreJSONObjects(t *testing.T, toolName, side string, properties map[string]json.RawMessage) {
 	t.Helper()
 	for name, property := range properties {
@@ -301,21 +257,8 @@ func assertSchemaPropertiesAreJSONObjects(t *testing.T, toolName, side string, p
 	}
 }
 
-// TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans pins that every
-// property of every published output schema is a JSON object.
-//
-// A property whose schema must accept any JSON value -- a json.RawMessage
-// field, widened by rawJSONSchemaOverrides -- used to be emitted as the
-// boolean `true`, because an empty jsonschema.Schema marshals to exactly that.
-// `true` is a legal JSON Schema, so nothing here noticed; a client's tool-list
-// validator that does not accept boolean subschemas refused the whole
-// tools/list over it. build_profile carries one such field (Record, a raw
-// TimingRecord), and one refusal of that list is the entire erun surface gone
-// for the session's callers -- the in-pod agent included.
-//
-// The surface is swept, and `record` is then asserted by name so the case the
-// report described is the one that has to pass, not just some property that
-// happened to be checked.
+// An empty jsonschema.Schema marshals to `true`, and one boolean subschema makes clients
+// refuse the whole tools/list. build_profile's `record` is asserted by name.
 func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
@@ -332,8 +275,6 @@ func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
 		for name := range shape.Properties {
 			properties++
 			if name == "record" {
-				// Named explicitly below, so the property the report
-				// described is one this test cannot pass without.
 				rawValueProperties++
 			}
 		}
@@ -349,24 +290,8 @@ func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
 	}
 }
 
-// TestPublishedInputSchemaPropertiesAreObjectsNotBooleans is the input-side
-// half of that same invariant, and the half that was missing.
-//
-// The sweep above guards the shape the report described, but it reads
-// `OutputSchema` only and skips every tool that publishes none; `InputSchema`
-// was not examined anywhere. The identical collapse on the input side --
-// `"properties": {"record": true}` -- would have landed with the whole suite
-// green, and it is the same shape that took every erun tool down for the
-// session's callers, because a client that validates the tool list refuses the
-// entire list over one boolean subschema.
-//
-// The invariant is the narrow one: no `properties.<name>` VALUE may be a
-// boolean. A blanket "no boolean in an input schema" rule would be wrong and is
-// not what this asserts -- a boolean `additionalProperties` is legal, and most
-// of these schemas publish `additionalProperties: false` on purpose to reject
-// unknown arguments. The logged counts are what keeps that arm visible: they
-// have to show the legal booleans were seen and left alone, not that the sweep
-// simply never met one.
+// Input-side half: no `properties.<name>` value may be a boolean. The logged counts show
+// legal boolean additionalProperties were seen and left alone.
 func TestPublishedInputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)

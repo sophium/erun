@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
 
 func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
-	unavailable := setup.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
+	unavailable := model.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
 	tagged := bootstrapInitExitError(unavailable)
 	if got := internal.ExitCodeFor(tagged); got != tenantSelectionUnavailableExitCode {
 		t.Fatalf("exit code %d, want %d", got, tenantSelectionUnavailableExitCode)
@@ -32,9 +32,7 @@ func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
 }
 
 func TestTenantSelectionUnavailableExitCodeIsItsOwnContract(t *testing.T) {
-	// A script that reads only the exit code branches on this number, so it is
-	// pinned here: not an ordinary failure (1), not the platform-alias
-	// condition main.go reports (127).
+	// Scripts branch on this code; it must differ from 1 and 127.
 	if tenantSelectionUnavailableExitCode != 128 {
 		t.Fatalf("tenantSelectionUnavailableExitCode = %d, want 128", tenantSelectionUnavailableExitCode)
 	}

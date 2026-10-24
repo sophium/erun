@@ -7,19 +7,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing verifies
-// that when the tenant image has no published versions, the upgrade target falls
-// back to the default ERun image so the env still gets a target instead of
-// resolving to "(unset)".
 func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *testing.T) {
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -31,17 +26,16 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != config.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "petios-devops":
-				// A successful-but-empty lookup (not a failed one) is what triggers
-				// the fallback to the default image.
-				return registry.RuntimeRegistryVersions{}, nil
+				// A successful-but-empty lookup triggers the fallback; a failed one does not.
+				return model.RuntimeRegistryVersions{}, nil
 			case config.DefaultRuntimeImageName:
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.85", fallbackSnapshot},
 					LatestStable:   "1.0.85",
@@ -50,7 +44,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{}, nil
+			return model.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -73,16 +67,12 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 	}
 }
 
-// TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree verifies that when
-// registries publish different newer versions for the tracked channel, the env is
-// not auto-resolved: it carries each candidate for the operator to pick in the
-// Upgrade-all dialog, and the run skips it until they do.
 func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) {
 	const tenantSnapshot = "1.0.90-snapshot-20260606090000"
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -117,30 +107,30 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	assertCandidateVersions(t, item.Candidates, tenantSnapshot, defaultSnapshot)
 }
 
-func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
+func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (model.RuntimeRegistryVersions, error) {
 	t.Helper()
 
-	return func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+	return func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 		switch repository {
 		case "petios-devops":
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{tenantSnapshot},
 				LatestSnapshot: tenantSnapshot,
 			}, nil
 		case config.DefaultRuntimeImageName:
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				LatestSnapshot: defaultSnapshot,
 			}, nil
 		default:
 			t.Fatalf("unexpected registry repository: %s", repository)
 		}
-		return registry.RuntimeRegistryVersions{}, nil
+		return model.RuntimeRegistryVersions{}, nil
 	}
 }
 
-func assertCandidateVersions(t *testing.T, candidates []lifecycle.UpgradeVersionCandidate, want ...string) {
+func assertCandidateVersions(t *testing.T, candidates []model.UpgradeVersionCandidate, want ...string) {
 	t.Helper()
 
 	versions := map[string]bool{}
@@ -154,15 +144,11 @@ func assertCandidateVersions(t *testing.T, candidates []lifecycle.UpgradeVersion
 	}
 }
 
-// TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup verifies that a
-// failed tenant-registry lookup falls back to the canonical ERun image — the
-// tenant image is a wrapper the deploy rebuilds from canonical — so the env
-// upgrades instead of being parked on "latest unknown".
 func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T) {
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -174,14 +160,14 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					LatestStable:   "1.0.85",
 					LatestSnapshot: canonicalSnapshot,
 				}, nil
 			}
-			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return model.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 
@@ -198,14 +184,10 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 	}
 }
 
-// TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails verifies that when
-// neither the tenant nor the canonical image resolves, the member is "latest
-// unknown" with the registry failure as its reason, so the dialog renders it and
-// the run skips it.
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -217,11 +199,11 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return registry.RuntimeRegistryVersions{}, errors.New("registry unreachable")
+				return model.RuntimeRegistryVersions{}, errors.New("registry unreachable")
 			}
-			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return model.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 

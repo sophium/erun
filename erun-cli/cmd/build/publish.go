@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/opentarget"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/spf13/cobra"
 )
 
-func NewPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewPublishCmd(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) *cobra.Command {
+	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:   "publish [TENANT] [ENVIRONMENT]",
 		Short: "Mirror a built version's images to the shared registry",
@@ -27,8 +32,8 @@ func NewPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinde
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
-			publishTarget, err := shared.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
+			publishTarget, err := opentarget.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -36,12 +41,12 @@ func NewPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinde
 				return fmt.Errorf("publish requires a version: pass --version <version> produced by `erun build`/`erun push`")
 			}
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
+			ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
 			defer closeEnvTrace()
-			return common.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
+			return release.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish (produced by `erun build`/`erun push`)")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Publish for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Publish for a specific environment; requires --tenant")

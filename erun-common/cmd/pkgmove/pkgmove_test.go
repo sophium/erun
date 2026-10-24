@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// writeFixture lays out a module whose root package is about to be split.
 func writeFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -51,11 +50,6 @@ func readFile(t *testing.T, path string) string {
 	return string(src)
 }
 
-// TestApplyMovesAFileAndExportsWhatCrossesTheBoundary moves one file into its
-// own package: the helper the root still calls is exported, its doc comment
-// follows the new name, the root refers to it through an import, and a root
-// test's helper that a moved test needs is copied rather than exported -- a
-// _test.go declaration cannot be. The result has to build and pass its tests.
 func TestApplyMovesAFileAndExportsWhatCrossesTheBoundary(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"root.go":        "package fixture\n\n// Run adds one to the helper.\nfunc Run() int { return helper() + 1 }\n",
@@ -93,9 +87,7 @@ func TestApplyMovesAFileAndExportsWhatCrossesTheBoundary(t *testing.T) {
 	requireReapplyChangesNothing(t, dir)
 }
 
-// requireReapplyChangesNothing re-runs a map on the tree it already moved: a
-// branch that predates a move re-runs that map after rebasing onto it, so on
-// a moved tree it has to change nothing.
+// requireReapplyChangesNothing: re-running a map on a moved tree must be a no-op.
 func requireReapplyChangesNothing(t *testing.T, dir string) {
 	t.Helper()
 	out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map"))
@@ -104,8 +96,6 @@ func requireReapplyChangesNothing(t *testing.T, dir string) {
 	}
 }
 
-// TestPlanRefusesAMapThatMakesAnImportCycle pins the gate apply relies on:
-// two files that call each other cannot be put in different packages.
 func TestPlanRefusesAMapThatMakesAnImportCycle(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"a.go":         "package fixture\n\nfunc A() int { return B() }\n\nfunc C() int { return 1 }\n",
@@ -150,10 +140,6 @@ func TestFileDirFollowsTheFirstMatchingRuleAndTestsFollowTheirSource(t *testing.
 	}
 }
 
-// TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt is the reproduction of
-// a move that lost tests: a test moved back into its file's own package and a
-// helper copied into that package both wrote that one path, so the second
-// write erased the test. Both have to survive, in source order.
 func TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"root.go":       "package fixture\n\nfunc Root() int { return 1 }\n",
@@ -176,10 +162,6 @@ func TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplySplitsAGroupedDeclarationBetweenPackages pins the split a grouped
-// declaration needs: one `type ( ... )` block whose specs go to two packages
-// is reopened in the second, and an iota const group stays whole because
-// splitting it would renumber the specs after the cut.
 func TestApplySplitsAGroupedDeclarationBetweenPackages(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"types.go":     "package fixture\n\n// Shared types.\ntype (\n\t// Kept stays.\n\tKept int\n\t// Moved goes.\n\tMoved string\n)\n\nconst (\n\tFirst = iota\n\tSecond\n)\n",
@@ -203,9 +185,6 @@ func TestApplySplitsAGroupedDeclarationBetweenPackages(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyAppendsToAFileAPackageAlreadyHas is the shape every step after the
-// first takes: declarations pulled out of a root file into a package that
-// already holds a file of that name are added to it, keeping what was there.
 func TestApplyAppendsToAFileAPackageAlreadyHas(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"sub/cloud.go": "package sub\n\nimport (\n\t\"strings\"\n\n\t\"example.com/fixture/base\"\n)\n\n// Earlier came first.\nfunc Earlier() string { return strings.ToUpper(base.A) }\n",
@@ -228,10 +207,6 @@ func TestApplyAppendsToAFileAPackageAlreadyHas(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyDropsAnImportOnlyAShadowingLocalStillSpells is the reproduction of
-// a moved file that kept an import it no longer used: a parameter named like
-// the package it shadows is not a use of that package, so once the one real
-// use moves away, the import goes with it.
 func TestApplyDropsAnImportOnlyAShadowingLocalStillSpells(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"files.go":     "package fixture\n\nimport (\n\t\"io\"\n\t\"strings\"\n)\n\ntype FileIO struct{ Write func(string) }\n\nfunc Save(io FileIO) { io.Write(\"x\") }\n\nfunc AsWriter(b *strings.Builder) io.Writer { return b }\n",
@@ -246,11 +221,6 @@ func TestApplyDropsAnImportOnlyAShadowingLocalStillSpells(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyMovesAHelperTypeWithItsMethods is the reproduction of a copied stub
-// that lost its methods: a test-only type used both at home and by a moved
-// test is copied, and its methods have to be copied with it -- Go keeps
-// methods with their type, so a copy without them stops implementing the
-// interface its users pass it as.
 func TestApplyMovesAHelperTypeWithItsMethods(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
@@ -266,10 +236,6 @@ func TestApplyMovesAHelperTypeWithItsMethods(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain pins the guard
-// the root package's TestMain gives its tests -- no runtime pod identity, no
-// real timing history, no browser, no git maintenance -- for every package the
-// split creates: tests moved out of the root package must not lose it.
 func TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"base/core/timing.go":      "package core\n\nconst TimingRecordDirEnv = \"FIXTURE_TIMING_DIR\"\n",
@@ -295,12 +261,6 @@ func TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplyKeepsAMovedReentryHelperReachable is the reproduction of a moved
-// test that hung: its helper process is this test binary re-executed, which
-// only works while the package's TestMain hands the re-entered process to the
-// helper. A helper registers itself from an init in its own file, so the init
-// moves with it, and the TestMain generated for its new package has to run
-// the registry before the suite.
 func TestApplyKeepsAMovedReentryHelperReachable(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"base/core/timing.go": "package core\n\nconst TimingRecordDirEnv = \"FIXTURE_TIMING_DIR\"\n",
@@ -320,9 +280,6 @@ func TestApplyKeepsAMovedReentryHelperReachable(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplyMovesSeveralInitsIntoOnePackage pins that init is not a name two
-// declarations can collide on: a package may hold any number of them, so
-// files that each register something from an init move into one package.
 func TestApplyMovesSeveralInitsIntoOnePackage(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"a.go":         "package fixture\n\nvar names []string\n\nfunc init() { names = append(names, \"a\") }\n\nfunc Names() []string { return names }\n",
@@ -339,11 +296,6 @@ func TestApplyMovesSeveralInitsIntoOnePackage(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyMovesAStubTypeOnlyAMovedTestUses is the reproduction of stub types
-// left behind unused: a test-only type with methods, declared in a file that
-// stays, used only by a test that moves. Its own methods are not a use that
-// keeps it at home, so the type moves with its methods instead of being
-// copied and leaving an unused original.
 func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
@@ -357,6 +309,81 @@ func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
 	}
 	if root := readFile(t, filepath.Join(dir, "stub_test.go")); strings.Contains(root, "type stub") || strings.Contains(root, "Load()") {
 		t.Errorf("the stub only the moved test uses must leave with its methods:\n%s", root)
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
+
+func TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"seam.go":       "package fixture\n\nvar Platform = func() string { return \"real\" }\n\nfunc Stays() string { return Platform() }\n",
+		"moves.go":      "package fixture\n\nfunc Moves() int { return 1 }\n",
+		"split_test.go": "package fixture\n\nimport \"testing\"\n\nfunc init() { Platform = func() string { return \"pinned\" } }\n\nfunc TestStays(t *testing.T) {\n\tif Stays() != \"pinned\" {\n\t\tt.Fatal(\"the init that pins the seam did not run here\")\n\t}\n}\n\nfunc TestMoves(t *testing.T) {\n\tif Moves() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub moves.go\nsub split_test.go\n. split_test.go:TestStays\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "split_test.go")), "func init()") {
+		t.Error("the half that stays keeps its init")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
+
+func TestApplyDropsACopyWhoseOwnPackageIsEmptied(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"root.go":            "package fixture\n\nfunc Root() int { return 1 }\n",
+		"helper_test.go":     "package fixture\n\nfunc helper() int { return 2 }\n",
+		"root_test.go":       "package fixture\n\nimport \"testing\"\n\nfunc TestRoot(t *testing.T) {\n\tif Root()+helper() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/sub.go":         "package sub\n\nfunc Sub() int { return 0 }\n",
+		"sub/helper_test.go": "package sub\n\nfunc helper() int { return 2 }\n",
+		"other.go":           "package fixture\n\nfunc Other() int { return 4 }\n",
+		"other_test.go":      "package fixture\n\nimport \"testing\"\n\nconst (\n\tfour = 4\n\ttwo  = 2\n)\n\nfunc TestOther(t *testing.T) {\n\tif Other() != four || helper() != two {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/consts_test.go": "package sub\n\nconst (\n\ttwo = 2\n)\n",
+		"packages.map":       "sub root.go\nsub root_test.go\nsub helper_test.go\nother other.go\nother other_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "helper_test.go")); !os.IsNotExist(err) {
+		t.Error("the root copy must go once nothing else stays in the root package")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
+
+func TestApplyGivesASplitOutsideTheBaseModuleItsSuiteFromTheNamedSeam(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"root.go":      "package fixture\n\nfunc Root() int { return 1 }\n",
+		"tool.go":      "package fixture\n\nfunc Tool() int { return 2 }\n",
+		"tool_test.go": "package fixture\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestTool(t *testing.T) {\n\tif Tool() != 2 || os.Getenv(\"FIXTURE_TIMING_DIR\") == \"\" {\n\t\tt.Fatal(\"the suite is not isolated\")\n\t}\n}\n",
+		"packages.map": "tools/x tool.go\ntools/x tool_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map"), "-timing-env", "FIXTURE_TIMING_DIR"); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "tools", "x", "suite_main_test.go")), `"FIXTURE_TIMING_DIR"`) {
+		t.Error("the moved package gets a suite redirecting the named seam")
+	}
+	goIn(t, dir, "test", "./...")
+}
+
+func TestApplyResolvesAMovedTestToTheHelperItsNewPackageDeclares(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"a.go":               "package fixture\n\nfunc A() int { return 1 }\n",
+		"helper_test.go":     "package fixture\n\nfunc helper() int { return 2 }\n",
+		"stays_test.go":      "package fixture\n\nimport \"testing\"\n\nfunc TestStays(t *testing.T) {\n\tif A()+helper() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"moves_test.go":      "package fixture\n\nimport \"testing\"\n\nfunc TestMoves(t *testing.T) {\n\tif helper() != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/sub.go":         "package sub\n\nfunc Sub() int { return 0 }\n",
+		"sub/helper_test.go": "package sub\n\nfunc helper() int { return 2 }\n",
+		"packages.map":       "sub moves_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if strings.Contains(readFile(t, filepath.Join(dir, "sub", "moves_test.go")), "example.com/fixture\"") {
+		t.Error("the moved test must use its new package's own helper, not import the old package")
 	}
 	goIn(t, dir, "vet", "./...")
 	goIn(t, dir, "test", "./...")

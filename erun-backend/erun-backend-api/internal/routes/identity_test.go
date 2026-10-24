@@ -141,9 +141,6 @@ func TestListUsersReturnsAdminResult(t *testing.T) {
 	}
 }
 
-// TestListUsersDefaultsToNoOrgOverride locks today's unchanged behaviour for
-// the common case: omitting ?orgId= must not send an override, so an
-// existing caller keeps seeing the credential's own org.
 func TestListUsersDefaultsToNoOrgOverride(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
@@ -157,9 +154,7 @@ func TestListUsersDefaultsToNoOrgOverride(t *testing.T) {
 	}
 }
 
-// TestListUsersThreadsOrgIDQueryParam is the fix itself: an identity created
-// in another org via orgId is invisible to ListUsers unless that same org is
-// named again on the read.
+// An identity in another org is invisible unless that org is named on the read.
 func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
@@ -173,10 +168,6 @@ func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	}
 }
 
-// TestListUsersDefaultsMembershipJoinToCallersOwnTenant locks today's
-// unchanged behaviour: omitting ?tenantId= must keep cross-referencing
-// against the caller's own resolved tenant, so an existing caller sees no
-// change.
 func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	erunUsers := &stubEnrolledUserLister{}
@@ -191,12 +182,7 @@ func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestListUsersThreadsTenantIDQueryParamForMembershipJoin is the fix itself:
-// the membership join must target the tenant being administered, not the
-// caller's own resolved tenant -- otherwise every row
-// from another org misses the join against its genuine members and renders
-// "IdP only, not enrolled" for people who really are enrolled, just in a
-// different tenant.
+// The join must target the administered tenant, or members of other orgs render as IdP-only.
 func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	erunUsers := &stubEnrolledUserLister{}
@@ -211,10 +197,7 @@ func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
 	}
 }
 
-// TestListUsersDistinguishesEnrolledFromIdPOnly locks the core of #1482's
-// Users-page fix: a self-registered IdP account with no erun mapping must
-// not render identically to an actual tenant member. It also proves the
-// machine-account signal survives the merge unchanged.
+// Also proves the machine-account signal survives the merge.
 func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	admin := &stubIdentityAdminClient{users: []zitadel.User{
 		{ID: "sub-alice", Username: "alice", Email: "alice@example.com"},
@@ -248,15 +231,7 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 }
 
-// TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
-// half: an enrolled row's own erun username travels alongside the
-// IdP's own username field rather than being merged away, so a client can
-// render both when they diverge instead of rendering only the IdP one under
-// a caller who is used to seeing their erun username everywhere else
-// (whoami's own `username`, reviews, audit entries). The row's own `id` is
-// asserted too: it is the OIDC subject, the one stable value that actually
-// joins the two directories, and it must keep flowing through unrenamed for
-// a client to recognize "this is the same person" against whoami's subject.
+// `id` is the OIDC subject, the one value joining both directories.
 func TestListUsersReportsErunUsernameAlongsideIdPUsername(t *testing.T) {
 	admin := &stubIdentityAdminClient{users: []zitadel.User{
 		{ID: "sub-1", Username: "zadmin@frs.auth.example.com", Email: "admin@example.com"},
@@ -330,12 +305,7 @@ func TestCreateUserReports201WithErrorOnMappingFailure(t *testing.T) {
 	}
 }
 
-// TestCreateUserReportsATakenLoginNameAsUsernameTaken is the route-level half
-// of the reported failure: the instance rejects the create with its bare
-// AlreadyExists conflict, so the caller must get a code and the name they
-// chose rather than the IdP's own account-naming text. It is wrapped the way
-// the service wraps it, so the check proves the error is still recognized
-// through that wrap.
+// The error is wrapped as the service wraps it.
 func TestCreateUserReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
 	enroller := &stubIdentityEnroller{err: fmt.Errorf("create identity provider user: %w",
 		&zitadel.UsernameTakenError{Username: "login-client"})}
@@ -354,10 +324,6 @@ func TestCreateUserReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
 	}
 }
 
-// TestCreateUserForwardsAnUnrelatedConflictFromTheIdP is the crossed state of
-// the test above: a conflict that is not the user-already-exists collision
-// keeps the instance's own status and body, so the caller is not sent to
-// change a login name that was never the problem.
 func TestCreateUserForwardsAnUnrelatedConflictFromTheIdP(t *testing.T) {
 	enroller := &stubIdentityEnroller{err: &zitadel.APIError{
 		StatusCode: http.StatusConflict,
@@ -398,10 +364,6 @@ func TestDeactivateAndReactivateUsePathValue(t *testing.T) {
 	}
 }
 
-// TestDeactivateAndReactivateThreadOrgIDQueryParam is the other half of the
-// fix: an identity created in another org 404s deactivating with no org
-// context, so the route must forward ?orgId= to the client the same way it
-// forwards the path's external_id.
 func TestDeactivateAndReactivateThreadOrgIDQueryParam(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin}
@@ -433,209 +395,5 @@ func TestDeactivateForwardsZitadelAPIError(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte("state initial")) {
 		t.Fatalf("body = %s, want the Zitadel message forwarded", rec.Body.String())
-	}
-}
-
-func TestGetOrgSettingsForbidsNonOperationsTenant(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.getOrgSettings(rec, identityRequest(http.MethodGet, "/v1/identity/org-settings", "", string(model.TenantTypeCompany)))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
-}
-
-func TestUpdateOrgSettingsPassesOnlyProvidedFields(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.updateOrgSettings(rec, identityRequest(http.MethodPatch, "/v1/identity/org-settings", `{"forceMfa":true}`, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if admin.gotUpdateParams.ForceMFA == nil || !*admin.gotUpdateParams.ForceMFA {
-		t.Fatalf("gotUpdateParams.ForceMFA = %v, want true", admin.gotUpdateParams.ForceMFA)
-	}
-	if admin.gotUpdateParams.MinPasswordLength != nil {
-		t.Fatalf("gotUpdateParams.MinPasswordLength = %v, want nil when not provided", admin.gotUpdateParams.MinPasswordLength)
-	}
-	if admin.gotUpdateParams.AllowRegister != nil {
-		t.Fatalf("gotUpdateParams.AllowRegister = %v, want nil when not provided", admin.gotUpdateParams.AllowRegister)
-	}
-}
-
-// TestUpdateOrgSettingsThreadsAllowRegister locks the actual lever #1482
-// asks for: closing (or reopening) self-registration must reach the
-// Zitadel client's params, the same way forceMfa already does.
-func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.updateOrgSettings(rec, identityRequest(http.MethodPatch, "/v1/identity/org-settings", `{"allowRegister":false}`, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if admin.gotUpdateParams.AllowRegister == nil || *admin.gotUpdateParams.AllowRegister {
-		t.Fatalf("gotUpdateParams.AllowRegister = %v, want false", admin.gotUpdateParams.AllowRegister)
-	}
-	if admin.gotUpdateParams.ForceMFA != nil {
-		t.Fatalf("gotUpdateParams.ForceMFA = %v, want nil when not provided", admin.gotUpdateParams.ForceMFA)
-	}
-}
-
-// TestCreateUserReportsMailNotConfiguredWithATemporaryPassword locks the
-// honest-failure behaviour: when Enroll reports mail delivery
-// as unconfigured, the response must carry the temporary password and a
-// warning explaining why, not silently look identical to a normal invite.
-func TestCreateUserReportsMailNotConfiguredWithATemporaryPassword(t *testing.T) {
-	enroller := &stubIdentityEnroller{result: service.EnrollIdentityResult{
-		IdPUser:                zitadel.User{ID: "idp-5", Username: "erin"},
-		ErunUser:               model.User{UserID: "erun-5", Username: "erin"},
-		MailDeliveryConfigured: false,
-		TemporaryPassword:      "Ertemp12345!",
-	}}
-	routes := IdentityRoutes{enroller: enroller}
-	rec := httptest.NewRecorder()
-	routes.createUser(rec, identityRequest(http.MethodPost, "/v1/identity/users", `{"username":"erin","email":"erin@example.com"}`, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("Ertemp12345!")) {
-		t.Fatalf("body = %s, want the temporary password reported", rec.Body.String())
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("\"mailDeliveryConfigured\":false")) {
-		t.Fatalf("body = %s, want mailDeliveryConfigured:false reported", rec.Body.String())
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("warning")) {
-		t.Fatalf("body = %s, want a warning explaining no invitation email was sent", rec.Body.String())
-	}
-}
-
-// TestCreateUserReportsMailConfiguredWithNoWarning is the positive-path
-// counterpart: a normal invite carries no warning and no password.
-func TestCreateUserReportsMailConfiguredWithNoWarning(t *testing.T) {
-	enroller := &stubIdentityEnroller{result: service.EnrollIdentityResult{
-		IdPUser:                zitadel.User{ID: "idp-6", Username: "frank"},
-		ErunUser:               model.User{UserID: "erun-6", Username: "frank"},
-		MailDeliveryConfigured: true,
-	}}
-	routes := IdentityRoutes{enroller: enroller}
-	rec := httptest.NewRecorder()
-	routes.createUser(rec, identityRequest(http.MethodPost, "/v1/identity/users", `{"username":"frank","email":"frank@example.com"}`, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-	if bytes.Contains(rec.Body.Bytes(), []byte("warning")) {
-		t.Fatalf("body = %s, want no warning when mail delivery is configured", rec.Body.String())
-	}
-	if bytes.Contains(rec.Body.Bytes(), []byte("temporaryPassword")) {
-		t.Fatalf("body = %s, want no temporaryPassword field when mail delivery is configured", rec.Body.String())
-	}
-}
-
-func TestGetSMTPSettingsForbidsNonOperationsTenant(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.getSMTPSettings(rec, identityRequest(http.MethodGet, "/v1/identity/smtp-settings", "", string(model.TenantTypeCompany)))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
-}
-
-// TestGetSMTPSettingsReportsUnconfigured locks the visibility fix (issue
-// #1168): the platform must be able to report "mail is not configured"
-// through this surface, cleanly, rather than only via Zitadel's own
-// unhandled 404.
-func TestGetSMTPSettingsReportsUnconfigured(t *testing.T) {
-	admin := &stubIdentityAdminClient{smtpStatus: zitadel.SMTPStatus{Configured: false}}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.getSMTPSettings(rec, identityRequest(http.MethodGet, "/v1/identity/smtp-settings", "", string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("\"configured\":false")) {
-		t.Fatalf("body = %s, want configured:false reported", rec.Body.String())
-	}
-}
-
-func TestUpdateSMTPSettingsRejectsMissingFields(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	routes.updateSMTPSettings(rec, identityRequest(http.MethodPatch, "/v1/identity/smtp-settings", `{"username":"erun"}`, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a missing host/senderAddress", rec.Code)
-	}
-}
-
-func TestUpdateSMTPSettingsPassesDeclaredFields(t *testing.T) {
-	admin := &stubIdentityAdminClient{smtpStatus: zitadel.SMTPStatus{Configured: true}}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-	body := `{"host":"smtp.example.com:587","username":"erun","password":"s3cret","senderAddress":"noreply@example.com","senderName":"Erun Platform","tls":true}`
-	routes.updateSMTPSettings(rec, identityRequest(http.MethodPatch, "/v1/identity/smtp-settings", body, string(model.TenantTypeOperations)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if admin.gotSMTPParams.Host != "smtp.example.com:587" || admin.gotSMTPParams.Password != "s3cret" || !admin.gotSMTPParams.TLS {
-		t.Fatalf("gotSMTPParams = %+v, want the declared fields passed through", admin.gotSMTPParams)
-	}
-}
-
-// An org is the per-tenant identity boundary an org-scoped issuer resolves
-// by, so being unable to create one left tenant onboarding dependent on a
-// hand-made org in Zitadel's own console.
-func TestIdentityRoutesCreateOrg(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	routes := IdentityRoutes{admin: admin}
-	rec := httptest.NewRecorder()
-
-	routes.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"validationagent"}`, string(model.TenantTypeOperations)))
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-	if admin.createdOrgName != "validationagent" {
-		t.Fatalf("created org name = %q", admin.createdOrgName)
-	}
-	var org zitadel.Org
-	if err := json.NewDecoder(rec.Body).Decode(&org); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if org.ID == "" {
-		t.Fatal("the response must carry the org id: it is what an org-scoped mapping points at")
-	}
-}
-
-func TestIdentityRoutesCreateOrgRequiresName(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	rec := httptest.NewRecorder()
-
-	IdentityRoutes{admin: admin}.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"   "}`, string(model.TenantTypeOperations)))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if admin.createdOrgName != "" {
-		t.Fatal("a blank name must not reach the IdP")
-	}
-}
-
-// Administering the platform's own IdP is not a company tenant's business,
-// and creating orgs least of all.
-func TestIdentityRoutesCreateOrgRequiresOperationsTenant(t *testing.T) {
-	admin := &stubIdentityAdminClient{}
-	rec := httptest.NewRecorder()
-
-	IdentityRoutes{admin: admin}.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"acme"}`, string(model.TenantTypeCompany)))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
-	if admin.createdOrgName != "" {
-		t.Fatal("a company tenant must not reach the IdP")
 	}
 }

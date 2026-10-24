@@ -1,31 +1,9 @@
-// Package oidcbootstrap reconciles the platform's OIDC sign-in applications
-// (erun-console, erun-cli, erun-mobile) against Zitadel's Management API and
-// persists the two bootstrap PATs Zitadel core mints into a durable Secret. It
-// is what `eapi oidc-bootstrap` runs as the erun-zitadel chart's sidecar.
+// Package oidcbootstrap reconciles the platform's OIDC applications in Zitadel
+// and persists core's bootstrap PATs to a Secret, as the erun-zitadel sidecar.
 //
-// It runs as a sidecar, not a hook Job, because it needs the org-owner PAT
-// core writes to the pod's shared bootstrap emptyDir, which a separate Job
-// cannot mount. Every Management API call carries the external domain as its
-// Host (internal/zitadel does that): Zitadel resolves the instance a call
-// targets from that header, not from the loopback address the call is sent to.
-//
-// Reconciliation, not create-once: each app's registered redirect URIs are
-// converged to the configured list on every tick through the OIDC config
-// update endpoint. An app that already matches is left alone — no write, no
-// log line. A change is logged from what to what; a failed update is logged
-// loudly rather than silently leaving a stale registration in place, which is
-// what let a changed console address go unnoticed until sign-in broke.
-// Converging to an empty list is refused: an operator who unsets every
-// configured redirect keeps whatever is registered rather than losing sign-in
-// outright, mirroring the ConfigMap publish guard below.
-//
-// The client-id ConfigMap is never published unless every app genuinely
-// resolved. The console and mobile ids are empty on purpose when no redirect
-// URI is configured for them (a platform with no mobile client yet leaves
-// erun-mobile unconfigured — its custom URL scheme belongs to whichever client
-// ships), but an app that could not be resolved aborts the publish, so a
-// failure leaves prior good data alone instead of overwriting it with empty
-// strings.
+// It is a sidecar, not a hook Job, because it needs core's bootstrap emptyDir.
+// Redirect URIs converge every tick, but never to an empty list, and the
+// client-id ConfigMap is published only when every app resolved.
 package oidcbootstrap
 
 import (
@@ -43,15 +21,11 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// The two PAT files Zitadel core writes into the bootstrap directory at
-// first-instance init, and the Secret keys they are persisted under.
 const (
 	AdminPATFile = "admin-sa.pat"
 	LoginPATFile = "login-client.pat"
 )
 
-// The OIDC applications this package reconciles, and the ConfigMap keys their
-// client ids are published under.
 const (
 	ConsoleAppName = "erun-console"
 	CLIAppName     = "erun-cli"
@@ -62,14 +36,10 @@ const (
 	MobileClientIDKey  = "mobileClientId"
 )
 
-// CLIRedirectURIs are erun-cli's loopback redirects. Nothing configures them
-// today, but the app is reconciled the same way as erun-console so the two do
-// not diverge in shape.
+// CLIRedirectURIs are erun-cli's loopback redirects.
 var CLIRedirectURIs = []string{"http://127.0.0.1/callback", "http://localhost/callback"}
 
-// Zitadel's enum values for the application properties set at creation. Every
-// app issues JWT access tokens: erun's bearer verifier validates a JWT through
-// discovery and JWKS and rejects Zitadel's default opaque token.
+// erun's bearer verifier rejects Zitadel's default opaque tokens, so every app issues JWTs.
 const (
 	responseTypeCode    = "OIDC_RESPONSE_TYPE_CODE"
 	grantTypeAuthCode   = "OIDC_GRANT_TYPE_AUTHORIZATION_CODE"
@@ -84,18 +54,12 @@ const (
 
 // Config names what one reconcile tick acts on.
 type Config struct {
-	// ProjectName is the Zitadel project the three applications live in.
-	ProjectName string
-	// ConfigMapName is the ConfigMap the client ids are published to.
-	ConfigMapName string
-	// PATsSecretName is the Secret both bootstrap PATs are persisted to.
+	ProjectName    string
+	ConfigMapName  string
 	PATsSecretName string
-	// Namespace holds the ConfigMap and the Secret.
-	Namespace string
-	// BootstrapDir is the shared emptyDir core writes the PATs into.
-	BootstrapDir string
-	// ConsoleRedirectURIs and MobileRedirectURIs are the configured redirect
-	// lists; empty leaves that app uncreated.
+	Namespace      string
+	BootstrapDir   string
+	// Empty redirect lists leave that app uncreated.
 	ConsoleRedirectURIs []string
 	MobileRedirectURIs  []string
 }
@@ -116,12 +80,9 @@ func NewReconciler(cfg Config, idp *zitadel.Client, kube kubernetes.Interface, l
 	return &Reconciler{cfg: cfg, idp: idp, kube: kube, log: logger}
 }
 
-// appDefinition is one OIDC application's desired state.
 type appDefinition struct {
-	spec zitadel.OIDCAppSpec
-	// optional apps are not created while no redirect URI is configured.
-	optional bool
-	// convergeLogout also converges postLogoutRedirectUris to the redirects.
+	spec           zitadel.OIDCAppSpec
+	optional       bool
 	convergeLogout bool
 }
 
@@ -153,8 +114,7 @@ func (r *Reconciler) apps() []appDefinition {
 			},
 		},
 		{
-			// A mobile client always has a system browser to redirect
-			// through, so erun-mobile is Authorization Code + PKCE only.
+			// A mobile client always has a system browser, so PKCE only.
 			spec: zitadel.OIDCAppSpec{
 				Name:            MobileAppName,
 				RedirectURIs:    r.cfg.MobileRedirectURIs,
@@ -169,10 +129,8 @@ func (r *Reconciler) apps() []appDefinition {
 	}
 }
 
-// Reconcile performs one tick: persist the PATs, resolve the project and every
-// app, then publish the client ids. A returned error means the tick was
-// incomplete; a convergence failure is still reported after the client ids
-// were published, since the app itself resolved.
+// Reconcile performs one tick. Client ids are published even when a
+// resolved app's convergence fails, and that failure is still returned.
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err := r.persistPATs(ctx); err != nil {
 		r.log.Printf("PATs Secret not persisted this tick: %v", err)
@@ -210,10 +168,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	return errors.Join(convergeErrs...)
 }
 
-// ensureApp resolves one app to its client id, creating it when absent and
-// converging its redirect URIs when present. err means the app did not
-// resolve; convergeErr means it resolved but its registration could not be
-// brought up to date.
 func (r *Reconciler) ensureApp(ctx context.Context, projectID string, app appDefinition) (clientID string, convergeErr error, err error) {
 	name := app.spec.Name
 	appID, err := r.idp.FindAppID(ctx, projectID, name)
@@ -240,7 +194,6 @@ func (r *Reconciler) ensureApp(ctx context.Context, projectID string, app appDef
 	return live.ClientID, r.converge(ctx, projectID, appID, app, live), nil
 }
 
-// shortName is the word the skip log line names an app by.
 func shortName(name string) string {
 	switch name {
 	case ConsoleAppName:
@@ -252,9 +205,7 @@ func shortName(name string) string {
 	}
 }
 
-// updatableOIDCFields are the oidcConfig fields the update endpoint accepts.
-// It replaces the whole config rather than merging, so each one present on the
-// live app is carried over unchanged unless the reconcile means to change it.
+// The update endpoint replaces the whole config, so these are carried over.
 var updatableOIDCFields = []string{
 	"responseTypes", "grantTypes", "appType", "authMethodType",
 	redirectURIsField, postLogoutURIsField,
@@ -262,9 +213,6 @@ var updatableOIDCFields = []string{
 	"idTokenUserinfoAssertion", "clockSkew", "additionalOrigins", "skipNativeAppSuccessPage",
 }
 
-// converge brings the app's registered redirect URIs (and, for an app that
-// converges them, post-logout redirect URIs) to the configured list, writing
-// only on a difference.
 func (r *Reconciler) converge(ctx context.Context, projectID string, appID string, app appDefinition, live zitadel.OIDCApp) error {
 	name := app.spec.Name
 	desired := app.spec.RedirectURIs
@@ -288,9 +236,6 @@ func (r *Reconciler) converge(ctx context.Context, projectID string, appID strin
 	return nil
 }
 
-// registeredState reads the app's registered redirect URIs and reports whether
-// they (and, for an app that converges them, its post-logout redirect URIs)
-// already match the configured list, order-insensitively.
 func registeredState(live zitadel.OIDCApp, app appDefinition) (current []string, inSync bool, err error) {
 	current, err = live.StringList(redirectURIsField)
 	if err != nil {
@@ -307,8 +252,6 @@ func registeredState(live zitadel.OIDCApp, app appDefinition) (current []string,
 	return current, inSync, nil
 }
 
-// convergedConfig is the live config with the configured redirect URIs in
-// place, carrying every other updatable field over unchanged.
 func convergedConfig(live zitadel.OIDCApp, app appDefinition) map[string]json.RawMessage {
 	update := make(map[string]json.RawMessage, len(updatableOIDCFields))
 	for _, field := range updatableOIDCFields {
@@ -323,8 +266,6 @@ func convergedConfig(live zitadel.OIDCApp, app appDefinition) map[string]json.Ra
 	return update
 }
 
-// persistPATs copies both bootstrap PATs into the durable Secret the
-// restore-pats init container seeds a restarted pod from.
 func (r *Reconciler) persistPATs(ctx context.Context) error {
 	data := map[string][]byte{}
 	for _, file := range []string{AdminPATFile, LoginPATFile} {
@@ -359,6 +300,9 @@ func rawList(values []string) json.RawMessage {
 	if values == nil {
 		values = []string{}
 	}
-	encoded, _ := json.Marshal(values)
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return json.RawMessage(`[]`)
+	}
 	return encoded
 }

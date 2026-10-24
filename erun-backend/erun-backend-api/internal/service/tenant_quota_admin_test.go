@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// fakeTenantQuotaSetter is the narrow TenantQuotaSetter dependency, recording
-// what it was asked to set and which tenant it was told to set it for, so a
-// test can prove SetForTenant persists against the named target rather than
-// whatever tenant the caller's own context carries.
+// fakeTenantQuotaSetter records the target tenant to prove it is not taken from the context.
 type fakeTenantQuotaSetter struct {
 	set       model.TenantQuota
 	err       error
@@ -33,10 +30,6 @@ func (f *fakeTenantQuotaSetter) Set(_ context.Context, tenantID string, quota mo
 	return set, nil
 }
 
-// fakeTenantQuotaAdminAudit is the narrow TenantQuotaAdminAuditLogger
-// dependency: tests that want "no audit logger configured" pass a literal nil
-// for the interface parameter, not a typed *fakeTenantQuotaAdminAudit nil —
-// mirroring fakeEnvironmentAdminAudit's own doc comment.
 type fakeTenantQuotaAdminAudit struct {
 	events []model.AuditEvent
 	err    error
@@ -99,9 +92,7 @@ func TestSetForTenantRecordsWhichOperatorSetWhichTenantsQuotaFromWhichHomeTenant
 		t.Fatalf("expected exactly one audit event, got %d", len(audit.events))
 	}
 	event := audit.events[0]
-	// The audit row's own tenant_id is the operator's home tenant, not the
-	// tenant whose quota was set — that fact lives in APIParameters instead,
-	// since the write itself only ever records the target.
+	// The audit row's tenant_id is the operator's home tenant; the target is in APIParameters.
 	if event.TenantID != "ops-tenant" {
 		t.Fatalf("audit TenantID = %q, want ops-tenant (the operator's home tenant)", event.TenantID)
 	}
@@ -120,9 +111,6 @@ func TestSetForTenantRecordsWhichOperatorSetWhichTenantsQuotaFromWhichHomeTenant
 	}
 }
 
-// TestSetForTenantFailsClosedWithNoAuditLogger mirrors
-// TestCreateForTenantFailsClosedWithNoAuditLogger: an unattributable
-// cross-tenant write must never happen quietly.
 func TestSetForTenantFailsClosedWithNoAuditLogger(t *testing.T) {
 	quotas := &fakeTenantQuotaSetter{}
 	svc := NewTenantQuotaAdminService(quotas, nil)
@@ -135,9 +123,6 @@ func TestSetForTenantFailsClosedWithNoAuditLogger(t *testing.T) {
 	}
 }
 
-// TestSetForTenantFailsClosedWhenAuditWriteFails proves the audit-before-set
-// ordering actually holds: a failing audit write must leave the target
-// tenant's quota unchanged.
 func TestSetForTenantFailsClosedWhenAuditWriteFails(t *testing.T) {
 	quotas := &fakeTenantQuotaSetter{}
 	audit := &fakeTenantQuotaAdminAudit{err: context.DeadlineExceeded}

@@ -1,8 +1,4 @@
-// The kit's public surface. Everything exported here is transport-agnostic:
-// no Wails bindings, no `fetch`, no concrete base query, no store. Widgets
-// take props and emit callbacks; the shared platform-config model and RTK
-// Query endpoint definitions take a `BaseQuery` as a parameter rather than
-// embedding one, so nothing here reaches into an app's transport.
+// The kit's public surface; everything here is transport-agnostic.
 
 export * from './api/platformConfigEndpoints';
 export * from './components/EditableComboField';

@@ -33,19 +33,14 @@ func describeRuntimeEnvironmentMonitor(boot runtimeBoot) string {
 	return description
 }
 
-// startRuntimeEnvironmentMonitor runs the pod's one activity loop. Every tick
-// samples the processes working in this container, so a build or agent run
-// nobody instrumented still registers as activity; the sample is taken before
-// the sleep, so the first tick sets the CPU baseline the next compares against.
-// Auto-stop rides the same tick, only for a cloud-managed environment, the only
-// kind with a host to stop.
+// The sample is taken before the sleep so the first tick sets the CPU baseline. Auto-stop
+// runs only for cloud-managed environments.
 func startRuntimeEnvironmentMonitor(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	dir := boot.path(".erun", boot.tenant(), boot.environment())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	// idle-stop.log is on the home volume and survives restarts; it is cleared
-	// here so the desktop never shows a stop error from an earlier pod.
+	// idle-stop.log survives restarts; clear it so the desktop never shows a stale error.
 	stopLog := filepath.Join(dir, "idle-stop.log")
 	if err := os.WriteFile(stopLog, nil, 0o644); err != nil {
 		return err
@@ -69,9 +64,7 @@ func (b runtimeBoot) erunCommand(args ...string) *exec.Cmd {
 	return core.Command(b.erunPath, args...)
 }
 
-// runtimeIdleStopTick asks the idle policy whether to stop, records the answer,
-// and stops the host when it fires. It reports whether the host was stopped,
-// which ends the monitor.
+// runtimeIdleStopTick reports whether the host was stopped, which ends the monitor.
 func runtimeIdleStopTick(boot runtimeBoot, supervisor *runtimeSupervisor, monitorLog, stopLog string) bool {
 	var check bytes.Buffer
 	cmd := boot.erunCommand("activity", "stop-ready", "--json", "--tenant", boot.tenant(), "--environment", boot.environment())
@@ -85,24 +78,18 @@ func runtimeIdleStopTick(boot runtimeBoot, supervisor *runtimeSupervisor, monito
 	if exitCode != 0 {
 		return false
 	}
-	// Reset per attempt: empty on success, the latest error on failure.
 	log, err := os.OpenFile(stopLog, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = log.Close() }()
-	// The host is asked to stop first: stop-instances returns at once and the
-	// shutdown follows, leaving time to quit clients gracefully, while quitting
-	// them first would destroy their state for nothing when the stop is refused.
-	// A refused or failed stop leaves everything running, and the next tick
-	// retries; its error stays in idle-stop.log for the desktop until then.
+	// Stop the host before quitting clients: a refused stop then destroys no client state,
+	// and the next tick retries.
 	if err := stopRuntimeCloudHost(boot, supervisor, log); err != nil {
 		_, _ = fmt.Fprintln(log, err)
 		return false
 	}
-	// stop-ready's Fire cleared stop-pending.json, so the JSON it printed is the
-	// only surviving record of why; the stop already happened, so this is
-	// best-effort.
+	// stop-ready's Fire cleared stop-pending.json, so its printed JSON is the only record.
 	record := boot.erunCommand("activity", "record-stop", "--tenant", boot.tenant(), "--environment", boot.environment(), "--source", "pod-monitor", "--state-stdin")
 	record.Stdin = strings.NewReader(checkJSON + "\n")
 	record.Stdout, record.Stderr = log, log
@@ -131,7 +118,6 @@ func appendRuntimeLog(path, line string) {
 	_ = file.Close()
 }
 
-// stopRuntimeCloudHost stops the EC2 instance the environment runs on.
 func stopRuntimeCloudHost(boot runtimeBoot, supervisor *runtimeSupervisor, log io.Writer) error {
 	if _, err := exec.LookPath("aws"); err != nil {
 		return errors.New("aws CLI is not installed; cannot stop cloud host")
@@ -146,17 +132,12 @@ func stopRuntimeCloudHost(boot runtimeBoot, supervisor *runtimeSupervisor, log i
 	return supervisor.run(cmd)
 }
 
-// runtimeAIClientPackages are the npm packages the image installs the AI clients
-// from. Claude Code runs as a native binary inside its package
-// (bin/claude.exe, reached through the /usr/local/bin/claude symlink) and Codex's
-// node launcher starts a native binary vendored inside its package, so a process
-// whose executable lies in one of these is an AI client however it was named.
+// Both AI clients run native binaries inside these npm packages, so the executable path
+// identifies them whatever their process name.
 var runtimeAIClientPackages = []string{"/@anthropic-ai/claude-code/", "/@openai/codex/"}
 
 var runtimeAIClientNames = map[string]bool{"claude": true, "codex": true}
 
-// isRuntimeAIClient matches the AI clients by what actually runs: the executable
-// path, the program name, or the script a node launcher runs.
 func isRuntimeAIClient(exe string, argv []string) bool {
 	for _, pkg := range runtimeAIClientPackages {
 		if strings.Contains(exe, pkg) {
@@ -182,7 +163,6 @@ func isRuntimeAIClient(exe string, argv []string) bool {
 	return false
 }
 
-// runtimeAIClientPIDs lists the AI client processes under procRoot.
 func runtimeAIClientPIDs(procRoot string) []int {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
@@ -208,9 +188,7 @@ func runtimeAIClientPIDs(procRoot string) []int {
 	return pids
 }
 
-// quitRuntimeAIClients asks every running Claude Code and Codex to quit before the
-// host powers off, so their session state is written, waits up to 20s for them,
-// and flushes filesystem buffers.
+// quitRuntimeAIClients lets the clients write session state before power-off, waiting up to 20s.
 func quitRuntimeAIClients(procRoot string, log io.Writer) {
 	pids := runtimeAIClientPIDs(procRoot)
 	for _, pid := range pids {

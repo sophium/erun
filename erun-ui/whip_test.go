@@ -8,15 +8,13 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// whipTestStore mirrors jobsTestStore's shape: one resolvable tenant/
-// environment so eruncommon.ResolveOpen succeeds.
 func whipTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -30,12 +28,6 @@ func whipTestStore(t *testing.T) stubUIStore {
 	}
 }
 
-// TestWhipOneEnvironmentNowNotOpenReportsNotAlive is the red-then-green
-// contract for the environment half of the desktop's whip control: an
-// environment nobody has opened in this session has no MCP edge to push
-// through, so it must be reported not-alive without ever attempting the call
-// -- the same semantics erun-cli's own `erun whip` reports for an unopened
-// environment.
 func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 	called := false
 	app := NewApp(erunUIDeps{
@@ -46,9 +38,9 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return false
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
 			called = true
-			return orchestratorpkg.WhipResult{}, nil
+			return model.WhipResult{}, nil
 		},
 	})
 
@@ -56,7 +48,7 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 	if called {
 		t.Fatal("expected the MCP call to be skipped for an environment with no reachable edge")
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNone || result.Reason != orchestratorpkg.WhipReasonNotAlive {
+	if result.Decision != model.WhipDecisionNone || result.Reason != model.WhipReasonNotAlive {
 		t.Fatalf("got decision=%v reason=%v, want none/not-alive", result.Decision, result.Reason)
 	}
 	if result.Candidate.ID != "erun/ux" {
@@ -64,12 +56,6 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 	}
 }
 
-// TestWhipOneEnvironmentNowStaleForwardReportsUnreachableNotNotAlive is the
-// sibling case jobsReachability already draws for job reads: a stale
-// port-forward (something holds the port, the edge never answers) means a
-// pod may well be running a session behind it, so reporting not-alive there
-// would tell the operator there is nothing to push when the true answer is
-// "cannot tell right now".
 func TestWhipOneEnvironmentNowStaleForwardReportsUnreachableNotNotAlive(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
@@ -82,7 +68,7 @@ func TestWhipOneEnvironmentNowStaleForwardReportsUnreachableNotNotAlive(t *testi
 	})
 
 	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
-	if result.Reason != orchestratorpkg.WhipReasonUnreachable {
+	if result.Reason != model.WhipReasonUnreachable {
 		t.Fatalf("got reason=%v, want unreachable", result.Reason)
 	}
 	if result.Error == "" {
@@ -90,10 +76,6 @@ func TestWhipOneEnvironmentNowStaleForwardReportsUnreachableNotNotAlive(t *testi
 	}
 }
 
-// TestWhipOneEnvironmentNowPushesThroughAReachableEdge is the counterpart
-// green case: a reachable edge is called, and the pod's own decoded
-// WhipResult (not a host-derived one) is what the desktop reports -- the
-// desktop must never re-derive the environment decision locally.
 func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 	var gotEndpoint string
 	app := NewApp(erunUIDeps{
@@ -101,12 +83,12 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (model.WhipResult, error) {
 			gotEndpoint = endpoint
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
-				Reason:    orchestratorpkg.WhipReasonNudge,
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
+				Reason:    model.WhipReasonNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -116,28 +98,21 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 	if gotEndpoint == "" {
 		t.Fatal("expected the pod-backed whip call to be used")
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNudge || !result.Pushed {
+	if result.Decision != model.WhipDecisionNudge || !result.Pushed {
 		t.Fatalf("expected the pod's own decision to pass through untouched, got %+v", result)
 	}
 }
 
-// TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot is the
-// regression test for the "identity was never the pod's to supply" half of
-// Every other return path in whipOneEnvironmentNow already stamps
-// Candidate.ID/Name from the host's own id, but the success path used to
-// trust whatever the pod echoed back verbatim. A pod that decodes to an empty
-// (or wrong) identity must still be reported under the id the desktop itself
-// resolved, never a blank row.
 func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Decision: orchestratorpkg.WhipDecisionNudge,
-				Reason:   orchestratorpkg.WhipReasonNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Decision: model.WhipDecisionNudge,
+				Reason:   model.WhipReasonNudge,
 				Pushed:   true,
 			}, nil
 		},
@@ -147,48 +122,31 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 	if result.Candidate.ID != "erun/ux" || result.Candidate.Name != "erun/ux" {
 		t.Fatalf("expected the host-resolved id to be stamped regardless of the pod's payload, got %+v", result.Candidate)
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNudge || !result.Pushed {
+	if result.Decision != model.WhipDecisionNudge || !result.Pushed {
 		t.Fatalf("expected the pod's own decision to still pass through, got %+v", result)
 	}
 }
 
-// TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive covers the
-// MCP call itself failing (e.g. an old runtime image without the "whip" tool,
-// or -- since the fix below now forwards a real target -- a tenant/
-// environment mismatch the pod's own resolveLocalTarget refused): the
-// environment must be reported as a genuine failure, never folded into
-// WhipReasonNotAlive. The whip tool itself already reports a dead session as
-// a *successful* result carrying that reason, so an error at this call site
-// can only mean the call itself did not work -- erun#1709's "a reason that
-// contradicts the error" defect (a not-alive skip citing an unrelated
-// call-level error, e.g. a missing target) is exactly what this guards.
 func TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{}, errors.New("tool not found")
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{}, errors.New("tool not found")
 		},
 	})
 
 	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
-	if result.Reason != orchestratorpkg.WhipReasonCallFailed || result.Error == "" {
+	if result.Reason != model.WhipReasonCallFailed || result.Error == "" {
 		t.Fatalf("expected a call-failed result naming the failure, got %+v", result)
 	}
-	if result.Reason == orchestratorpkg.WhipReasonNotAlive {
+	if result.Reason == model.WhipReasonNotAlive {
 		t.Fatal("a call-level failure must never be reported as not-alive")
 	}
 }
 
-// TestWhipOneEnvironmentNowForwardsTheResolvedTarget is the plumbing
-// regression test for erun#1709: the desktop used to call the "whip" MCP tool
-// with only {"preview": false}, relying entirely on the pod defaulting to its
-// own bound context. whipOneEnvironmentNow already resolved tenant/environment
-// to reach this edge in the first place, so it must restate them in the call
-// -- the stronger assertion that turns a stale edge pointed at the wrong
-// environment into a named mismatch instead of a silent act on the wrong one.
 func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
 	var gotTenant, gotEnvironment string
 	app := NewApp(erunUIDeps{
@@ -196,9 +154,9 @@ func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, tenant, environment, _, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, tenant, environment, _, _ string) (model.WhipResult, error) {
 			gotTenant, gotEnvironment = tenant, environment
-			return orchestratorpkg.WhipResult{Decision: orchestratorpkg.WhipDecisionNudge, Pushed: true}, nil
+			return model.WhipResult{Decision: model.WhipDecisionNudge, Pushed: true}, nil
 		},
 	})
 
@@ -208,10 +166,6 @@ func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
 	}
 }
 
-// TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport is the desktop's
-// own visible-record contract (root AGENTS.md's "Smooth, Seamless, No Dead
-// Ends"): every configured environment and every live orchestrator appears in
-// the returned report, not just an aggregate "ran" signal.
 func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -221,11 +175,11 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
-				Reason:    orchestratorpkg.WhipReasonNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
+				Reason:    model.WhipReasonNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -260,11 +214,6 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	}
 }
 
-// TestWhipEnvironmentsNowSkipsHostEnvs covers the "enumerates targets
-// that could never have been whipped" finding: a host-type env has no pod and
-// no cluster contact at all (EnvConfig.HasPod), so it can never carry an AI
-// session to push. Reporting it every pass is noise the report should not
-// carry, unlike a real env this transport merely cannot reach right now.
 func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 	store := whipTestStore(t)
 	store.envs["erun/desktop-build"] = config.EnvConfig{
@@ -278,10 +227,10 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -299,10 +248,6 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 	}
 }
 
-// TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments is the regression
-// test for the desktop's own blast-radius bug (erun#1700): an environment not
-// in the requested set must not be pushed at all, not merely omitted from the
-// report after being attempted anyway.
 func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 	store := whipTestStore(t)
 	store.envs["erun/dev"] = config.EnvConfig{
@@ -318,9 +263,9 @@ func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (model.WhipResult, error) {
 			pushedEndpoints = append(pushedEndpoints, endpoint)
-			return orchestratorpkg.WhipResult{Decision: orchestratorpkg.WhipDecisionNudge, Pushed: true}, nil
+			return model.WhipResult{Decision: model.WhipDecisionNudge, Pushed: true}, nil
 		},
 	})
 
@@ -336,10 +281,6 @@ func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 	}
 }
 
-// TestListWhipEnvironmentTargetsSkipsHostEnvs mirrors
-// TestWhipEnvironmentsNowSkipsHostEnvs for the selection surface's own
-// population: a host-type env must not be offered as a selectable target
-// either, since it can never carry a session to push.
 func TestListWhipEnvironmentTargetsSkipsHostEnvs(t *testing.T) {
 	store := whipTestStore(t)
 	store.envs["erun/desktop-build"] = config.EnvConfig{
@@ -358,9 +299,6 @@ func TestListWhipEnvironmentTargetsSkipsHostEnvs(t *testing.T) {
 	}
 }
 
-// TestWhipNowRefusesAnEmptyTargetList is the acceptance-criteria contract
-// (erun#1700): an empty selection is not "all" -- WhipNow must refuse rather
-// than fall back to whipping everything configured.
 func TestWhipNowRefusesAnEmptyTargetList(t *testing.T) {
 	app := NewApp(erunUIDeps{store: whipTestStore(t)})
 	if _, err := app.WhipNow(nil); err == nil {
@@ -371,9 +309,6 @@ func TestWhipNowRefusesAnEmptyTargetList(t *testing.T) {
 	}
 }
 
-// TestWhipNowRefusesAnUnknownTargetKind guards the wire contract between the
-// frontend and this method: a target kind neither transport recognizes must
-// fail loudly rather than being silently dropped from the push.
 func TestWhipNowRefusesAnUnknownTargetKind(t *testing.T) {
 	app := NewApp(erunUIDeps{store: whipTestStore(t)})
 	if _, err := app.WhipNow([]uiWhipTargetRef{{Kind: "bogus", ID: "x"}}); err == nil {
@@ -381,11 +316,6 @@ func TestWhipNowRefusesAnUnknownTargetKind(t *testing.T) {
 	}
 }
 
-// TestWhipTargetsListsEnvironmentsAndOrchestrators is the selection surface's
-// whole-population contract: WhipTargets must offer exactly the environments
-// listWhipEnvironmentTargets enumerates and exactly the orchestrators
-// listWhipOrchestratorTargets enumerates, with IDs that round-trip through
-// WhipNow's own uiWhipTargetRef.
 func TestWhipTargetsListsEnvironmentsAndOrchestrators(t *testing.T) {
 	app := NewApp(erunUIDeps{store: whipTestStore(t)})
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "Alive", startedAt: time.Now()}
@@ -407,24 +337,18 @@ func TestWhipTargetsListsEnvironmentsAndOrchestrators(t *testing.T) {
 	}
 }
 
-// TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision pins the
-// inverse of orchestratorPacingDecisionFromWhip/orchestratorPacingReasonFromWhip
-// used to fold an orchestrator outcome into the shared eruncommon.WhipResult
-// shape: every decision/reason pair the reconciler can produce must survive
-// the round trip, or WhipNow's report would misname an orchestrator's actual
-// outcome.
 func TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision(t *testing.T) {
 	cases := []struct {
 		decision orchestratorPacingDecision
 		reason   orchestratorPacingReason
-		want     orchestratorpkg.WhipDecision
+		want     model.WhipDecision
 		alive    bool
 		pushed   bool
 	}{
-		{orchestratorPacingNudge, orchestratorPacingReasonNudge, orchestratorpkg.WhipDecisionNudge, true, true},
-		{orchestratorPacingCap, orchestratorPacingReasonCapCrossed, orchestratorpkg.WhipDecisionCap, true, false},
-		{orchestratorPacingNone, orchestratorPacingReasonNotAlive, orchestratorpkg.WhipDecisionNone, false, false},
-		{orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped, orchestratorpkg.WhipDecisionNone, true, false},
+		{orchestratorPacingNudge, orchestratorPacingReasonNudge, model.WhipDecisionNudge, true, true},
+		{orchestratorPacingCap, orchestratorPacingReasonCapCrossed, model.WhipDecisionCap, true, false},
+		{orchestratorPacingNone, orchestratorPacingReasonNotAlive, model.WhipDecisionNone, false, false},
+		{orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped, model.WhipDecisionNone, true, false},
 	}
 	for _, tc := range cases {
 		result := orchestratorWhipOutcomeToResult(orchestratorWhipOutcome{id: "o1", name: "One", decision: tc.decision, reason: tc.reason})
@@ -440,40 +364,36 @@ func TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision(t *testing.T) {
 	}
 }
 
-// TestWhipResultToUIRendersEveryOutcome pins the UI facade's rendering rules:
-// a pushed nudge reads "pushed", a capped target reads "capped" with its own
-// recovery text, and a skip always carries a human-readable reason so a
-// skipped row never reaches the frontend blank.
 func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
-	pushed := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux"},
-		Decision:  orchestratorpkg.WhipDecisionNudge,
+	pushed := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux"},
+		Decision:  model.WhipDecisionNudge,
 		Pushed:    true,
 	})
 	if pushed.Outcome != "pushed" || pushed.Kind != "environment" {
 		t.Fatalf("got %+v, want pushed/environment", pushed)
 	}
 
-	capped := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetOrchestrator, ID: "o1", Name: "One"},
-		Decision:  orchestratorpkg.WhipDecisionCap,
+	capped := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetOrchestrator, ID: "o1", Name: "One"},
+		Decision:  model.WhipDecisionCap,
 	})
 	if capped.Outcome != "capped" || capped.Reason == "" {
 		t.Fatalf("got %+v, want capped with a non-empty reason", capped)
 	}
 
-	skipped := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNone,
-		Reason:    orchestratorpkg.WhipReasonNotAlive,
+	skipped := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNone,
+		Reason:    model.WhipReasonNotAlive,
 	})
 	if skipped.Outcome != "skipped" || !strings.Contains(skipped.Reason, "not alive") {
 		t.Fatalf("got %+v, want skipped naming not-alive", skipped)
 	}
 
-	failedPush := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNudge,
+	failedPush := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNudge,
 		Pushed:    false,
 		Error:     "writing nudge text: boom",
 	})
@@ -482,17 +402,11 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 	}
 }
 
-// TestWhipResultToUIRendersACallFailureAsFailed is the erun#1709 regression
-// test for the UI facade: a WhipReasonCallFailed result (the tool call itself
-// erroring out, never the tool reporting a dead session) must render as
-// "failed", not fold into whipSkipReasonText's "not alive" wording the way a
-// genuine skip does. Split out from TestWhipResultToUIRendersEveryOutcome to
-// keep that test's cyclomatic complexity under the repo's lint threshold.
 func TestWhipResultToUIRendersACallFailureAsFailed(t *testing.T) {
-	failedCall := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNone,
-		Reason:    orchestratorpkg.WhipReasonCallFailed,
+	failedCall := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNone,
+		Reason:    model.WhipReasonCallFailed,
 		Error:     "tenant/environment not resolved",
 	})
 	if failedCall.Outcome != "failed" || failedCall.Error == "" {

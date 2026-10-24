@@ -11,7 +11,7 @@ const (
 	DefaultGHCRRegistryBaseURL      = "https://ghcr.io"
 )
 
-// Resolved returns a fully-specified config, applying registry defaults to any unset field.
+// Resolved fills unset fields with registry defaults.
 func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 	resolved := RuntimeRegistryConfig{
 		Namespace:  strings.TrimSpace(c.Namespace),
@@ -31,11 +31,7 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		case namespaceIsGHCR(resolved.Namespace):
 			resolved.BaseURL = DefaultGHCRRegistryBaseURL
 		case isRegistryHost:
-			// A namespace that names its own registry host is served by that host,
-			// not by Docker Hub; defaulting to the Hub sent the listing to a
-			// repository named after the host and answered 404. That host may speak
-			// plain HTTP only (an insecure in-cluster registry), so honor Insecure
-			// rather than always assuming TLS.
+			// A namespace naming its own host is served by it, not Docker Hub, possibly over plain HTTP.
 			scheme := "https://"
 			if resolved.Insecure {
 				scheme = "http://"

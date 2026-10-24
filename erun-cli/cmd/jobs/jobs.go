@@ -4,28 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
-// NewJobsCmd builds `erun jobs`: the platform-backed view of what agents and
-// orchestrators are working on right now, and what recently finished. It
-// answers the question the environment-scoped `erun exec job` verbs cannot -- those observe work in
-// one environment, this observes the tenant's whole queue, including work that
-// never entered an environment at all.
-//
-// It is deliberately its own top-level group rather than a verb on `erun exec
-// job`: that group is scoped to one environment's own jobs, and a platform
-// queue read is not. `erun job` is the deprecated alias for that group and is
-// on its way out, so nothing new is added under it.
+// NewJobsCmd builds `erun jobs`, the platform-backed view of the tenant's whole queue.
 func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
-	cmd := shared.NewCommandGroup(
+	cmd := clicmd.NewCommandGroup(
 		"jobs",
 		"See what agents and orchestrators are working on, and what recently finished",
 		newJobsListCmd(store, &alias, deps),
@@ -38,7 +29,7 @@ func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobr
 }
 
 func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobListParams
+	var params model.JobListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List jobs: what is being worked on now, and what recently finished",
@@ -50,7 +41,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		SilenceUsage: true,
 		Example:      "  erun jobs list --status RUNNING\n  erun jobs list --issue sophium/erun#2109",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			jobs, err := jobspkg.RunJobList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -59,7 +50,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformJobList(ctx, jobs); err != nil {
 					return err
 				}
@@ -72,7 +63,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Filter by the issue the work belongs to, e.g. owner/repo#2109")
 	cmd.Flags().StringVar(&params.Scope, "scope", "", "Filter by the scope a job claims")
 	cmd.Flags().StringVar(&params.ActorID, "actor", "", "Filter by the actor holding the job")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -84,7 +75,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			job, err := jobspkg.RunJobShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -93,7 +84,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs show planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformJobDetail(ctx, job); err != nil {
 					return err
 				}
@@ -101,12 +92,12 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 			return ctx.WriteResult(job)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobClaimParams
+	var params model.JobClaimParams
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Record that this actor is starting a piece of work",
@@ -126,7 +117,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 			"  erun jobs start --type triage --status PLANNED --issue sophium/erun#2109 --scope sophium/erun#2109 \\\n" +
 			"    --summary \"planning the jobs claim fix\" --actor erun/ideas",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			job, err := jobspkg.RunJobClaim(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -135,7 +126,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs start planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Started job %s (%s, %s).\n", job.JobID, job.JobType, job.Status); err != nil {
 					return err
 				}
@@ -152,12 +143,12 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "The issue this work belongs to, e.g. owner/repo#2109")
 	cmd.Flags().StringVar(&params.Scope, "scope", "", "What this job claims, so a second actor is told who holds it")
 	cmd.Flags().StringVar(&params.LocalJobID, "local-job-id", "", "The in-pod job id this mirrors, when there is one")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobUpdateParams
+	var params model.JobUpdateParams
 	cmd := &cobra.Command{
 		Use:   "finish <job-id>",
 		Short: "Report a job's progress or its outcome",
@@ -171,7 +162,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			"  erun jobs finish job_01H... --status RUNNING   # the planned work has begun\n" +
 			"  erun jobs finish job_01H... --summary \"waiting on the merge-queue build\"",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			params.JobID = args[0]
 			job, err := jobspkg.RunJobUpdate(ctx, store, *alias, params, deps)
 			if err != nil {
@@ -181,7 +172,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs finish planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Updated job %s (%s).\n", job.JobID, job.Status); err != nil {
 					return err
 				}
@@ -192,11 +183,11 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	cmd.Flags().StringVar(&params.Status, "status", "", "Move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it")
 	cmd.Flags().StringVar(&params.Summary, "summary", "", "Refresh what the job is doing, in prose")
 	cmd.Flags().StringVar(&params.LocalJobID, "local-job-id", "", "Record the in-pod job id this mirrors")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) error {
+func writePlatformJobList(ctx core.Context, jobs []model.PlatformJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -209,10 +200,7 @@ func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) e
 	return nil
 }
 
-// writePlatformJobLine renders one row: what is being done, by whom, and how long it
-// has been going. The summary is the row's whole point, so it leads; the job
-// id trails so it can be copied into `erun jobs show`.
-func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) error {
+func writePlatformJobLine(ctx core.Context, job model.PlatformJob) error {
 	suffix := ""
 	if strings.TrimSpace(job.IssueRef) != "" {
 		suffix += " issue=" + job.IssueRef
@@ -225,7 +213,7 @@ func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) erro
 	return err
 }
 
-func writePlatformJobDetail(ctx core.Context, job platformclient.PlatformJob) error {
+func writePlatformJobDetail(ctx core.Context, job model.PlatformJob) error {
 	ended := "-"
 	if job.EndedAt != nil {
 		ended = job.EndedAt.UTC().Format("2006-01-02T15:04:05Z")

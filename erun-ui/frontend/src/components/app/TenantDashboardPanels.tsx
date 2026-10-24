@@ -97,11 +97,7 @@ function AuditPanel({ data }: { data: TenantDashboardData }): React.ReactElement
   );
 }
 
-// Subject is rendered on its own column rather than folded into the
-// username display: it is the one value that reliably joins
-// this erun identity against the same person's row in the console's
-// identity-administration Users list, which lists IdP identities rather
-// than erun users and previously had nowhere to show it either.
+// Subject gets its own column: it joins this identity to the console's IdP Users list.
 function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactElement {
   return (
     <DataTable headers={['Username', 'Roles', 'Subject']}>
@@ -217,11 +213,7 @@ function displayUsername(user: UITenantDashboardUser): string {
   return 'Unknown user';
 }
 
-// formatRosterRoles renders a roster row's roles. GET /v1/users reports the
-// tenant's users without their roles, so an absent list here means the roles
-// were not reported -- not that the user has none. Claiming the latter would
-// state something false about a colleague; only the caller's own row carries
-// roles, which whoami answered with.
+// GET /v1/users omits roles, so an absent list means unreported, not none.
 function formatRosterRoles(roles: string[] | undefined): string {
   const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
   return names.length > 0 ? names.join(', ') : 'Not reported';

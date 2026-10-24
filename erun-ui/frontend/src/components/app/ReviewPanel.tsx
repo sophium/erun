@@ -120,8 +120,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   const controller = useController();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
-  // Register the tree's scroll container so the diff→tree scrollspy can keep
-  // the active node visible as the diff scrolls.
+  // Lets the diff-to-tree scrollspy keep the active node visible.
   const setTreeContainer = React.useCallback(
     (element: HTMLDivElement | null) => {
       controller.setTreeContainer(element);
@@ -167,8 +166,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   );
 }
 
-// Lets a contributor audit the same work in both the env repo and the ERun
-// contribute-clone without leaving the review panel.
+// Audits the same work in the env repo and the ERun contribute-clone.
 function DiffSourceControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((state) => state.selection.selected);
@@ -297,10 +295,7 @@ function ReviewBoundaryTrack({
   );
 }
 
-// ReviewRangeControl is per-environment: ReviewBase, ReviewCommits, Scope and
-// SelectedCommit are all per-repository, so a commit list or a base commit
-// shared across two unrelated checkouts would be a value that means nothing
-// (#1178).
+// Per-environment: base and commits are per-repository.
 function ReviewRangeControl({
   target,
   showEnvLabel,
@@ -401,11 +396,7 @@ function ReviewBoundaryButton({
   );
 }
 
-// ChangedFilesHeader is the panel's single header, so its counts are the total
-// across every environment shown. Summed rather than taken from one env: with a
-// cross-env session the header describes the whole panel (#1178).
-// ReviewRangeControls renders one range control per environment shown, since
-// each has its own commit list.
+// ReviewRangeControls renders one range control per environment, each with its own commits.
 function ReviewRangeControls(): React.ReactElement {
   const targets = useAppSelector(selectReviewTargets);
   const multi = targets.length > 1;

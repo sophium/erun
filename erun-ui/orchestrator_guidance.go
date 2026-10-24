@@ -8,29 +8,20 @@ import (
 	"strings"
 )
 
-// orchestratorGuidanceLayerRole and orchestratorGuidanceLayerShared are the two
-// layers RevealOrchestratorGuidance and OrchestratorGuidancePaths resolve: the
-// operator's own standing role (CLAUDE.<id>.md, seeded once and never
-// rewritten) and the one contract every orchestrator obeys (CLAUDE.md,
-// rewritten by erun on every launch). See orchestratorRoleFileSeed and
-// orchestratorClaudeMd for what each one carries.
+// The role layer (CLAUDE.<id>.md) is seeded once; the shared layer (CLAUDE.md) is
+// rewritten on every launch.
 const (
 	orchestratorGuidanceLayerRole   = "role"
 	orchestratorGuidanceLayerShared = "shared"
 )
 
-// orchestratorGuidancePaths is the JSON-safe, resolved view of where an
-// orchestrator's two guidance layers live on this host, so the desktop can
-// show the operator the convention (and that `<id>` is not the display name)
-// instead of a bare filename.
 type orchestratorGuidancePaths struct {
 	Role   string `json:"role"`
 	Shared string `json:"shared"`
 }
 
-// orchestratorGuidanceFilePath maps a layer name to its file, resolved with an
-// exact filepath.Join and never a glob, so a hand-edited config.yaml id cannot
-// widen what gets read or opened.
+// orchestratorGuidanceFilePath uses an exact Join, never a glob, so a hand-edited
+// id cannot widen what is opened.
 func orchestratorGuidanceFilePath(dir, id, layer string) (string, error) {
 	switch strings.TrimSpace(layer) {
 	case orchestratorGuidanceLayerRole:
@@ -42,9 +33,7 @@ func orchestratorGuidanceFilePath(dir, id, layer string) (string, error) {
 	}
 }
 
-// OrchestratorGuidancePaths resolves the two guidance layers for a persisted
-// orchestrator, without creating the workspace or seeding anything —
-// OrchestratorDialog calls it to label each entry with its resolved path.
+// OrchestratorGuidancePaths resolves the guidance paths without creating or seeding anything.
 func (a *App) OrchestratorGuidancePaths(id string) orchestratorGuidancePaths {
 	id = strings.TrimSpace(id)
 	dir := orchestratorsRoot()
@@ -53,12 +42,8 @@ func (a *App) OrchestratorGuidancePaths(id string) orchestratorGuidancePaths {
 	return orchestratorGuidancePaths{Role: role, Shared: shared}
 }
 
-// RevealOrchestratorGuidance opens one of an orchestrator's two guidance layers
-// in the operator's chosen host IDE — the same vscode/intellij choice
-// OpenHostIDE already offers, so this introduces no second editor setting. It
-// ensures the shared workspace and seeds this orchestrator's role file first
-// (ensureOrchestratorWorkspaceFor), so revealing the role layer before the
-// orchestrator has ever launched still opens a real file rather than nothing.
+// RevealOrchestratorGuidance opens a guidance layer in the host IDE, seeding the
+// role file first so it always exists.
 func (a *App) RevealOrchestratorGuidance(id, layer, ide string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {

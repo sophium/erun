@@ -6,19 +6,14 @@ import (
 	"strings"
 )
 
-// AISessionHookPayload is the part of an AI tool's hook payload the model
-// reads. A hook carries the conversation the session is actually on as
-// `session_id`, on every event; nothing else is needed, because which model
-// event to record is a property of the settings entry the command is bound to
-// rather than of the payload.
+// AISessionHookPayload is the part of a hook payload the model reads; the
+// event kind comes from the settings entry, not the payload.
 type AISessionHookPayload struct {
 	SessionID string `json:"session_id"`
 }
 
-// AISessionHookSessionID extracts the session id a hook invocation reports.
-// A payload that is not JSON, or that carries no session id, is refused rather
-// than defaulted: the session id is the key the record is filed under, so a
-// guessed one would attribute the event to a session that did not send it.
+// AISessionHookSessionID returns the payload's session id, refusing rather than
+// guessing, since the id is the record's key.
 func AISessionHookSessionID(payload []byte) (string, error) {
 	trimmed := strings.TrimSpace(string(payload))
 	if trimmed == "" {

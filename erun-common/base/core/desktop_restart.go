@@ -10,54 +10,30 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// The desktop app's Restart button (erun-ui's App.RestartApp) is the only
-// place that knows how to hand a rebuild+restart off correctly: it records
-// which orchestrator the operator restarted from, relaunches a fresh copy of
-// itself, and quits — all inside the one process that holds the open sessions.
-// A CLI-triggered restart therefore cannot reimplement the restart; it can
-// only ask the running desktop to run its own RestartApp. desktopControlMarkerFileName is where the running desktop
-// records how to reach itself for exactly that ask, and DesktopControlPath is
-// the endpoint RestartDesktopApp calls once the marker resolves to a live pid.
+// A CLI restart cannot reimplement the desktop's RestartApp; it finds the running
+// desktop through its control marker and asks it over loopback HTTP.
 const (
 	desktopControlMarkerFileName = "desktop-control.json"
-	// DesktopControlPath is the loopback HTTP path the desktop's control
-	// server listens on for a restart trigger. Exported so erun-ui, which owns
-	// the listener, and erun-common, which owns the caller, agree on it
-	// without one importing the other.
+	// DesktopControlPath is shared by erun-ui (listener) and erun-common (caller).
 	DesktopControlPath = "/__erun_restart"
-	// DesktopControlPlanPath is where a dry run asks what a restart would
-	// reopen — and it is a path of its own rather than a flag on the one above
-	// because of what a desktop that predates it would do with a flag. Unknown
-	// JSON fields are ignored, so a `dryRun` flag sent to an older build would
-	// be read as an ordinary restart: the desktop would restart itself and
-	// answer exactly what a restart answers, turning the one command whose
-	// whole promise is "nothing is performed" into the action it promised not
-	// to take. An unserved path cannot be misread that way. The two answer
-	// from the same process and the same state, so the plan a dry run reports
-	// and the restart it describes still cannot disagree.
+	// DesktopControlPlanPath is a separate path, not a dryRun flag: an older desktop
+	// would ignore the flag and actually restart, but answers an unknown path with 404.
 	DesktopControlPlanPath = DesktopControlPath + "/plan"
 )
 
-// DesktopControlMarker is what a running desktop app (erun-ui) records at
-// startup and removes at a clean shutdown, so an external trigger can find it
-// and verify it before acting. This package owns the contract — the shape, its
-// location, reading it, and the liveness probe that tells a live record from a
-// stale one — while the desktop owns the record itself: it is the only thing
-// that writes one, and it keeps the rule that a record naming a live process is
-// never overwritten or removed by another instance. A marker left behind by a
-// crash still names a pid, which is exactly what lets a stale one be told apart
-// from a live one: see DesktopProcessAlive.
+// DesktopControlMarker is written by a running desktop at startup and removed on
+// clean shutdown. A crash leaves a pid that DesktopProcessAlive tells apart from a live one.
 type DesktopControlMarker struct {
 	PID           int   `json:"pid"`
 	ControlPort   int   `json:"controlPort"`
 	StartedAtUnix int64 `json:"startedAtUnix"`
 }
 
-// DefaultDesktopControlMarkerPath is the one location every erun-app instance
-// writes to and every restart trigger reads from, beside the desktop's other
-// per-installation state under UserConfigDir()/ERun.
+// DefaultDesktopControlMarkerPath is the marker's location under UserConfigDir()/ERun.
 func DefaultDesktopControlMarkerPath() string {
 	dir := DefaultDesktopIdentityDir()
 	if dir == "" {
@@ -66,10 +42,7 @@ func DefaultDesktopControlMarkerPath() string {
 	return filepath.Join(dir, desktopControlMarkerFileName)
 }
 
-// ReadDesktopControlMarker reads what a running (or previously running)
-// desktop app recorded. The caller decides what an unreadable or missing
-// marker means; it usually means no desktop app has ever started, or one
-// exited cleanly and removed its own marker.
+// ReadDesktopControlMarker reads a desktop's marker; callers decide what a missing one means.
 func ReadDesktopControlMarker(path string) (DesktopControlMarker, error) {
 	if path == "" {
 		return DesktopControlMarker{}, fmt.Errorf("desktop control marker path is unset")
@@ -88,97 +61,28 @@ func ReadDesktopControlMarker(path string) (DesktopControlMarker, error) {
 	return marker, nil
 }
 
-// DesktopRestartStatus is the outcome of one RestartDesktopApp call, reported
-// back to the caller so success, refusal, and failure are never conflated. See
-// root AGENTS.md "Smooth, Seamless, No Dead Ends": an action that silently did
-// nothing is the exact failure this exists to prevent.
-type DesktopRestartStatus string
-
-const (
-	// DesktopRestartWouldRestart is the dry-run answer: a live target resolved
-	// and would have been asked to restart.
-	DesktopRestartWouldRestart DesktopRestartStatus = "would-restart"
-	// DesktopRestartRestarted means the running desktop app accepted the
-	// restart request and is now relaunching itself.
-	DesktopRestartRestarted DesktopRestartStatus = "restarted"
-	// DesktopRestartRefused means no safe target could be resolved and
-	// verified, so nothing was attempted. This is the pid-does-not-resolve
-	// case root AGENTS.md calls out: a relauncher armed against a dead target
-	// kills nothing and a following relaunch just re-activates what was
-	// already there, which reads exactly like a restart that did not take.
-	DesktopRestartRefused DesktopRestartStatus = "refused"
-	// DesktopRestartFailed means a live target was resolved and reached, but
-	// it reported that the restart itself did not succeed.
-	DesktopRestartFailed DesktopRestartStatus = "failed"
-)
-
-// DesktopRestartOutcome is RestartDesktopApp's result: what was decided, why,
-// and which target it decided about.
-type DesktopRestartOutcome struct {
-	Status      DesktopRestartStatus `json:"status"`
-	Reason      string               `json:"reason,omitempty"`
-	PID         int                  `json:"pid,omitempty"`
-	ControlPort int                  `json:"controlPort,omitempty"`
-	// Preview is the dry run's answer: every orchestrator the restart would
-	// reopen, and the ones among them the next launch would refuse to reopen
-	// (see DesktopRestartReopen.Notice). Empty for a real restart — by the time
-	// one is asked for, it has happened.
-	Preview []DesktopRestartReopen `json:"preview,omitempty"`
-	// PreviewUnavailable says a dry run resolved and verified a live target but
-	// could not read the plan from it. The dry run still reports
-	// would-restart — that much the marker and the liveness probe established —
-	// and this is what keeps the missing half from reading as "nothing would be
-	// refused", which is the one thing an absent preview must never say.
-	PreviewUnavailable string `json:"previewUnavailable,omitempty"`
-}
-
-// DesktopRestartRequest is what a trigger sends the running desktop: which
-// orchestrator the restart is resuming. Which QUESTION is being asked is the
-// path it is sent to, not a field of this (see DesktopControlPlanPath).
+// DesktopRestartRequest names the orchestrator being resumed; the path selects the question.
 type DesktopRestartRequest struct {
 	OrchestratorID string `json:"orchestratorId"`
 }
 
-// DesktopRestartReopen is one orchestrator a restart reopens. Its background
-// agent keeps running through the restart, so it comes back on whatever
-// conversation the agent is on.
-type DesktopRestartReopen struct {
-	OrchestratorID string `json:"orchestratorId"`
-	// Notice is set when the launch after the restart would refuse to reopen
-	// this orchestrator, naming why. Empty is the ordinary case, and the only
-	// one that needs no reporting.
-	Notice string `json:"notice,omitempty"`
-}
-
-// DesktopRestartResponse is what the desktop answers either trigger with:
-// whether it did the thing, why not when it did not, and — on the plan path —
-// the plan it was asked for. One shape serves both because one process answers
-// both from one piece of state; each path fills the fields it has an answer for.
+// DesktopRestartResponse answers both the restart and the plan path.
 type DesktopRestartResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-	// Preview is the plan: every orchestrator a restart triggered now would
-	// reopen, in the order the open set records them.
-	Preview []DesktopRestartReopen `json:"preview,omitempty"`
+	OK      bool                         `json:"ok"`
+	Error   string                       `json:"error,omitempty"`
+	Preview []model.DesktopRestartReopen `json:"preview,omitempty"`
 }
 
-// DesktopRestartDeps lets RestartDesktopApp's target resolution and transport
-// be substituted in tests without a real running desktop process or a real OS
-// pid to probe.
+// DesktopRestartDeps is RestartDesktopApp's test seam.
 type DesktopRestartDeps struct {
 	MarkerPath   string
 	ReadMarker   func(string) (DesktopControlMarker, error)
 	ProcessAlive func(int) bool
-	// Post asks the desktop at controlPort to restart itself, returning its
-	// answer separately from a transport error (could not even reach it).
+	// Post returns the desktop's answer separately from a transport error.
 	Post func(ctx context.Context, controlPort int, orchestratorID string) (DesktopRestartResponse, error)
-	// Plan asks the desktop at controlPort what a restart would reopen, over
-	// the path reserved for that question (see DesktopControlPlanPath).
 	Plan func(ctx context.Context, controlPort int, orchestratorID string) (DesktopRestartResponse, error)
 }
 
-// DefaultDesktopRestartDeps wires the real marker file, the real OS process
-// check, and the real HTTP calls to the desktop's two control endpoints.
 func DefaultDesktopRestartDeps() DesktopRestartDeps {
 	return DesktopRestartDeps{
 		MarkerPath:   DefaultDesktopControlMarkerPath(),
@@ -189,51 +93,24 @@ func DefaultDesktopRestartDeps() DesktopRestartDeps {
 	}
 }
 
-// RestartDesktopApp triggers the one restart mechanism the desktop app owns
-// (App.RestartApp) from outside its process: resolve the running desktop from
-// its control marker, verify it is actually alive before touching anything,
-// then — unless dryRun — ask it to restart itself. It never spawns a second
-// desktop instance itself and never signals a pid directly: the running
-// desktop is the only thing that can correctly write the hand-off, relaunch a
-// fresh copy, and quit, so this always defers to that single mechanism rather
-// than growing a second one beside it.
-//
-// A dry run asks that same process the one question that is still actionable
-// BEFORE it restarts: which orchestrators it would reopen, and which of them
-// the next launch would refuse to reopen. The
-// answer is the outcome's Preview, and it comes from the desktop rather than
-// from this caller reading state back for the same reason the restart does: the
-// resolution is the desktop's, and a second implementation of it here would be
-// one more thing that can disagree with what the restart then does. Not
-// being able to read it is reported (see PreviewUnavailable) rather than
-// rendered as an empty plan, and it is never fallen back on to a restart: the
-// question travels a path of its own so that a desktop too old to answer it
-// refuses the request instead of performing the action the dry run forbids
-// (see DesktopControlPlanPath).
-func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestratorID string, dryRun bool) DesktopRestartOutcome {
+// RestartDesktopApp asks the running desktop to restart itself after verifying it
+// is alive; it never spawns or signals a process itself. A dry run asks the plan
+// path instead and never falls back to a restart.
+func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestratorID string, dryRun bool) model.DesktopRestartOutcome {
 	marker, err := deps.ReadMarker(deps.MarkerPath)
 	if err != nil {
 		reason := "no desktop app is currently running"
 		if !os.IsNotExist(err) {
-			// A marker that exists but cannot be read or parsed is a genuine
-			// problem (corrupt state, a permissions issue), not the ordinary
-			// "nothing running" case, so its detail is worth keeping.
+			// An unreadable marker is a real problem, unlike a missing one.
 			reason = fmt.Sprintf("its restart control record could not be read (%v)", err)
 		}
-		return DesktopRestartOutcome{Status: DesktopRestartRefused, Reason: reason}
+		return model.DesktopRestartOutcome{Status: model.DesktopRestartRefused, Reason: reason}
 	}
 	if !deps.ProcessAlive(marker.PID) {
-		// The record names a process that is gone, so it identifies no desktop
-		// this call could ask to restart — and because a desktop that never
-		// took the record over publishes no endpoint, there is nothing else to
-		// resolve it by. Refusing is therefore the honest answer, but a bare
-		// "the record is stale" is a dead end: the record is not what the
-		// operator acts on. A record naming a dead pid is free, so reopening
-		// the desktop app claims it cleanly and the trigger works again, and
-		// the reason says so rather than leaving them with no path back to a
-		// rebuild.
-		return DesktopRestartOutcome{
-			Status: DesktopRestartRefused,
+		// A marker naming a dead pid identifies nothing to ask; reopening the desktop
+		// reclaims it, so the reason says that.
+		return model.DesktopRestartOutcome{
+			Status: model.DesktopRestartRefused,
 			Reason: fmt.Sprintf(
 				"the desktop app recorded at pid %d is not running; the record is stale — quit and reopen the desktop app so it records a fresh one",
 				marker.PID),
@@ -242,12 +119,9 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 		}
 	}
 	if dryRun {
-		// The plan is a separate question on a separate path, so the only thing
-		// this branch can do is read it or say it could not. It never falls
-		// through to the restart: a dry run that restarted because its question
-		// was not understood would be the action it promised not to take.
+		// Never fall through to the restart from a dry run.
 		response, err := deps.Plan(ctx, marker.ControlPort, orchestratorID)
-		outcome := DesktopRestartOutcome{Status: DesktopRestartWouldRestart, PID: marker.PID, ControlPort: marker.ControlPort}
+		outcome := model.DesktopRestartOutcome{Status: model.DesktopRestartWouldRestart, PID: marker.PID, ControlPort: marker.ControlPort}
 		switch {
 		case err != nil:
 			outcome.PreviewUnavailable = restartPlanUnavailable(err.Error())
@@ -260,46 +134,33 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 	}
 	response, err := deps.Post(ctx, marker.ControlPort, orchestratorID)
 	if err != nil {
-		return DesktopRestartOutcome{
-			Status:      DesktopRestartRefused,
+		return model.DesktopRestartOutcome{
+			Status:      model.DesktopRestartRefused,
 			Reason:      fmt.Sprintf("could not reach the running desktop app's restart control endpoint: %v", err),
 			PID:         marker.PID,
 			ControlPort: marker.ControlPort,
 		}
 	}
 	if !response.OK {
-		return DesktopRestartOutcome{Status: DesktopRestartFailed, Reason: response.Error, PID: marker.PID, ControlPort: marker.ControlPort}
+		return model.DesktopRestartOutcome{Status: model.DesktopRestartFailed, Reason: response.Error, PID: marker.PID, ControlPort: marker.ControlPort}
 	}
-	return DesktopRestartOutcome{Status: DesktopRestartRestarted, PID: marker.PID, ControlPort: marker.ControlPort}
+	return model.DesktopRestartOutcome{Status: model.DesktopRestartRestarted, PID: marker.PID, ControlPort: marker.ControlPort}
 }
 
-// restartPlanUnavailable states, once, that a dry run could not read the plan —
-// the headline naming what could not be read, the cause after it. One wording
-// for both ways the question can go unanswered, because an operator reading it
-// needs to know which half is missing, not which side of the wire dropped it.
 func restartPlanUnavailable(cause string) string {
 	return "could not ask the running desktop app which orchestrators it would reopen: " + cause
 }
 
-// postDesktopRestart is the real Post: one POST to the desktop's own loopback
-// control server, which is the only thing in a position to call its own
-// App.RestartApp.
 func postDesktopRestart(ctx context.Context, controlPort int, orchestratorID string) (DesktopRestartResponse, error) {
 	return postDesktopControl(ctx, controlPort, DesktopControlPath, orchestratorID)
 }
 
-// postDesktopRestartPlan is the real Plan: the same call to the same server, on
-// the path reserved for the question that must never be mistaken for the
-// restart (see DesktopControlPlanPath).
 func postDesktopRestartPlan(ctx context.Context, controlPort int, orchestratorID string) (DesktopRestartResponse, error) {
 	return postDesktopControl(ctx, controlPort, DesktopControlPlanPath, orchestratorID)
 }
 
-// postDesktopControl puts one request to the desktop's control server at path
-// and decodes its answer. A path the desktop does not serve is reported as
-// exactly that — the one response a request sent to reach a build that predates
-// it will get, and the reason it is safe to send a dry run to a desktop this
-// command has never met.
+// postDesktopControl reports an unserved path as such: that is how an older
+// desktop safely refuses a dry run.
 func postDesktopControl(ctx context.Context, controlPort int, path, orchestratorID string) (DesktopRestartResponse, error) {
 	body, err := json.Marshal(DesktopRestartRequest{OrchestratorID: orchestratorID})
 	if err != nil {

@@ -5,164 +5,73 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
-// A doctor docker-storage read or prune acts on exactly one docker daemon, and
-// which daemon that is decides whether the run means anything: an environment's
-// build images live in the daemon its builds run in, so a prune of any other
-// daemon reclaims nothing the build needs while still printing docker's own
-// success. The daemon is therefore resolved from the environment rather than
-// assumed from a container name, and every line the doctor prints about docker
-// storage names the daemon it came from.
-
-// DoctorDockerDaemonKind names the daemon a doctor docker-storage read or prune
-// acts on.
-type DoctorDockerDaemonKind string
-
-const (
-	// DoctorDockerDaemonDindSidecar is the erun-dind sidecar in the
-	// environment's runtime pod: the daemon every image build in this
-	// environment runs in, and so the one whose stores hold its build images.
-	DoctorDockerDaemonDindSidecar DoctorDockerDaemonKind = "dind-sidecar"
-
-	// DoctorDockerDaemonHost is the docker daemon on the machine the doctor
-	// runs on. A host environment is a worktree on this machine with no pod,
-	// so this is the daemon its builds run against.
-	DoctorDockerDaemonHost DoctorDockerDaemonKind = "host"
-
-	// DoctorDockerDaemonNone means no daemon holds this environment's build
-	// images at all, with Where saying why.
-	DoctorDockerDaemonNone DoctorDockerDaemonKind = "none"
-)
-
-// DoctorDockerDaemon is the daemon a doctor docker-storage read or prune acts
-// on, resolved from the target environment.
-type DoctorDockerDaemon struct {
-	Kind DoctorDockerDaemonKind
-	// Container is the pod container to exec into. Empty for a daemon this
-	// process reaches directly (Kind host).
-	Container string
-	// Label names this daemon inside a report line, e.g. "the erun-dind sidecar".
-	Label string
-	// Where says which daemon this is and why it is the one that matters — the
-	// container and deployment for a sidecar, this machine for a host daemon —
-	// or, when Kind is none, why no daemon holds this environment's build
-	// images. It is written to be read on its own, as the reason a requested
-	// prune cannot run.
-	Where string
-}
-
-// DoctorDockerDaemonUnavailableError reports that the requested docker-storage
-// work cannot be done in this environment, with Daemon.Where as the reason. It
-// is distinct from a daemon that could not be reached: nothing here is
-// transient or broken, the daemon the operator asked for simply does not exist
-// in this environment, and pruning some other daemon instead would report a
-// reclaim this environment's builds cannot use.
-type DoctorDockerDaemonUnavailableError struct {
-	Daemon DoctorDockerDaemon
-}
-
-func (e DoctorDockerDaemonUnavailableError) Error() string {
-	if strings.TrimSpace(e.Daemon.Where) == "" {
-		return "no docker daemon in this environment holds its build images"
-	}
-	return e.Daemon.Where
-}
-
-// ResolveDoctorDockerDaemon resolves the daemon a doctor docker-storage read or
-// prune must act on for this environment. The environment's own type decides it
-// — the same signal the runtime chart uses to render the erun-dind sidecar at
-// all (EnvironmentType.UsesDindSidecar) — because a prune aimed anywhere else
-// reports a reclaim this environment's builds cannot use.
-func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) DoctorDockerDaemon {
+// ResolveDoctorDockerDaemon picks the daemon from the environment's type.
+func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) model.DoctorDockerDaemon {
 	switch {
-	// Checked before the type cases below: this is the predicate the chart's
-	// own dind condition mirrors, so the two cannot disagree about which
-	// environments have a sidecar.
+	// Checked first: the chart's dind condition uses the same predicate.
 	case req.Type.UsesDindSidecar():
-		return DoctorDockerDaemon{
-			Kind:      DoctorDockerDaemonDindSidecar,
-			Container: eruncommon.RuntimeDindContainerName,
-			Label:     "the " + eruncommon.RuntimeDindContainerName + " sidecar",
+		return model.DoctorDockerDaemon{
+			Kind:      model.DoctorDockerDaemonDindSidecar,
+			Container: build.RuntimeDindContainerName,
+			Label:     "the " + build.RuntimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
-				eruncommon.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
+				build.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonHost,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonHost,
 			Label: "this machine's docker daemon",
 			Where: "the docker daemon on this machine, where a host environment's builds run (it is a worktree here with no pod)",
 		}
 	case req.Type == config.EnvironmentTypeRuntime:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonNone,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonNone,
 			Label: "no build daemon",
 			Where: "this environment resolves to type \"runtime\", which installs published versions by reference and never builds: its pod carries no " +
-				eruncommon.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
+				build.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
 		}
 	default:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonNone,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonNone,
 			Label: "no known build daemon",
 			Where: fmt.Sprintf("this environment's type is %q, so doctor cannot tell which docker daemon holds its build images. Set the environment's type (local-agent, remote-agent, runtime, or host) and retry", string(req.Type)),
 		}
 	}
 }
 
-// Unavailable reports whether no daemon in this environment holds build images.
-// A caller asked to prune must refuse with Where as the reason rather than act
-// on some other daemon and report its success.
-func (d DoctorDockerDaemon) Unavailable() bool {
-	return d.Kind == DoctorDockerDaemonNone
-}
-
-// Report is the daemon's own one-line description: what it is, and where it is
-// or why there is none.
-func (d DoctorDockerDaemon) Report() string {
-	return d.Label + " — " + d.Where
-}
-
-// DoctorDockerDaemonLine is the line that opens a docker-storage section,
-// naming the daemon every figure below it came from: without it a table from an
-// empty daemon reads exactly like one from the daemon the build just measured.
-func DoctorDockerDaemonLine(daemon DoctorDockerDaemon) string {
+// DoctorDockerDaemonLine names the daemon a docker-storage section's figures came from.
+func DoctorDockerDaemonLine(daemon model.DoctorDockerDaemon) string {
 	return "docker storage: " + daemon.Report()
 }
 
-// DoctorActionDescriptionOn names a prune action together with the daemon it
-// will act on, for the line printed before it runs.
-func DoctorActionDescriptionOn(action DoctorAction, daemon DoctorDockerDaemon) string {
+// DoctorActionDescriptionOn names a prune action and the daemon it acts on.
+func DoctorActionDescriptionOn(action model.DoctorAction, daemon model.DoctorDockerDaemon) string {
 	return fmt.Sprintf("%s (%s)", DoctorActionDescription(action), daemon.Label)
 }
 
-// doctorDockerStep is one step of a doctor docker-storage read or prune,
-// declared once so both transports below run the same thing: the pod transport
-// renders these into a single script for one kubectl exec, and the host
-// transport runs each one directly. A step that means two different things on
-// the two transports would be exactly the drift this type exists to prevent.
+// doctorDockerStep is declared once so the pod transport (one script) and the
+// host transport (direct exec) run the same steps.
 type doctorDockerStep struct {
-	// header, when set, is printed before this step's output as a section title.
 	header string
-	// name is the executable to run, defaulting to the docker CLI.
+	// name defaults to the docker CLI.
 	name string
-	// args is the step's argv.
 	args []string
-	// readKey names a step whose output is a store reading the caller parses
-	// rather than prints ("before"/"after" of a prune). Empty for a step whose
-	// output is shown to the operator.
+	// readKey marks output parsed as a store reading rather than printed.
 	readKey string
-	// tolerant marks a step whose failure is reported but does not fail the
-	// operation: reading the daemon's own root directory, which this process
-	// cannot see whenever that root lives inside the daemon's filesystem (the
-	// dind container, or a host daemon's VM on Docker Desktop). Every docker
-	// step failing is the operation failing, wherever it ran.
+	// tolerant steps may fail without failing the operation: the daemon root may
+	// live inside dind or Docker Desktop's VM.
 	tolerant bool
 }
 
-// executable is the name this step's command runs as.
 func (s doctorDockerStep) executable() string {
 	if strings.TrimSpace(s.name) == "" {
 		return "docker"
@@ -170,14 +79,11 @@ func (s doctorDockerStep) executable() string {
 	return s.name
 }
 
-// doctorStoreFormat is the docker system df format the machine-readable store
-// readings are taken with: the reclaimed figure is the last field, so the same
-// parser also reads the two-field readings release_disk_headroom.go takes.
+// doctorStoreFormat puts the reclaimable figure last, so the parser also reads
+// release_disk_headroom.go's two-field readings.
 const doctorStoreFormat = "{{.Type}}|{{.Size}}|{{.Reclaimable}}"
 
-// doctorDockerReadMarker delimits a machine-readable reading inside one exec's
-// output, so a pod transport can carry both readings and the human tables in a
-// single round trip without the caller guessing where one ends.
+// doctorDockerReadMarker delimits readings within one exec's output.
 const doctorDockerReadMarker = "erun-doctor-read:"
 
 func doctorInspectionSteps() []doctorDockerStep {
@@ -188,14 +94,14 @@ func doctorInspectionSteps() []doctorDockerStep {
 	}
 }
 
-func doctorActionSteps(action DoctorAction) ([]doctorDockerStep, error) {
+func doctorActionSteps(action model.DoctorAction) ([]doctorDockerStep, error) {
 	var prune []string
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		prune = []string{"image", "prune", "-a", "-f"}
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		prune = []string{"builder", "prune", "-a", "-f"}
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		prune = []string{"container", "prune", "-f"}
 	default:
 		return nil, fmt.Errorf("unsupported doctor action %q", action)
@@ -208,15 +114,11 @@ func doctorActionSteps(action DoctorAction) ([]doctorDockerStep, error) {
 	}, nil
 }
 
-// doctorDockerScript renders steps as one shell script, which is what the pod
-// transport hands to a single kubectl exec.
 func doctorDockerScript(steps []doctorDockerStep) string {
 	lines := []string{"set -eu"}
 	first := true
 	for _, step := range steps {
 		if step.header != "" {
-			// A blank line separates each section from the one above it, the
-			// shape this report has always had.
 			if !first {
 				lines = append(lines, "printf '\\n'")
 			}
@@ -237,9 +139,7 @@ func doctorDockerScript(steps []doctorDockerStep) string {
 	return strings.Join(lines, "\n")
 }
 
-// quotedDockerArgs writes an argv as the script's own words, quoting only what
-// the shell would otherwise change — so the traced script stays readable as the
-// command it is, and every argument still arrives exactly as given.
+// quotedDockerArgs quotes only what the shell would change, keeping traces readable.
 func quotedDockerArgs(args []string) []string {
 	quoted := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -267,30 +167,24 @@ func shellSafeArg(arg string) bool {
 	return true
 }
 
-// DoctorDockerStore is what one docker daemon's own stores reported: the bytes
-// it could still reclaim, per store and in total. Local volumes are excluded,
-// the same as dockerReclaimableBytes, because no prune of docker's images or
-// cache reaches them.
+// DoctorDockerStore is a daemon's reclaimable bytes per store and in total,
+// excluding local volumes, which no prune reaches.
 type DoctorDockerStore struct {
 	Reclaimable uint64
 	Images      uint64
 	BuildCache  uint64
 }
 
-// DoctorDockerResult is one doctor docker-storage operation's outcome: the daemon
-// it acted on, the output to show for it, and the store readings taken around
-// it (keyed by each step's readKey).
+// DoctorDockerResult is one operation's daemon, output and readings by readKey.
 type DoctorDockerResult struct {
-	Daemon   DoctorDockerDaemon
+	Daemon   model.DoctorDockerDaemon
 	Stdout   string
 	Stderr   string
 	Readings map[string]DoctorDockerStore
 }
 
-// DoctorPruneSummary states what a prune did to the daemon it ran against, so a
-// prune that freed nothing cannot pass as a success — the reported failure mode
-// this wording exists for. It returns "" when there is nothing honest to say:
-// a dry run, or readings that could not be taken.
+// DoctorPruneSummary reports what a prune freed, so a no-op prune cannot read
+// as success; "" when readings are missing or it was a dry run.
 func DoctorPruneSummary(result DoctorDockerResult) string {
 	before, beforeOK := result.Readings["before"]
 	after, afterOK := result.Readings["after"]
@@ -316,9 +210,7 @@ func DoctorPruneSummary(result DoctorDockerResult) string {
 		formatDockerStoreBytes(after.Reclaimable), detail(after))
 }
 
-// formatDockerStoreBytes renders a byte count the way the docker CLI renders the
-// figures it was parsed from (decimal units), so a reported before/after
-// compares directly with the `docker system df` table printed beside it.
+// formatDockerStoreBytes uses docker's decimal units so it matches `docker system df`.
 func formatDockerStoreBytes(bytes uint64) string {
 	switch {
 	case bytes == 0:
@@ -336,14 +228,12 @@ func formatDockerStoreBytes(bytes uint64) string {
 	}
 }
 
-// runDoctorDockerSteps runs steps against daemon through the transport that
-// daemon is reachable by, and returns both the output and the store readings.
-func runDoctorDockerSteps(ctx core.Context, runner eruncommon.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
-	if daemon.Kind == DoctorDockerDaemonHost {
+func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}
 	script := doctorDockerScript(steps)
-	preview := eruncommon.PreviewRuntimeContainerCommand(req, daemon.Container, script)
+	preview := diagnosis.PreviewRuntimeContainerCommand(req, daemon.Container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
@@ -354,28 +244,20 @@ func runDoctorDockerSteps(ctx core.Context, runner eruncommon.RuntimeContainerCo
 		return DoctorDockerResult{Daemon: daemon}, nil
 	}
 	if runner == nil {
-		runner = eruncommon.RunRuntimeContainerCommand
+		runner = diagnosis.RunRuntimeContainerCommand
 	}
 	result, err := runner(req, daemon.Container, script)
 	if err != nil {
 		return DoctorDockerResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr},
-			eruncommon.NormalizeDoctorKubectlError(req, result.Stderr, err)
+			cloud.NormalizeDoctorKubectlError(req, result.Stderr, err)
 	}
 	stdout, readings := splitDoctorDockerReadings(result.Stdout)
 	return DoctorDockerResult{Daemon: daemon, Stdout: stdout, Stderr: result.Stderr, Readings: readings}, nil
 }
 
-// runDoctorDockerStepsLocally is the host daemon's transport: each step is one
-// docker CLI invocation on this machine, with no shell between them, so a host
-// environment's prune does not depend on a POSIX shell being installed.
-//
-// A step that fails does not abort the rest: `df` over the daemon's root, in
-// particular, is expected to fail on a machine where that root lives inside the
-// daemon's own VM (Docker Desktop), and that failure is reported rather than
-// hiding the readings that did succeed. The error is returned only when the
-// daemon produced nothing at all, which is the case where there is no reading
-// to show the operator.
-func runDoctorDockerStepsLocally(ctx core.Context, daemon DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
+// runDoctorDockerStepsLocally runs each step directly, without a shell. A failed
+// step does not abort the rest; it errors only when nothing succeeded.
+func runDoctorDockerStepsLocally(ctx core.Context, daemon model.DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	result := DoctorDockerResult{Daemon: daemon, Readings: map[string]DoctorDockerStore{}}
 	var stdout, stderr bytes.Buffer
 	var failure doctorStepFailure
@@ -397,9 +279,7 @@ func runDoctorDockerStepsLocally(ctx core.Context, daemon DoctorDockerDaemon, st
 		if step.readKey == "" {
 			stdout.Write(out)
 		} else if store, ok := readLocalDockerStore(out, err); ok {
-			// Only a reading that was actually taken is recorded: an absent
-			// one has to stay absent, or a failed read would read as a daemon
-			// that reported nothing reclaimable.
+			// Record only readings actually taken: a missing one must not read as zero.
 			result.Readings[step.readKey] = store
 		}
 		failure.record(step, err)
@@ -407,18 +287,13 @@ func runDoctorDockerStepsLocally(ctx core.Context, daemon DoctorDockerDaemon, st
 	result.Stdout = strings.TrimRight(stdout.String(), "\n")
 	result.Stderr = strings.TrimRight(stderr.String(), "\n")
 	if failure.err != nil {
-		// Named down to the command, because a host daemon can fail for
-		// reasons that have nothing to do with docker (a docker CLI that is
-		// not installed, a daemon that is not running) and the operator has
-		// to be able to tell which one this was.
+		// Name the command: a host failure may be a missing CLI or a stopped daemon.
 		return result, fmt.Errorf("`%s` failed against %s: %w", failure.command, daemon.Label, failure.err)
 	}
 	return result, nil
 }
 
-// doctorStepFailure keeps the first step that failed the operation. Only
-// tolerant steps may fail without failing it, so every other step's failure is
-// this operation's failure.
+// doctorStepFailure keeps the first non-tolerant failure.
 type doctorStepFailure struct {
 	command string
 	err     error
@@ -441,8 +316,6 @@ func runLocalDockerStep(step doctorDockerStep) ([]byte, []byte, error) {
 	return out.Bytes(), errOut.Bytes(), err
 }
 
-// readLocalDockerStore parses one machine-readable store reading, which a step
-// that failed did not produce.
 func readLocalDockerStore(out []byte, err error) (DoctorDockerStore, bool) {
 	if err != nil {
 		return DoctorDockerStore{}, false
@@ -450,9 +323,7 @@ func readLocalDockerStore(out []byte, err error) (DoctorDockerStore, bool) {
 	return parseDoctorDockerStore(string(out))
 }
 
-// splitDoctorDockerReadings separates the marker-delimited store readings from
-// the output meant to be shown, so the readings never appear as loose lines in
-// the report.
+// splitDoctorDockerReadings keeps readings out of the printed report.
 func splitDoctorDockerReadings(stdout string) (string, map[string]DoctorDockerStore) {
 	lines := strings.Split(stdout, "\n")
 	kept := make([]string, 0, len(lines))
@@ -486,9 +357,8 @@ func doctorReadMarkerKey(line string) (string, bool) {
 	return strings.TrimPrefix(trimmed, doctorDockerReadMarker), true
 }
 
-// parseDoctorDockerStore reads one `docker system df --format` reading. The
-// reclaimed figure is taken from the line's last field so this reads both the
-// three-field format above and the two-field one release_disk_headroom.go uses.
+// parseDoctorDockerStore reads the reclaimable figure from the last field, so
+// both the three- and two-field formats parse.
 func parseDoctorDockerStore(text string) (DoctorDockerStore, bool) {
 	var store DoctorDockerStore
 	recognized := false
@@ -501,7 +371,7 @@ func parseDoctorDockerStore(text string) (DoctorDockerStore, bool) {
 		if strings.EqualFold(name, "local volumes") {
 			continue
 		}
-		reclaimable, ok := eruncommon.ParseDockerSize(fields[len(fields)-1])
+		reclaimable, ok := diskheadroom.ParseDockerSize(fields[len(fields)-1])
 		if !ok {
 			continue
 		}

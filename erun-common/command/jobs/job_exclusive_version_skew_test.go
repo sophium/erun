@@ -6,11 +6,7 @@ import (
 	"testing"
 )
 
-// job start's off-environment dispatch (exec_raw/exec_agent) gates on
-// --exclusive the same way activity_lease_take does, so an edge that
-// predates the feature produces the identical raw schema-rejection shape --
-// see activity_lease_version_skew_test.go's rawExclusiveLeaseSchemaError for
-// the field-observed wire text this is modeled on.
+// Same raw schema-rejection shape as activity_lease_take on an old edge.
 const rawExclusiveJobStartSchemaError = `MCP tools/call failed: invalid params: validating "arguments": validating root: unexpected additional properties ["exclusive"] (code -32602)`
 
 func TestDescribeExclusiveJobStartVersionSkewNamesTheVersionMismatch(t *testing.T) {
@@ -32,12 +28,12 @@ func TestDescribeExclusiveJobStartVersionSkewNamesTheVersionMismatch(t *testing.
 
 func TestDescribeExclusiveJobStartVersionSkewLeavesOtherFailuresAlone(t *testing.T) {
 	notExclusive := errors.New(rawExclusiveJobStartSchemaError)
-	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", false, notExclusive); got != notExclusive {
+	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", false, notExclusive); !errors.Is(got, notExclusive) || got.Error() != notExclusive.Error() {
 		t.Fatalf("a non-exclusive call must pass its error through unchanged, got %v", got)
 	}
 
 	unrelated := errors.New(`MCP tools/call failed: invalid params: validating "arguments": validating "name": value is required (code -32602)`)
-	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", true, unrelated); got != unrelated {
+	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", true, unrelated); !errors.Is(got, unrelated) || got.Error() != unrelated.Error() {
 		t.Fatalf("a genuinely malformed call must pass its error through unchanged, got %v", got)
 	}
 

@@ -16,29 +16,10 @@ import type { PipelineIssue, PipelineItem } from '../app/api/pipelineApi';
 import type { PipelineState } from './controller';
 import { usePipelineController } from './controller';
 
-// PipelinePanel answers "what is going on?" in one read: planned work, work in
-// progress, reviews open, ready to merge, merging, merged -- across the jobs
-// that record planned and in-flight work and the reviews moving through the
-// merge queue, unioned on the issue each belongs to.
-//
-// Three rules shape what this renders:
-//
-//   - The rung is the platform's, not the console's. A rung this client does
-//     not recognise is rendered under its own spelling and toned as an
-//     outcome, never folded into a rung it resembles; the platform being ahead
-//     of the console is not a licence to describe work the console cannot see.
-//   - A link parsed out of a branch name is a guess about the branch, and it
-//     says so. `issueRefSource` of INFERRED renders with an explicit marker,
-//     because presenting a guess as something the author declared is the one
-//     claim this provenance exists to refuse.
-//   - A row says which record it came from. A job has no branch; a review has
-//     no scope. A row that could not tell them apart would send an operator
-//     looking for one that does not exist.
+// Unknown rungs render under their own spelling; branch-inferred links are marked as
+// inferred; each row says whether it is a job or a review.
 
-// issueUrl turns a canonical owner/repo#number key into a link, and returns
-// undefined for anything else. An unparseable key renders as plain text: a
-// link built from a guess sends an operator somewhere that has nothing to do
-// with the work.
+// Undefined for an unparseable key: a guessed link would mislead.
 function issueUrl(issueKey: string): string | undefined {
   const match = /^([^/\s#]+)\/([^/\s#]+)#(\d+)$/.exec(issueKey.trim());
   if (match === null) {
@@ -66,8 +47,6 @@ function IssueLink({ issueKey }: { issueKey: string }): React.ReactElement {
   );
 }
 
-// RefSource marks a link that was parsed out of a branch name rather than
-// stated. It is the whole reason the field travels.
 function RefSource({ item }: { item: PipelineItem }): React.ReactElement | null {
   if (item.issueRefSource !== 'INFERRED') {
     return null;
@@ -174,8 +153,6 @@ function PipelineBody({ state }: { state: PipelineState }): React.ReactElement {
   );
 }
 
-// PipelinePanel is the tenant's own view of the whole pipeline. Read-only: the
-// actors doing the work record it, and the merge queue moves reviews.
 export function PipelinePanel({ token }: { token: string }): React.ReactElement {
   const state = usePipelineController(token);
 

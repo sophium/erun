@@ -1,46 +1,8 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtures/seedRoot.js';
 
-// #1260: the desktop re-states the orchestrator pacing contract into a live
-// session every 10 minutes, and reattaches a terminal that died from a crash
-// (never one the operator cleanly quit or Stopped) to the same background agent.
-//
-// Neither half of that has a reachable surface in this harness. Both text-into-
-// the-pty and the crash-relaunch require a real orchestrator PTY: the pacing
-// nudge only fires against a session whose activity report has gone stale over
-// ten real minutes, and the respawn only fires when that PTY's underlying
-// process actually exits non-zero. `claude` resolves to the harness's inert
-// stub (fixtures/seedRoot.ts), which blocks forever and never reports activity
-// — so no staleness accrues and no crash ever happens to relaunch. Driving
-// either for real would mean pointing the suite at a live AI harness, which it
-// must not do: every orchestrator the desktop starts runs on the one shared
-// agent account (erun-ui/AGENTS.md, "Spawning an AI agent is a resource
-// decision").
-//
-// So this spec only drives the safe half: creating an orchestrator (which
-// never starts a session — CreateOrchestrator "creates stopped") and asserting
-// it renders as stopped with none of the reconciler's side effects, which is
-// the negative invariant that IS reachable. The nudge decision, the cap/rearm
-// bookkeeping, the crash-vs-clean-exit distinction, and the same-agent
-// reattach are covered by the Go suite instead:
-// erun-ui/orchestrator_pacing_test.go (TestDecideOrchestratorPacing,
-// TestReconcileOrchestratorPacingNudgesAQuietSession,
-// TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy,
-// TestSendSessionInputRearmsOrchestratorPacing) and erun-ui/orchestrator_test.go
-// (TestOrchestratorRespawnsAfterCrashOntoTheSameAgent,
-// TestOrchestratorCleanExitDoesNotRespawn, TestStopOrchestratorRefusesItsOwnRespawn).
-//
-// #1699's env-aware suppression (a linked environment busy on this
-// orchestrator's own dispatched work must not accrue staleness or take a
-// nudge) is the same unreachable-without-a-real-PTY case, so it is covered the
-// same way: erun-ui/orchestrator_pacing_env_test.go
-// (TestOrchestratorPacingSuppressedWhileLinkedEnvBusy,
-// TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments,
-// TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease,
-// TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal,
-// TestOrchestratorPacingSurfacesPastTheEnvBusyBound,
-// TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap,
-// TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder).
+// Pacing nudges and crash respawn need a real PTY the inert claude stub never
+// provides, so only the negative invariant is reachable here.
 test.describe('orchestrator pacing/respawn has no surface without a live session', () => {
   test('a created-but-never-started orchestrator stays stopped with no busy/shell/alert artifacts', async ({
     app,

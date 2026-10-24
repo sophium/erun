@@ -10,8 +10,7 @@ import (
 	"testing"
 )
 
-// runNoAskGuard runs the command erun actually installs and reports its exit
-// code: 2 refuses the stop, 0 lets the turn end.
+// runNoAskGuard runs the installed command: 2 refuses the stop, 0 lets the turn end.
 func runNoAskGuard(t *testing.T, shell, input string) int {
 	t.Helper()
 	cmd := exec.Command(shell, "-c", orchestratorNoAskStopGuardCommand())
@@ -42,9 +41,6 @@ func writeGuardTranscript(t *testing.T, dir, name, text string) string {
 	return path
 }
 
-// writeGuardTranscriptEntries writes the transcript verbatim, so a test can
-// stage what Claude Code actually records around a turn — the hook's own
-// firing, the operator's prompt — and not just the turn's own message.
 func writeGuardTranscriptEntries(t *testing.T, dir, name string, entries []map[string]any) string {
 	t.Helper()
 	var encoded []byte
@@ -78,8 +74,6 @@ func guardHookInput(t *testing.T, transcript string, active bool) string {
 	return string(encoded)
 }
 
-// The guard is a one-liner, so asserting on its text would prove nothing about
-// what it does. This runs it.
 func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {
@@ -91,14 +85,11 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	dir := t.TempDir()
 	gate := writeGuardTranscript(t, dir, "gate.jsonl", "Filed it. Say the word and I will open the PR.")
 	clean := writeGuardTranscript(t, dir, "clean.jsonl", "Filed it and opened the PR. Both are verified.")
-	// A firing is recorded in the transcript, and the record carries this
-	// command — every trigger phrase with it. Read as raw lines, the guard
-	// matches its own echo from then on and the session can never end.
+	// The hook's firing is echoed into the transcript; matching raw lines would loop forever.
 	echoed := writeGuardTranscriptEntries(t, dir, "echoed.jsonl", []map[string]any{
 		assistantTranscriptEntry("Filed it and opened the PR. Both are verified."),
 		{"type": "system", "content": "Stop hook feedback: " + orchestratorNoAskStopGuardCommand()},
 	})
-	// The operator asking a question is not the turn handing one back.
 	asked := writeGuardTranscriptEntries(t, dir, "asked.jsonl", []map[string]any{
 		{"type": "user", "message": map[string]any{"content": "would you like me to file it?"}},
 		assistantTranscriptEntry("Filed it and opened the PR. Both are verified."),
@@ -113,7 +104,6 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 		{"a turn that decided is let go", guardHookInput(t, clean, false), 0},
 		{"the guard's own recorded firing is not the turn's last words", guardHookInput(t, echoed, false), 0},
 		{"the operator's own question is not the turn's last words", guardHookInput(t, asked, false), 0},
-		// Corrected once, never looped.
 		{"an already nudged turn is not refused again", guardHookInput(t, gate, true), 0},
 		// Fail-open: wedging a session costs more than the stalls this prevents.
 		{"an unreadable transcript does not block the stop", guardHookInput(t, filepath.Join(dir, "missing.jsonl"), false), 0},
@@ -128,7 +118,6 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	}
 }
 
-// countStopHookBlocks tallies the Stop event by owner.
 func countStopHookBlocks(t *testing.T, path string) (guards, idles, retired, foreign int) {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -180,7 +169,7 @@ func TestOrchestratorSettingsKeepTheStopGuardBesideTheIdleReport(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := seedOperatorStopHook(t, dir)
 
-	// Twice: a rewrite replaces our own blocks rather than stacking copies.
+	// A rewrite replaces our own blocks rather than stacking copies.
 	for range 2 {
 		if err := ensureOrchestratorSessionStartHook(dir); err != nil {
 			t.Fatalf("ensure hooks: %v", err)
@@ -188,7 +177,7 @@ func TestOrchestratorSettingsKeepTheStopGuardBesideTheIdleReport(t *testing.T) {
 	}
 
 	guards, idles, retired, foreign := countStopHookBlocks(t, settingsPath)
-	// The settings file is shared with the operator, so theirs has to survive.
+	// The operator's own hooks in the shared settings file must survive.
 	if guards != 1 || idles != 1 || retired != 0 || foreign != 1 {
 		t.Fatalf("Stop must carry one guard, one idle report, no retired recorder and the operator's hook, "+
 			"got guards=%d idles=%d retired=%d foreign=%d", guards, idles, retired, foreign)

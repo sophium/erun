@@ -4,9 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { renderWithStore } from '../test/renderWithStore';
 
-// Mocking `fetch` exercises the whole config read path end-to-end. The OIDC
-// login flow is deliberately not covered here — it is a flagged placeholder
-// that needs a live IdP to verify.
+// Mocks `fetch` to exercise the config read path; OIDC login needs a live IdP and is not covered.
 
 const SAMPLE_CONFIG = {
   tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY' },
@@ -84,8 +82,6 @@ describe('ConfigView via App', () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
     renderWithStore(<App />);
 
-    // The shell's own h1 carries the active section title ("Overview"); the
-    // tenant name is a section-level h2 within it.
     expect(await screen.findByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
 
     expect(screen.getByRole('cell', { name: 'prod' })).toBeInTheDocument();
@@ -96,8 +92,7 @@ describe('ConfigView via App', () => {
 
     expect(screen.getByRole('cell', { name: '1.2.3' })).toBeInTheDocument();
 
-    // Scoped to the contexts section because the context name "primary" also
-    // appears as an env's kubernetes context cell, so an unscoped query is ambiguous.
+    // Scoped because "primary" also appears as an env's kubernetes context cell.
     const contexts = within(screen.getByRole('region', { name: 'Cloud contexts' }));
     expect(contexts.getByText('primary')).toBeInTheDocument();
     expect(contexts.getByText('aws · eu-west-2')).toBeInTheDocument();
@@ -109,16 +104,10 @@ describe('ConfigView via App', () => {
 
     const contexts = within(await screen.findByRole('region', { name: 'Cloud contexts' }));
 
-    // The running context's badge is a semantic text label, not color-only.
     expect(contexts.getByText('Running')).toBeInTheDocument();
 
-    // The provision error is visible text, not hidden behind a bare title tooltip.
     expect(contexts.getByText('Failed')).toBeInTheDocument();
-    // And it is announced, not merely present. The reason
-    // materialises asynchronously beside a badge that has already flipped, so
-    // without a role nothing is read out and the enclosing Card — a
-    // navigational landmark — does not announce on its own. Queried by role,
-    // so a bare <span class="text-destructive"> fails here.
+    // Queried by role: the reason appears asynchronously and must be announced.
     const contextsFailure = contexts.getByRole('alert');
     expect(contextsFailure).toHaveTextContent('run-instances: InsufficientInstanceCapacity');
     expect(contextsFailure).toHaveAttribute('aria-live', 'polite');
@@ -131,8 +120,6 @@ describe('ConfigView via App', () => {
     const envs = within(await screen.findByRole('region', { name: 'Environments' }));
     expect(envs.getByText('Running')).toBeInTheDocument();
     expect(envs.getByText('Failed')).toBeInTheDocument();
-    // A failed env surfaces its provision error inline, like a failed context,
-    // and announces it the same way.
     const envFailure = envs.getByRole('alert');
     expect(envFailure).toHaveTextContent('deploy job did not succeed');
     expect(envFailure).toHaveAttribute('aria-live', 'polite');
@@ -147,12 +134,7 @@ describe('ConfigView via App', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
   });
 
-  // A 401 *with* a token held is not a signed-out caller: the identity provider
-  // authenticated them and the API still refused, which means the identity is
-  // enrolled in no tenant. This test previously asserted the sign-in prompt,
-  // which encoded the dead end -- Sign in succeeds and lands right back here
-  // (#1167). The signed-out case is covered by the test below, which has no
-  // token at all.
+  // A 401 with a token means unenrolled; a Sign in prompt would loop.
   it('tells a signed-in but unenrolled caller they need enrolling, not to sign in again', async () => {
     mockFetch(jsonResponse('invalid bearer token', 401));
     renderWithStore(<App />);
@@ -163,7 +145,6 @@ describe('ConfigView via App', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/An operator has to enrol you/)).toBeInTheDocument();
-    // Offering Sign in here is the loop this fix removes.
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 

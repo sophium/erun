@@ -10,13 +10,10 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
-// tenant must fail loudly, naming the operation and its recovery, rather
-// than silently returning null the way the old apiUrl/cloudProviderAlias
-// precondition used to.
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
@@ -28,17 +25,14 @@ func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	}
 }
 
-// TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured is the
-// multiple-erun-alias case: the CLI errors and asks for --alias; the desktop
-// instead reports every configured alias as a choice so the operator can
-// pick one, preselecting none until they do.
+// Several erun aliases are reported as choices with none preselected.
 func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T) {
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
-		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
+		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 	})
 
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
@@ -54,8 +48,6 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 		t.Fatalf("PlatformAliasChoices = %v, want %v", got, want)
 	}
 
-	// An explicit PlatformAlias resolves the ambiguity, exactly like the
-	// CLI's --alias.
 	chosen, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs", PlatformAlias: "erun+b@erun"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard with an explicit alias failed: %v", err)
@@ -65,15 +57,13 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 	}
 }
 
-// TestLoadTenantDashboardReportsNotSignedInLocally is state B's second row:
-// an erun alias is configured but never signed in, so the bearer mint fails
-// before any network call to the platform is made.
+// An alias that never signed in fails before any network call.
 func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: cloud.CloudDependencies{
 			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				t.Fatal("must not fetch discovery with no refresh token and no cache to check")
@@ -97,21 +87,15 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 	}
 }
 
-// TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead:
-// TenantConfig.APIURL is documented only as `erun open`'s own port-forward
-// address (erun-docs/docs/reference/configuration.md), not a platform-URL
-// override. Honoring it here used to send the resolved alias's bearer token
-// to whatever address the field named — a credential-disclosure shape
-// (erun#1955) — so the platform read must always use the alias's own known
-// URL and never reach the address this test's httptest server would prove it
-// used if the override still won.
+// TenantConfig.APIURL is not a platform URL; honoring it would leak the
+// alias's bearer token to that address.
 func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)
 	defer server.Close()
 
 	app := testERunPlatformAliasAppWithTenants(t, server.URL,
-		map[string]config.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
+		map[string]model.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
 
 	dashboard := loadTenantDashboardFrom(t, app)
 	if dashboard.PlatformURL != server.URL || dashboard.APIURL != server.URL {
@@ -125,14 +109,7 @@ func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *tes
 	}
 }
 
-// TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant is the
-// erun#1955 regression: a global erun alias exists and is even signed in,
-// but this tenant's own configuration selected only an AWS alias (exactly
-// the operator's own machine — an "erun" tenant whose Manage tenant dialog
-// had an AWS alias checked and Primary, with the erun alias explicitly
-// unchecked). The dashboard must never authenticate this tenant's platform
-// reads with a credential the tenant itself did not select, even though it
-// is the only erun alias configured anywhere.
+// A tenant must never use an erun alias it did not select.
 func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("must never reach the erun platform with an alias this tenant did not select, got %s", req.URL.Path)
@@ -140,18 +117,18 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	defer server.Close()
 
 	jwt := testUIJWT("https://sts.aws.example")
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		{Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team"},
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", CloudProviderAliases: []string{"team-cloud"}, PrimaryCloudProviderAlias: "team-cloud"},
 		}},
 		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -173,11 +150,6 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	}
 }
 
-// TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias is the positive
-// half of the erun#1955 fix: once the tenant's own selection DOES include an
-// erun alias, that alias is used even though a different erun alias is also
-// configured globally — the tenant's own choice, not "the only one on the
-// machine", decides.
 func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)
@@ -190,12 +162,12 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 	const otherERunAlias = "erun+api.other.example@erun"
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", CloudProviderAliases: []string{otherERunAlias, testERunAlias}, PrimaryCloudProviderAlias: testERunAlias},
 		}},
 		cloudDeps: cloud.CloudDependencies{

@@ -23,10 +23,7 @@ interface StubbedResponse {
   error?: string;
 }
 
-// 12 contexts is far more than fits in an 85vh frame at any viewport this
-// suite uses, so the body region must be what scrolls, not the dialog growing
-// past its cap. Used by both the bounded-height case and the case that pins the
-// frame it is measured against.
+// Far more contexts than fit in an 85vh frame, so the body must scroll.
 function overflowingCloudConfig(): Record<string, unknown> {
   return {
     defaultTenant: SEED_TENANT,
@@ -56,9 +53,6 @@ function overflowingCloudConfig(): Record<string, unknown> {
   };
 }
 
-// A frame member that is absent is a missing element, not a skipped assertion;
-// this fails the spec by name the way boundingBoxOf does. A helper rather than
-// an inline branch, which is what keeps the missing case out of the test body.
 function requireFrame<T>(member: T | null, label: string): T {
   if (member === null) {
     throw new Error(`${label} is missing from the settings dialog frame`);
@@ -66,10 +60,6 @@ function requireFrame<T>(member: T | null, label: string): T {
   return member;
 }
 
-// stubRPC intercepts every named method on /__erun_invoke, returning
-// whatever the caller's map holds for it — used below to exercise the cloud
-// aliases empty state and the erun provider without depending on the seeded
-// baseline's single AWS alias.
 function stubRPC(
   page: import('@playwright/test').Page,
   responses: Record<string, StubbedResponse>,
@@ -114,9 +104,7 @@ test.describe('global config dialog', () => {
     await provider.waitFor({ state: 'visible' });
     await region.waitFor({ state: 'visible' });
 
-    // Guards a regression where a long cloud-provider alias overflowed its
-    // column and covered the Region trigger. The seeded alias is short, so
-    // inject a long value to reproduce the overflow.
+    // The seeded alias is short, so inject a long one to reproduce the overflow.
     await provider.evaluate((btn) => {
       const span = btn.querySelector('[data-slot="select-value"]');
       if (!(span instanceof HTMLElement)) {
@@ -138,20 +126,8 @@ test.describe('global config dialog', () => {
     await app.globalConfigDialog.waitForClosed();
   });
 
-  // The alias actions above are content of the config the dialog loads on open,
-  // so every read of them is the answer to a LoadERunConfig round trip rather
-  // than a render that has already happened. `expect(...)` carries expect's
-  // 10s default when it is given no timeout -- a separate clock from the 30s
-  // this test declares and not moved by `test.setTimeout(...)` -- so a config
-  // that is merely slow on a loaded machine reds the read with the test's own
-  // budget unspent. The hold is injected at the RPC this spec already stubs
-  // rather than by loading the machine, so the reproduction is deterministic on
-  // a quiet host, and it sits just past that 10s default: the smallest delay
-  // that discriminates.
-  //
-  // Pre-fix this reds at exactly 10_000ms, over a config that arrives at 12s,
-  // with 20s of its own budget unused; with the read pointed at the budget the
-  // test declared it passes at the config's real arrival.
+  // The config is held just past expect's 10s default, which test.setTimeout does
+  // not move, so reads must carry the test's budget explicitly.
   test('a config that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -163,8 +139,7 @@ test.describe('global config dialog', () => {
         await route.continue();
         return;
       }
-      // Anchored to the request, so the window is the same however long the
-      // dialog took to open.
+      // Anchored to the request, so the delay is independent of dialog open time.
       if (holdUntil === 0) {
         holdUntil = Date.now() + 12_000;
       }
@@ -193,10 +168,8 @@ test.describe('global config dialog', () => {
 
 test.describe('global config dialog — cloud aliases add actions and erun provider', () => {
   test('empty state offers each add action exactly once', async ({ app, page }) => {
-    // The dialog reads its aliases from the config it loads on open
-    // (LoadERunConfig), not from LoadCloudProviderStatuses -- that one backs
-    // the Refresh button alone. Stubbing the wrong call leaves the seeded
-    // alias in place and the empty state never renders.
+    // The dialog reads aliases from LoadERunConfig; LoadCloudProviderStatuses only
+    // backs Refresh.
     stubRPC(page, {
       LoadERunConfig: {
         data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] },
@@ -205,21 +178,13 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // Anchor on the empty state first. Both surfaces render the same three
-    // actions, so a count of 1 holds in either state -- without this the test
-    // would pass even if the empty state never rendered, which is exactly how
-    // it passed while stubbing the wrong call.
-    // Every read below is content of the config this test stubbed, and each one
-    // arrives over that round trip rather than already being on screen. A bare
-    // `expect(...)` resolves to expect's 10s default -- a separate clock from
-    // the 30s this test declares -- so each names the budget it declared; see
-    // the held-config case at the end of this describe for the reproduction.
+    // Anchor on the empty state first: both surfaces render the same actions, so
+    // the counts below hold either way.
     await expect(app.globalConfigDialog.locator().getByText('No cloud aliases yet')).toBeVisible(
       withTestBudget(),
     );
 
-    // Regression guard for the four-buttons-two-actions defect: the header
-    // and the empty state must never both render the same add action.
+    // The header and the empty state must never both render the add action.
     await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1, withTestBudget());
     await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1, withTestBudget());
     await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1, withTestBudget());
@@ -256,10 +221,6 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // With aliases present, the header (not the empty state) is the one
-    // surface offering each add action. Each of these is content of the config
-    // this test stubbed, so each carries the budget the test declared rather
-    // than expect's own 10s default.
     await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1, withTestBudget());
     await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1, withTestBudget());
     await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1, withTestBudget());
@@ -309,20 +270,13 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.connectERunPlatform('https://api.acme.test');
 
     await expect(app.globalConfigDialog.cloudAliasRow('erun+api.acme.test@erun')).toBeVisible();
-    // The settings entry point must reach the same connect-and-sign-in code
-    // path as the tenant dashboard's Connect panel, not a second
-    // implementation that creates the alias with no sign-in of its own.
+    // Must reach the same connect-and-sign-in path as the tenant dashboard.
     await expect.poll(() => rpc.calls('LoginCloudProvider')).toBe(1);
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
   });
 
-  // A connected erun alias row previously rendered only a static "Connected"
-  // badge with no action at all -- once signed in there was no way back
-  // through the UI (the CLI's `cloud logout` was the only path). These two
-  // specs lock in the row's actual escape hatches, wired through
-  // cloudApi.logoutCloudProvider / switchCloudProviderIdentity.
   const activeERunAlias = {
     alias: 'erun+api.acme.test@erun',
     provider: 'erun',
@@ -377,8 +331,7 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.switchCloudAliasIdentity(activeERunAlias.alias);
 
     await expect.poll(() => rpc.calls('SwitchCloudProviderIdentity')).toBe(1);
-    // Switching identity is a force re-login, not sign-out-then-sign-in: the
-    // row never drops out of the connected state along the way.
+    // Switching identity is a force re-login, not sign-out-then-sign-in.
     expect(rpc.calls('LogoutCloudProvider')).toBe(0);
     await expect(
       app.globalConfigDialog.cloudAliasRow(activeERunAlias.alias).getByText('Connected'),
@@ -394,35 +347,20 @@ test.describe('global config dialog — bounded height and scroll', () => {
     app,
     page,
   }) => {
-    // 12 contexts is far more than fits in an 85vh frame at any viewport this
-    // suite uses, so the body region must be what scrolls, not the dialog
-    // growing past its cap -- the regression this guards.
     stubRPC(page, { LoadERunConfig: { data: overflowingCloudConfig() } });
 
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // Converge on the loaded frame before measuring anything inside it.
-    // `waitForOpen` resolves on the ~195px `configLoading` shell, and every
-    // assertion below is about the 85vh-capped card the config produces; the
-    // geometry of one is not the geometry of the other (see the case below).
+    // waitForOpen resolves on the loading shell; the assertions are about the loaded card.
     await app.globalConfigDialog.waitForLoadedFrame();
 
-    // One layout snapshot for the frame and everything asserted inside it.
-    // Read as separate round trips these are separate layout moments, and a
-    // transition landing between two of them is what reddened the gate: the
-    // frame from one state and the footer from the next.
+    // One layout snapshot: separate reads can straddle a transition.
     const frame = await app.globalConfigDialog.frameGeometry();
 
-    // The dialog's own frame (DialogContent's max-h-[85vh]) caps the whole
-    // surface regardless of how much is configured. The suite's config
-    // viewport is 1440x1200 and this test never changes it.
     const dialogBox = requireFrame(frame.dialog, 'ERun settings dialog');
     expect(dialogBox.height).toBeLessThanOrEqual(1200 * 0.85 + 2);
 
-    // The title and the footer buttons must both land inside that bounded
-    // frame -- cut off above and cut off below is exactly the failure mode
-    // being guarded against.
     const titleBox = requireFrame(frame.title, 'ERun settings title');
     expect(titleBox.y).toBeGreaterThanOrEqual(dialogBox.y - 1);
     const cancelBox = requireFrame(frame.cancel, 'Cancel button');
@@ -430,7 +368,6 @@ test.describe('global config dialog — bounded height and scroll', () => {
     const saveBox = requireFrame(frame.save, 'Save settings button');
     expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
 
-    // The body region -- not the dialog itself -- is what scrolls.
     const body = requireFrame(frame.body, 'the settings dialog body scroller');
     expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
 
@@ -438,20 +375,8 @@ test.describe('global config dialog — bounded height and scroll', () => {
     await app.globalConfigDialog.waitForClosed();
   });
 
-  // The gate's own numbers. Its red measured this dialog's frame at 702.19 --
-  // the bottom edge of the `configLoading` shell -- and the Save button at 1085,
-  // the loaded frame's footer: 382px apart, on one dialog in one open state.
-  // Neither measurement is wrong for the layout it was taken in. What separates
-  // them is the config load, and on the gate it landed between two of the spec's
-  // five reads. The landing point is decided by load, so this decides it
-  // instead: the route handler parks on a promise the test releases, which makes
-  // the shell provably the layout on screen for as long as it holds.
-  //
-  // The two reads below sit where the gate's own two landed: the frame while
-  // the shell is up, the footer once the load has cleared it. Read as per-box
-  // round trips at those same sites -- which is what the pre-fix case did, and
-  // what this case pins against -- the pair is the one the gate measured 382px
-  // apart: Expected <= 699.29, Received 1085.
+  // The config route is parked so the loading shell is provably on screen for
+  // the first read; per-box reads across the load measured inconsistent layouts.
   test('the frame and the footer inside it are read from one layout, not across the config load', async ({
     app,
     page,
@@ -478,25 +403,16 @@ test.describe('global config dialog — bounded height and scroll', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // Read 1, at the site the gate's frame read landed: the route is parked, so
-    // this is the loading shell and nothing else can be. Its body has nothing
-    // to scroll, which is what makes measuring it a vacuous pass rather than a
-    // failure for every assertion the case above makes.
+    // The shell has nothing to scroll, so measuring it would pass vacuously.
     await expect.poll(() => configArrived).toBe(1);
     const whileLoading = await app.globalConfigDialog.frameGeometry();
     const shellBody = requireFrame(whileLoading.body, 'the loading shell body scroller');
     expect(shellBody.scrollHeight).toBe(shellBody.clientHeight);
 
-    // Read 2, at the site the gate's Save-button read landed. Converging on the
-    // frame the load produces is what keeps this read off whatever happens to be
-    // on screen when its round trip arrives -- and it is the read the loaded
-    // assertions below are about.
     releaseConfig();
     await app.globalConfigDialog.waitForLoadedFrame();
     const loaded = await app.globalConfigDialog.frameGeometry();
 
-    // Each read is one layout, so each frame contains its own footer. Split back
-    // into per-box reads, these are the two boxes the gate measured 382px apart.
     for (const [label, frame] of [
       ['the loading shell', whileLoading],
       ['the loaded frame', loaded],
@@ -506,8 +422,6 @@ test.describe('global config dialog — bounded height and scroll', () => {
       expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
     }
 
-    // ... and the loaded one is the frame the case above is about: capped,
-    // titled, and scrolled.
     const shellBox = requireFrame(whileLoading.dialog, 'the loading shell dialog');
     const dialogBox = requireFrame(loaded.dialog, 'the loaded dialog');
     expect(dialogBox.height).toBeGreaterThan(shellBox.height);
@@ -532,10 +446,7 @@ test.describe('global config dialog — bounded height and scroll', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // Same convergence and one-snapshot read as the case above: a 500px
-    // viewport makes the shell's 195px frame *look* like it satisfies every
-    // bound here, so measuring it is how this case passes while asserting
-    // nothing.
+    // At a 500px viewport the shell's frame would trivially satisfy these bounds.
     await app.globalConfigDialog.waitForLoadedFrame();
     const frame = await app.globalConfigDialog.frameGeometry();
     const dialogBox = requireFrame(frame.dialog, 'ERun settings dialog');
@@ -549,7 +460,7 @@ test.describe('global config dialog — bounded height and scroll', () => {
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
 
-    // Restore the config default viewport for later specs in the singleton backend.
+    // Restore the default viewport for later specs on the shared backend.
     await page.setViewportSize({ width: 1440, height: 1200 });
   });
 });

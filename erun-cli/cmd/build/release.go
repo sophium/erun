@@ -5,14 +5,20 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
+	"github.com/sophium/erun/erun-common/orchestration/execute"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/release"
 	"github.com/spf13/cobra"
 )
 
-func NewReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push common.DockerPushFunc) *cobra.Command {
+func NewReleaseCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -21,10 +27,10 @@ func NewReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReleaseCommand(shared.CommandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, buildDockerImage, loginToDockerRegistry, selectRunner, push)
+			return runReleaseCommand(clicmd.CommandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, buildDockerImage, loginToDockerRegistry, selectRunner, push)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&force, "force", false, "Delete and recreate conflicting release tags before tagging")
 	cmd.Example = "  erun release --dry-run\n  erun -v release --dry-run"
 	cmd.Long = "Cut a release from the current branch.\n\n" +
@@ -37,12 +43,12 @@ func NewReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	return cmd
 }
 
-func runReleaseCommand(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push common.DockerPushFunc) error {
-	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, common.DockerCommandTarget{Release: true, Force: force})
+func runReleaseCommand(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, force bool, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) error {
+	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, model.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err
 	}
-	version := strings.TrimSpace(common.NewBuildResult(execution).Version)
+	version := strings.TrimSpace(buildrun.NewBuildResult(execution).Version)
 	if _, err := fmt.Fprintln(ctx.Stdout, version); err != nil {
 		return err
 	}
@@ -50,17 +56,14 @@ func runReleaseCommand(ctx core.Context, store common.DockerStore, findProjectRo
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
 	}
-	// stdout carries the released version and nothing else, so git chatter is
-	// redirected to stderr for orchestrators reading the version.
+	// stdout carries only the released version.
 	gitToStderr := func(dir string, stdout, stderr io.Writer, args ...string) error {
 		return runGit(dir, ctx.Stderr, stderr, args...)
 	}
-	// Source control only: release stamps, commits, tags and pushes the version
-	// and never builds or publishes an artifact. Build and publish are
-	// `erun build --release` and `erun push --version`. See RunReleaseSpec.
-	spec, ok := common.BuildExecutionReleaseSpec(execution)
+	// Release never builds or publishes; see RunReleaseSpec.
+	spec, ok := execute.BuildExecutionReleaseSpec(execution)
 	if !ok {
 		return fmt.Errorf("release: the resolved plan is not a release")
 	}
-	return common.RunReleaseSpec(ctx, spec, gitToStderr)
+	return release.RunReleaseSpec(ctx, spec, gitToStderr)
 }

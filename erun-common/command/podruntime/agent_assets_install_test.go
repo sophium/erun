@@ -28,52 +28,16 @@ func assertAssetFile(t *testing.T, path, want string) {
 	}
 }
 
-// TestInstallOrRefreshSkillsTracksTheSourceAndKeepsOperatorEdits walks one skill
-// through every state an environment's home volume can hold it in: absent,
-// erun's unmodified copy of an older source, an operator's in-place edit, and a
-// copy installed before markers existed.
-func TestInstallOrRefreshSkillsTracksTheSourceAndKeepsOperatorEdits(t *testing.T) {
+// install-skills drives install, refresh and preserve; a pre-marker copy is adopted.
+func TestInstallOrRefreshSkillsAdoptsALegacyCopy(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
-	skill := filepath.Join(src, "erun-build-env")
 	installed := filepath.Join(dest, "erun-build-env")
-	marker := filepath.Join(installed, AgentSkillMarker)
-
-	writeAssetFile(t, filepath.Join(skill, "SKILL.md"), "v1 body\n")
-	writeAssetFile(t, filepath.Join(skill, "templates", "reference.md"), "ref v1\n")
-	result := installSkillsForTest(t, src, dest)
-	if strings.Join(result.Installed, ",") != "erun-build-env" {
-		t.Fatalf("fresh install should report the skill installed, got %+v", result)
-	}
-	assertAssetFile(t, filepath.Join(installed, "SKILL.md"), "v1 body\n")
-	assertAssetFile(t, filepath.Join(installed, "templates", "reference.md"), "ref v1\n")
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("a fresh install must record its marker: %v", err)
-	}
-
-	writeAssetFile(t, filepath.Join(skill, "SKILL.md"), "v2 body\n")
-	writeAssetFile(t, filepath.Join(skill, "templates", "reference.md"), "ref v2\n")
-	if result = installSkillsForTest(t, src, dest); len(result.Refreshed) != 1 {
-		t.Fatalf("an unmodified install must follow a changed source: %+v", result)
-	}
-	assertAssetFile(t, filepath.Join(installed, "SKILL.md"), "v2 body\n")
-	assertAssetFile(t, filepath.Join(installed, "templates", "reference.md"), "ref v2\n")
-
-	writeAssetFile(t, filepath.Join(installed, "SKILL.md"), "operator edit\n")
-	writeAssetFile(t, filepath.Join(skill, "SKILL.md"), "v3 body\n")
-	if result = installSkillsForTest(t, src, dest); len(result.Preserved) != 1 {
-		t.Fatalf("an in-place edit must be preserved: %+v", result)
-	}
-	assertAssetFile(t, filepath.Join(installed, "SKILL.md"), "operator edit\n")
-
+	writeAssetFile(t, filepath.Join(src, "erun-build-env", "SKILL.md"), "v4 body\n")
 	writeAssetFile(t, filepath.Join(installed, "SKILL.md"), "ancient body\n")
-	if err := os.Remove(marker); err != nil {
-		t.Fatal(err)
-	}
-	writeAssetFile(t, filepath.Join(skill, "SKILL.md"), "v4 body\n")
 	installSkillsForTest(t, src, dest)
 	assertAssetFile(t, filepath.Join(installed, "SKILL.md"), "v4 body\n")
-	if _, err := os.Stat(marker); err != nil {
+	if _, err := os.Stat(filepath.Join(installed, AgentSkillMarker)); err != nil {
 		t.Fatalf("a legacy copy must be adopted with a marker: %v", err)
 	}
 }
@@ -87,20 +51,6 @@ func installSkillsForTest(t *testing.T, src, dest string) AgentAssetsInstallResu
 	return result
 }
 
-func TestInstallOrRefreshSkillsSkipsADirectoryWithNoSkill(t *testing.T) {
-	src := t.TempDir()
-	dest := t.TempDir()
-	writeAssetFile(t, filepath.Join(src, "not-a-skill", "README.md"), "stray\n")
-	if _, err := InstallOrRefreshSkills(src, dest); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "not-a-skill")); !os.IsNotExist(err) {
-		t.Fatalf("a directory with no SKILL.md must not be installed, stat err = %v", err)
-	}
-}
-
-// The image bakes skills 0755 so the unprivileged user can enter them; what is
-// installed is always ordinary 0644 files in 0755 directories.
 func TestInstallOrRefreshSkillsNormalisesModes(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
@@ -120,47 +70,25 @@ func TestInstallOrRefreshSkillsNormalisesModes(t *testing.T) {
 	}
 }
 
-func TestInstallOrRefreshAgentsTracksTheSourceAndKeepsOperatorEdits(t *testing.T) {
+// install-skills drives install, refresh and preserve; a pre-marker copy is adopted
+// and only <name>.md files are agents.
+func TestInstallOrRefreshAgentsAdoptsALegacyCopy(t *testing.T) {
 	src := t.TempDir()
 	dest := filepath.Join(t.TempDir(), "agents")
-	source := filepath.Join(src, "erun-builder.md")
 	installed := filepath.Join(dest, "erun-builder.md")
-	marker := installed + AgentFileMarkerSuffix
 	writeAssetFile(t, filepath.Join(src, "notes.txt"), "not an agent\n")
-
-	writeAssetFile(t, source, "v1\n")
-	if _, err := InstallOrRefreshAgents(src, dest); err != nil {
-		t.Fatalf("fresh install: %v", err)
-	}
-	assertAssetFile(t, installed, "v1\n")
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("a fresh install must record its marker: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "notes.txt")); !os.IsNotExist(err) {
-		t.Fatalf("only <name>.md files are agents, stat err = %v", err)
-	}
-
-	writeAssetFile(t, source, "v2\n")
-	if _, err := InstallOrRefreshAgents(src, dest); err != nil {
-		t.Fatal(err)
-	}
-	assertAssetFile(t, installed, "v2\n")
-
-	writeAssetFile(t, installed, "operator edit\n")
-	writeAssetFile(t, source, "v3\n")
-	if _, err := InstallOrRefreshAgents(src, dest); err != nil {
-		t.Fatal(err)
-	}
-	assertAssetFile(t, installed, "operator edit\n")
-
-	if err := os.Remove(marker); err != nil {
-		t.Fatal(err)
-	}
-	writeAssetFile(t, source, "v4\n")
+	writeAssetFile(t, filepath.Join(src, "erun-builder.md"), "v4\n")
+	writeAssetFile(t, installed, "ancient\n")
 	if _, err := InstallOrRefreshAgents(src, dest); err != nil {
 		t.Fatal(err)
 	}
 	assertAssetFile(t, installed, "v4\n")
+	if _, err := os.Stat(installed + AgentFileMarkerSuffix); err != nil {
+		t.Fatalf("a legacy copy must be adopted with a marker: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "notes.txt")); !os.IsNotExist(err) {
+		t.Fatalf("only <name>.md files are agents, stat err = %v", err)
+	}
 }
 
 func TestInstallOrRefreshSkillsReportsAnUnreadableSource(t *testing.T) {

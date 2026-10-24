@@ -10,10 +10,6 @@ import { readError } from './errors';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppThunk } from './store';
 
-// refreshManageExposures loads the Ports tab's public-exposure list. Called
-// automatically when the Manage dialog opens (matching deployComponents) and
-// again after a successful expose/unexpose, so the list always reflects the
-// cluster's actual Ingresses rather than an optimistic local edit.
 export const refreshManageExposures = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().manageDialog;
   const selection = dialog.selection;
@@ -21,12 +17,7 @@ export const refreshManageExposures = (): AppThunk<Promise<void>> => async (disp
     return;
   }
   dispatch(patchManageDialog({ exposuresLoading: true }));
-  // Both reads in flight together: they answer halves of one question ("what
-  // is published" and "what could be"), and serializing them would show the
-  // tab half-loaded for no reason. allSettled rather than all so one read
-  // failing does not blank the other's already-resolved panel -- the same
-  // "partial access degrades partially" rule the two panels already each
-  // follow individually (erun-ui/AGENTS.md "Degrade by permission").
+  // allSettled so one failed read does not blank the other panel.
   const [exposuresResult, servicesResult] = await Promise.allSettled([
     dispatch(environmentApi.endpoints.listEnvironmentExposures.initiate(selection)).unwrap(),
     dispatch(environmentApi.endpoints.listEnvironmentServices.initiate(selection)).unwrap(),
@@ -34,10 +25,7 @@ export const refreshManageExposures = (): AppThunk<Promise<void>> => async (disp
   if (!getState().manageDialog.open) {
     return;
   }
-  // A round-trip failure (not a computed restricted/unconfigured result) is
-  // reported the same way a genuine listing failure is, so it renders with
-  // the same "failed to load" affordance rather than reading as "nothing
-  // exposed here".
+  // A round-trip failure renders as "failed to load", not "nothing exposed".
   const exposures: UIExposureList =
     exposuresResult.status === 'fulfilled'
       ? exposuresResult.value
@@ -77,9 +65,6 @@ export const updateExposeForm =
     );
   };
 
-// submitExposeService exposes the form's service at a public hostname, then
-// re-reads the list from the cluster so the new row (and its resolved scheme)
-// reflects what was actually applied, not the form's own guess.
 export const submitExposeService = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().manageDialog;
   const selection = dialog.selection;
@@ -97,9 +82,7 @@ export const submitExposeService = (): AppThunk<Promise<void>> => async (dispatc
   const input: UIExposeServiceInput = {
     service,
     targetIP,
-    // Only sent when a Service was picked. Left out, the backend keeps the
-    // <tenant>-<service> derivation, so a form filled in by hand behaves
-    // exactly as it did before the picker existed.
+    // Omitted, the backend derives <tenant>-<service>.
     ...(backendService ? { backendService } : {}),
     ...(port ? { port: Number(port) } : {}),
   };
@@ -126,9 +109,6 @@ export const submitExposeService = (): AppThunk<Promise<void>> => async (dispatc
   }
 };
 
-// startUnexposeConfirm/cancelUnexposeConfirm drive the two-step destructive
-// confirm below the exposure list, matching the Delete tab's own pattern
-// (confirm, then a second explicit action commits it).
 export const startUnexposeConfirm = (): AppThunk => (dispatch) => {
   dispatch(patchManageDialog({ unexposeConfirming: true, unexposeError: '' }));
 };

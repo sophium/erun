@@ -19,12 +19,7 @@ type windowsTerminalSession struct {
 	pty     *conpty.ConPty
 	outPipe *os.File
 	pid     int
-	// handle is the process handle CreateProcess returned via conpty.Spawn. We
-	// keep it instead of re-opening the process with os.FindProcess: on
-	// locked-down machines an EDR blocks OpenProcess (PROCESS_TERMINATE) and
-	// os.FindProcess fails with "OpenProcess: Access is denied.", which used to
-	// abort every PTY spawn (env-create, erun open, ...). CreateProcess already
-	// handed us a full-rights handle, so no OpenProcess is needed.
+	// handle comes from CreateProcess; os.FindProcess needs OpenProcess, which EDR agents deny.
 	handle  syscall.Handle
 	wait    sync.Once
 	waitErr error
@@ -38,10 +33,7 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 
 	env := terminalSessionEnv(os.Environ(), params.Env)
 
-	// ConPTY's Spawn resolves a non-absolute executable relative to attr.Dir
-	// rather than searching PATH, so a bare name like "powershell.exe" would be
-	// looked for in the session's start dir and fail with "the system cannot find
-	// the file specified". Resolve it on PATH to an absolute path first.
+	// ConPTY resolves a bare executable against attr.Dir, not PATH.
 	executable := params.Executable
 	if !filepath.IsAbs(executable) {
 		if resolved, lookErr := exec.LookPath(executable); lookErr == nil {
@@ -95,16 +87,12 @@ func (s *windowsTerminalSession) Pid() int {
 	return s.pid
 }
 
-// Alive checks the CreateProcess handle we already hold via GetExitCodeProcess,
-// so it never calls OpenProcess (which an EDR denies on locked-down machines,
-// see the handle comment above). STILL_ACTIVE (259) means the shell is running;
-// any real exit code means it has ended. If the query itself fails we assume
-// alive rather than falsely flag a live shell as exited.
+// Alive uses GetExitCodeProcess on the held handle; a failed query assumes alive.
 func (s *windowsTerminalSession) Alive() bool {
 	if s == nil || s.handle == 0 {
 		return false
 	}
-	const stillActive = 259 // STILL_ACTIVE
+	const stillActive = 259
 	var code uint32
 	if err := syscall.GetExitCodeProcess(s.handle, &code); err != nil {
 		return true
@@ -136,12 +124,8 @@ func (s *windowsTerminalSession) Close() error {
 	if s == nil {
 		return nil
 	}
-	// Kill the whole child tree, not just the shell: an `erun open`'s kubectl
-	// exec child otherwise survives as an orphan that holds the exec stream open,
-	// leaving a stale dtach client attached in the pod after every close.
-	//
-	// The liveness probe runs while the handle is still open — Alive reads it,
-	// and closing it first would turn "did I kill it" into "I no longer know".
+	// Kill the whole tree so the kubectl exec child does not orphan. Probe liveness
+	// before closing the handle Alive reads.
 	killErr := killProcessTree(s.pid, func() error {
 		killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.pid))
 		core.HideConsoleWindow(killCmd)
@@ -153,8 +137,7 @@ func (s *windowsTerminalSession) Close() error {
 	}
 	if s.pty != nil {
 		ptyErr := ignoreAlreadyClosed(s.pty.Close())
-		// A survivor is the report the caller has to act on; a pty that could
-		// not be released only says the desktop still holds its own end.
+		// A survivor is what the caller must act on; a pty release error is secondary.
 		if killErr == nil {
 			return ptyErr
 		}

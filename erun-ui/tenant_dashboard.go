@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -57,24 +55,15 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	defer cancel()
 	capabilities := loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
 	if dashboard.PlatformState == tenantPlatformStateTenantMismatch {
-		// Every remaining read would be a read of the other tenant's rows —
-		// including the invite-request status below, which is the caller's own
-		// status on *that* tenant. The mismatch is terminal for this load.
+		// Every remaining read would be the other tenant's rows.
 		return dashboard, nil
 	}
-	// The caller's own invite-request status needs only the bearer this
-	// resolution already minted, never tenant membership — read it even when
-	// loadTenantDashboardData above downgraded PlatformState to not-enrolled/
-	// no-permission, since that is exactly the caller this status is for.
+	// Needs only the bearer, not membership, so read it even for a not-enrolled caller.
 	loadTenantDashboardMyInviteRequest(requestCtx, resolution.client, &dashboard)
 	loadTenantDashboardAccessRemedies(requestCtx, resolution.client, capabilities, &dashboard)
 	return dashboard, nil
 }
 
-// loadTenantDashboardAccessRemedies gives each restricted panel the copyable
-// grant that would lift its restriction, so a refused tab offers the request
-// rather than only naming the read it needs. Panels are the only place the
-// dashboard records a refused read, so they are also the whole input here.
 func loadTenantDashboardAccessRemedies(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	var userID string
 	if dashboard.User != nil {
@@ -101,8 +90,7 @@ const (
 	tenantDashboardTabRequests     = "requests"
 )
 
-// The API reads each panel is made of, in canonical route-template form — the
-// same form the platform reports capabilities in.
+// API reads per panel, in the route-template form the platform reports capabilities in.
 const (
 	tenantDashboardReadWhoami         = "GET /v1/whoami"
 	tenantDashboardReadReviews        = "GET /v1/reviews"
@@ -125,23 +113,16 @@ const (
 	tenantDashboardWriteDeclineInvite = "POST /v1/invite-requests/{invite_request_id}/decline"
 )
 
-// loadTenantDashboardData resolves every panel independently. One panel the
-// caller may not read, or one call that fails, must not blank the panels that
-// worked — and a panel the caller may not read must not read as an empty one.
+// loadTenantDashboardData resolves each panel independently; a restricted panel must not read as empty.
 func loadTenantDashboardData(ctx context.Context, client *platformclient.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) model.PlatformCapabilities {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
-		// Identity is the dashboard's own precondition: without it there is no
-		// capability set to gate the remaining panels honestly.
 		dashboard.PlatformState, dashboard.APIError = tenantDashboardIdentityFailure(err)
 		return nil
 	}
 	dashboard.User = &uiTenantDashboardUser{
 		TenantID: whoami.TenantID,
-		// The platform's own name for the tenant behind this bearer. The local
-		// tenant this dashboard was opened from is a different namespace, joined
-		// to this one only by whichever alias the credential belongs to, so this
-		// is the only value that can say whose rows the panels below are.
+		// The local tenant is a different namespace; only this says whose rows the panels show.
 		TenantName: whoami.TenantName,
 		UserID:     whoami.UserID,
 		Username:   whoami.Username,
@@ -149,24 +130,13 @@ func loadTenantDashboardData(ctx context.Context, client *platformclient.Platfor
 		Issuer:     whoami.Issuer,
 		Subject:    whoami.Subject,
 	}
-	// A local tenant is bound to a platform tenant only by whichever cloud
-	// alias its credential reaches, so the name the platform reports is the
-	// one thing that can say whether the two correspond. When it names a
-	// different tenant, this dashboard would render that tenant's reviews,
-	// queue, users and audit under the local tenant's own name — behind the
-	// write controls (create a review, advance a merge queue, approve an
-	// invitation) that would act on them. Refuse before reading any of it. A
-	// platform that reports no name leaves nothing to compare, and is read
-	// exactly as it was before.
+	// A different platform tenant would render its rows, and write controls, under the
+	// local tenant's name, so refuse before reading. No reported name skips the check.
 	if mismatched := tenantDashboardTenantMismatch(dashboard.Tenant, whoami.TenantName); mismatched != "" {
 		dashboard.PlatformState = tenantPlatformStateTenantMismatch
 		return nil
 	}
 	capabilities := whoami.Capabilities
-	// The Users tab shows the tenant's roster, not the caller's own identity:
-	// whoami above answered "who am I", and this read answers "who else is
-	// here". A caller who may not list users gets that read named on the panel
-	// rather than a table whose one row states a false count for the tenant.
 	roster := loadTenantDashboardUsers(ctx, client, capabilities, dashboard)
 	usernames := tenantDashboardUsernamesFromRoster(roster)
 	reviewFilter := platformclient.PlatformReviewFilter{}
@@ -193,17 +163,8 @@ func loadTenantDashboardData(ctx context.Context, client *platformclient.Platfor
 	return capabilities
 }
 
-// tenantDashboardTenantMismatch reports the platform tenant name that does not
-// correspond to localTenant, or "" when there is nothing to compare — the
-// platform reported no name, or the local tenant is unnamed — and when the two
-// correspond. A platform that reports no name is read exactly as it was
-// before.
-//
-// It is the correspondence check the two namespaces otherwise do not have: the
-// platform's own name for the tenant behind the bearer is the only value that
-// can say whether the rows a dashboard is about to render are the local
-// tenant's. Names are compared case-insensitively, because a tenant name is a
-// DNS-safe label that both sides normalise on their own.
+// tenantDashboardTenantMismatch returns the mismatching platform name, or "" when
+// they match or either is empty. Compared case-insensitively.
 func tenantDashboardTenantMismatch(localTenant, platformTenantName string) string {
 	platformTenantName = strings.TrimSpace(platformTenantName)
 	localTenant = strings.TrimSpace(localTenant)
@@ -216,11 +177,6 @@ func tenantDashboardTenantMismatch(localTenant, platformTenantName string) strin
 	return platformTenantName
 }
 
-// loadTenantDashboardInviteRequests loads the operator/admin queue: every
-// pending request the caller may see (their own tenant's JOIN_TENANT
-// requests, or every request for an operations-scoped caller). Degrades like
-// every other panel here — a caller who cannot read the queue gets a named
-// restriction, never a false "nothing pending".
 func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabRequests}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadInviteRequests); restricted != "" {
@@ -245,21 +201,16 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclie
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// loadTenantDashboardUsers reads the tenant's roster for the Users tab and
-// returns it for the username directory the review panels resolve authors
-// with, so the dashboard pays for GET /v1/users once. Degrades like every
-// other panel: a caller who may not read it gets that read named as the
-// panel's restriction, and a failed read gets the panel's own error — neither
-// silently reduces the tab to the caller's single row, which reads as a
-// one-user tenant.
-func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []platformclient.PlatformUser {
+// loadTenantDashboardUsers also returns the roster for resolving review authors,
+// so GET /v1/users is read once.
+func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []model.PlatformUser {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabUsers}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return nil
 	}
-	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadUsers, err)
 		dashboard.Panels = append(dashboard.Panels, panel)
@@ -280,10 +231,7 @@ func loadTenantDashboardUsers(ctx context.Context, client *platformclient.Platfo
 			CreatedAt: tenantDashboardTime(user.CreatedAt),
 			UpdatedAt: tenantDashboardTime(user.UpdatedAt),
 		}
-		// GET /v1/users reports the roster without roles, so a row's roles stay
-		// unset — "not reported" — rather than reading as "none assigned". The
-		// caller's own row is the one the dashboard can answer for, from the
-		// whoami read that already succeeded.
+		// The roster has no roles; only the caller's own row is filled in, from whoami.
 		if selfUserID != "" && strings.TrimSpace(user.UserID) == selfUserID {
 			row.Roles = dashboard.User.Roles
 		}
@@ -293,10 +241,7 @@ func loadTenantDashboardUsers(ctx context.Context, client *platformclient.Platfo
 	return users
 }
 
-// tenantDashboardUsernamesFromRoster resolves every tenant user id to its
-// display username from an already-read roster. Every caller of the map falls
-// back to the raw id it was given when a name is missing (#1378).
-func tenantDashboardUsernamesFromRoster(users []platformclient.PlatformUser) map[string]string {
+func tenantDashboardUsernamesFromRoster(users []model.PlatformUser) map[string]string {
 	names := make(map[string]string)
 	for _, user := range users {
 		userID := strings.TrimSpace(user.UserID)
@@ -309,68 +254,16 @@ func tenantDashboardUsernamesFromRoster(users []platformclient.PlatformUser) map
 	return names
 }
 
-// tenantDashboardUsernames is the standalone status of that directory, for
-// callers that resolved no roster of their own (the review detail read). Best
-// effort: a caller who cannot read /v1/users, or a read that fails, gets back
-// an empty map rather than failing the whole load.
+// tenantDashboardUsernames is best-effort and returns an empty map on failure.
 func tenantDashboardUsernames(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) map[string]string {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return map[string]string{}
 	}
-	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		return map[string]string{}
 	}
 	return tenantDashboardUsernamesFromRoster(users)
-}
-
-// loadTenantDashboardReviewFilterCounts reports how many reviews are Mine and
-// how many are Waiting on me, independent of whichever filter the caller
-// currently has applied: the Reviews tab's filter buttons need the
-// distribution visible before the caller clicks either one (#1378), not only
-// after. Best effort like the other row-enrichment reads: a restricted or
-// failing count simply leaves the corresponding field unset rather than
-// reporting a false zero.
-func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
-	if strings.TrimSpace(userID) == "" || restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews) != "" {
-		return
-	}
-	if mine, err := client.ListReviews(ctx, platformclient.PlatformReviewFilter{AuthorUserID: userID}); err == nil {
-		count := len(mine)
-		dashboard.MineReviewCount = &count
-	}
-	if waiting, err := client.ListReviews(ctx, platformclient.PlatformReviewFilter{ReviewerUserID: userID}); err == nil {
-		count := len(waiting)
-		dashboard.WaitingOnMeReviewCount = &count
-	}
-}
-
-// reviewsLoadOutcome carries the Reviews panel's own result forward to the
-// Builds panel, which needs the same review list but must not blank on a
-// restriction or failure the Reviews panel already reported for a different
-// reason than its own.
-type reviewsLoadOutcome struct {
-	reviews    []platformclient.PlatformReview
-	err        error
-	restricted string
-}
-
-func loadTenantDashboardReviews(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, filter platformclient.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
-		panel.Restricted = restricted
-		dashboard.Panels = append(dashboard.Panels, panel)
-		return reviewsLoadOutcome{restricted: restricted}
-	}
-	reviews, err := client.ListReviews(ctx, filter)
-	if err != nil {
-		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
-		dashboard.Panels = append(dashboard.Panels, panel)
-		return reviewsLoadOutcome{err: err}
-	}
-	dashboard.Reviews = tenantDashboardReviews(reviews, usernames)
-	dashboard.Panels = append(dashboard.Panels, panel)
-	return reviewsLoadOutcome{reviews: reviews}
 }
 
 func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, usernames map[string]string) {
@@ -380,12 +273,8 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	// The merge queue belongs to a repository; the dashboard shows every
-	// repository's queue for the default target branch the API picks, and
-	// each row names its own repository so a mixed panel is legible rather
-	// than read as one queue. Advancing from here asks for one specifically —
-	// see the merge-queue panel's own advance action.
-	reviews, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{})
+	// Shows every repository's queue; each row names its repository.
+	reviews, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{})
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
 	} else {
@@ -394,17 +283,11 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// loadTenantDashboardBuilds reuses the review list the Reviews panel already
-// fetched rather than re-listing it, and reads each review's builds
-// concurrently: a tenant with many reviews used to pay one round trip per
-// review under this panel's own share of the whole dashboard's single
-// request timeout, so a big tenant read out as a timed-out API error instead
-// of a slow-but-successful load.
+// Builds are read concurrently per review to stay within the dashboard's single request timeout.
 func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
 	switch {
 	case reviewsOutcome.restricted != "":
-		// Builds are read per review, so this panel needs the review list too.
 		panel.Restricted = reviewsOutcome.restricted
 	case reviewsOutcome.err != nil:
 		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, reviewsOutcome.err)
@@ -423,14 +306,8 @@ func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.Platf
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// appendUnattachedTenantDashboardBuilds merges GET /v1/builds' unattached
-// (no-review) builds into the same Builds panel the review-linked read above
-// populates -- an ordinary `erun build` self-reports here now too
-// (erun#1954), not only a build recorded against a review. Best-effort: a
-// caller who cannot read this newer route, or a read that fails, does not
-// blank builds the review-side read already found; it only becomes the
-// panel's own restriction/error when the review-side had none of its own to
-// report.
+// appendUnattachedTenantDashboardBuilds merges no-review builds best-effort; it
+// only sets the panel's restriction/error when the review-side read had none.
 func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, panel *uiTenantDashboardPanel) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAllBuilds); restricted != "" {
 		if panel.Restricted == "" && panel.Error == "" {
@@ -447,7 +324,7 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platform
 	}
 	for _, build := range page.Builds {
 		if strings.TrimSpace(build.ReviewID) != "" {
-			continue // already covered by the review-linked read above
+			continue
 		}
 		dashboard.Builds = append(dashboard.Builds, uiTenantDashboardBuild{
 			BuildID:         build.BuildID,
@@ -467,130 +344,6 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platform
 	})
 }
 
-// loadTenantDashboardReviewThreadCounts enriches each review row with its
-// unresolved-thread count, so "is this review actually finished" is readable
-// from the list itself, not only inside the detail dialog. A review is left
-// without a count (rather than a false zero) when the caller cannot read
-// comments at all, or when its own comment read failed — supplemental detail
-// on a row, not worth a panel error the way the Reviews/Builds panels get.
-func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
-	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
-		return
-	}
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) != "" {
-		return
-	}
-	counts := fetchReviewThreadCountsConcurrently(ctx, client, reviewsOutcome.reviews)
-	for i := range dashboard.Reviews {
-		count, ok := counts[dashboard.Reviews[i].ReviewID]
-		if !ok {
-			continue
-		}
-		dashboard.Reviews[i].UnresolvedThreads = &count
-	}
-}
-
-// maxConcurrentReviewCommentReads mirrors maxConcurrentReviewBuildReads for
-// the same reason: bound the per-review /comments reads a big tenant's
-// listing pays for, inside the one dashboard load's shared timeout.
-const maxConcurrentReviewCommentReads = 8
-
-// fetchReviewThreadCountsConcurrently reads every review's comments in
-// parallel, bounded by maxConcurrentReviewCommentReads, mirroring
-// fetchReviewBuildsConcurrently's shape. A review whose comment read fails is
-// simply absent from the returned map rather than reported as zero.
-func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) map[string]int {
-	counts := make(map[string]int, len(reviews))
-	semaphore := make(chan struct{}, maxConcurrentReviewCommentReads)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for _, review := range reviews {
-		reviewID := strings.TrimSpace(review.ReviewID)
-		if reviewID == "" {
-			continue
-		}
-		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(reviewID string) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
-			comments, err := client.ListComments(ctx, reviewID)
-			if err != nil {
-				return
-			}
-			count := reviewpkg.CountUnresolvedThreads(comments)
-			mu.Lock()
-			counts[reviewID] = count
-			mu.Unlock()
-		}(reviewID)
-	}
-	wg.Wait()
-	return counts
-}
-
-// maxConcurrentReviewBuildReads bounds how many /builds requests run at once,
-// so a tenant with many reviews still fits comfortably inside one request's
-// share of tenantDashboardTimeout instead of paying N sequential round trips.
-const maxConcurrentReviewBuildReads = 8
-
-// fetchReviewBuildsConcurrently reads every review's builds in parallel,
-// bounded by maxConcurrentReviewBuildReads, and flattens the results in the
-// same review order the old serial loop used to produce. Every read runs to
-// completion regardless of another review's failure — the old serial loop
-// dropped every review's builds *after* the point it broke on an error, an
-// order-dependent partial result. This keeps every review that did succeed
-// and still reports the first failure, which is both more complete and no
-// longer dependent on where in the list the failure happened to land.
-func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) ([]uiTenantDashboardBuild, error) {
-	perReview := make([][]platformclient.PlatformBuild, len(reviews))
-	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-	for i, review := range reviews {
-		reviewID := strings.TrimSpace(review.ReviewID)
-		if reviewID == "" {
-			continue
-		}
-		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(index int, reviewID string) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
-			reviewBuilds, err := client.ListBuilds(ctx, reviewID)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-				return
-			}
-			perReview[index] = reviewBuilds
-		}(i, reviewID)
-	}
-	wg.Wait()
-
-	builds := make([]uiTenantDashboardBuild, 0, len(reviews))
-	for i, review := range reviews {
-		for _, build := range perReview[i] {
-			builds = append(builds, uiTenantDashboardBuild{
-				BuildID:    build.BuildID,
-				TenantID:   build.TenantID,
-				ReviewID:   build.ReviewID,
-				ReviewName: strings.TrimSpace(review.Name),
-				Successful: build.Successful,
-				CommitID:   build.CommitID,
-				Version:    build.Version,
-				Profile:    build.Profile,
-				CreatedAt:  tenantDashboardTime(build.CreatedAt),
-				UpdatedAt:  tenantDashboardTime(build.UpdatedAt),
-			})
-		}
-	}
-	return builds, firstErr
-}
-
 func loadTenantDashboardAuditEvents(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabAudit}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAuditEvents); restricted != "" {
@@ -607,10 +360,7 @@ func loadTenantDashboardAuditEvents(ctx context.Context, client *platformclient.
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// restrictedTenantDashboardRead reports the read the caller lacks, or "" when
-// the panel may be attempted. A platform that reported no capability set at all
-// leaves every read attemptable: the call then reports its own refusal, which is
-// still better than hiding a surface the caller can use.
+// No reported capability set leaves every read attemptable.
 func restrictedTenantDashboardRead(capabilities model.PlatformCapabilities, read string) string {
 	if !capabilities.Known() {
 		return ""
@@ -626,24 +376,9 @@ func tenantDashboardReadError(read string, err error) string {
 	return fmt.Sprintf("load tenant dashboard %s: %v", read, err)
 }
 
-// tenantDashboardIdentityFailure classifies a refused identity read into the
-// state that names the operator's actual next action, plus the message the
-// dashboard shows before that action. By the time this runs, the bearer
-// itself minted successfully (resolveTenantPlatform already reports
-// tenantPlatformStateNotSignedIn when it does not) — so a 401 here is the
-// platform's own auth middleware rejecting the token, for one of three
-// reasons its {code, message} envelope distinguishes: NOT_ENROLLED (the
-// ordinary case, this identity's subject is not one of the tenant's users),
-// TENANT_UNRESOLVED (the platform could not even determine a tenant for this
-// token — the caller may already be enrolled somewhere else, so "ask an
-// administrator to enroll it" is wrong advice), or RESOLUTION_FAILED (an
-// internal error unrelated to enrollment at all, sanitized server-side).
-// Only NOT_ENROLLED, and an older platform's unclassified 401 with no code
-// at all, get the not-enrolled treatment; the other two fall through to the
-// generic read-error message rather than asserting an enrollment answer that
-// is not true. A 403 means the identity is enrolled but the whoami read
-// itself is refused, which happens only for a caller with no permissions at
-// all.
+// A 401 here means the platform rejected a minted token. Only NOT_ENROLLED (or an
+// older platform's code-less 401) means not enrolled; TENANT_UNRESOLVED and
+// RESOLUTION_FAILED get the generic message. A 403 means enrolled with no permissions.
 func tenantDashboardIdentityFailure(err error) (state, message string) {
 	switch {
 	case errors.Is(err, platformclient.ErrPlatformForbidden):
@@ -656,43 +391,6 @@ func tenantDashboardIdentityFailure(err error) (state, message string) {
 		return tenantPlatformStateNotEnrolled, "Your signed-in identity is not enrolled in this tenant yet. Ask an administrator to enroll it, or request access below."
 	default:
 		return "", tenantDashboardReadError(tenantDashboardReadWhoami, err)
-	}
-}
-
-func tenantDashboardReviews(reviews []platformclient.PlatformReview, usernames map[string]string) []uiTenantDashboardReview {
-	converted := make([]uiTenantDashboardReview, 0, len(reviews))
-	for _, review := range reviews {
-		converted = append(converted, tenantDashboardReviewWithUsername(review, usernames))
-	}
-	return converted
-}
-
-// tenantDashboardReviewWithUsername mirrors tenantDashboardCommentWithUsername:
-// the read paths (listings, single-review load) have a resolved user
-// directory to enrich with; the write paths in tenant_review_write.go return
-// the review the caller themselves just acted on and use the base converter
-// directly, unresolved (#1378).
-func tenantDashboardReviewWithUsername(review platformclient.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
-	converted := tenantDashboardReview(review)
-	converted.AuthorUsername = usernames[review.AuthorUserID]
-	return converted
-}
-
-func tenantDashboardReview(review platformclient.PlatformReview) uiTenantDashboardReview {
-	return uiTenantDashboardReview{
-		ReviewID:          review.ReviewID,
-		TenantID:          review.TenantID,
-		AuthorUserID:      review.AuthorUserID,
-		Name:              review.Name,
-		Repository:        review.Repository,
-		TargetBranch:      review.TargetBranch,
-		SourceBranch:      review.SourceBranch,
-		Status:            review.Status,
-		LastFailedBuildID: review.LastFailedBuildID,
-		LastReadyBuildID:  review.LastReadyBuildID,
-		LastMergedBuildID: review.LastMergedBuildID,
-		CreatedAt:         tenantDashboardTime(review.CreatedAt),
-		UpdatedAt:         tenantDashboardTime(review.UpdatedAt),
 	}
 }
 

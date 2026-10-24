@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-// ParseRuntimeCPUMax reads cpu.max's "<quota> <period>" pair, both in
-// microseconds. A quota of "max" means the container has no CPU ceiling, so
-// there is nothing to compute a percentage-of-quota against.
+// ParseRuntimeCPUMax parses cpu.max's "<quota> <period>"; a "max" quota has no ceiling.
 func ParseRuntimeCPUMax(raw string) (quotaUsec, periodUsec int64, ok bool) {
 	fields := strings.Fields(raw)
 	if len(fields) != 2 || fields[0] == "max" {

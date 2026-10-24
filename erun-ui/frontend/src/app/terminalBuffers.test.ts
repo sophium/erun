@@ -18,13 +18,10 @@ test('trimChunksToBudget keeps everything under the line budget', () => {
 
 test('trimChunksToBudget keeps only the tail once the line budget is exceeded', () => {
   const chunks = ['1\n', '2\n', '3\n', '4\n', '5\n'];
-  // Budget of 2 lines: walk from the tail, stop once 2 newlines are counted.
   const trimmed = trimChunksToBudget(chunks, 2, 1_000_000);
   assert.deepEqual(trimmed, ['4\n', '5\n']);
 });
 
-// What is kept stays within the budget: a chunk that would cross it is
-// dropped, not kept as the one that reached it.
 test('trimChunksToBudget keeps only the tail once the byte budget is exceeded', () => {
   const chunks = ['aaaa', 'bbbb', 'cccc'];
   const trimmed = trimChunksToBudget(chunks, 1_000_000, 5);
@@ -59,9 +56,7 @@ test('detects alt-screen enter in a single chunk', () => {
   assert.equal(bufferCursorVisibility([ALT_ENTER]).altScreen, true);
 });
 
-// The regression that blanked the Claude (alt-screen) tab: a PTY can split the
-// escape sequence at ANY byte boundary, and a per-chunk scan missed it, leaving
-// altScreen=false so the switch took the trim path onto a reset screen.
+// A PTY can split the escape sequence at any byte boundary.
 test('detects alt-screen enter split at every chunk boundary', () => {
   for (let cut = 1; cut < ALT_ENTER.length; cut++) {
     const head = ALT_ENTER.slice(0, cut);
@@ -87,7 +82,7 @@ test('alt-screen exit split across chunks is detected', () => {
 
 test('a trailing bare CSI (SGR) split across chunks is not misread as alt-screen', () => {
   const state = bufferCursorVisibility([ALT_ENTER, '\x1B[', '0m done']);
-  assert.equal(state.altScreen, true); // still in alt-screen; the SGR must not flip it
+  assert.equal(state.altScreen, true);
 });
 
 test('cursor hide/show split across chunks is tracked', () => {

@@ -1,25 +1,19 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// A deploy-triggered spinner cannot be staged in the headless harness (it
-// needs the helm poller + live cluster state), so the first two tests only
-// lock negative invariants. build / release / push entries are pure
-// trace-driven with no cluster dependency, so the third test stages a
-// running entry directly and drives the positive flow.
+// Deploy spinners need a live cluster, so those tests lock negative invariants; build/release/push
+// entries are trace-driven and staged directly.
 
 test.describe('sidebar busy spinner', () => {
   test('quiet env rows show no spinner', async ({ app: _app, page }) => {
-    // Scope to the sidebar so the assertion does not collide with unrelated
-    // role="status" surfaces like terminal banners.
+    // Avoid unrelated role="status" surfaces like terminal banners.
     const sidebar = page.locator('aside').first();
     const spinners = sidebar.getByRole('status');
     await expect(spinners).toHaveCount(0);
   });
 
   test('navigating away clears any in-flight spinner', async ({ app, page }) => {
-    // Guards a regression where clicking env A then env B mid-open (a cold
-    // EC2 open can take ~60s) stranded a stale spinner and "Opening A..."
-    // banner on the env the user had navigated away from.
+    // Switching envs mid-open must not strand a spinner or banner on the previous env.
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_BETA);
 
@@ -36,10 +30,8 @@ test.describe('sidebar busy spinner', () => {
     const environment = SEED_ENV_ALPHA;
 
     const sidebar = page.locator('aside').first();
-    // No "zero spinners" precondition: the harness may still be auto-opening
-    // the restored env (its own "Opening..." spinner), unrelated to this
-    // test. Asserting on the specific per-command label keeps the checks
-    // robust to that concurrent open.
+    // The harness may still be auto-opening the restored env, so assert on the per-command label
+    // rather than zero spinners.
 
     const emitActivity = (command: string, status: 'running' | 'succeeded') =>
       page.evaluate(
@@ -77,8 +69,6 @@ test.describe('sidebar busy spinner', () => {
       await emitActivity(command, 'running');
       await expect(labelledSpinner).toBeVisible();
 
-      // Scope to the command label so a concurrent "Opening..." spinner on
-      // the same row cannot make the finish assertion flaky.
       await emitActivity(command, 'succeeded');
       await expect(labelledSpinner).toHaveCount(0);
     }

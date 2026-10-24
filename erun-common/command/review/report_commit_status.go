@@ -10,67 +10,14 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// A required GitHub status check has nothing to require until something
-// reports a status under its context. The merge queue (`erun exec
-// gate-merge`, `erun build`, `erun review record-build`) already knows
-// whether the prospective merge is green or red; this is the missing last
-// step that turns that knowledge into a GitHub commit status, so branch
-// protection on the target branch can finally require it.
-//
-// The status always targets the review's source-branch tip commit, never the
-// local prospective squash-merge commit gate-merge produces: GitHub only
-// evaluates a required check against a commit reachable from the open pull
-// request, and the squash commit never exists there until after its build
-// has passed and it was pushed.
-
-// ReportCommitStatusState is a state GitHub's Statuses API accepts.
-type ReportCommitStatusState string
-
-const (
-	CommitStatusSuccess ReportCommitStatusState = "success"
-	CommitStatusFailure ReportCommitStatusState = "failure"
-	CommitStatusError   ReportCommitStatusState = "error"
-	CommitStatusPending ReportCommitStatusState = "pending"
-)
-
-// DefaultCommitStatusContext is the check name a required-status-checks rule
-// points at when the caller does not name a more specific one.
+// DefaultCommitStatusContext is the default required-check name.
 const DefaultCommitStatusContext = "erun/merge-gate"
 
-// ReportCommitStatusParams is the `erun exec report-commit-status` input.
-type ReportCommitStatusParams struct {
-	// RemoteURL is the github.com remote the status is reported against, in
-	// any form git accepts (ssh, https, with or without a .git suffix).
-	RemoteURL string
-	// Commit is the full commit SHA the status attaches to.
-	Commit string
-	// State is the outcome to report.
-	State ReportCommitStatusState
-	// Context is the check name a required-status-checks rule names. Empty
-	// defaults to DefaultCommitStatusContext.
-	Context string
-	// Description is a short, human-readable summary, naming which gate step
-	// failed when State is not success.
-	Description string
-	// TargetURL is an optional link a reader clicks through to from the
-	// status (e.g. a build log).
-	TargetURL string
-}
-
-// ReportCommitStatusResult is what was actually reported.
-type ReportCommitStatusResult struct {
-	Owner   string `json:"owner"`
-	Repo    string `json:"repo"`
-	Commit  string `json:"commit"`
-	State   string `json:"state"`
-	Context string `json:"context"`
-}
-
-// ReportCommitStatusDependencies lets tests replace the HTTP call and gh
-// token resolution without a real network or a real gh CLI.
+// ReportCommitStatusDependencies are the HTTP and gh token seams.
 type ReportCommitStatusDependencies struct {
 	Client       *http.Client
 	ResolveToken func(owner string) (string, bool)
@@ -86,42 +33,41 @@ func normalizeReportCommitStatusDependencies(deps ReportCommitStatusDependencies
 	return deps
 }
 
-var validCommitStatusStates = map[ReportCommitStatusState]bool{
-	CommitStatusSuccess: true,
-	CommitStatusFailure: true,
-	CommitStatusError:   true,
-	CommitStatusPending: true,
+var validCommitStatusStates = map[model.ReportCommitStatusState]bool{
+	model.CommitStatusSuccess: true,
+	model.CommitStatusFailure: true,
+	model.CommitStatusError:   true,
+	model.CommitStatusPending: true,
 }
 
-// ReportCommitStatus reports a commit status on GitHub for params.Commit, the
-// SHA a required status check on the remote's branch protection can point at.
-func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps ReportCommitStatusDependencies) (ReportCommitStatusResult, error) {
+// ReportCommitStatus reports a GitHub commit status for params.Commit.
+func ReportCommitStatus(ctx core.Context, params model.ReportCommitStatusParams, deps ReportCommitStatusDependencies) (model.ReportCommitStatusResult, error) {
 	ctx.Trace("report-commit-status: resolving commit")
 	commit := strings.TrimSpace(params.Commit)
 	if commit == "" {
 		ctx.Trace("report-commit-status: commit resolution failed: commit is required")
-		return ReportCommitStatusResult{}, fmt.Errorf("commit is required")
+		return model.ReportCommitStatusResult{}, fmt.Errorf("commit is required")
 	}
 	ctx.Trace("report-commit-status: commit = " + commit)
 
 	ctx.Trace("report-commit-status: resolving state")
 	if !validCommitStatusStates[params.State] {
 		ctx.Trace(fmt.Sprintf("report-commit-status: state resolution failed: %q is not one of success, failure, error, pending", params.State))
-		return ReportCommitStatusResult{}, fmt.Errorf("state %q is not one of success, failure, error, pending", params.State)
+		return model.ReportCommitStatusResult{}, fmt.Errorf("state %q is not one of success, failure, error, pending", params.State)
 	}
 	ctx.Trace("report-commit-status: state = " + string(params.State))
 
 	ctx.Trace("report-commit-status: resolving description")
 	if strings.TrimSpace(params.Description) == "" {
 		ctx.Trace("report-commit-status: description resolution failed: description is required")
-		return ReportCommitStatusResult{}, fmt.Errorf("description is required")
+		return model.ReportCommitStatusResult{}, fmt.Errorf("description is required")
 	}
 
 	ctx.Trace("report-commit-status: resolving owner/repo from remote-url")
 	owner, repo, err := parseGitHubOwnerRepo(params.RemoteURL)
 	if err != nil {
 		ctx.Trace("report-commit-status: remote-url resolution failed: " + err.Error())
-		return ReportCommitStatusResult{}, err
+		return model.ReportCommitStatusResult{}, err
 	}
 	ctx.Trace(fmt.Sprintf("report-commit-status: owner = %s, repo = %s", owner, repo))
 
@@ -138,7 +84,7 @@ func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps 
 		"github: POST %srepos/%s/%s/statuses/%s (state=%s, context=%s, description=%q)",
 		registry.GithubAPIBaseURL, owner, repo, commit, params.State, statusContext, params.Description,
 	))
-	result := ReportCommitStatusResult{Owner: owner, Repo: repo, Commit: commit, State: string(params.State), Context: statusContext}
+	result := model.ReportCommitStatusResult{Owner: owner, Repo: repo, Commit: commit, State: string(params.State), Context: statusContext}
 	if ctx.DryRun {
 		return result, nil
 	}
@@ -147,7 +93,7 @@ func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps 
 	token, ok := deps.ResolveToken(owner)
 	if !ok {
 		ctx.Trace("report-commit-status: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set")
-		return ReportCommitStatusResult{}, fmt.Errorf(
+		return model.ReportCommitStatusResult{}, fmt.Errorf(
 			"no GitHub token available to report a commit status; run 'gh auth login' or set GITHUB_TOKEN")
 	}
 	body, err := json.Marshal(commitStatusRequestBody{
@@ -157,10 +103,10 @@ func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps 
 		TargetURL:   strings.TrimSpace(params.TargetURL),
 	})
 	if err != nil {
-		return ReportCommitStatusResult{}, fmt.Errorf("encode commit status body: %w", err)
+		return model.ReportCommitStatusResult{}, fmt.Errorf("encode commit status body: %w", err)
 	}
 	if err := postGitHubCommitStatus(context.Background(), deps.Client, token, owner, repo, commit, body); err != nil {
-		return ReportCommitStatusResult{}, err
+		return model.ReportCommitStatusResult{}, err
 	}
 	return result, nil
 }
@@ -196,9 +142,7 @@ func postGitHubCommitStatus(ctx context.Context, client *http.Client, token, own
 	return nil
 }
 
-// resolveGitHubAPIToken resolves a gh-issued token for the general GitHub
-// REST API, mirroring resolveGHCRBasicAuth's gh-then-env-var precedence
-// without the ghcr-specific basic-auth wrapping.
+// resolveGitHubAPIToken uses resolveGHCRBasicAuth's gh-then-env precedence.
 func resolveGitHubAPIToken(owner string) (string, bool) {
 	if token, ok := registry.ResolveGHCRTokenViaGH(owner); ok {
 		return token, true
@@ -206,9 +150,6 @@ func resolveGitHubAPIToken(owner string) (string, bool) {
 	return registry.GhcrTokenFromEnv()
 }
 
-// parseGitHubOwnerRepo extracts owner/repo from a github.com remote URL in
-// any form git accepts: git@github.com:owner/repo(.git), https://github.com/
-// owner/repo(.git), ssh://git@github.com/owner/repo(.git).
 func parseGitHubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 	trimmed := strings.TrimSuffix(strings.TrimSpace(remoteURL), ".git")
 	if trimmed == "" {

@@ -9,28 +9,17 @@ import (
 	"strings"
 )
 
-// Installing erun's skills and reusable agents into an assistant's discovery
-// directory is shared by the runtime pod (from the image's baked copies) and the
-// desktop's host orchestrator (from a checkout). Both install what is absent and
-// refresh a copy erun wrote itself when the source changed, but never overwrite
-// a copy the operator edited in place: a home directory outlives the image or
-// build that first installed into it, so a one-time install would freeze every
-// later update, and a blind overwrite would discard the operator's edits.
-//
-// Provenance is a marker holding the sha256 of the source erun last installed.
-// An installed copy that still matches its marker is erun's and is refreshed; one
-// that differs from both the source and its marker was edited and is kept. A
-// copy with no marker predates markers and is treated as erun's.
+// Installed skills and agents are refreshed when erun's copy is unmodified and kept when
+// the operator edited them. A marker holds the sha256 of the last installed source;
+// a copy with no marker is treated as erun's.
 
 const (
-	// AgentSkillMarker sits inside an installed skill directory.
 	AgentSkillMarker = ".erun-skill-baked-sha256"
-	// AgentFileMarkerSuffix is appended to an installed agent file's name, since
-	// an agent is one flat file with no directory to hold a marker.
+	// AgentFileMarkerSuffix is appended to an agent file's name; an agent has no directory.
 	AgentFileMarkerSuffix = ".erun-agent-baked-sha256"
 )
 
-// AgentAssetsInstallResult counts what one install pass did, per outcome.
+// AgentAssetsInstallResult counts install outcomes.
 type AgentAssetsInstallResult struct {
 	Installed []string `json:"installed"`
 	Refreshed []string `json:"refreshed"`
@@ -50,6 +39,7 @@ const (
 
 func (r *AgentAssetsInstallResult) record(name string, outcome agentAssetOutcome) {
 	switch outcome {
+	case agentAssetSkipped:
 	case agentAssetInstalled:
 		r.Installed = append(r.Installed, name)
 	case agentAssetRefreshed:
@@ -61,8 +51,7 @@ func (r *AgentAssetsInstallResult) record(name string, outcome agentAssetOutcome
 	}
 }
 
-// InstallOrRefreshSkills reconciles every skill directory under srcRoot (one
-// holding a SKILL.md) into destRoot/<name>.
+// InstallOrRefreshSkills reconciles every skill directory under srcRoot into destRoot.
 func InstallOrRefreshSkills(srcRoot, destRoot string) (AgentAssetsInstallResult, error) {
 	var result AgentAssetsInstallResult
 	entries, err := os.ReadDir(srcRoot)
@@ -82,8 +71,7 @@ func InstallOrRefreshSkills(srcRoot, destRoot string) (AgentAssetsInstallResult,
 	return result, nil
 }
 
-// InstallOrRefreshAgents reconciles every <name>.md under srcRoot into
-// destRoot/<name>.md.
+// InstallOrRefreshAgents reconciles every <name>.md under srcRoot into destRoot.
 func InstallOrRefreshAgents(srcRoot, destRoot string) (AgentAssetsInstallResult, error) {
 	var result AgentAssetsInstallResult
 	entries, err := os.ReadDir(srcRoot)
@@ -105,8 +93,8 @@ func InstallOrRefreshAgents(srcRoot, destRoot string) (AgentAssetsInstallResult,
 
 func installOrRefreshSkill(src, dst string) (agentAssetOutcome, error) {
 	sourceMD := filepath.Join(src, "SKILL.md")
-	if _, err := os.Stat(sourceMD); err != nil {
-		return agentAssetSkipped, nil // a directory with no SKILL.md is not a skill
+	if !pathExists(sourceMD) {
+		return agentAssetSkipped, nil
 	}
 	installedMD := filepath.Join(dst, "SKILL.md")
 	if _, err := os.Stat(installedMD); err != nil {
@@ -130,9 +118,7 @@ func installOrRefreshAgent(src, dst string) (agentAssetOutcome, error) {
 	return outcome, copyAgent(src, dst)
 }
 
-// reconcileInstalledAgentAsset decides what an existing install needs. A copy
-// already matching the source only has its marker (re)written, which also
-// adopts a pre-marker copy that happens to match, so a later change refreshes it.
+// A copy already matching the source only has its marker rewritten, adopting pre-marker copies.
 func reconcileInstalledAgentAsset(sourceFile, installedFile, marker string) (agentAssetOutcome, error) {
 	sourceSHA, err := FileSHA256(sourceFile)
 	if err != nil {
@@ -180,7 +166,7 @@ func copyAgent(src, dst string) error {
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		return err
 	}
-	// WriteFile keeps an existing file's mode; an installed copy is always 0644.
+	// WriteFile keeps an existing file's mode.
 	if err := os.Chmod(dst, 0o644); err != nil {
 		return err
 	}
@@ -191,9 +177,7 @@ func copyAgent(src, dst string) error {
 	return os.WriteFile(dst+AgentFileMarkerSuffix, []byte(sha+"\n"), 0o644)
 }
 
-// copyAgentAssetTree copies src into dst with directories 0755 and files 0644,
-// whatever modes the source carries (the image bakes skills 0755 so the erun
-// user can enter them).
+// copyAgentAssetTree normalises modes; the image bakes skills 0755.
 func copyAgentAssetTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {

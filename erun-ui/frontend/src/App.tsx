@@ -69,14 +69,9 @@ export function App(): React.ReactElement {
           <Titlebar />
           <ErrorBoundary>
             {/*
-              The grid's track count must match the number of participating
-              children. A `display:none` grid item is removed from grid flow,
-              so when the sidebar is hidden the resize handle is dropped — keep
-              it in the template (a 3rd `0` track) and MainPane backfills into
-              the empty 0-width middle track, blanking the whole content area.
-              Render the handle only while the sidebar is shown
-              and use a matching 2-track template when hidden, so MainPane
-              always occupies the trailing `1fr` track.
+              A display:none grid item leaves grid flow, so a kept handle would push
+              MainPane into a 0-width track and blank the content. Render the handle
+              only with the sidebar and use a 2-track template otherwise.
             */}
             <div
               className={cn(

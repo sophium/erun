@@ -1,18 +1,16 @@
 package gitx
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// gitPushAccessTestRepo creates a real git checkout with the given origin
-// remote so gitPushAccessScript's `cd`/`git remote get-url origin` steps have
-// something real to read. The remote deliberately resolves to a closed local
-// port: `git ls-remote` then fails fast (connection refused) instead of
-// hanging on DNS/network for a host that doesn't exist, since these tests
-// only care about the gh/ssh push-credential verdict, not fetch_ok.
+// gitPushAccessTestRepo points origin at a closed local port so ls-remote fails fast.
 func gitPushAccessTestRepo(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,15 +27,8 @@ func gitPushAccessTestRepo(t *testing.T, remote string) string {
 	return dir
 }
 
-// gitPushAccessStubBin writes a stub `gh` and `ssh` onto a fresh PATH prefix
-// so gitPushAccessScript's shell logic runs for real against controlled
-// answers, instead of only being checked as trace text. The stub `gh` answers
-// `gh auth status -h <host>` from GH_STUB_EXIT/GH_STUB_STDOUT so a test can
-// simulate a session that authenticates but reports (or omits) a scope list;
-// the stub `ssh` exits SSH_STUB_EXIT so a test can simulate the ssh client's
-// own exit-code convention (255 for a connection/auth failure, anything else
-// passed through from the remote) independent of what text the remote host
-// happens to print.
+// gitPushAccessStubBin puts stub gh and ssh on PATH, controlled by GH_STUB_EXIT,
+// GH_STUB_STDOUT, and SSH_STUB_EXIT.
 func gitPushAccessStubBin(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
@@ -57,7 +48,7 @@ func gitPushAccessStubBin(t *testing.T) string {
 	return bin
 }
 
-func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string) GitPushAccessStatus {
+func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string) model.GitPushAccessStatus {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", gitPushAccessScript(repoPath))
 	cmd.Env = append(os.Environ(), "PATH="+env["PATH"]+":"+os.Getenv("PATH"))
@@ -75,16 +66,13 @@ func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string
 }
 
 func stderrOf(err error) string {
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return string(exitErr.Stderr)
 	}
 	return ""
 }
 
-// A classic OAuth gh session that authenticates but was never granted `repo`
-// must not read as a push credential -- the same defect class already fixed
-// several times elsewhere in this repo: `gh auth status` succeeding only
-// proves the session authenticates, never that it can push.
 func TestGitPushAccessGHSessionWithoutRepoScopeIsNotAPushCredential(t *testing.T) {
 	repo := gitPushAccessTestRepo(t, "https://127.0.0.1:1/acme/example.git")
 	status := runGitPushAccessScript(t, repo, map[string]string{
@@ -112,10 +100,7 @@ func TestGitPushAccessGHSessionWithRepoScopeIsAPushCredential(t *testing.T) {
 	}
 }
 
-// A fine-grained PAT or GitHub App token reports no scope list at all -- a
-// different permission model, not an absence of permission (mirrors
-// TestATokenWithADifferentPermissionModelIsNotJudged in
-// ghcr_push_preflight_test.go).
+// Fine-grained PATs and App tokens report no scope list.
 func TestGitPushAccessGHSessionWithNoScopeLineIsTrusted(t *testing.T) {
 	repo := gitPushAccessTestRepo(t, "https://127.0.0.1:1/acme/example.git")
 	status := runGitPushAccessScript(t, repo, map[string]string{
@@ -128,11 +113,7 @@ func TestGitPushAccessGHSessionWithNoScopeLineIsTrusted(t *testing.T) {
 	}
 }
 
-// The ssh client itself reserves exit 255 for its own connection/auth
-// failure and passes through whatever the remote decided to return
-// otherwise. A non-GitHub host that greets a valid key with its own welcome
-// text (not GitHub's "successfully authenticated" wording) must still read
-// as a push credential.
+// ssh reserves exit 255 for its own failures; any other exit means the key was accepted.
 func TestGitPushAccessSSHNonGitHubWelcomeStillCounts(t *testing.T) {
 	repo := gitPushAccessTestRepo(t, "git@fakehost.example:acme/example.git")
 	status := runGitPushAccessScript(t, repo, map[string]string{
@@ -145,9 +126,7 @@ func TestGitPushAccessSSHNonGitHubWelcomeStillCounts(t *testing.T) {
 	}
 }
 
-// GitHub itself answers a valid key with exit 1 ("successfully authenticated,
-// but GitHub does not provide shell access") -- the pre-existing GitHub case
-// must keep working under the exit-code check.
+// GitHub answers a valid key with exit 1.
 func TestGitPushAccessSSHGitHubStyleExitOneStillCounts(t *testing.T) {
 	repo := gitPushAccessTestRepo(t, "git@fakehost.example:acme/example.git")
 	status := runGitPushAccessScript(t, repo, map[string]string{

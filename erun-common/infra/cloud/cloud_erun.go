@@ -9,47 +9,34 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-// InitERunCloudProviderParams is the explicit input for attaching a hosted
-// erun platform as a cloud alias: just the API base URL. Everything else
-// (issuer, CLI client id) is discovered from the platform itself.
-type InitERunCloudProviderParams struct {
-	APIURL string
-}
-
-// HostedPlatformAPIURL is erun's own hosted platform's front door — a single
-// apex host serving every tenant, never a per-tenant or per-environment one.
-// The CLI's `cloud init erun` help text and the desktop's Connect-tenant
-// default both read this constant so the two cannot drift apart the way they
-// did when each hardcoded its own guess.
+// HostedPlatformAPIURL is erun's hosted platform API, one apex host for every tenant.
 const HostedPlatformAPIURL = "https://api.erunpaas.com"
 
-// InitERunCloudProvider discovers a hosted erun platform's own config (GET
-// /v1/platform) and its issuer's OIDC discovery document, then records the
-// alias, API URL, issuer, and CLI client id. It performs no sign-in: use
-// LoginCloudProviderAlias afterward to obtain a token.
-func InitERunCloudProvider(ctx core.Context, store CloudStore, params InitERunCloudProviderParams, deps CloudDependencies) (config.CloudProviderConfig, error) {
+// InitERunCloudProvider discovers the platform config and records the alias; it does not sign in.
+func InitERunCloudProvider(ctx core.Context, store seam.CloudStore, params model.InitERunCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
-		return config.CloudProviderConfig{}, fmt.Errorf("store is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	deps = NormalizeCloudDependencies(deps)
 	apiURL := strings.TrimRight(strings.TrimSpace(params.APIURL), "/")
 	ctx.Trace("cloud init erun: api-url=" + apiURL)
 	if apiURL == "" {
-		return config.CloudProviderConfig{}, fmt.Errorf("erun platform api url is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("erun platform api url is required")
 	}
 
 	accountID := erunPlatformHost(apiURL)
 	if ctx.DryRun {
-		// No network call at all in dry run — a preview must not depend on the
-		// platform actually being reachable.
+		// Dry run makes no network call so a preview works offline.
 		ctx.Trace("cloud init erun: would resolve issuer, cli client id, and oidc discovery from " + apiURL)
-		provider := NormalizeCloudProviderConfig(config.CloudProviderConfig{
+		provider := NormalizeCloudProviderConfig(model.CloudProviderConfig{
 			Provider:  config.CloudProviderERun,
 			Username:  erunAliasUsername,
 			AccountID: accountID,
-			ERun:      &config.ERunProviderConfig{APIURL: apiURL},
+			ERun:      &model.ERunProviderConfig{APIURL: apiURL},
 		})
 		ctx.Trace("write cloud provider " + provider.Alias)
 		return provider, nil
@@ -58,30 +45,30 @@ func InitERunCloudProvider(ctx core.Context, store CloudStore, params InitERunCl
 	platform, err := deps.FetchPlatformInfo(ctx, apiURL)
 	if err != nil {
 		ctx.Trace("cloud init erun: platform discovery failed: " + err.Error())
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	if platform.Issuer == "" {
-		return config.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report an OIDC issuer", apiURL)
+		return model.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report an OIDC issuer", apiURL)
 	}
 	if platform.CLIClientID == "" {
-		return config.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report a cli oidc client id", apiURL)
+		return model.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report a cli oidc client id", apiURL)
 	}
 	if _, err := deps.FetchOIDCDiscovery(ctx, platform.Issuer); err != nil {
 		ctx.Trace("cloud init erun: oidc discovery failed: " + err.Error())
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 
 	alias := CloudProviderAlias(erunAliasUsername, accountID, config.CloudProviderERun)
 	if alias == "" {
-		return config.CloudProviderConfig{}, fmt.Errorf("erun cloud provider alias cannot be resolved")
+		return model.CloudProviderConfig{}, fmt.Errorf("erun cloud provider alias cannot be resolved")
 	}
-	provider := NormalizeCloudProviderConfig(config.CloudProviderConfig{
+	provider := NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:         alias,
 		Provider:      config.CloudProviderERun,
 		Username:      erunAliasUsername,
 		AccountID:     accountID,
 		OIDCIssuerURL: platform.Issuer,
-		ERun: &config.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:   apiURL,
 			ClientID: platform.CLIClientID,
 		},
@@ -89,22 +76,14 @@ func InitERunCloudProvider(ctx core.Context, store CloudStore, params InitERunCl
 	provider.ERun.RefreshTokenRef = existingERunRefreshTokenRef(store, alias)
 	saved, err := SaveCloudProviderConfig(store, provider)
 	if err != nil {
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	return saved, nil
 }
 
-// existingERunRefreshTokenRef returns the stored-session reference the alias
-// already carries, or "" when it is not configured yet.
-//
-// Re-initializing an alias rediscovers its platform config and rewrites the
-// alias wholesale (upsertCloudProvider replaces a matching alias rather than
-// merging it), so a fresh provider carrying no refresh-token reference would
-// drop that reference from config.yaml — the token itself stays in the secret
-// store, orphaned, and the operator who re-ran init is silently signed out.
-// Only the session reference is carried over: the API URL, client id, and
-// issuer just discovered are the point of re-initializing.
-func existingERunRefreshTokenRef(store CloudStore, alias string) string {
+// existingERunRefreshTokenRef returns the alias's current session reference so
+// re-init, which replaces the alias wholesale, does not sign the operator out.
+func existingERunRefreshTokenRef(store seam.CloudStore, alias string) string {
 	existing, err := ResolveCloudProvider(store, alias)
 	if err != nil || existing.ERun == nil {
 		return ""
@@ -112,15 +91,10 @@ func existingERunRefreshTokenRef(store CloudStore, alias string) string {
 	return existing.ERun.RefreshTokenRef
 }
 
-// erunAliasUsername is fixed rather than derived from a signed-in identity:
-// InitERunCloudProvider runs before any sign-in, so there is no subject yet to
-// name the alias with. AccountID (the platform's own host) is what makes the
-// alias distinct per platform.
+// erunAliasUsername is fixed: init runs before sign-in, so there is no subject yet.
 const erunAliasUsername = "erun"
 
-// erunPlatformHost extracts the host from an API URL for use as the alias's
-// account-id-equivalent slot, so two different hosted platforms never collide
-// on the same alias.
+// erunPlatformHost returns the API host, which keeps aliases distinct per platform.
 func erunPlatformHost(apiURL string) string {
 	parsed, err := url.Parse(apiURL)
 	if err != nil || parsed.Host == "" {
@@ -129,34 +103,25 @@ func erunPlatformHost(apiURL string) string {
 	return parsed.Host
 }
 
-// erunCloudProviderLogin runs the OIDC sign-in for an erun cloud alias: the
-// device authorization grant when the issuer advertises one (the only flow
-// that works with no browser, e.g. from inside a pod), falling back to
-// Authorization Code + PKCE on a loopback listener otherwise. On success it
-// persists the refresh token (via the secret store, referenced from config)
-// and caches the access token with its expiry.
-func erunCloudProviderLogin(ctx core.Context, store CloudStore, provider config.CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (CloudProviderStatus, error) {
+// erunCloudProviderLogin signs in via the device grant when advertised (it works
+// without a browser), else Authorization Code + PKCE on a loopback listener.
+func erunCloudProviderLogin(ctx core.Context, store seam.CloudStore, provider model.CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
-		return CloudProviderStatus{}, fmt.Errorf("erun cloud provider %q is not fully configured; run `erun cloud init erun` first", provider.Alias)
+		return model.CloudProviderStatus{}, fmt.Errorf("erun cloud provider %q is not fully configured; run `erun cloud init erun` first", provider.Alias)
 	}
 	ctx.Trace("cloud login erun: alias=" + provider.Alias)
 	discovery, err := deps.FetchOIDCDiscovery(ctx, provider.OIDCIssuerURL)
 	if err != nil {
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 
 	flow, err := NormalizeERunLoginFlow(requestedFlow)
 	if err != nil {
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 	hasDeviceEndpoint := strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) != ""
-	// The org-claim scope is requested by default so a shared, org-scoped
-	// issuer's tokens carry the discriminator erun's tenant resolution reads.
-	// fallbackScope is what acquireERunLoginTokens retries with when an
-	// issuer that has never heard of it (a dedicated/BYO IdP, the common
-	// case) refuses the request — login still succeeds exactly as it did
-	// before this default was added, instead of breaking on an unrecognized
-	// scope.
+	// The org-claim scope is requested by default; issuers that reject it are
+	// retried with fallbackScope.
 	scope := erunLoginScope(append([]string{erunOrgClaimScope}, extraScopes...))
 	fallbackScope := erunLoginScope(extraScopes)
 	if scope != erunOAuthScope {
@@ -165,28 +130,17 @@ func erunCloudProviderLogin(ctx core.Context, store CloudStore, provider config.
 
 	tokens, err := acquireERunLoginTokens(ctx, discovery, provider.ERun.ClientID, scope, fallbackScope, flow, hasDeviceEndpoint, deps)
 	if err != nil {
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 	if ctx.DryRun {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}, nil
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}, nil
 	}
 	return persistERunLoginTokens(store, provider, deps, tokens)
 }
 
-// acquireERunLoginTokens picks the grant and runs it. An explicitly requested
-// flow is honoured exactly — including refusing the device grant against an
-// issuer that does not advertise one, rather than silently substituting a
-// different flow. Auto prefers the device grant but falls back to
-// authorization code + PKCE: the device page forces a fresh authentication, so
-// an account whose only method there is broken can never finish it, while the
-// redirect reuses the browser session that same operator may already hold.
-//
-// Split out of erunCloudProviderLogin to keep that function under the cyclop
-// threshold; the selection and its ordering are unchanged. Each flow attempt
-// is wrapped by runERunLoginAttempt so a scope the issuer refuses is retried
-// once, on the same flow, with fallbackScope — before falling back to a
-// different flow at all, since a different flow against the same issuer would
-// likely refuse the same scope for the same reason.
+// acquireERunLoginTokens honours an explicit flow exactly. Auto prefers the device
+// grant but falls back to authcode, which can reuse an existing browser session.
+// A refused scope is retried on the same flow before switching flows.
 func acquireERunLoginTokens(ctx core.Context, discovery OIDCDiscovery, clientID, scope, fallbackScope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
 	device := func(s string) (ERunTokens, error) { return erunDeviceFlowLogin(ctx, discovery, clientID, s, deps) }
 	authCode := func(s string) (ERunTokens, error) { return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, s) }
@@ -212,9 +166,7 @@ func acquireERunLoginTokens(ctx core.Context, discovery OIDCDiscovery, clientID,
 	}
 }
 
-// runERunLoginAttempt runs run(scope), retrying once with fallbackScope when
-// the issuer's refusal is specifically an invalid_scope response — never for
-// any other failure, which is returned to the caller unchanged.
+// runERunLoginAttempt retries once with fallbackScope only on invalid_scope.
 func runERunLoginAttempt(ctx core.Context, scope, fallbackScope string, run func(string) (ERunTokens, error)) (ERunTokens, error) {
 	tokens, err := run(scope)
 	if err == nil || scope == fallbackScope || !isERunInvalidScopeError(err) {
@@ -224,26 +176,24 @@ func runERunLoginAttempt(ctx core.Context, scope, fallbackScope string, run func
 	return run(fallbackScope)
 }
 
-// persistERunLoginTokens saves a fresh refresh token (when the grant returned
-// one) and caches the access token, then returns the resulting status.
-func persistERunLoginTokens(store CloudStore, provider config.CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (CloudProviderStatus, error) {
+func persistERunLoginTokens(store seam.CloudStore, provider model.CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (model.CloudProviderStatus, error) {
 	if deps.CloudSecretStore == nil {
-		return CloudProviderStatus{}, fmt.Errorf("cloud secret store is not configured")
+		return model.CloudProviderStatus{}, fmt.Errorf("cloud secret store is not configured")
 	}
 	if tokens.RefreshToken != "" {
 		ref := ErunRefreshTokenRef(provider.Alias)
 		if err := deps.CloudSecretStore.SaveCloudSecret(ref, tokens.RefreshToken); err != nil {
-			return CloudProviderStatus{}, fmt.Errorf("store erun refresh token: %w", err)
+			return model.CloudProviderStatus{}, fmt.Errorf("store erun refresh token: %w", err)
 		}
 		provider.ERun.RefreshTokenRef = ref
 		saved, err := SaveCloudProviderConfig(store, provider)
 		if err != nil {
-			return CloudProviderStatus{}, err
+			return model.CloudProviderStatus{}, err
 		}
 		provider = saved
 	}
 	if err := SaveCachedERunAccessToken(deps.CloudSecretStore, provider.Alias, tokens); err != nil {
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 	return CloudProviderTokenStatus(provider, deps), nil
 }
@@ -270,11 +220,8 @@ func writeERunLoginPrompt(ctx core.Context, message string) {
 	_, _ = ctx.Stdout.Write([]byte(message))
 }
 
-// erunCloudProviderLogout is the erun equivalent of Cloudflare's token
-// deletion: there is no SSO session to end, so "logout" removes the stored
-// refresh token and cached access token, leaving the alias configured but
-// signed out.
-func erunCloudProviderLogout(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) error {
+// erunCloudProviderLogout removes the stored refresh and access tokens, leaving the alias configured.
+func erunCloudProviderLogout(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) error {
 	ctx.Trace("cloud logout erun: alias=" + provider.Alias)
 	if ctx.DryRun {
 		return nil
@@ -290,7 +237,7 @@ func erunCloudProviderLogout(ctx core.Context, provider config.CloudProviderConf
 	return deps.CloudSecretStore.DeleteCloudSecret(ErunAccessTokenCacheRef(provider.Alias))
 }
 
-func erunCloudProviderBearerToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (CloudBearerToken, error) {
+func erunCloudProviderBearerToken(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) (CloudBearerToken, error) {
 	if ctx.DryRun {
 		return CloudBearerToken{Alias: provider.Alias, Provider: provider.Provider, Issuer: provider.OIDCIssuerURL}, nil
 	}
@@ -301,34 +248,28 @@ func erunCloudProviderBearerToken(ctx core.Context, provider config.CloudProvide
 	return CloudBearerToken{Alias: provider.Alias, Provider: provider.Provider, Token: token, Issuer: provider.OIDCIssuerURL}, nil
 }
 
-func erunCloudProviderTokenStatus(provider config.CloudProviderConfig, deps CloudDependencies) CloudProviderStatus {
+func erunCloudProviderTokenStatus(provider model.CloudProviderConfig, deps CloudDependencies) model.CloudProviderStatus {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "erun cloud provider is not fully configured"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "erun cloud provider is not fully configured"}
 	}
-	// Checked here, ahead of resolveERunAccessToken, because that call also
-	// reports a missing store as an error, and a configured provider with a
-	// refresh token then reads as "expired" — asserting the token was checked
-	// and rejected when it was never checked at all. unknown/"not
-	// checked" is the honest answer when nothing was actually verified.
+	// Without a store nothing can be verified, so report unknown rather than
+	// letting resolveERunAccessToken make it look expired.
 	if deps.CloudSecretStore == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
 	}
 	if _, err := ResolveERunAccessToken(core.StderrOnlyContext(), provider, deps); err != nil {
 		status := config.CloudTokenStatusNotConfigured
 		if provider.ERun.RefreshTokenRef != "" || provider.ERun.IsMachineIdentity() {
 			status = config.CloudTokenStatusExpired
 		}
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: err.Error()}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: err.Error()}
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+	return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 }
 
-// ResolveERunAccessToken returns a usable access token: the cached one if
-// still fresh, otherwise a freshly minted one via the refresh_token grant
-// (cached for next time). It is the single place both the bearer-token path
-// and the status check resolve a token, so they never disagree about what
-// "active" means.
-func ResolveERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
+// ResolveERunAccessToken returns a cached or refreshed access token; it is the
+// single resolver so bearer use and status checks agree on "active".
+func ResolveERunAccessToken(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
 		return "", fmt.Errorf("erun cloud provider %q is not fully configured", provider.Alias)
 	}
@@ -347,17 +288,9 @@ func ResolveERunAccessToken(ctx core.Context, provider config.CloudProviderConfi
 	return refreshERunAccessToken(ctx, provider, deps)
 }
 
-// clientCredentialsERunAccessToken mints an access token for a provisioned
-// machine identity, and is the whole of what an environment does to
-// authenticate once it has one: no stored session, no human, and nothing to
-// refresh — a fresh token per call, cached only for as long as it is valid.
-//
-// There is no rotation to reconcile here, unlike the refresh-token path: the
-// client secret is long-lived and reusable, so a call either mints a token or
-// reports why it could not. The report names re-provisioning rather than
-// `cloud login`, because there is no sign-in that would fix a machine
-// identity whose credential has been removed.
-func clientCredentialsERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
+// clientCredentialsERunAccessToken mints a token for a provisioned machine identity.
+// Its errors name re-provisioning, since no sign-in fixes a removed credential.
+func clientCredentialsERunAccessToken(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	if deps.CloudSecretStore == nil {
 		return "", fmt.Errorf("cloud secret store is not configured")
 	}
@@ -382,10 +315,8 @@ func clientCredentialsERunAccessToken(ctx core.Context, provider config.CloudPro
 	return tokens.AccessToken, nil
 }
 
-// refreshERunAccessToken mints a fresh access token via the refresh_token
-// grant, caches it, and rotates the stored refresh token when the server
-// issued a new one (refresh-token rotation).
-func refreshERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
+// refreshERunAccessToken also rotates the stored refresh token when the server issues a new one.
+func refreshERunAccessToken(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	refreshToken, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.RefreshTokenRef)
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		return "", fmt.Errorf("refresh token is not available on this machine; run `erun cloud login %s`", provider.Alias)
@@ -420,8 +351,6 @@ func ErunAccessTokenCacheRef(alias string) string {
 	return "erun/access/" + strings.TrimSpace(alias)
 }
 
-// erunAccessTokenExpiryLeeway avoids handing back a token that expires
-// moments after the caller receives it.
 const erunAccessTokenExpiryLeeway = 30 * time.Second
 
 type ErunAccessTokenCache struct {
@@ -429,7 +358,7 @@ type ErunAccessTokenCache struct {
 	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
-func loadCachedERunAccessToken(store CloudSecretStore, alias string) (string, bool) {
+func loadCachedERunAccessToken(store seam.CloudSecretStore, alias string) (string, bool) {
 	if store == nil {
 		return "", false
 	}
@@ -447,7 +376,7 @@ func loadCachedERunAccessToken(store CloudSecretStore, alias string) (string, bo
 	return cached.AccessToken, true
 }
 
-func SaveCachedERunAccessToken(store CloudSecretStore, alias string, tokens ERunTokens) error {
+func SaveCachedERunAccessToken(store seam.CloudSecretStore, alias string, tokens ERunTokens) error {
 	if store == nil || tokens.AccessToken == "" {
 		return nil
 	}

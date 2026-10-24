@@ -6,23 +6,22 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// The distinct reasons a sync cannot run. They stay separate values because the
-// operator's next move differs for each, and from the outside an empty mirror
-// looks the same whichever one it is.
+// Distinct refusals: the operator's fix differs, though the empty mirror looks the same.
 var (
 	ErrWorkspaceSyncNotRemoteAgent = errors.New("only a remote-agent environment has a pod worktree to mirror")
 	ErrWorkspaceSyncNotEnabled     = errors.New("workspace sync is not enabled for this environment")
 	ErrWorkspaceSyncNoLocalPath    = errors.New("workspace sync has no local path to mirror into")
 )
 
-// WorkspaceSyncLocalPath resolves the host directory a pass mirrors into: the
-// configured path first, then the project root, then the environment's own
-// worktree when that already lives on this host.
-func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot eruncommon.ProjectFinderFunc) string {
+// WorkspaceSyncLocalPath prefers the configured path, then the project root, then a host-local worktree.
+func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) string {
 	if localPath := strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath); localPath != "" {
 		return localPath
 	}
@@ -37,11 +36,8 @@ func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot eruncommon
 	return ""
 }
 
-// ResolveWorkspaceSyncParams turns an environment into the one pass it would
-// run, or names the precondition it fails. Every transport resolves through
-// here, so the desktop poller, the CLI and the MCP agree on both what a pass
-// addresses and when there is nothing to address.
-func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot eruncommon.ProjectFinderFunc) (WorkspaceSyncParams, error) {
+// ResolveWorkspaceSyncParams resolves an environment to its pass or the precondition it fails.
+func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) (WorkspaceSyncParams, error) {
 	if !result.RemoteRepo() {
 		return WorkspaceSyncParams{}, ErrWorkspaceSyncNotRemoteAgent
 	}
@@ -52,7 +48,7 @@ func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot erunco
 	if localPath == "" {
 		return WorkspaceSyncParams{}, ErrWorkspaceSyncNoLocalPath
 	}
-	connection := eruncommon.SSHConnectionInfoForResult(result)
+	connection := open.SSHConnectionInfoForResult(result)
 	return WorkspaceSyncParams{
 		HostAlias:  connection.HostAlias,
 		RemotePath: connection.WorkspacePath,
@@ -60,21 +56,17 @@ func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot erunco
 	}, nil
 }
 
-// PreviewWorkspaceSync reports what a pass would change without changing it, so
-// a dry run shows the counts the real pass would produce instead of a summary
-// note. It reads the same remote listing and local walk the pass does and stops
-// short of every write — no mirror directory is created, nothing is fetched, and
-// nothing is deleted.
-func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (WorkspaceSyncResult, error) {
+// PreviewWorkspaceSync reports a pass's counts without writing anything.
+func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 	if err := validateWorkspaceSyncParams(&params); err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	resolved, err := resolveWorkspaceSyncPaths(ctx, params)
 	if err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	if resolved.notGitRepo {
-		return WorkspaceSyncResult{}, nil
+		return model.WorkspaceSyncResult{}, nil
 	}
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
 	toFetch := changedWorkspaceSyncPaths(resolved.remote, remoteMeta, resolved.localMeta)
@@ -89,15 +81,13 @@ func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (Work
 		}
 		deletions++
 	}
-	// A missing or unreachable outputs dir is the normal case for an environment
-	// that has cross-built nothing yet, so it reports zero rather than failing the
-	// preview.
-	artifacts, _ := remoteOutputsFiles(ctx, params.HostAlias, eruncommon.DefaultRuntimeOutputsDir)
+	// A missing outputs dir is normal before any cross-build.
+	artifacts, _ := remoteOutputsFiles(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir)
 	artifactsLocal := filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir)
 	artifactsToFetch := changedOutputsPaths(artifacts,
-		remoteOutputsFileHashes(ctx, params.HostAlias, eruncommon.DefaultRuntimeOutputsDir, artifacts),
+		remoteOutputsFileHashes(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir, artifacts),
 		localArtifactFileHashes(artifactsLocal, artifacts))
-	return WorkspaceSyncResult{
+	return model.WorkspaceSyncResult{
 		FilesCopied:     len(toFetch),
 		FilesDeleted:    deletions,
 		ArtifactsCopied: len(artifactsToFetch),

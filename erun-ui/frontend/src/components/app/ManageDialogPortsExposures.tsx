@@ -36,23 +36,12 @@ import { BrowserOpenURL, ClipboardSetText } from '../../../wailsjs/runtime/runti
 
 type ManageDialog = AppState['manageDialog'];
 
-// ExposuresSection is the Ports tab's public-exposure surface: it lists an
-// environment's active exposures and their public hostnames, exposes a new
-// service, and removes the environment's public DNS record behind a
-// two-step confirm. Every reachable state is designed explicitly — loading,
-// four distinct empty states (host environment type / project not
-// configured for exposure, each named and the fixable one carrying its
-// recovery / restricted / nothing yet), populated, failed, and the in-flight
-// create/remove states — per erun-ui/AGENTS.md "Degrade by permission" and
-// "Keep the three empty states distinct".
+// ExposuresSection lists, creates and removes public exposures, keeping each empty state distinct (erun-ui/AGENTS.md).
 export function ExposuresSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const exposures = dialog.exposures;
   const loading = dialog.exposuresLoading;
-  // A certificate that is still issuing resolves on its own over time, with
-  // nothing the user did to trigger a re-check -- offer one explicitly rather
-  // than making "close and reopen the dialog" the only way to see it update
-  // (Nielsen #1, visibility of system status).
+  // Issuing certificates resolve on their own, so offer an explicit refresh.
   const canRefresh = !loading && exposures.configured && !exposures.restricted && !exposures.error;
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
@@ -141,10 +130,7 @@ function ExposuresBody({
   }
   if (exposures.error) {
     return (
-      // The EmptyState already carries the glyph, so this is the other half of
-      // the contract: `overflow-wrap` is inherited, so naming it here reaches
-      // the body that holds the upstream error rather than letting a long one
-      // widen the surface it sits in.
+      // overflow-wrap inherits down to the upstream error text.
       <div role="alert" className="grid gap-2 [overflow-wrap:anywhere]">
         <EmptyState
           icon={<AlertTriangle aria-hidden="true" />}
@@ -222,9 +208,7 @@ function ExposedServiceRow({
           )}
           <span>{url}</span>
         </div>
-        {/* Never render the pending state as if it were already serving: the
-            certificate exists but has not issued, so opening this URL right
-            now would show a warning, not a working page. */}
+        {/* Pending: the certificate has not issued, so the URL would show a warning. */}
         {status === 'https-pending' && (
           <div className="text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]">
             Certificate pending{service.tlsNotReadyReason ? `: ${service.tlsNotReadyReason}` : ''}
@@ -329,11 +313,7 @@ function ExposeServiceForm({ dialog }: { dialog: ManageDialog }): React.ReactEle
   );
 }
 
-// UnexposeSection removes the environment's public DNS record -- the one
-// primitive that exists for taking exposure down, and it covers every
-// service listed above at once (see UnexposeEnvironment in exposure_app.go).
-// The two-step shape mirrors the Delete tab: a named warning first, a
-// separate explicit confirm action second.
+// UnexposeSection removes the env's public DNS record, which covers every listed service at once.
 function UnexposeSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   if (!dialog.unexposeConfirming) {

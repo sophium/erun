@@ -30,11 +30,7 @@ func TestSaveTenantConfigRequiresATenant(t *testing.T) {
 	}
 }
 
-// TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration pins the editor's
-// own hole in this contract: saving the catalog writes the whole list back, so a
-// conversion that did not carry the declaration would delete it on the first
-// save from the desktop and quietly return the model to the selectable set the
-// declaration exists to keep it out of.
+// Saving writes the whole catalog back, so a conversion dropping the declaration would delete it.
 func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
 	config := &configpkg.OpenRouterConfig{
 		BaseURL:      "https://openrouter.ai/api",
@@ -58,8 +54,6 @@ func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
 	if roundTripped.Models[1].RequiresReasoningEcho {
 		t.Fatalf("a driveable listing came back declared: %+v", roundTripped.Models[1])
 	}
-	// The declaration is what the lanes act on, so the id it applies to must not
-	// resolve as the environment's model or be offered for selection.
 	if got := roundTripped.ResolveDefaultModel(); got != "anthropic/claude-fable-5.1" {
 		t.Fatalf("ResolveDefaultModel = %q, want the driveable listing", got)
 	}
@@ -68,9 +62,7 @@ func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
 	}
 }
 
-// TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse: every launch
-// drops an id that is not a plain model token, so storing one silently would
-// leave an entry the operator saved and nothing ever offers.
+// Launches drop ids that are not plain model tokens, so saving one must be refused.
 func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 	stored := &configpkg.OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []configpkg.OpenRouterModel{{ID: "acme/coder"}}}
 	cases := []struct {
@@ -111,9 +103,6 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 	}
 }
 
-// TestTheSaveCheckAgreesWithWhatTheCatalogOffers pins the save check to the
-// rule the catalog applies: an id the save accepts must be one the catalog
-// offers, and the other way round.
 func TestTheSaveCheckAgreesWithWhatTheCatalogOffers(t *testing.T) {
 	for _, id := range []string{"opus", "acme/coder", "vendor/model:free", "a.b_c-d", "-p", "--model", "a b", "a;b", "$(id)", "a'b", "a\"b", "a|b", "ü", "a\nb", ".hidden", "/abs", ":tag"} {
 		offered := len((&configpkg.OpenRouterConfig{Models: []configpkg.OpenRouterModel{{ID: id}}}).ModelIDs()) == 1

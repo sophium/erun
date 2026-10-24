@@ -20,7 +20,7 @@
       "go build -trimpath -ldflags $cliLdflags -o \"$dir\\erun.exe\" .",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun.exe' }",
       "Pop-Location",
-      "$mcpLdflags = \"-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=$version\"",
+      "$mcpLdflags = \"-s -w -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-mcp\"",
       "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",

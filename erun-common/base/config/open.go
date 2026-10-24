@@ -5,35 +5,30 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
 	LoadEnvConfig(string, string) (EnvConfig, string, error)
 }
 
 type OpenResult struct {
 	Tenant       string
 	Environment  string
-	TenantConfig TenantConfig
+	TenantConfig model.TenantConfig
 	EnvConfig    EnvConfig
-	LocalPorts   EnvironmentLocalPorts
+	LocalPorts   model.EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
-	// ClusterPullRegistry, when set, is the concrete in-cluster pull host a
-	// context-resolved cluster registry resolved to; deploy renders it as the
-	// chart's containerRegistry in place of the on-disk DEPLOY entry. Empty for a
-	// plain (non-cluster) registry, so those envs are unaffected.
+	// ClusterPullRegistry is the resolved in-cluster pull host deploy renders in
+	// place of the DEPLOY entry; empty for a plain registry.
 	ClusterPullRegistry string
-	// ClusterRegistryInsecure marks the resolved cluster registry as plain HTTP,
-	// so deploy tells the in-pod dind daemon to trust it (an in-pod build pushes
-	// to this non-loopback host, which dind would otherwise reject as needing TLS).
+	// ClusterRegistryInsecure tells in-pod dind to trust the plain-HTTP cluster registry.
 	ClusterRegistryInsecure bool
-	// Gateway is the erun-level gateway catalog, resolved with the target so
-	// every caller that launches or diagnoses the environment's AI session
-	// reaches the same catalog instead of each reading it (or forgetting to).
-	// Nil when no catalog is configured or the root config cannot be read.
+	// Gateway is resolved once here so every AI launch and diagnosis sees the same
+	// catalog; nil when none is configured or readable.
 	Gateway *OpenRouterConfig
 }
 
@@ -124,34 +119,22 @@ type ShellLaunchParams struct {
 	ManagedCloud       bool
 	CloudProviderAlias string
 	Idle               EnvironmentIdleConfig
-	// AppSession, when non-empty, makes the remote shell a persistent,
-	// reattachable dtach session keyed by this id, so closing/reopening a tab
-	// or a transient kubectl-exec drop reconnects to the still-running shell
-	// (and the AI tab's claude keeps working in the pod) instead of spawning a
-	// parallel one. Empty keeps the ephemeral bare `erun open` behaviour.
+	// AppSession, when set, makes the shell a reattachable dtach session keyed by
+	// this id; empty keeps the ephemeral `erun open` shell.
 	AppSession string
-	// AI / Contribute select the persistent session's create-time program, run
-	// once on create so a reattach never re-runs it: Contribute enters the
-	// contribute clone with its env; AI launches the AI tool.
+	// AI and Contribute pick the session's create-time program; a reattach never re-runs it.
 	AI         bool
 	Contribute bool
 	AITool     string
 	Claude     EnvironmentClaudeConfig
-	// Gateway is the erun-level OpenRouter catalog, when the operator has
-	// configured one, carried over from OpenResult.Gateway. The AI launch
-	// resolves this environment's effective gateway through it (model, Remote
-	// Control, context window), and so does the deploy diagnosis, to tell a
-	// gateway-routed environment whose pod template never consumed the gateway
-	// from a healthy one (runtime_agent_credentials.go).
+	// Gateway is OpenResult.Gateway, used by the AI launch and the deploy diagnosis.
 	Gateway *OpenRouterConfig
-	// RuntimeImage lets the AI session prelude advise on the erun-build-env
-	// skill only when the env still runs the default published runtime image.
+	// RuntimeImage gates the erun-build-env advice to the default runtime image.
 	RuntimeImage string
-	// RuntimeVersion and RuntimePod are the env config's recorded runtime
-	// deploy intent, threaded through so observe can diff them against what
-	// the live helm release and running pods actually hold.
+	// RuntimeVersion and RuntimePod are the recorded deploy intent observe diffs
+	// against the live release.
 	RuntimeVersion string
-	RuntimePod     RuntimePodResources
+	RuntimePod     model.RuntimePodResources
 }
 
 func RuntimeReleaseName(tenant string) string {

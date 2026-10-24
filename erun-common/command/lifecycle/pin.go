@@ -1,179 +1,51 @@
 package lifecycle
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// One erun version is written down in several places in a tenant repo — the
-// Terraform module refs, an erun image reference a tenant's own Terraform
-// variables set directly (e.g. the cluster-edge module's dns01_webhook_image),
-// every umbrella chart's erun dependencies, the build-env image tag, a stated
-// runtime chart or runtime image naming erun's own stock release, and the
-// environment's own runtimeversion — and they only work when they agree.
-// Nothing enforced that, so they drifted: a repo was found pinned to three
-// different versions at once, and realigning it meant editing seven files by
-// hand.
-//
-// The sites are found by pattern rather than by walking a fixed layout. The
-// Terraform root alone has three legitimate locations, and a tenant is free to
-// add modules and umbrellas, so a scan that recognises an erun reference wherever
-// it appears is the thing that stays true as a repo grows.
-
-// PinSiteKind names what kind of reference a site is, so a plan can be read
-// without knowing the repo's layout.
-type PinSiteKind string
-
-const (
-	PinSiteRuntimeVersion PinSiteKind = "runtime-version"
-	PinSiteTerraformRef   PinSiteKind = "terraform-ref"
-	PinSiteHelmDependency PinSiteKind = "helm-dependency"
-	PinSiteRuntimeImage   PinSiteKind = "runtime-image"
-	PinSiteImageReference PinSiteKind = "image-reference"
-	PinSiteRuntimeChart   PinSiteKind = "runtime-chart"
-)
-
-// PinSiteSummary is the wording one kind of re-pin site is named by on the
-// surfaces an operator reads. It is deliberately not the kind's identifier:
-// what matters here is that a surface saying "every erun reference" is
-// followed by all of them, so each kind carries the distinctive phrase those
-// surfaces have to share.
+// PinSiteSummary is the phrase every re-pin surface uses to name a site kind.
 type PinSiteSummary struct {
-	Kind   PinSiteKind
+	Kind   model.PinSiteKind
 	Phrase string
 }
 
-// PinSiteSummaries is the canonical enumeration of what a re-pin rewrites, in
-// the order the describing surfaces list it. Every surface that enumerates
-// re-pin sites -- the CLI's `pin --help`, the erun-mcp `pin` tool description,
-// the desktop's Change erun version dialog, the erun-pin-version skill, and the
-// public pin page -- carries every phrase here, and
-// TestEverySurfaceDescribingARepinNamesEveryPinSiteKind fails when one does
-// not. A site kind the engine gains must gain a phrase here too: the same test
-// reads the declarations below and refuses a kind no surface is required to
-// name.
+// PinSiteSummaries enumerates what a re-pin rewrites; every surface listing re-pin sites must
+// carry each phrase (TestEverySurfaceDescribingARepinNamesEveryPinSiteKind).
 var PinSiteSummaries = []PinSiteSummary{
-	{Kind: PinSiteTerraformRef, Phrase: "Terraform module"},
-	{Kind: PinSiteImageReference, Phrase: "dns01_webhook_image"},
-	{Kind: PinSiteHelmDependency, Phrase: "umbrella"},
-	{Kind: PinSiteRuntimeImage, Phrase: "build-env image"},
-	{Kind: PinSiteRuntimeChart, Phrase: "own stock"},
-	{Kind: PinSiteRuntimeVersion, Phrase: "runtime version"},
+	{Kind: model.PinSiteTerraformRef, Phrase: "Terraform module"},
+	{Kind: model.PinSiteImageReference, Phrase: "dns01_webhook_image"},
+	{Kind: model.PinSiteHelmDependency, Phrase: "umbrella"},
+	{Kind: model.PinSiteRuntimeImage, Phrase: "build-env image"},
+	{Kind: model.PinSiteRuntimeChart, Phrase: "own stock"},
+	{Kind: model.PinSiteRuntimeVersion, Phrase: "runtime version"},
 }
 
-// PinSite is one place a version is recorded, and what it would become.
-type PinSite struct {
-	Kind PinSiteKind `json:"kind"`
-	// Path is repo-relative, or empty for the environment's own config, which
-	// is not a file in the repo.
-	Path    string `json:"path,omitempty"`
-	Detail  string `json:"detail,omitempty"`
-	Current string `json:"current"`
-	Target  string `json:"target"`
-}
-
-// Aligned reports whether this site already holds the target, which is what
-// makes a re-pin safe to re-run.
-func (s PinSite) Aligned() bool {
-	return strings.TrimSpace(s.Current) == strings.TrimSpace(s.Target)
-}
-
-// PinPlan is every site a re-pin would touch, resolved before anything is
-// written so it can be rendered and refused as a whole.
-type PinPlan struct {
-	Tenant      string    `json:"tenant"`
-	Environment string    `json:"environment"`
-	Target      string    `json:"target"`
-	Previous    string    `json:"previous,omitempty"`
-	ProjectRoot string    `json:"projectRoot"`
-	Sites       []PinSite `json:"sites"`
-	// Skipped explains, in order, why something that looked like a version
-	// reference was deliberately left out of Sites, so a caller reading the
-	// plan is not left assuming it was covered.
-	Skipped []string `json:"skipped,omitempty"`
-	// ProjectRootNote is set only when ProjectRoot was not read from the
-	// environment's own recorded repo path or a sibling environment's — i.e. it
-	// fell back to the caller's working directory, which may or may not be the
-	// environment's real repo at all. It names that tree's HEAD and, when the
-	// tree's own pinned versions disagree with what the environment has
-	// deployed, warns that the plan may not describe the environment's real
-	// drift. Empty whenever ProjectRoot came from a known checkout.
-	ProjectRootNote string `json:"projectRootNote,omitempty"`
-	// BaseFreshness is how the resolved checkout stands against the ref it
-	// tracks — how far behind that ref it is, and whether the remote was
-	// actually reached to establish it. A plan read from a checkout behind its
-	// remote is internally consistent while describing an older base than the
-	// remote holds, so this is the one fact that separates a good plan from a
-	// stale one; see PinBaseFreshness. Nil only when no tracked ref could be
-	// read.
-	BaseFreshness *PinBaseFreshness `json:"baseFreshness,omitempty"`
-}
-
-// Changes is the sites that would actually move. A plan whose changes are empty
-// is a no-op, which is the expected result of running a re-pin twice.
-func (p PinPlan) Changes() []PinSite {
-	changes := make([]PinSite, 0, len(p.Sites))
-	for _, site := range p.Sites {
-		if !site.Aligned() {
-			changes = append(changes, site)
-		}
-	}
-	return changes
-}
-
-func (p PinPlan) Aligned() bool { return len(p.Changes()) == 0 }
-
-// erunTerraformRefPattern matches an erun Terraform module reference and
-// captures the tag it is pinned to. Only erun's own repository is rewritten: a
-// tenant's other module sources have nothing to do with the erun version.
+// Only erun's own module sources are rewritten.
 var erunTerraformRefPattern = regexp.MustCompile(`(github\.com/sophium/erun\.git//[^"'\s?]*\?ref=)v?([0-9][^"'\s]*)`)
 
-// erunHelmDependencyPattern matches one erun OCI chart dependency's version line
-// within a Chart.yaml. The repository line anchors it so a tenant's own charts,
-// which are versioned independently, are left alone.
+// The repository line anchors it so a tenant's own charts are left alone.
 var erunHelmDependencyPattern = regexp.MustCompile(`(?ms)(-\s+name:\s*(\S+)[^\n]*\n(?:\s+[^\n]*\n)*?\s+repository:\s*[^\n]*sophium[^\n]*\n(?:\s+[^\n]*\n)*?\s+version:\s*)(\S+)`)
 
-// erunDevopsImagePattern matches a build-env base image tag. The version
-// class excludes `\` so an escaped quote right after it (as in an HCL string)
-// is never swallowed into the captured version.
+// The version class excludes `\` so an escaped quote (as in HCL) is never captured.
 var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"'\\]*)`)
 
-// erunImageReferencePattern matches a published erun image reference
-// (ghcr.io/sophium/erun-<component>:<version>) that is itself a whole quoted
-// assignment value — anchored on `=\s*"` immediately before the reference and
-// a plain, unescaped closing `"` immediately after the version. A tenant's own
-// terraform can set one of these directly — the cluster-edge module's
-// dns01_webhook_image is the reported case — and it names an erun release
-// exactly like the module ref above it, just as a variable's value instead of
-// a module source string. The anchor is what keeps this from matching the same
-// reference when it only appears as an example inside a variable's
-// `description` prose: prose has other text between the `=` and the quoted
-// reference, and its escaped inner quotes (`\"`) leave a `\` between the
-// version and the next `"` rather than the version butting straight up
-// against it. Excluding `\` from the version class also means a match can
-// never consume that escape backslash, so a rewrite can never turn `\"` into a
-// bare `"` and break the surrounding HCL string. erun-devops is excluded: a
-// bare build-env tag is already the dedicated site above, and matching it here
-// too would report the same reference twice.
+// Anchored on `=\s*"` and an unescaped closing quote so mentions inside description prose
+// never match. erun-devops is covered by erunDevopsImagePattern.
 var erunImageReferencePattern = regexp.MustCompile(`(=\s*")(ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):)([0-9][^\s"'\\]*)"`)
 
-// normalizePinPlanInputs trims and validates the inputs a plan is built from.
-// An unresolved tenant/environment must refuse here rather than flow into a
-// plan: the runtime-version site below would otherwise report a real-looking
-// row (current "", detail "/") for an environment nobody actually named,
-// which a caller could mistake for an honest reading rather than a resolution
-// failure.
+// An unresolved tenant/environment must fail here rather than yield a real-looking runtime-version row.
 func normalizePinPlanInputs(tenant, environment, projectRoot, target string) (string, string, string, string, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -191,19 +63,17 @@ func normalizePinPlanInputs(tenant, environment, projectRoot, target string) (st
 	return tenant, environment, projectRoot, target, nil
 }
 
-// ResolvePinPlan reads every pin site under projectRoot and reports what moving
-// to target would change. It never writes, so a caller can render the plan,
-// refuse it, or apply it.
-func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfig, target string) (PinPlan, error) {
+// ResolvePinPlan reports what moving projectRoot's pin sites to target would change, without writing.
+func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfig, target string) (model.PinPlan, error) {
 	if env.ResolvedType() == config.EnvironmentTypeHost {
-		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
+		return model.PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
 	}
 	tenant, environment, projectRoot, target, err := normalizePinPlanInputs(tenant, environment, projectRoot, target)
 	if err != nil {
-		return PinPlan{}, err
+		return model.PinPlan{}, err
 	}
 
-	plan := PinPlan{
+	plan := model.PinPlan{
 		Tenant:      tenant,
 		Environment: environment,
 		Target:      target,
@@ -221,47 +91,21 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfi
 
 	fileSites, err := scanPinFiles(projectRoot, target)
 	if err != nil {
-		return PinPlan{}, err
+		return model.PinPlan{}, err
 	}
 	plan.Sites = append(plan.Sites, fileSites...)
 	return plan, nil
 }
 
-// runtimeImageStatement is one thing the environment's own config says about
-// the image its runtime pod runs. Origin names the field it was read from, so a
-// plan's skip note can show the operator what the decision rested on; it is
-// empty for the operative runtimeimage, whose own value is already the claim.
+// Origin names the config field the reference came from; empty for runtimeimage.
 type runtimeImageStatement struct {
 	Reference string
 	Origin    string
 }
 
-// ownLineImageStatements reports every statement the environment's config makes
-// about a runtime image on a release line other than erun's, in the order a
-// deploy resolves them. A runtimeversion is that line's coordinate, so any one
-// of these is enough to make rewriting it to the erun target wrong.
-//
-// The evidence is deliberately wider than the operative runtimeimage alone.
-// That field is the one a deploy records and heals, and it can be stale or
-// absent while the environment's pod runs something else entirely — the
-// reported frs/build case, whose config carried no runtime image statement at
-// all while its pod ran ghcr.io/sophium/frs-devops:1.0.134. Its runtimechart and
-// its last confirmed deploy survive that drift, and either one names the line
-// the environment actually runs.
-//
-// An environment that states nothing is not left unknown either: the line it
-// runs is decided rather than guessed, by the same rule the deploy resolves its
-// image with (defaultDeployRuntimeImageBareName) — with no runtimeimage and no
-// confirmed running image, a deploy installs the tenant's own <tenant>-devops
-// image, and records the version it deployed as runtimeversion. Only a tenant
-// on erun's own line (RuntimeReleaseName == erun-devops) defaults to the stock
-// image, and only there is the erun target runtimeversion's to hold.
-//
-// Classified by the reference's own name, never by version number: a tenant's
-// line and erun's line can each publish the same number. A reference that does
-// not classify (empty, or naming no component) is skipped rather than guessed,
-// the same "never guess a line from the tenant name" rule RuntimeVersionLine
-// follows.
+// ownLineImageStatements returns every config statement placing the runtime image on a line
+// other than erun's; any one means runtimeversion must not move to the erun target. Lines are
+// classified by name, never version number, and unclassifiable references are skipped.
 func ownLineImageStatements(tenant string, env config.EnvConfig) []runtimeImageStatement {
 	var statements []runtimeImageStatement
 	for _, candidate := range []runtimeImageStatement{
@@ -286,26 +130,20 @@ func ownLineImageStatements(tenant string, env config.EnvConfig) []runtimeImageS
 	return statements
 }
 
-// referenceIsOnOwnLine reports whether a stated reference names a release line
-// other than erun's. A reference that does not classify (empty, or naming no
-// component) is false: unknown is not a claim about which line it is on.
+// An unclassifiable reference is not on its own line.
 func referenceIsOnOwnLine(reference string) bool {
 	line, ok := config.RuntimeImageReleaseLine(reference)
 	return ok && line != "erun"
 }
 
-// ownLineChartStatement answers the chart half of the same question. A stated
-// chart that is not erun's own stock one has its own image on its own line: a
-// deploy runs the umbrella's own image rather than erun's stock one
-// (defaultDeployRuntimeImageBareName), which is what --runtime-chart exists to
-// let an environment do.
+// A stated non-stock chart runs its own image on its own line.
 func ownLineChartStatement(chart string) *runtimeImageStatement {
 	chart = strings.TrimSpace(chart)
 	if chart == "" {
 		return nil
 	}
-	reference, _ := eruncommon.SplitChartReferenceVersion(chart)
-	name := eruncommon.ChartName(reference)
+	reference, _ := deploy.SplitChartReferenceVersion(chart)
+	name := deploy.ChartName(reference)
 	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
@@ -315,17 +153,14 @@ func ownLineChartStatement(chart string) *runtimeImageStatement {
 	}
 }
 
-// defaultDeployImageStatement answers the same question for an environment that
-// records no image of its own: what a deploy of it installs. nil when it states
-// a runtimeimage or a confirmed running image, and nil when that default is the
-// stock erun-devops image — the one case where the erun target is this
-// environment's runtimeversion to hold.
+// defaultDeployImageStatement is what a deploy installs when the env states no image; nil when
+// that is the stock erun-devops image.
 func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeImageStatement {
 	if strings.TrimSpace(env.RuntimeImage) != "" || strings.TrimSpace(env.RuntimeRunningImage) != "" {
 		return nil
 	}
-	chartReference, _ := eruncommon.SplitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
-	name := eruncommon.DefaultDeployRuntimeImageBareName(tenant, eruncommon.ChartName(chartReference))
+	chartReference, _ := deploy.SplitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
+	name := deploy.DefaultDeployRuntimeImageBareName(tenant, deploy.ChartName(chartReference))
 	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
@@ -335,10 +170,6 @@ func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeIm
 	}
 }
 
-// ownLineRuntimeVersionSkipNote explains, in the operator's terms, why a
-// re-pin left the environment's runtimeversion alone: the environment's own
-// config says its runtime image is on another release line, so the erun target
-// is not this environment's number to hold.
 func ownLineRuntimeVersionSkipNote(tenant, environment string, statements []runtimeImageStatement) string {
 	reasons := make([]string, 0, len(statements))
 	for _, statement := range statements {
@@ -352,25 +183,17 @@ func ownLineRuntimeVersionSkipNote(tenant, environment string, statements []runt
 		", not erun's, so pin leaves it alone; it moves on the tenant's own next build/release"
 }
 
-// resolveRuntimeVersionAndImagePinSites answers the two env-config sites that
-// ride erun's own release line only when the environment's runtime image does:
-// runtimeversion, and a stated-stock runtimeimage's own tag. An env whose
-// runtime image belongs to another line (frs/prod on
-// ghcr.io/sophium/frs-devops:1.0.76 is the reported case) has its
-// runtimeversion skipped instead — rewriting it to the erun target names a tag
-// that line never publishes, guaranteeing an ImagePullBackOff on the next
-// deploy. See ownLineImageStatements for what counts as evidence of that line:
-// the operative runtimeimage is not the only field that carries it, and an
-// environment that states nothing still has the image a deploy resolves for it.
-func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env config.EnvConfig) ([]PinSite, []string) {
-	var sites []PinSite
+// runtimeversion and a stock runtimeimage's tag follow erun's line only when the runtime image
+// does; otherwise they are skipped, since the erun target tag does not exist on that line.
+func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env config.EnvConfig) ([]model.PinSite, []string) {
+	var sites []model.PinSite
 	var skipped []string
 	image := strings.TrimSpace(env.RuntimeImage)
 	if ownLine := ownLineImageStatements(tenant, env); len(ownLine) > 0 {
 		skipped = append(skipped, ownLineRuntimeVersionSkipNote(tenant, environment, ownLine))
 	} else {
-		sites = append(sites, PinSite{
-			Kind:    PinSiteRuntimeVersion,
+		sites = append(sites, model.PinSite{
+			Kind:    model.PinSiteRuntimeVersion,
 			Detail:  tenant + "/" + environment,
 			Current: strings.TrimSpace(env.RuntimeVersion),
 			Target:  target,
@@ -379,19 +202,17 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 	if image == "" {
 		return sites, skipped
 	}
-	_, version, ok := eruncommon.SplitImageTag(image)
+	_, version, ok := deploy.SplitImageTag(image)
 	if !ok {
 		return sites, skipped
 	}
-	// Only the stock erun-devops image's tag is an erun version; a tenant's own
-	// <tenant>-devops image rides the tenant's own release line, and rewriting
-	// its tag to an erun version would name a tag that line never publishes.
-	if !eruncommon.RuntimeImageIsStockDevops(image) {
+	// A tenant's own <tenant>-devops tag follows the tenant's release line.
+	if !deploy.RuntimeImageIsStockDevops(image) {
 		skipped = append(skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
 		return sites, skipped
 	}
-	sites = append(sites, PinSite{
-		Kind:    PinSiteRuntimeImage,
+	sites = append(sites, model.PinSite{
+		Kind:    model.PinSiteRuntimeImage,
 		Detail:  image,
 		Current: version,
 		Target:  target,
@@ -399,23 +220,14 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 	return sites, skipped
 }
 
-// resolveRuntimeChartPinSite classifies a stated runtimechart the same way
-// the runtime-image line guard classifies the image: by the reference's own
-// name, never by version number — a tenant's own line and erun's own line
-// can each publish the same number. A chart naming erun's own stock chart
-// returns a site to move when it carries an explicit version; a stated
-// chart with no version
-// rides the deploy version already, so there is nothing to move and no
-// skip note either. Any other name -- the tenant's own umbrella, or a
-// reference pin could not even read a name out of -- returns a skip note
-// instead, and never a site: an unclassifiable pairing must proceed, not
-// block, the same rule the runtime-image line guard established.
-func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
+// resolveRuntimeChartPinSite moves only erun's stock chart with an explicit version; anything
+// else yields a skip note and never blocks.
+func resolveRuntimeChartPinSite(chart, target string) (*model.PinSite, string) {
 	if chart == "" {
 		return nil, ""
 	}
-	reference, chartVersion := eruncommon.SplitChartReferenceVersion(chart)
-	chartName := eruncommon.ChartName(reference)
+	reference, chartVersion := deploy.SplitChartReferenceVersion(chart)
+	chartName := deploy.ChartName(reference)
 	if chartName != config.DevopsComponentName {
 		reason := "names " + chartName + ", not the stock " + config.DevopsComponentName + " chart, so it rides its own release line"
 		if chartName == "" {
@@ -426,23 +238,17 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 	if chartVersion == "" {
 		return nil, ""
 	}
-	return &PinSite{
-		Kind:    PinSiteRuntimeChart,
+	return &model.PinSite{
+		Kind:    model.PinSiteRuntimeChart,
 		Detail:  chart,
 		Current: chartVersion,
 		Target:  target,
 	}, ""
 }
 
-// DescribeCwdFallbackProjectRoot names a resolved project root's HEAD and
-// warns when the tree's own pinned versions disagree with what the
-// environment has deployed. Callers use it only when ProjectRoot came from
-// falling back to the caller's working directory rather than a checkout known
-// to belong to this environment or its tenant, since that tree's identity was
-// never actually verified. Best-effort: a HEAD that cannot be read still
-// leaves the note naming the fallback, and an unreadable HEAD never fails the
-// plan this only annotates.
-func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
+// DescribeCwdFallbackProjectRoot names the fallback root's HEAD and warns when its pins disagree
+// with what is deployed. Best-effort: an unreadable HEAD never fails the plan.
+func DescribeCwdFallbackProjectRoot(ctx core.Context, plan model.PinPlan) string {
 	note := "project root resolved from the caller's working directory, not a known checkout of this environment or its tenant"
 	if head, err := gitx.GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
 		note += "; HEAD is " + strings.TrimSpace(head)
@@ -452,7 +258,7 @@ func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 		return note
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteRuntimeVersion {
+		if site.Kind == model.PinSiteRuntimeVersion {
 			continue
 		}
 		current := strings.TrimSpace(site.Current)
@@ -464,109 +270,8 @@ func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 	return note
 }
 
-// scanPinFiles walks the repo once and recognises each erun reference it finds.
-// Vendored trees are skipped: a chart pulled into charts/ is a build artifact of
-// a pin, not a pin, and rewriting it would edit something the next
-// `helm dependency update` regenerates anyway.
-func scanPinFiles(projectRoot, target string) ([]PinSite, error) {
-	var sites []PinSite
-	walkErr := filepath.WalkDir(projectRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			if skipPinScanDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relative, relErr := filepath.Rel(projectRoot, path)
-		if relErr != nil {
-			return nil
-		}
-		found, readErr := pinSitesInFile(path, filepath.ToSlash(relative), entry.Name(), target)
-		if readErr != nil {
-			return nil
-		}
-		sites = append(sites, found...)
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
-	sort.SliceStable(sites, func(i, j int) bool {
-		if sites[i].Path == sites[j].Path {
-			return sites[i].Detail < sites[j].Detail
-		}
-		return sites[i].Path < sites[j].Path
-	})
-	return sites, nil
-}
-
-func skipPinScanDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "charts", ".terraform", "vendor", "build", "dist":
-		return true
-	}
-	return false
-}
-
-func pinSitesInFile(path, relative, name, target string) ([]PinSite, error) {
-	if !pinScannableFile(name) {
-		return nil, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	content := string(data)
-
-	var sites []PinSite
-	for _, match := range erunTerraformRefPattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteTerraformRef, Path: relative, Detail: match[0], Current: match[2], Target: target})
-	}
-	for _, match := range erunHelmDependencyPattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteHelmDependency, Path: relative, Detail: match[2], Current: match[3], Target: target})
-	}
-	for _, match := range erunDevopsImagePattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteRuntimeImage, Path: relative, Detail: "erun-devops", Current: match[2], Target: target})
-	}
-	if pinTerraformFile(name) {
-		for _, match := range erunImageReferencePattern.FindAllStringSubmatch(content, -1) {
-			if match[3] == "erun-devops" {
-				continue
-			}
-			sites = append(sites, PinSite{Kind: PinSiteImageReference, Path: relative, Detail: match[3], Current: match[4], Target: target})
-		}
-	}
-	return sites, nil
-}
-
-func pinScannableFile(name string) bool {
-	switch {
-	case pinTerraformFile(name):
-		return true
-	case name == "Chart.yaml":
-		return true
-	case name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile."):
-		return true
-	}
-	return false
-}
-
-// pinTerraformFile reports whether name is a Terraform configuration or
-// variables file — the two places a tenant's own terraform can carry an erun
-// image reference directly, alongside a module ref.
-func pinTerraformFile(name string) bool {
-	return strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tfvars")
-}
-
-// ApplyPinPlan rewrites every file site to the target. The environment's own
-// config fields (runtimeversion, runtimeimage, runtimechart) are not written
-// here: they live in erun's config store, which the caller owns via
-// ApplyPinnedEnvConfig, so the transport applies that half and this owns the
-// repo half.
-func ApplyPinPlan(plan PinPlan) error {
+// ApplyPinPlan rewrites every file site; env-config sites are applied via ApplyPinnedEnvConfig.
+func ApplyPinPlan(plan model.PinPlan) error {
 	byPath := map[string]struct{}{}
 	for _, site := range plan.Changes() {
 		if site.Path == "" {
@@ -601,29 +306,22 @@ func ApplyPinPlan(plan PinPlan) error {
 	return nil
 }
 
-// ApplyPinnedEnvConfig returns the environment config a resolved plan's own
-// env-config sites (runtimeversion, a stated-stock runtimeimage, runtimechart)
-// would produce, and whether anything actually changed. These three are one
-// coordinate: a prior report found runtimeversion healed while runtimeimage
-// was left behind, and the same gap turned up for runtimechart, so a caller
-// applying a plan computes every field it carries a site for in one pass and
-// saves once. Two independent saves derived from the same starting snapshot
-// would each overwrite the other's change, since a config save writes the
-// whole struct rather than merging fields.
-func ApplyPinnedEnvConfig(env config.EnvConfig, plan PinPlan) (config.EnvConfig, bool) {
+// ApplyPinnedEnvConfig returns the env config with every env-config site applied, so the caller
+// saves once; separate saves would overwrite each other since a save writes the whole struct.
+func ApplyPinnedEnvConfig(env config.EnvConfig, plan model.PinPlan) (config.EnvConfig, bool) {
 	updated := env
 	changed := false
-	if planHasSite(plan, PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
+	if planHasSite(plan, model.PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
 		updated.RuntimeVersion = plan.Target
 		changed = true
 	}
-	if planHasEnvConfigSite(plan, PinSiteRuntimeImage) {
+	if planHasEnvConfigSite(plan, model.PinSiteRuntimeImage) {
 		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeImage, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeImage) {
 			updated.RuntimeImage = rewritten
 			changed = true
 		}
 	}
-	if planHasSite(plan, PinSiteRuntimeChart) {
+	if planHasSite(plan, model.PinSiteRuntimeChart) {
 		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeChart, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeChart) {
 			updated.RuntimeChart = rewritten
 			changed = true
@@ -632,7 +330,7 @@ func ApplyPinnedEnvConfig(env config.EnvConfig, plan PinPlan) (config.EnvConfig,
 	return updated, changed
 }
 
-func planHasSite(plan PinPlan, kind PinSiteKind) bool {
+func planHasSite(plan model.PinPlan, kind model.PinSiteKind) bool {
 	for _, site := range plan.Sites {
 		if site.Kind == kind {
 			return true
@@ -641,13 +339,8 @@ func planHasSite(plan PinPlan, kind PinSiteKind) bool {
 	return false
 }
 
-// planHasEnvConfigSite reports a site of kind that lives in the env's own
-// config rather than a repo file (Path empty) — PinSiteRuntimeImage can be
-// either, depending on whether it came from EnvConfig.RuntimeImage or a
-// scanned Dockerfile/tfvars reference, and only the former is this
-// function's to persist; the latter is already rewritten in place by
-// ApplyPinPlan.
-func planHasEnvConfigSite(plan PinPlan, kind PinSiteKind) bool {
+// Only sites from the env config (empty Path) are persisted here; file sites are rewritten by ApplyPinPlan.
+func planHasEnvConfigSite(plan model.PinPlan, kind model.PinSiteKind) bool {
 	for _, site := range plan.Sites {
 		if site.Kind == kind && strings.TrimSpace(site.Path) == "" {
 			return true
@@ -656,9 +349,6 @@ func planHasEnvConfigSite(plan PinPlan, kind PinSiteKind) bool {
 	return false
 }
 
-// rewritePinnedReferenceVersion moves the version embedded in a stated image
-// or chart reference to target, leaving its scheme, registry, and name
-// exactly as stated.
 func rewritePinnedReferenceVersion(raw, target string) string {
 	raw = strings.TrimSpace(raw)
 	cut := strings.LastIndex(raw, "/")
@@ -673,8 +363,7 @@ func rewritePinnedReferenceVersion(raw, target string) string {
 	return raw[:cut+1] + last[:sep] + ":" + target
 }
 
-// rewritePinnedVersions moves every erun reference in one file to the target,
-// and touches nothing else — a re-pin edits pins, never content.
+// rewritePinnedVersions changes only erun version references in content.
 func rewritePinnedVersions(content, target string) string {
 	content = erunTerraformRefPattern.ReplaceAllString(content, "${1}v"+target)
 	content = erunHelmDependencyPattern.ReplaceAllString(content, "${1}"+target)
@@ -683,15 +372,10 @@ func rewritePinnedVersions(content, target string) string {
 	return content
 }
 
-// A rewritten Chart.yaml is only half a re-pin: the lock beside it still names
-// the versions that were there before, and `helm dependency build` — which the
-// deploy path runs — refuses a lock that disagrees with its chart. So the chart
-// directories a re-pin touched have their locks regenerated, or the very next
-// deploy fails on a tree the operator was told was aligned.
+// `helm dependency build` refuses a lock that disagrees with its chart, so every re-pinned chart's
+// lock is regenerated.
 
-// HelmDependencyUpdater regenerates one chart's Chart.lock and charts/. It is a
-// seam so a scenario can prove the pass runs — and runs once per chart — without
-// a helm binary or a reachable registry.
+// HelmDependencyUpdater regenerates one chart's Chart.lock and charts/.
 type HelmDependencyUpdater func(ctx core.Context, chartDir string) error
 
 // RunHelmDependencyUpdate is the real updater.
@@ -708,14 +392,12 @@ func RunHelmDependencyUpdate(ctx core.Context, chartDir string) error {
 	return nil
 }
 
-// PinnedChartDirs lists the chart directories a plan rewrote a dependency in,
-// deduplicated and ordered, so each is refreshed exactly once however many
-// dependencies inside it moved.
-func PinnedChartDirs(plan PinPlan) []string {
+// PinnedChartDirs lists each chart directory a plan rewrote, once.
+func PinnedChartDirs(plan model.PinPlan) []string {
 	seen := map[string]struct{}{}
 	dirs := make([]string, 0, len(plan.Sites))
 	for _, site := range plan.Changes() {
-		if site.Kind != PinSiteHelmDependency || strings.TrimSpace(site.Path) == "" {
+		if site.Kind != model.PinSiteHelmDependency || strings.TrimSpace(site.Path) == "" {
 			continue
 		}
 		dir := filepath.Dir(filepath.Join(plan.ProjectRoot, filepath.FromSlash(site.Path)))
@@ -729,11 +411,8 @@ func PinnedChartDirs(plan PinPlan) []string {
 	return dirs
 }
 
-// RefreshPinnedChartLocks regenerates the lock of every chart the re-pin moved.
-// A failure names the chart and stops: leaving some locks refreshed and others
-// stale is a worse tree than the one we started from, and the operator needs to
-// know which one to look at.
-func RefreshPinnedChartLocks(ctx core.Context, plan PinPlan, update HelmDependencyUpdater) error {
+// RefreshPinnedChartLocks regenerates each re-pinned chart's lock, stopping at the first failure.
+func RefreshPinnedChartLocks(ctx core.Context, plan model.PinPlan, update HelmDependencyUpdater) error {
 	if update == nil {
 		update = RunHelmDependencyUpdate
 	}
@@ -743,65 +422,4 @@ func RefreshPinnedChartLocks(ctx core.Context, plan PinPlan, update HelmDependen
 		}
 	}
 	return nil
-}
-
-// pinHistoryFileName records what the repo was pinned to before the last
-// re-pin, so reverting is one motion rather than remembering a number. It lives
-// beside the project's erun config because it describes this tree.
-const pinHistoryFileName = "pin-history.json"
-
-type pinHistory struct {
-	Previous map[string]string `json:"previous"`
-}
-
-func pinHistoryPath(projectRoot string) string {
-	return filepath.Join(projectRoot, config.ProjectConfigDir, pinHistoryFileName)
-}
-
-func pinHistoryKey(tenant, environment string) string {
-	return strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
-}
-
-// RecordPinPrevious remembers the version this environment was on before a
-// re-pin. A re-pin that changes nothing does not overwrite the record: reverting
-// twice must still reach the version you came from, not the one you are on.
-func RecordPinPrevious(projectRoot, tenant, environment, previous string) error {
-	previous = strings.TrimSpace(previous)
-	if previous == "" {
-		return nil
-	}
-	path := pinHistoryPath(projectRoot)
-	history := readPinHistory(path)
-	if history.Previous == nil {
-		history.Previous = map[string]string{}
-	}
-	history.Previous[pinHistoryKey(tenant, environment)] = previous
-	data, err := json.MarshalIndent(history, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
-}
-
-// PinPrevious reports the version recorded before the last re-pin, which is what
-// a revert targets.
-func PinPrevious(projectRoot, tenant, environment string) (string, bool) {
-	history := readPinHistory(pinHistoryPath(projectRoot))
-	previous, ok := history.Previous[pinHistoryKey(tenant, environment)]
-	return strings.TrimSpace(previous), ok && strings.TrimSpace(previous) != ""
-}
-
-func readPinHistory(path string) pinHistory {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return pinHistory{}
-	}
-	var history pinHistory
-	if err := json.Unmarshal(data, &history); err != nil {
-		return pinHistory{}
-	}
-	return history
 }

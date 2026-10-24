@@ -28,24 +28,12 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; config: TenantConfigView; token: string }
   | { status: 'signed-out' }
-  // Signed in with the identity provider, but the API does not recognise the
-  // identity — it belongs to no tenant yet. Distinct from signed-out because
-  // the recovery is completely different: signing in again just repeats the
-  // same successful sign-in and lands here once more (#1167).
+  // Signed in, but the identity belongs to no tenant; signing in again would loop.
   | { status: 'not-enrolled'; token: string }
-  // Signed in, and the caller may well already be enrolled somewhere — the
-  // API could simply not determine which tenant this token resolves to (a
-  // shared, org-scoped issuer whose token carries no matching org claim, most
-  // commonly). Distinct from not-enrolled because "ask an operator to enrol
-  // you" is advice that cannot work here (erun#1721).
+  // Signed in, but the API could not tell which tenant the token resolves to;
+  // the caller may already be enrolled, so enrolment advice is wrong here.
   | { status: 'tenant-unresolved'; token: string; message: string }
-  // Authenticated, but the API's own resolution failed because of an
-  // internal error (repository.ErrIdentityResolutionFailed, sanitized
-  // server-side of any raw database detail) rather than a real answer about
-  // enrolment or tenant resolution. Distinct from both states above: neither
-  // "ask an operator to enrol you" nor "you may already be enrolled
-  // elsewhere" is true advice here, and no enrolment command is offered
-  // (erun#1752).
+  // The API's identity resolution failed internally; no enrolment advice applies.
   | { status: 'resolution-error'; token: string; message: string }
   | { status: 'error'; message: string };
 
@@ -65,20 +53,8 @@ interface ConfigQueryPhase {
   data?: TenantConfigView;
 }
 
-// A 401 means at least three completely different things depending on
-// whether a token was held, and — once one is — which of three causes the
-// API itself reports via its {code, message} envelope (erun#1721, erun#1752).
-// With no token the caller is simply signed out. With a token, the identity
-// provider authenticated them and the API still said no: either this
-// identity really is not enrolled anywhere (NOT_ENROLLED, telling them to
-// sign in again is a loop, #1167), or the API could not determine which
-// tenant this token resolves to at all (TENANT_UNRESOLVED) — a state the
-// caller may already be enrolled past, so "ask an operator to enrol you"
-// would be wrong advice — or resolution failed for an internal reason
-// unrelated to either (RESOLUTION_FAILED, erun#1752) — neither piece of
-// advice above is true here either, and no enrolment command is offered.
-// Anything else 401-shaped falls back to the same not-enrolled card the API
-// has always produced for an unclassified auth rejection.
+// A 401 without a token is signed-out; with one, the API's error code picks the
+// card. Unclassified 401s fall back to not-enrolled.
 function loadStateFromConfigQuery(token: string, configQuery: ConfigQueryPhase): LoadState {
   if (configQuery.isLoading || configQuery.isUninitialized) {
     return { status: 'loading' };
@@ -115,24 +91,14 @@ function computeLoadState(auth: AuthPhase, configQuery: ConfigQueryPhase): LoadS
 }
 
 interface PlatformInfo {
-  // Resolved through consoleBrand, never undefined: the server's own value
-  // once discovery answers, the value the deploy injected into the served page
-  // before that, and the bundled product-level name when the instance names
-  // itself nowhere. Always a string so the pre-resolution paint cannot show a
-  // different name than the one discovery resolves to.
+  // Always a string so the pre-discovery paint shows the same name discovery resolves to.
   brand: string;
   docsUrl?: string;
   tagline?: string;
   logoUrl?: string;
 }
 
-// usePlatformInfo resolves the instance's white-label surface from discovery
-// (GET /v1/platform) and mirrors the brand into the document title — the one
-// thing that used to be a hardcoded literal (`erun console`) despite the
-// value already being fetched and parsed for OIDC config. The remaining fields
-// are optional and left undefined when the backend has it unset (#1327);
-// callers fall back to bundled product-level defaults, never a hardcoded
-// instance name.
+// usePlatformInfo resolves the white-label surface from GET /v1/platform and mirrors the brand into the document title.
 function usePlatformInfo(): PlatformInfo {
   const [info, setInfo] = React.useState<PlatformInfo>(() => ({
     brand: consoleBrand(undefined),
@@ -162,11 +128,7 @@ function usePlatformInfo(): PlatformInfo {
   return info;
 }
 
-// retrySwitchHandler rebuilds the pending-switch intent and relaunches sign-in
-// so "try again" repeats the same requested target rather than losing it —
-// undefined (no retry offered) when there is nothing to retry against, either
-// because there's no live mismatch or no OIDC config to redirect through
-// (the dev-token fallback).
+// retrySwitchHandler is undefined when there is no mismatch or no OIDC config to redirect through.
 function retrySwitchHandler(
   oidc: OidcConfig | undefined,
   switchMismatch: TenantSwitchMismatch | undefined,
@@ -259,11 +221,7 @@ function AppContent({
   }
 }
 
-// isAcceptInvitePath and acceptInviteToken read the URL directly rather than
-// through a router: the console has no client-side routing today, and an
-// invite link is the one page that must render before OIDC sign-in ever
-// starts — an invitee has no bearer token and no tenant membership yet, so
-// forcing them through the normal sign-in flow first would be a dead end.
+// The invite page must render before OIDC sign-in: an invitee has no token or tenant yet.
 function isAcceptInvitePath(): boolean {
   return window.location.pathname === '/accept-invite';
 }
@@ -278,18 +236,12 @@ export function App(): React.ReactElement {
   const auth = useAppSelector((s) => s.auth);
   const acceptInvite = isAcceptInvitePath();
 
-  // The `.dark` class only gets applied here, once, so every pre-shell screen
-  // (including the signed-out landing page) honors a stored or OS-level dark
-  // preference from first paint — not only after AppShell's own toggle (whose
-  // useTheme() re-reads the same preference) has mounted post-sign-in.
+  // Applied here so pre-shell screens honor the dark preference from first paint.
   React.useEffect(() => {
     applyTheme(initialTheme());
   }, []);
 
-  // Resolves the OIDC config from platform discovery (GET /v1/platform), then
-  // the bearer token (an OIDC callback exchange, a token held this session,
-  // or the dev-token fallback) — see app/authThunks.ts. Skipped on the
-  // accept-invite page: an invitee has no identity to resolve yet.
+  // Skipped on the accept-invite page: an invitee has no identity to resolve yet.
   React.useEffect(() => {
     if (acceptInvite) {
       return;
@@ -297,24 +249,14 @@ export function App(): React.ReactElement {
     void dispatch(resolveAuth());
   }, [dispatch, acceptInvite]);
 
-  // Loads the tenant config once a token is known. `refetch` is also the
-  // refresh a write surface (register/deploy) triggers on completion, so a
-  // newly registered env or a settled deploy's status shows up here too —
-  // via `invalidatesTags: ['Config']` on those mutations.
   const configQuery = useGetConfigQuery(auth.token ?? '', {
     skip: acceptInvite || auth.token === undefined,
   });
 
   const state = computeLoadState(auth, configQuery);
 
-  // A pending tenant-switch target (shell/tenantSwitch.ts) is consumed exactly
-  // once, the first time the config a fresh sign-in produced is actually
-  // known — a ref (not just the effect's dependency) guards that, since
-  // `state` is a fresh object every render and consuming twice would be a
-  // silent no-op the second time anyway, but only the first matters for
-  // deciding whether this sign-in reached its requested target. Declared
-  // unconditionally (above the accept-invite early return below) because
-  // hooks cannot run conditionally.
+  // A pending tenant-switch target is consumed exactly once; declared above the
+  // accept-invite early return because hooks cannot run conditionally.
   const switchIntentConsumed = React.useRef(false);
   const [switchMismatch, setSwitchMismatch] = React.useState<TenantSwitchMismatch | undefined>(
     undefined,
@@ -339,8 +281,7 @@ export function App(): React.ReactElement {
     return <AcceptInvitePage token={acceptInviteToken()} />;
   }
 
-  // IconTooltip (used by the theme toggle and, once panels adopt it, elsewhere)
-  // requires a TooltipProvider ancestor, same as the desktop's App.tsx.
+  // IconTooltip requires a TooltipProvider ancestor.
   return (
     <TooltipProvider>
       <AppContent
@@ -354,12 +295,7 @@ export function App(): React.ReactElement {
         }}
         onSignOut={() => {
           void (async () => {
-            // signOut clears the local token unconditionally, then redirects
-            // to the IdP to end its session too when discovery says that's
-            // possible. When it redirects, the browser is already leaving
-            // this page — dispatching clearAuth would be pointless and the
-            // reload that follows the IdP's redirect back here resolves the
-            // signed-out state fresh anyway.
+            // When signOut redirects to the IdP the page is leaving, so clearAuth is skipped.
             const result = await signOut(auth.oidc);
             if (!result.idpSessionEnded) {
               dispatch(clearAuth());

@@ -22,9 +22,7 @@ type IdentityResolutionCache struct {
 type identityCacheKey struct {
 	issuer  string
 	subject string
-	// org is the resolved org claim value for org-scoped (shared) issuers, so the
-	// same (issuer, subject) presenting different org claims cannot collide on one
-	// cached tenant. Empty for single-tenant issuers.
+	// org keeps different orgs of a shared issuer from colliding on one cached tenant.
 	org string
 }
 

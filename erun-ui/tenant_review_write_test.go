@@ -10,11 +10,8 @@ import (
 	"testing"
 )
 
-// reviewWriteAPI serves the four write routes CreateReview/CloseReview/
-// AdvanceMergeQueue/CreateReviewComment drive, refusing every path in
-// forbidden the same way reviewDetailAPI/tenantDashboardAPI do. Routes are
-// keyed on "METHOD /path" and dispatched through a map rather than a
-// method+path switch, so adding a route never grows one function's branching.
+// reviewWriteAPI dispatches "METHOD /path" routes, refusing every path in
+// forbidden.
 func reviewWriteAPI(t *testing.T, forbidden map[string]bool) *httptest.Server {
 	t.Helper()
 	routes := map[string]func(w http.ResponseWriter, req *http.Request){
@@ -48,9 +45,8 @@ func reviewWriteAPI(t *testing.T, forbidden map[string]bool) *httptest.Server {
 	return newReviewWriteServer(routes, forbidden)
 }
 
-// reviewWriteAdvanceHandler promotes the queue head to MERGED, except for
-// the magic "blocked" target branch a test uses to exercise the
-// unresolved-thread refusal without standing up a second server.
+// reviewWriteAdvanceHandler refuses the "blocked" target branch with unresolved
+// threads.
 func reviewWriteAdvanceHandler(t *testing.T) func(w http.ResponseWriter, req *http.Request) {
 	return func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
@@ -71,8 +67,7 @@ func reviewWriteAdvanceHandler(t *testing.T) func(w http.ResponseWriter, req *ht
 	}
 }
 
-// reviewWriteOverrideAdvanceHandler promotes the head regardless of status,
-// requiring only that the reason travelled with the request.
+// reviewWriteOverrideAdvanceHandler requires only that the reason was sent.
 func reviewWriteOverrideAdvanceHandler(t *testing.T) func(w http.ResponseWriter, req *http.Request) {
 	return func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
@@ -234,12 +229,8 @@ func TestAdvanceMergeQueueRequiresATargetBranch(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueuePassesTheRepository: the repository is what settles
-// which of several same-branch queues is advanced, so the input has to reach
-// the platform call rather than being dropped on the way. It is deliberately
-// not required — a review created before the platform recorded a repository
-// has none to send, and the platform refuses the resulting ambiguous queue
-// rather than this layer guessing at one.
+// Repository is optional; the platform, not this layer, refuses an ambiguous
+// queue.
 func TestAdvanceMergeQueuePassesTheRepository(t *testing.T) {
 	var body map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -263,11 +254,7 @@ func TestAdvanceMergeQueuePassesTheRepository(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError is the UX
-// contract: a refusal that cannot be acted on (a bare error string) is the
-// dead end AGENTS.md's "Smooth, Seamless, No Dead Ends" refuses to accept.
-// The caller needs the count and the review id to route the operator to the
-// threads, so this surfaces as a successful, structured "blocked" result.
+// Unresolved threads surface as a structured block, not an error.
 func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
@@ -283,11 +270,8 @@ func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.
 	}
 }
 
-// TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot: an occupied MERGE
-// slot must not fall through to the generic conflict sentence, which says
-// somebody else changed something and to refresh — nothing changed under the
-// caller and retrying fails identically, so the operator would loop. The
-// platform names the review to requeue, and that is what has to surface.
+// An occupied MERGE slot must surface the platform's message, not the generic
+// refresh-and-retry sentence.
 func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
@@ -392,10 +376,6 @@ func TestCreateReviewCommentRequiresADiffLineAnchor(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardReportsWriteCapabilitiesAlongsideReads pins that a caller
-// missing the create-review or advance-merge-queue capability sees that named
-// up front, the same CanComment already gives the reply composer, instead of
-// discovering it only when the write 403s.
 func TestTenantDashboardReportsWriteCapabilitiesAlongsideReads(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/reviews"},{"method":"GET","path":"/v1/reviews/merge-queue"},{"method":"GET","path":"/v1/reviews/{review_id}/builds"},{"method":"GET","path":"/v1/audit-events"},{"method":"POST","path":"/v1/reviews"}]`
@@ -415,9 +395,7 @@ func TestTenantDashboardReportsWriteCapabilitiesAlongsideReads(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardReportsOverrideMergeQueueCapabilitySeparately pins that
-// the override is gated on its own route, distinct from CanAdvanceMergeQueue
-// — a tenant can grant ordinary advance without granting the override.
+// The override is gated separately from ordinary advance.
 func TestTenantDashboardReportsOverrideMergeQueueCapabilitySeparately(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/reviews"},{"method":"GET","path":"/v1/reviews/merge-queue"},{"method":"GET","path":"/v1/reviews/{review_id}/builds"},{"method":"GET","path":"/v1/audit-events"},{"method":"POST","path":"/v1/reviews/merge-queue/advance"},{"method":"POST","path":"/v1/reviews/merge-queue/override-advance"}]`
@@ -445,11 +423,7 @@ func TestReviewDetailReportsCanCloseAlongsideCanComment(t *testing.T) {
 	}
 }
 
-// TestResolveReviewCommentRequiresATenant and
-// TestUnresolveReviewCommentRequiresATenant both route through
-// updateReviewCommentStatus, which names a different operation for each
-// direction (resolving vs reopening) — both are locked here so neither
-// branch regresses to the shared bare message.
+// Each direction names its own operation in the error.
 func TestResolveReviewCommentRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).ResolveReviewComment(uiUpdateReviewCommentStatusInput{
 		ReviewID: "review-1", CommentID: "comment-1",

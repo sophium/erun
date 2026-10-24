@@ -69,11 +69,7 @@ func run(args []string) error {
 		AWSEndpoint:   cfg.AWSEndpoint,
 		MCPSigner:     optional.mcpSigner,
 		DNS01Broker:   optional.dns01Broker,
-		// The hostname route reuses the same PowerDNS write path
-		// DNS01Broker uses for ACME challenges, so both share one constructed
-		// writer -- see optionalDependencies. environmentHostnameWriter avoids
-		// assigning a typed-nil *PowerDNSWriter into the interface field,
-		// which would compare non-nil and defeat the route's own nil check.
+		// Shares the DNS-01 PowerDNS writer; the adapter avoids a typed-nil interface.
 		EnvironmentHostnameWriter:       environmentHostnameWriter(optional.dns01Writer),
 		EnvironmentHostnameServicesZone: cfg.DNS01ServicesZone,
 		KubeClient:                      optional.kubeClient,
@@ -82,11 +78,7 @@ func run(args []string) error {
 			PlatformNamespace:      cfg.PlatformNamespace,
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 			ExposeTargetIP:         cfg.EnvExposeTargetIP,
-			// The deploy Job's chained `erun expose` has no git checkout to resolve
-			// these from, so the control plane threads what it already
-			// knows for its own purposes: DNS01ServicesZone is the same services
-			// zone its DNS-01 cert issuance uses, and PlatformNamespace is where its
-			// own Jobs (and, in a self-hosted platform, the PowerDNS singleton) run.
+			// The deploy Job's `erun expose` has no checkout, so the control plane supplies these.
 			ExposeServicesZone:      cfg.DNS01ServicesZone,
 			ExposePlatformNamespace: cfg.PlatformNamespace,
 			ImagePullSecrets:        splitCSV(cfg.EnvDeployImagePullSecrets),
@@ -137,7 +129,6 @@ func run(args []string) error {
 	return server.ListenAndServe()
 }
 
-// resolveConfig layers command-line flags over the environment-derived config.
 func resolveConfig(args []string) (apiConfig, error) {
 	cfg := configFromEnv()
 	flags := flag.NewFlagSet("eapi", flag.ContinueOnError)
@@ -174,8 +165,7 @@ func resolveConfig(args []string) (apiConfig, error) {
 	return cfg, nil
 }
 
-// apiDependencies are the runtime pieces the API only gets when their
-// configuration is present; each stays nil otherwise, disabling its feature.
+// apiDependencies stay nil unless configured, disabling their feature.
 type apiDependencies struct {
 	cipher        *secrets.Cipher
 	dbosCtx       dbos.DBOSContext
@@ -187,24 +177,32 @@ type apiDependencies struct {
 }
 
 func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
-	cipher, err := optionalCipher(cfg.SecretsKey)
+	cipher, err := whenConfigured(cfg.SecretsKey != "", func() (*secrets.Cipher, error) {
+		return secrets.NewCipher(cfg.SecretsKey)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	dbosCtx, err := optionalDBOS(cfg.DBOSDatabaseURL)
+	dbosCtx, err := whenConfigured(cfg.DBOSDatabaseURL != "", func() (dbos.DBOSContext, error) {
+		return newDBOSContext(cfg.DBOSDatabaseURL)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	mcpSigner, err := optionalMCPSigner(cfg.MCPSigningKeyPath)
+	mcpSigner, err := whenConfigured(cfg.MCPSigningKeyPath != "", func() (*mcptoken.Signer, error) {
+		return loadMCPSigner(cfg.MCPSigningKeyPath)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	dns01Writer, err := optionalDNS01Writer(cfg)
+	dns01Writer, err := whenConfigured(dns01WriterConfigured(cfg), func() (*dns01broker.PowerDNSWriter, error) {
+		return newDNS01Writer(cfg)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
 	dns01Broker := optionalDNS01Broker(mcpSigner, dns01Writer, cfg.DNS01ServicesZone)
-	kubeClient, err := optionalKubeClient(cfg)
+	kubeClient, err := whenConfigured(cfg.EnvDeployerServiceAccount != "", envDeployKubeClient)
 	if err != nil {
 		return apiDependencies{}, err
 	}
@@ -223,11 +221,15 @@ func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
 	}, nil
 }
 
-// environmentHostnameWriter adapts a possibly-nil *dns01broker.PowerDNSWriter
-// into the routes.EnvironmentHostnameWriter interface. Assigning a typed-nil
-// pointer directly into an interface field produces a non-nil interface
-// value, which would defeat EnvironmentHostnameRoutes' own `writer == nil`
-// check -- this keeps "not configured" actually nil.
+func whenConfigured[T any](configured bool, build func() (T, error)) (T, error) {
+	if !configured {
+		var disabled T
+		return disabled, nil
+	}
+	return build()
+}
+
+// environmentHostnameWriter keeps "not configured" a nil interface rather than a typed nil.
 func environmentHostnameWriter(writer *dns01broker.PowerDNSWriter) routes.EnvironmentHostnameWriter {
 	if writer == nil {
 		return nil
@@ -235,11 +237,7 @@ func environmentHostnameWriter(writer *dns01broker.PowerDNSWriter) routes.Enviro
 	return writer
 }
 
-// optionalIdentityAdmin wires the Zitadel Management API client. Any of the
-// three settings missing leaves it nil -- the
-// /v1/identity/* routes then do not register at all -- but a set-but-broken
-// PAT path (unreadable, empty) is a hard misconfiguration, matching every
-// other optional dependency's convention in this file.
+// optionalIdentityAdmin is nil unless all three settings are set; a broken PAT path is an error.
 func optionalIdentityAdmin(cfg apiConfig) (*zitadel.Client, error) {
 	return zitadel.NewClientFromFile(zitadel.Config{
 		BaseURL:        cfg.ZitadelManagementAPIURL,
@@ -248,10 +246,8 @@ func optionalIdentityAdmin(cfg apiConfig) (*zitadel.Client, error) {
 	})
 }
 
-// oidcAudiencePolicy states the audience boundary in the startup log instead of
-// leaving an operator to read it out of a count of zero: an unenforced boundary
-// and one that happens to be passing look identical in the logs otherwise, and
-// which of the two a deployment is in is exactly what an operator needs to know.
+// oidcAudiencePolicy logs whether the audience boundary is enforced, since a
+// count of zero would hide it.
 func oidcAudiencePolicy(audiences []string) string {
 	if len(audiences) == 0 {
 		return "oidc audience enforcement=off (any audience from an allowed issuer is accepted)"
@@ -276,14 +272,8 @@ func identityBootstrapStatus(ctx context.Context, db *sql.DB, platformTenant str
 	return fmt.Sprintf("erun api identity ready; firstTenant=true firstUser=true tenants=%d users=%d issuers=%d%s", tenants, users, issuers, mismatch)
 }
 
-// platformTenantNameMismatch reports when this instance's declared tenant
-// (ERUN_TENANT) disagrees with the name its own OPERATIONS tenant actually
-// bootstrapped under. Bootstrap only ever runs once, so a platform
-// whose ERUN_TENANT was unset (or different) at bootstrap time can carry that
-// original name indefinitely with nothing else to say so -- the mismatch was
-// previously discoverable only by querying the database directly. Empty when
-// ERUN_TENANT is unset, the OPERATIONS tenant cannot be read, or the two
-// already agree.
+// platformTenantNameMismatch reports when ERUN_TENANT disagrees with the
+// OPERATIONS tenant's bootstrapped name, which bootstrap never revisits.
 func platformTenantNameMismatch(ctx context.Context, db *sql.DB, platformTenant string) string {
 	platformTenant = strings.TrimSpace(platformTenant)
 	if platformTenant == "" {
@@ -320,71 +310,36 @@ type apiConfig struct {
 	Port           int
 	DatabaseURL    string
 	AllowedIssuers string
-	// AllowedAudiences narrows the OIDC path to tokens minted for named
-	// audiences — the boundary between clients of one shared IdP, which the
-	// issuer allow-list cannot draw. Empty accepts any audience, so a deployment
-	// that has not established which client ids its IdP mints behaves as it
-	// always did; the startup log reports which of the two applies.
+	// AllowedAudiences separates clients of one shared IdP; empty accepts any.
 	AllowedAudiences     string
 	DesktopPublicKeyPath string
 	MCPSigningKeyPath    string
-	// DNS-01 broker write path, injected at deploy from the platform env's
-	// erun-powerdns TSIG Secret. Absent → the broker is disabled (its endpoints
-	// are not registered).
+	// DNS-01 broker write path; absent disables the broker.
 	DNS01ServicesZone  string
 	DNS01Nameserver    string
 	DNS01TSIGKeyName   string
 	DNS01TSIGAlgorithm string
 	DNS01TSIGSecret    string
-	// ACMEEmail/ACMEServer/DNS01WebhookGroupName configure the per-env TLS
-	// certificate a deploy Job provisions through the DNS-01 broker: the
-	// same ACME account and per-cluster webhook shim
-	// (terraform-erun-cluster-edge's chart-dns01-webhook) the platform's own
-	// per-env certificate already uses. ACMEEmail is required for a deploy Job
-	// to attempt TLS provisioning at all; ACMEServer and DNS01WebhookGroupName
-	// default to Let's Encrypt production and the webhook shim's own default
-	// group name, matching that module's defaults.
+	// Per-env TLS via the DNS-01 broker; ACMEEmail is required, the others default
+	// to terraform-erun-cluster-edge's defaults.
 	ACMEEmail             string
 	ACMEServer            string
 	DNS01WebhookGroupName string
-	// These enable optional live context provisioning; it stays disabled unless
-	// SecretsKey and DBOSDatabaseURL are both set. DBOSDatabaseURL is a separate
-	// database from ERUN_DATABASE_URL. AWSEndpoint targets a local emulator for
-	// verification (empty = real AWS).
+	// Live context provisioning needs both SecretsKey and DBOSDatabaseURL (a separate
+	// database). Empty AWSEndpoint means real AWS.
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
-	// Server-side env-deploy executor. EnvDeployerServiceAccount is the
-	// cluster-admin SA the deploy Job runs as; setting it enables live env
-	// provisioning (which then also needs an in-cluster kube client and
-	// DBOSContext). PlatformNamespace is the namespace the Jobs run in (the
-	// backend's own, via the downward API). EnvDeployRegistry is the image
-	// registry the tenant's <tenant>-devops runtime image is pulled from.
+	// Setting EnvDeployerServiceAccount enables live env provisioning.
 	EnvDeployerServiceAccount string
 	PlatformNamespace         string
 	EnvDeployRegistry         string
-	// EnvExposeTargetIP is the platform's ingress IP: set, every env-deploy Job
-	// also chains an `erun expose` for the env's MCP edge after a successful
-	// deploy; unset (the default), deploys stay exactly as they were before —
-	// no attempt to expose, independent of whether the executor above is on.
+	// Set, each env-deploy Job also chains `erun expose` for the env's MCP edge.
 	EnvExposeTargetIP string
-	// EnvDeployImagePullSecrets names the dockerconfigjson secrets in the
-	// platform namespace the deploy Job pulls with. The published-image probe
-	// reads them so it can interrogate a private registry namespace with the
-	// same credential; unset, the probe stays unauthenticated and can never
-	// confirm an image absent, so no deploy is diverted to the canonical image.
+	// Without pull secrets the published-image probe can never confirm an image absent.
 	EnvDeployImagePullSecrets string
-	// Platform is this instance's own self-describing config, served
-	// unauthenticated at GET /v1/platform so a client can discover it (issuer,
-	// API/console URLs, OIDC client ids, brand, and the white-label docs
-	// URL/tagline/logo its front door renders) before it has a token. Every
-	// field is optional; an absent value renders as an empty string, never an
-	// error, and a client falls back to its own bundled default.
-	// ConsoleClientID/CLIClientID/MobileClientID are typically sourced from the
-	// erun-zitadel bootstrap's published ConfigMap, threaded in by the chart.
-	// MobileClientID is empty until an operator configures a mobile client's
-	// redirect URI (zitadel.oidc.mobileRedirectUris) -- no erun-mobile app
-	// exists in the IdP until then.
+	// Platform is served unauthenticated at GET /v1/platform; every field is optional
+	// and an empty value means the client uses its own default.
 	PlatformIssuer          string
 	PlatformAPIURL          string
 	PlatformConsoleURL      string
@@ -395,18 +350,10 @@ type apiConfig struct {
 	PlatformDocsURL         string
 	PlatformTagline         string
 	PlatformLogoURL         string
-	// BootstrapTenantName is this pod's own declared tenant identity
-	// (ERUN_TENANT: the tenant this control plane runs as, e.g. "frs" on
-	// erunpaas.com). Empty-database bootstrap enrols the platform's own
-	// tenant under this name so hosted provisioning's first resolve of
-	// <tenant>-devops finds an image the platform actually publishes,
-	// instead of a synthetic placeholder falling back only when it is unset.
+	// BootstrapTenantName (ERUN_TENANT) names the platform tenant on empty-database
+	// bootstrap, so the first <tenant>-devops resolve finds a published image.
 	BootstrapTenantName string
-	// Identity administration drives Zitadel's Management API
-	// with the org-owner PAT the erun-zitadel chart already provisions and
-	// persists. All three fields must be set for the /v1/identity/* routes
-	// to register; any one missing leaves them off, same as every other
-	// optional dependency in this config.
+	// All three Zitadel fields must be set for /v1/identity/* to register.
 	ZitadelManagementAPIURL  string
 	ZitadelExternalDomain    string
 	ZitadelManagementPATPath string
@@ -458,15 +405,8 @@ func configFromEnv() apiConfig {
 	}
 }
 
-// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy
-// executor needs. A blank deployer ServiceAccount disables it (env creation
-// only registers the row); a set SA outside a cluster is a hard
-// misconfiguration (the SA is only ever set by the in-cluster deploy), so we
-// fail fast rather than silently disabling.
-func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
-	if cfg.EnvDeployerServiceAccount == "" {
-		return nil, nil
-	}
+// envDeployKubeClient fails fast when a deployer SA is set outside a cluster.
+func envDeployKubeClient() (kubernetes.Interface, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("in-cluster config for env-deploy executor: %w", err)
@@ -474,21 +414,8 @@ func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(restConfig)
 }
 
-func optionalCipher(key string) (*secrets.Cipher, error) {
-	if key == "" {
-		return nil, nil
-	}
-	return secrets.NewCipher(key)
-}
-
-// optionalMCPSigner loads the backend's MCP signing key when a path is set. A
-// blank path disables per-env MCP token minting (the endpoint reports 501); a
-// set-but-unreadable or invalid key is a hard misconfiguration, not a silent
-// disable.
-func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
-	if path == "" {
-		return nil, nil
-	}
+// loadMCPSigner returns nil for a blank path; an unreadable or invalid key is an error.
+func loadMCPSigner(path string) (*mcptoken.Signer, error) {
 	privatePEM, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read mcp signing key %s: %w", path, err)
@@ -496,9 +423,6 @@ func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
 	return mcptoken.NewSigner(privatePEM)
 }
 
-// mcpAuthPublicKeyPEM returns the backend's own MCP-signing public key when a
-// signer is configured, empty otherwise — threaded into every deploy Job so
-// the runtime's MCP edge trusts backend-minted tokens.
 func mcpAuthPublicKeyPEM(signer *mcptoken.Signer) string {
 	if signer == nil {
 		return ""
@@ -506,11 +430,7 @@ func mcpAuthPublicKeyPEM(signer *mcptoken.Signer) string {
 	return signer.PublicKeyPEM()
 }
 
-// dns01TokenSigner adapts the backend's MCP signer to provision.DNS01TokenSigner
-// for per-env TLS cert provisioning, returning a genuinely nil
-// interface when no signer is configured. Assigning a nil *mcptoken.Signer
-// directly to the interface field would produce a non-nil interface wrapping a
-// nil pointer, which applyTLSCertParams's nil check would miss.
+// dns01TokenSigner returns a genuinely nil interface when no signer is configured.
 func dns01TokenSigner(signer *mcptoken.Signer) provision.DNS01TokenSigner {
 	if signer == nil {
 		return nil
@@ -518,12 +438,8 @@ func dns01TokenSigner(signer *mcptoken.Signer) provision.DNS01TokenSigner {
 	return signer
 }
 
-// dns01BrokerURL derives the DNS-01 broker's base URL from this instance's own
-// public API URL: the broker's present/cleanup endpoints are served on this
-// same backend (dns01broker.Broker.Register), so a per-env Issuer's webhook
-// solver reaches it exactly as any other client would. Empty unless both the
-// platform API URL and the broker itself are configured, since a per-env
-// Issuer pointed at an unconfigured broker would never solve.
+// dns01BrokerURL is the backend's own public API URL, since the broker is served
+// here; empty unless both are configured.
 func dns01BrokerURL(cfg apiConfig, broker *dns01broker.Broker) string {
 	if broker == nil || cfg.PlatformAPIURL == "" {
 		return ""
@@ -531,15 +447,11 @@ func dns01BrokerURL(cfg apiConfig, broker *dns01broker.Broker) string {
 	return strings.TrimRight(cfg.PlatformAPIURL, "/") + "/v1/dns01"
 }
 
-// optionalDNS01Writer builds the shared PowerDNS write path when the
-// services zone and TSIG credential are all configured. Nil (with no error)
-// leaves both the DNS-01 broker and the environment hostname route
-// disabled — neither can write DNS without it; a bad TSIG algorithm is a
-// hard misconfiguration, not a silent disable.
-func optionalDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
-	if cfg.DNS01ServicesZone == "" || cfg.DNS01Nameserver == "" || cfg.DNS01TSIGKeyName == "" || cfg.DNS01TSIGSecret == "" {
-		return nil, nil
-	}
+func dns01WriterConfigured(cfg apiConfig) bool {
+	return cfg.DNS01ServicesZone != "" && cfg.DNS01Nameserver != "" && cfg.DNS01TSIGKeyName != "" && cfg.DNS01TSIGSecret != ""
+}
+
+func newDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
 	algorithm := cfg.DNS01TSIGAlgorithm
 	if algorithm == "" {
 		algorithm = "hmac-sha256"
@@ -551,10 +463,7 @@ func optionalDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
 	return writer, nil
 }
 
-// optionalDNS01Broker builds the DNS-01 broker when both the signing key (to
-// verify per-env tokens) and the shared PowerDNS writer are configured.
-// Either missing leaves the broker disabled — its endpoints are not
-// registered — rather than a half-wired broker.
+// optionalDNS01Broker is nil unless both the signer and writer are configured.
 func optionalDNS01Broker(signer *mcptoken.Signer, writer *dns01broker.PowerDNSWriter, servicesZone string) *dns01broker.Broker {
 	if signer == nil || writer == nil {
 		return nil
@@ -562,10 +471,7 @@ func optionalDNS01Broker(signer *mcptoken.Signer, writer *dns01broker.PowerDNSWr
 	return dns01broker.NewBroker(signer, writer, servicesZone, nil)
 }
 
-func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {
-	if databaseURL == "" {
-		return nil, nil
-	}
+func newDBOSContext(databaseURL string) (dbos.DBOSContext, error) {
 	return dbos.NewDBOSContext(context.Background(), dbos.Config{
 		AppName:     "erun-api",
 		DatabaseURL: databaseURL,

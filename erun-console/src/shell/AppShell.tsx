@@ -30,10 +30,7 @@ import {
 import { useSectionNavigation } from './useSectionNavigation';
 import { useTheme } from './useTheme';
 
-// OperationsSectionContent renders the operations-only identity/tenant
-// sections -- split out of SectionContent below purely to keep either
-// function's switch under the module's complexity budget as sections keep
-// being added (each case is its own branch for eslint's `complexity` rule).
+// Split from SectionContent to stay under the eslint `complexity` budget.
 function OperationsSectionContent({
   active,
   token,
@@ -69,10 +66,6 @@ function OperationsSectionContent({
   }
 }
 
-// SectionContent renders exactly one panel for the active section — the main
-// pane switches wholesale rather than stacking every panel, per #1207. Split
-// out of AppShell purely to keep AppShell under the module's
-// max-lines-per-function budget.
 function SectionContent({
   active,
   token,
@@ -154,10 +147,6 @@ function sectionLabel(sections: ConsoleSection[], active: ConsoleSectionId): str
   return sections.find((section) => section.id === active)?.label ?? '';
 }
 
-// AppShell is the console's app shell (#1207): a persistent sidebar for
-// navigation, a header carrying identity + sign-out, and a main pane that
-// switches on a single derived `active` value rather than stacking every
-// panel vertically.
 export function AppShell({
   brand,
   token,
@@ -183,34 +172,22 @@ export function AppShell({
 }): React.ReactElement {
   const { sections, active, onSelect } = useSectionNavigation(config.tenant);
   const { theme, toggleTheme } = useTheme();
-  // scopeTenantId is undefined for "my own tenant" -- the default, and every
-  // caller's ordinary behavior before the scope selector existed. Local state
-  // rather than a store slice: it has no reason to survive past this signed-in
-  // session (shell/ScopeSelector.tsx, erun#1816).
+  // Local state: scope need not survive this signed-in session.
   const [scopeTenantId, setScopeTenantId] = React.useState<string | undefined>(undefined);
-  // The full tenant list backs both the scope selector's options and the
-  // Environments panel's per-row tenant badge; skipped for a non-OPERATIONS
-  // caller, who has no scope to administer and only ever sees their own rows.
+  // Skipped for a non-OPERATIONS caller, who has no scope to administer.
   const tenantsQuery = useListTenantsQuery(token, {
     skip: config.tenant.type !== 'OPERATIONS',
   });
   const tenants = tenantsQuery.data ?? [];
-  // The header must never fall back to the raw `sub` claim -- whoami's own
-  // `username` is the platform's authoritative label for the enrolled user,
-  // and the token-claim email is a reasonable interim label while that query
-  // is still resolving. Neither present yet means "not resolved", shown as
-  // such rather than silently substituting the opaque subject id.
+  // Never fall back to the raw `sub` claim: whoami's username, then the token email,
+  // else "not resolved".
   const identity = React.useMemo(() => readTokenIdentity(token), [token]);
   const whoamiQuery = useGetWhoamiQuery(token);
   const identityLabel = whoamiQuery.data?.username ?? identity.email;
   const identityPending =
     identityLabel === undefined && (whoamiQuery.isLoading || whoamiQuery.isUninitialized);
 
-  // The pending-request count has to be visible without opening the
-  // Requests panel, so it's read here rather than only inside RequestsPanel
-  // -- the same query, shared
-  // through RTK Query's cache, so this costs no extra request beyond the
-  // panel's own poll once both are subscribed.
+  // Shares the panel's cached query, so the nav badge costs no extra request.
   const pendingRequestsQuery = useListInviteRequestsQuery(token, {
     pollingInterval: PENDING_REQUESTS_POLL_MS,
   });

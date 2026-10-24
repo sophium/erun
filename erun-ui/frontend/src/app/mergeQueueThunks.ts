@@ -4,17 +4,8 @@ import { showNotification } from './notificationThunks';
 import { patchMergeQueueAction } from './slices/mergeQueueActionSlice';
 import type { AppThunk } from './store';
 
-// mergeQueueThunks drives the Merge Queue panel's "Advance queue" action: an
-// inline confirm step (cancel-before-commitment), then the write itself. The
-// repository and target branch are derived from the queue's own rows rather
-// than typed by the operator — see mergeQueueAddress in tenantDashboardPanels.ts.
-//
-// A refusal because the queue head still has unresolved comment threads is
-// not treated as an error: AdvanceMergeQueue reports it as a distinct
-// "blocked" result (see tenantApi.ts), and this state machine renders it as
-// its own named state with a route forward — resolve the threads, or (with
-// permission) override with a stated reason — rather than the dead end a
-// bare error string would be.
+// A queue head blocked by unresolved threads is a distinct "blocked" state with a
+// route forward, not an error.
 
 export const confirmAdvanceMergeQueue = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ confirming: true, error: '' }));
@@ -24,26 +15,17 @@ export const cancelAdvanceMergeQueue = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ confirming: false, error: '' }));
 };
 
-// clearAdvanceMergeQueueError drops a stale advance-queue write error once a
-// sign-in it prompted has succeeded, leaving the confirm step in place so the
-// operator retries Confirm themselves (#1392).
+// clearAdvanceMergeQueueError keeps the confirm step so the operator retries.
 export const clearAdvanceMergeQueueError = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ error: '' }));
 };
 
-// tenant is explicit rather than read from state.tenantDashboard: the diff
-// panel's own "Advance queue" chip action reaches this without the tenant
-// dashboard ever having been opened, the same reason openReviewDetail
-// (reviewDetailThunks.ts) takes an explicit callerTenant.
+// tenant is explicit: the diff panel reaches this without the dashboard open.
 export const submitAdvanceMergeQueue =
   (tenant: string, repository: string, targetBranch: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
     tenant = tenant.trim();
-    // The repository is sent when the caller knows it — it is what settles
-    // which of several same-branch queues this is — but it is not required
-    // here: a review created before the platform recorded one has none, and
-    // the platform refuses the resulting ambiguous queue itself rather than
-    // this layer guessing at one.
+    // repository is optional; the platform refuses an ambiguous queue itself.
     if (!tenant || !targetBranch) {
       dispatch(patchMergeQueueAction({ error: 'No tenant is open.' }));
       return;
@@ -80,9 +62,6 @@ export const submitAdvanceMergeQueue =
     }
   };
 
-// beginMergeQueueOverride opens the reason input the override requires. The
-// blocked state stays visible underneath — cancelling the override leaves the
-// operator exactly where "resolve the threads instead" is still the answer.
 export const beginMergeQueueOverride = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ overriding: true, overrideReason: '', overrideError: '' }));
 };
@@ -101,9 +80,7 @@ export const clearMergeQueueOverrideError = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ overrideError: '' }));
 };
 
-// defaultMergeQueueActionPatch clears every blocked/override field a
-// successful override leaves stale, without touching confirming/busy/error —
-// those belong to the ordinary advance flow, not this one.
+// Leaves confirming/busy/error to the ordinary advance flow.
 const defaultMergeQueueActionPatch = {
   blocked: false,
   blockedReviewId: '',
@@ -112,10 +89,7 @@ const defaultMergeQueueActionPatch = {
   overrideReason: '',
 };
 
-// submitMergeQueueOverride bypasses the gate submitAdvanceMergeQueue's
-// "blocked" result reports. The platform itself refuses a blank reason, but
-// this checks first so the operator sees that immediately rather than after a
-// round trip.
+// submitMergeQueueOverride checks the reason locally too, to skip a round trip.
 export const submitMergeQueueOverride =
   (repository: string, targetBranch: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

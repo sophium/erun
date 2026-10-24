@@ -6,42 +6,37 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// erunTestPlatformAPIURL is the address the Connect card pre-fills; the alias
-// this action attaches is derived from it (erun+<host>@erun), which is what
-// makes a second click on the same card collide with the alias the first one
-// wrote rather than accumulating new ones.
+// erunTestPlatformAPIURL derives a stable alias, so a second Connect collides
+// with the first alias instead of adding another.
 const erunTestPlatformAPIURL = "https://api.erunpaas.com"
 
 const erunTestAlias = "erun+api.erunpaas.com@erun"
 
-// connectTestApp builds an app whose tenant already attaches the given non-erun
-// aliases — the state the Connect card is rendered for, because
-// resolveTenantPlatform takes the tenant-scoped path whenever that selection is
-// non-empty and finds no erun-type alias in it.
+// connectTestApp builds an app whose tenant attaches only non-erun aliases.
 func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubUIStore) {
 	t.Helper()
 	rootConfig := configpkg.ERunConfig{}
-	tenantConfig := configpkg.TenantConfig{Name: tenant}
+	tenantConfig := model.TenantConfig{Name: tenant}
 	if len(attached) > 0 {
 		tenantConfig.CloudProviderAliases = append([]string(nil), attached...)
 		tenantConfig.PrimaryCloudProviderAlias = attached[0]
 	}
 	store := stubUIStore{
 		config:  &rootConfig,
-		tenants: map[string]configpkg.TenantConfig{tenant: tenantConfig},
+		tenants: map[string]model.TenantConfig{tenant: tenantConfig},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
 		cloudDeps: cloud.CloudDependencies{
-			FetchPlatformInfo: func(_ core.Context, apiURL string) (platformclient.PlatformInfo, error) {
+			FetchPlatformInfo: func(_ core.Context, apiURL string) (model.PlatformInfo, error) {
 				if apiURL != erunTestPlatformAPIURL {
 					t.Fatalf("platform discovery went to %q, want %q", apiURL, erunTestPlatformAPIURL)
 				}
-				return platformclient.PlatformInfo{
+				return model.PlatformInfo{
 					Issuer:      "https://auth.erunpaas.com",
 					APIURL:      apiURL,
 					CLIClientID: "cli-client-1",
@@ -64,7 +59,7 @@ func loadTenantDashboardFor(t *testing.T, app *App, tenant string) uiTenantDashb
 	return dashboard
 }
 
-func loadTenantConfigFor(t *testing.T, app *App, tenant string) configpkg.TenantConfig {
+func loadTenantConfigFor(t *testing.T, app *App, tenant string) model.TenantConfig {
 	t.Helper()
 	config, _, err := app.deps.store.LoadTenantConfig(tenant)
 	if err != nil {
@@ -110,17 +105,8 @@ func connectToTestPlatform(t *testing.T, app *App, tenant string) uiCloudProvide
 	return status
 }
 
-// TestConnectERunPlatformMovesTheCardItWasClickedFrom is the reproduction of
-// the reported failure: the operator clicks Connect on a tenant whose own alias selection
-// is non-empty and holds no erun-type alias, and the card is expected to stop
-// being the not-connected one.
-//
-// Before the fix the click attached the alias to the machine-global provider
-// list only, resolveTenantPlatform kept taking the tenant-scoped path, found no
-// erun alias in the tenant's own selection, and returned not-connected — so the
-// dashboard re-rendered byte-identically and the button read as inert even
-// though it had done real work. This asserts the state the operator was
-// actually looking at, not the alias list.
+// Clicking Connect on a tenant with only non-erun aliases must leave the
+// not-connected card, not just update the global alias list.
 func TestConnectERunPlatformMovesTheCardItWasClickedFrom(t *testing.T) {
 	const tenant = "erun"
 	app, _ := connectTestApp(t, tenant, []string{"team+aws"})
@@ -143,11 +129,8 @@ func TestConnectERunPlatformMovesTheCardItWasClickedFrom(t *testing.T) {
 	requireAliasesContain(t, aliases, "team+aws", "tenant selection dropped the alias it already had")
 }
 
-// TestConnectERunPlatformKeepsExactlyOneErunAliasAttached guards the state the
-// second click lands in: the alias this action derives from a URL is stable, so
-// re-connecting the same platform must replace the tenant's erun choice rather
-// than leave two — two candidates with a primary that names neither is the
-// choose-alias state, which is a card the operator did not ask for.
+// Re-connecting the same platform replaces the erun alias; two would land in
+// the choose-alias state.
 func TestConnectERunPlatformKeepsExactlyOneErunAliasAttached(t *testing.T) {
 	const tenant = "erun"
 	app, _ := connectTestApp(t, tenant, []string{"team+aws"})
@@ -165,10 +148,6 @@ func TestConnectERunPlatformKeepsExactlyOneErunAliasAttached(t *testing.T) {
 	}
 }
 
-// TestConnectERunPlatformWithoutATenantAttachesGlobally is the machine-wide
-// settings dialog's path: it has no tenant to attach to, and must keep working
-// (and must not invent one) — its alias is attached for the whole machine, the
-// same as `erun cloud init erun` does.
 func TestConnectERunPlatformWithoutATenantAttachesGlobally(t *testing.T) {
 	const tenant = "erun"
 	app, store := connectTestApp(t, tenant, []string{"team+aws"})

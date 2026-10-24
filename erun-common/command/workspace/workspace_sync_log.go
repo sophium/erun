@@ -9,19 +9,11 @@ import (
 	"time"
 )
 
-// workspaceSyncLogWindow is how long a mirror may pass without a sync worth
-// reporting before one aggregate line says the loop is still alive. It is what
-// keeps silence meaningful: a mirror that syncs every few seconds and changes
-// nothing must not cost a line every few seconds, and a stretch of log with no
-// sync line at all must still be readable as "nothing changed", not as "the
-// sync loop died". The retained log is a rotation-bounded resource, and a
-// subsystem that fills it with "nothing happened" is what pushes a real event
-// out of the window it would have been diagnosed in.
+// workspaceSyncLogWindow bounds silence: no-op passes fold into one aggregate line per
+// window, so a quiet log means nothing changed rather than a dead loop.
 const workspaceSyncLogWindow = 15 * time.Minute
 
-// workspaceSyncPassLog is the record of what one sync pass saw and did. Every
-// count it carries is a count, never a path: one pass is one line no matter how
-// many files it moved.
+// workspaceSyncPassLog carries counts, never paths: one pass is one line.
 type workspaceSyncPassLog struct {
 	params       WorkspaceSyncParams
 	notGitRepo   bool
@@ -47,21 +39,13 @@ func (l *workspaceSyncPassLog) recordResolved(resolved workspaceSyncPaths, err e
 	l.failure = err
 }
 
-// reportable reports whether the pass has something of its own to say: it
-// transferred, deleted, or signed files, saw a stale index, carried a signing
-// note, or failed. Anything else is a no-op, and the sink folds those into its
-// aggregate line instead of logging them one at a time.
 func (l *workspaceSyncPassLog) reportable() bool {
 	return l.fetch > 0 || l.deleted > 0 || l.signed > 0 || l.stale > 0 ||
 		strings.TrimSpace(l.signNote) != "" ||
 		l.fetchErr != nil || l.deleteErr != nil || l.failure != nil
 }
 
-// quietState names why a pass that changed nothing is still worth a line of its
-// own — a mirror that is not a git repo, or a worktree listing that could not be
-// read, is a standing condition an operator has to be able to see. It is empty
-// for an ordinary in-step pass, which is exactly the case the aggregate line
-// covers instead.
+// quietState names a standing condition worth its own line even when nothing changed.
 func (l *workspaceSyncPassLog) quietState() string {
 	switch {
 	case l.notGitRepo:
@@ -73,7 +57,6 @@ func (l *workspaceSyncPassLog) quietState() string {
 	}
 }
 
-// line renders the pass as its one bounded diagnostic.
 func (l *workspaceSyncPassLog) line() string {
 	return fmt.Sprintf("erun: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d signed=%d%s%s%s%s",
 		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.staleLabel(), l.local, l.fetch, l.deleted, l.signed,
@@ -104,11 +87,7 @@ func workspaceSyncPassErrorSuffix(label string, err error) string {
 	return label + "=" + strings.TrimSpace(err.Error())
 }
 
-// workspaceSyncPassSink decides which passes reach the log and how often a
-// quiet loop still says it is alive. One sink serves the process, because the
-// cadence is a property of the log a host keeps rather than of one mirror: the
-// desktop polls several environments at once and their passes share one file,
-// so a per-pass line there is a per-pass line per environment.
+// workspaceSyncPassSink is process-wide because several mirrors share one log file.
 type workspaceSyncPassSink struct {
 	mu          sync.Mutex
 	now         func() time.Time
@@ -130,11 +109,8 @@ func newWorkspaceSyncPassSink() *workspaceSyncPassSink {
 	}
 }
 
-// workspaceSyncPasses is the process-wide sink every finished pass reports to.
 var workspaceSyncPasses = newWorkspaceSyncPassSink()
 
-// record takes one finished pass: a reportable pass logs its own full line, and
-// a quiet one is counted towards the next aggregate line.
 func (s *workspaceSyncPassSink) record(pass *workspaceSyncPassLog) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,8 +120,7 @@ func (s *workspaceSyncPassSink) record(pass *workspaceSyncPassLog) {
 	}
 	mirror := pass.params.LocalPath
 	if pass.reportable() {
-		// Whatever was suppressed before this line is reported first, so the
-		// log reads in the order the passes happened.
+		// Report suppressed passes first so the log stays in order.
 		s.flushLocked(now)
 		s.logf("%s", pass.line())
 		return
@@ -158,8 +133,6 @@ func (s *workspaceSyncPassSink) record(pass *workspaceSyncPassLog) {
 	}
 }
 
-// recordQuietLocked says so when a mirror enters a quiet state that is itself
-// the diagnosis, and otherwise stays silent.
 func (s *workspaceSyncPassSink) recordQuietLocked(pass *workspaceSyncPassLog, mirror string) {
 	state := pass.quietState()
 	if state == "" {
@@ -173,9 +146,7 @@ func (s *workspaceSyncPassSink) recordQuietLocked(pass *workspaceSyncPassLog, mi
 	s.logf("%s", pass.line())
 }
 
-// flushLocked reports the no-op passes suppressed since the window opened, and
-// reopens the window. It logs nothing when there were none — the empty window
-// is not an event, and saying so on a timer would rebuild the flood.
+// flushLocked logs nothing for an empty window; a timer line would rebuild the flood.
 func (s *workspaceSyncPassSink) flushLocked(now time.Time) {
 	if s.quiet > 0 {
 		elapsed := now.Sub(s.windowStart).Round(time.Second)

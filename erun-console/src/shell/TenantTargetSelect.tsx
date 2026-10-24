@@ -3,16 +3,8 @@ import type * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
 
-// TenantTargetSelect is the shared "pick a target tenant" control: an
-// OPERATIONS-only dropdown over every platform tenant, gated the same way
-// `shell/sections.ts` gates the Users/Tenants nav entries. Every caller
-// (identity/EnrollUserForm.tsx, identity/UsersPanel.tsx's EnrollForm, and
-// shell/ScopeSelector.tsx) picks a target tenant for a different reason --
-// where a write lands vs. which tenant's rows to read -- but the control and
-// its gate are identical, so this is the one implementation. `id` is
-// caller-supplied rather than baked in here because more than one of these
-// can render on the same page at once (UsersPanel mounts both identity forms
-// together), and two same-id selects would break label association.
+// TenantTargetSelect is the OPERATIONS-only target-tenant dropdown. `id` is
+// caller-supplied because several can render on one page.
 export function TenantTargetSelect({
   id,
   label = 'Tenant',

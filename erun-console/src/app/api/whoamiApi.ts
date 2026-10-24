@@ -1,27 +1,15 @@
-// RTK Query endpoint for GET /v1/whoami: the caller's own identity and
-// effective permission set. The console had no whoami/capability plumbing
-// before the invite-requests queue — its Approve/Decline
-// actions are the first console surface gated on a per-action capability
-// rather than on tenant.type, so this is the shape that lands rather than a
-// component-local guess. See app/capabilities.ts for the matching helper and
-// erun-console/AGENTS.md's "Permission degradation".
+// RTK Query endpoint for GET /v1/whoami: identity and effective capabilities.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';
 
-// PlatformCapability mirrors erun-common's own type exactly (Go:
-// erun-common/platform_capabilities.go): a canonical route template such as
-// `/v1/invite-requests/{invite_request_id}/approve`, never a concrete
-// request URL.
+// A canonical route template, never a concrete request URL.
 export interface PlatformCapability {
   method: string;
   path: string;
 }
 
-// Whoami is GET /v1/whoami's response. capabilities is deliberately
-// undefined (not an empty array) when the platform could not resolve a set
-// at all — see erun-common's PlatformCapabilities.Known() doc: an unknown
-// set is not an empty one, and a client must not conflate them.
+// capabilities is undefined, not empty, when the set is unknown; never conflate the two.
 export interface Whoami {
   tenantId: string;
   userId: string;

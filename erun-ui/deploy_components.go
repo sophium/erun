@@ -6,18 +6,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// LoadDeployComponents powers the Runtime tab's "Components to deploy" checklist
-// so the operator sees and edits exactly what an equivalent `erun deploy` would
-// roll out. Read-only: it never builds, pushes, or deploys.
-//
-// For a sourceless (RemoteRepo) env the checklist is version-aware: only the
-// component charts actually published at the deploy version are offered, since
-// deploying an unpublished chart would fail. The version is the selection's
-// version-to-deploy when set, else the env's current runtime version.
+// LoadDeployComponents lists what an equivalent `erun deploy` would roll out, limited
+// to component charts published at the deploy version. Read-only.
 func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, error) {
 	selection = normalizeSelection(selection)
 	tenant := strings.TrimSpace(selection.Tenant)
@@ -25,21 +20,19 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 	if err := errMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
 		return uiDeployComponents{}, err
 	}
-	components, err := eruncommon.ResolveDeployableComponents(
+	components, err := deploy.ResolveDeployableComponents(
 		a.deps.store,
 		a.deps.findProjectRoot,
 		nil,
 		nil,
 		nil,
-		eruncommon.DeployTarget{Tenant: tenant, Environment: environment},
+		model.DeployTarget{Tenant: tenant, Environment: environment},
 	)
 	if err != nil {
 		return uiDeployComponents{}, err
 	}
 	filtered := a.filterDeployComponentsByChartAvailability(tenant, environment, selection.Version, components)
-	// The chart is resolved alongside the checklist rather than at deploy time,
-	// because a version with no chart is something the operator must be told before
-	// committing to a rollout, not after it fails.
+	// Resolved now so a version with no chart is reported before committing to a rollout.
 	version := strings.TrimSpace(selection.Version)
 	if version == "" {
 		if env, _, envErr := a.deps.store.LoadEnvConfig(tenant, environment); envErr == nil {
@@ -52,25 +45,19 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 	}, nil
 }
 
-// runtimeIsLocalChart reports whether the runtime item is backed by a chart in the
-// worktree, in which case no registry has a say in what installs.
-func runtimeIsLocalChart(components []eruncommon.DeployableComponent) bool {
+// runtimeIsLocalChart reports whether the runtime chart is in the worktree, bypassing registries.
+func runtimeIsLocalChart(components []deploy.DeployableComponent) bool {
 	for _, component := range components {
 		if component.Runtime {
-			return component.Source != eruncommon.DeployComponentSourcePublished
+			return component.Source != deploy.DeployComponentSourcePublished
 		}
 	}
 	return false
 }
 
-// filterDeployComponentsByChartAvailability drops published component charts the
-// registry has not published at the version this deploy would use, so the
-// checklist offers only charts a deploy could actually pull at that version. It
-// applies to every env type — the deploy version, not the env's local source,
-// decides which charts exist — and always keeps the runtime item, whose chart
-// exists at every deployable version (a genuinely missing one surfaces at deploy
-// time as PublishedChartNotFoundError, not here).
-func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, version string, components []eruncommon.DeployableComponent) []eruncommon.DeployableComponent {
+// filterDeployComponentsByChartAvailability drops component charts not published at
+// the deploy version. The runtime item is always kept; a missing one fails at deploy time.
+func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, version string, components []deploy.DeployableComponent) []deploy.DeployableComponent {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
 		return components
@@ -80,7 +67,6 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 		version = strings.TrimSpace(env.RuntimeVersion)
 	}
 	if version == "" {
-		// No version to probe against — don't hide anything.
 		return components
 	}
 
@@ -91,16 +77,14 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 			probe = append(probe, component.Name)
 		}
 	}
-	// Probe the tenant's own runtime chart too so the runtime row can name the
-	// chart the deploy will actually install — the tenant's <tenant>-devops when
-	// it is published at this version, else the canonical erun-devops fallback.
+	// Probe the tenant's runtime chart so the row names <tenant>-devops or the erun-devops fallback.
 	if runtimeChart != config.DevopsComponentName {
 		probe = append(probe, runtimeChart)
 	}
 	available := a.publishedComponentChartAvailability(tenant, environment, version, probe)
-	resolvedRuntimeChart := eruncommon.ResolvedRuntimeChartName(tenant, available[runtimeChart])
+	resolvedRuntimeChart := deploy.ResolvedRuntimeChartName(tenant, available[runtimeChart])
 
-	filtered := make([]eruncommon.DeployableComponent, 0, len(components))
+	filtered := make([]deploy.DeployableComponent, 0, len(components))
 	for _, component := range components {
 		if component.Runtime {
 			component.PublishedChart = resolvedRuntimeChart
@@ -114,14 +98,8 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 	return filtered
 }
 
-// publishedComponentChartAvailability reports, per component, whether its Helm
-// chart is published at the given version in the env's chart registry. It reuses
-// the injected image-registry resolver against the chart repo path
-// (charts/<component>), probing components in parallel.
-//
-// ERUN_CHART_AVAILABILITY_OVERRIDE short-circuits the network probe with a fixed
-// answer — a deterministic test seam for the headless UI suite, never set in
-// production.
+// publishedComponentChartAvailability probes charts/<component> at version in parallel.
+// ERUN_CHART_AVAILABILITY_OVERRIDE replaces the probe for the headless suite only.
 func (a *App) publishedComponentChartAvailability(tenant, environment, version string, components []string) map[string]bool {
 	if override, ok := chartAvailabilityOverride(version); ok {
 		return override
@@ -157,11 +135,8 @@ func (a *App) publishedComponentChartAvailability(tenant, environment, version s
 	return result
 }
 
-// chartAvailabilityOverride parses ERUN_CHART_AVAILABILITY_OVERRIDE, a headless-
-// test seam of the form "1.0.112=erun-backend-api,erun-docs;1.0.106=" giving the
-// published component charts per version. When set it is authoritative for every
-// version — an unlisted version resolves to no published components — so tests
-// never touch the network.
+// chartAvailabilityOverride parses "1.0.112=erun-backend-api,erun-docs;1.0.106=";
+// when set, unlisted versions have no published components.
 func chartAvailabilityOverride(version string) (map[string]bool, bool) {
 	raw := strings.TrimSpace(os.Getenv("ERUN_CHART_AVAILABILITY_OVERRIDE"))
 	if raw == "" {

@@ -4,13 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
-// TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields guards
-// against over-correcting into "never write a delete": a field the current
-// binary's type does know about, now empty, must still disappear from the
-// written document rather than being resurrected from the old file.
 func TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields(t *testing.T) {
 	existing, err := yaml.Marshal(EnvConfig{
 		Name:               "prod",
@@ -39,40 +36,8 @@ func TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields(t *testing.T
 	}
 }
 
-// TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey covers
-// the simpler top-level case: a whole key this binary's ERunConfig type has
-// never declared (e.g. a field added by a newer release) survives a save from
-// this older type.
-func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testing.T) {
-	existing := []byte("defaulttenant: frs\nfutureField:\n  nested: true\n  value: 42\n")
-
-	out, err := MarshalConfigPreservingUnknownFields(existing, ERunConfig{DefaultTenant: "frs"})
-	if err != nil {
-		t.Fatalf("marshalConfigPreservingUnknownFields: %v", err)
-	}
-
-	var raw map[string]any
-	if err := yaml.Unmarshal(out, &raw); err != nil {
-		t.Fatalf("unmarshal merged output: %v", err)
-	}
-	future, ok := raw["futureField"].(map[string]any)
-	if !ok {
-		t.Fatalf("futureField missing or wrong shape in output:\n%s", out)
-	}
-	if future["nested"] != true || future["value"] != 42 {
-		t.Fatalf("futureField corrupted: %+v", future)
-	}
-}
-
-// TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey guards the
-// one-way migration documented on migrateLegacyContainerRegistry (erun#1222):
-// a legacy scalar key an UnmarshalYAML migrated into a current field must
-// actually disappear on the next save, not survive as an "unknown" field the
-// plain struct has no name for. Left unfixed, the desktop's own save (which
-// clears EnvConfig.ContainerRegistries to route a local-agent env's marked
-// list into the project config instead) writes a merged file that still
-// carries the legacy key, so the very next load re-migrates it and clobbers
-// whatever roles the operator just set.
+// TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey: a surviving legacy
+// key would re-migrate on every load.
 func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T) {
 	existing := []byte("name: alpha\ncontainerregistry: registry.example/test\ntype: local-agent\n")
 
@@ -84,8 +49,6 @@ func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T
 		t.Fatalf("legacy scalar did not migrate: %+v", loaded)
 	}
 
-	// Mirrors what the desktop does for a local-agent env: the marked list
-	// moves to the project config, so the env's own ContainerRegistries clears.
 	cleared := loaded
 	cleared.ContainerRegistries = nil
 
@@ -106,19 +69,70 @@ func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T
 	}
 }
 
-// TestMarshalConfigPreservingUnknownFieldsNoExistingFile covers the plain
-// first-write path: with nothing to preserve, the output is just the ordinary
-// marshal of config.
-func TestMarshalConfigPreservingUnknownFieldsNoExistingFile(t *testing.T) {
-	out, err := MarshalConfigPreservingUnknownFields(nil, ERunConfig{DefaultTenant: "frs"})
+// staleCloudProviderConfig is CloudProviderConfig before it grew its ERun field.
+type staleCloudProviderConfig struct {
+	Alias         string `yaml:"alias"`
+	Provider      string `yaml:"provider"`
+	Username      string `yaml:"username,omitempty"`
+	AccountID     string `yaml:"accountid,omitempty"`
+	OIDCIssuerURL string `yaml:"oidcissuerurl,omitempty"`
+}
+
+type staleERunConfig struct {
+	DefaultTenant  string
+	CloudProviders []staleCloudProviderConfig `yaml:"cloudproviders,omitempty"`
+}
+
+func TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock(t *testing.T) {
+	existing, err := yaml.Marshal(ERunConfig{
+		DefaultTenant: "frs",
+		CloudProviders: []model.CloudProviderConfig{{
+			Alias:         "erun+api.frs-prod.services.erunpaas.com@erun",
+			Provider:      CloudProviderERun,
+			Username:      "erun",
+			AccountID:     "api.frs-prod.services.erunpaas.com",
+			OIDCIssuerURL: "https://auth.example.test",
+			ERun: &model.ERunProviderConfig{
+				APIURL:          "https://api.frs-prod.services.erunpaas.com",
+				ClientID:        "386994662461735100",
+				RefreshTokenRef: "keychain:erun/frs-prod",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("seed marshal: %v", err)
+	}
+
+	stale := staleERunConfig{
+		DefaultTenant: "frs",
+		CloudProviders: []staleCloudProviderConfig{{
+			Alias:         "erun+api.frs-prod.services.erunpaas.com@erun",
+			Provider:      CloudProviderERun,
+			Username:      "erun",
+			AccountID:     "api.frs-prod.services.erunpaas.com",
+			OIDCIssuerURL: "https://auth.example.test",
+		}},
+	}
+
+	out, err := MarshalConfigPreservingUnknownFields(existing, stale)
 	if err != nil {
 		t.Fatalf("marshalConfigPreservingUnknownFields: %v", err)
 	}
-	want, err := yaml.Marshal(ERunConfig{DefaultTenant: "frs"})
-	if err != nil {
-		t.Fatalf("yaml.Marshal: %v", err)
+
+	var roundTripped ERunConfig
+	if err := yaml.Unmarshal(out, &roundTripped); err != nil {
+		t.Fatalf("unmarshal merged output: %v", err)
 	}
-	if string(out) != string(want) {
-		t.Fatalf("out = %q, want %q", out, want)
+	if len(roundTripped.CloudProviders) != 1 {
+		t.Fatalf("CloudProviders = %d entries, want 1", len(roundTripped.CloudProviders))
+	}
+	provider := roundTripped.CloudProviders[0]
+	if provider.ERun == nil {
+		t.Fatalf("erun: block was dropped by the stale-binary write; got %+v\n\noutput:\n%s", provider, out)
+	}
+	if provider.ERun.APIURL != "https://api.frs-prod.services.erunpaas.com" ||
+		provider.ERun.ClientID != "386994662461735100" ||
+		provider.ERun.RefreshTokenRef != "keychain:erun/frs-prod" {
+		t.Fatalf("erun: block corrupted, got %+v", provider.ERun)
 	}
 }

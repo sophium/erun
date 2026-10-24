@@ -38,15 +38,8 @@ import { resetTenantDashboard } from './slices/tenantDashboardSlice';
 import { setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 
-// focusOrchestratorSession makes an orchestrator's session own the terminal
-// pane. The pane and the sidebar highlight are each derived from whichever of
-// the tenant dashboard, an orchestrator's session, or an environment
-// selection currently applies (see selectSidebarFocus in ./selectors), so
-// handing an orchestrator the pane must clear the other two here, once,
-// rather than at every call site that starts, opens, or restarts one — a
-// caller that dispatched setSessionId directly used to leave the tenant
-// dashboard painted over the session the sidebar now highlighted as focused
-// (#1204).
+// focusOrchestratorSession clears the tenant dashboard and env selection, which
+// would otherwise paint over the focused session.
 const focusOrchestratorSession =
   (sessionId: number): AppThunk =>
   (dispatch) => {
@@ -55,13 +48,8 @@ const focusOrchestratorSession =
     dispatch(setSessionId(sessionId));
   };
 
-// loadOrchestrators fetches the current list and, in the same pass, seeds the
-// AI-busy store from each orchestrator's own `busy` snapshot field,
-// and the shell-activity store from its shellRunning/shellCommand/
-// shellStartedAtUnix fields — the same store fields the ai-activity and
-// orchestrator-shell-activity events write to, so a fetch that lands after a
-// transition (boot, a dialog close-and-reload, a manual refresh) renders the
-// true state even if that event was never observed.
+// loadOrchestrators seeds AI-busy and shell activity from the list, so a fetch
+// after a missed event still renders the true state.
 export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch) => {
   try {
     const list = (await ListOrchestrators()) as OrchestratorInfo[] | null;
@@ -87,10 +75,6 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
   }
 };
 
-// createOrchestrator persists a new orchestrator linking the chosen agent
-// environments (each with the host directory it is reviewed in) plus the
-// directories of its own, the platform alias it declares as its own and its
-// launch settings, and closes the dialog.
 export const createOrchestrator =
   (
     name: string,
@@ -111,11 +95,7 @@ export const createOrchestrator =
     }
   };
 
-// updateOrchestrator edits an existing orchestrator's linked environments, its
-// own directories, its name, the platform alias it declares as its own, and
-// its launch settings. Every field is sent, not only the changed one: the
-// backend replaces the whole definition, so an omitted field is erased rather
-// than left alone.
+// updateOrchestrator sends every field: the backend replaces the whole definition.
 export const updateOrchestrator =
   (
     id: string,
@@ -137,8 +117,6 @@ export const updateOrchestrator =
     }
   };
 
-// startOrchestrator spawns the session for a definition and makes it the active
-// terminal so the operator lands in it immediately.
 export const startOrchestrator =
   (id: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -151,7 +129,6 @@ export const startOrchestrator =
     }
   };
 
-// openOrchestrator attaches the terminal pane to an already-running orchestrator.
 export const openOrchestrator =
   (sessionId: number): AppThunk =>
   (dispatch) => {
@@ -160,10 +137,7 @@ export const openOrchestrator =
     }
   };
 
-// restartOrchestrator tears down a running orchestrator's session and spawns a
-// fresh one — which resumes that orchestrator's own pinned conversation — then
-// re-focuses the new session (a fresh serial; reusing the old one would attach to
-// a dead PTY).
+// restartOrchestrator refocuses by the new serial; the old one is a dead PTY.
 export const restartOrchestrator =
   (id: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -176,10 +150,7 @@ export const restartOrchestrator =
     }
   };
 
-// restartApp relaunches the desktop app and asks it to give the given
-// orchestrator the terminal pane on the way back up (empty id just restarts).
-// Orchestrators run as background agents, so the restart does not interrupt
-// them: the new desktop reattaches each one.
+// restartApp does not interrupt orchestrators; they run as background agents.
 export const restartApp =
   (returnToOrchestratorId: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -190,18 +161,8 @@ export const restartApp =
     }
   };
 
-// restoreOpenOrchestrators reopens every orchestrator this launch should come
-// back to — everything that was open when the desktop last ran — and returns
-// whether one of them ended up owning the terminal pane, so the caller (boot)
-// can skip the default environment selection. The pane is single but the
-// restored set is not: exactly one orchestrator (the restart hand-off's target,
-// or the most recently (re)started one) owns it and clears the env selection —
-// otherwise boot's default selection and the selection-sync middleware would
-// reconcile the terminal back to an environment — while every other
-// orchestrator in the set is reopened too, off the pane, so the tab strip and
-// the live sessions agree instead of a tab surviving with no session behind it.
-// Each one reattaches to its own background agent, on whatever conversation
-// that agent is on.
+// restoreOpenOrchestrators returns whether one took the pane, so boot skips the
+// default env selection. Every other open orchestrator reopens off the pane.
 export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
@@ -247,10 +208,7 @@ export const stopOrchestrator =
     await dispatch(loadOrchestrators());
   };
 
-// deleteOrchestrator removes a persisted definition — the linked environments'
-// workspace-sync config is left intact — and closes the dialog on success. On
-// failure it surfaces the error and keeps the dialog open so the operator can
-// retry, matching create/update.
+// deleteOrchestrator leaves the linked environments' sync config intact.
 export const deleteOrchestrator =
   (id: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -265,11 +223,6 @@ export const deleteOrchestrator =
     }
   };
 
-// revealOrchestratorGuidance opens one of an orchestrator's two guidance
-// layers — its own standing role or the shared contract every orchestrator
-// obeys — in the operator's chosen host IDE. Errors surface the same way
-// create/update/delete already do in OrchestratorDialog: inline, via the
-// shared `error` state, rather than a second notification channel.
 export const revealOrchestratorGuidance =
   (id: string, layer: OrchestratorGuidanceLayer, ide: IDEKind): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -280,8 +233,6 @@ export const revealOrchestratorGuidance =
     }
   };
 
-// investigateFailure spawns a transient orchestrator, grouped under the failed
-// env's tenant, seeded to fix the failure, then makes it the active terminal.
 export const investigateFailure =
   (report: string, tenant: string, environment: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -294,20 +245,8 @@ export const investigateFailure =
     }
   };
 
-// reportFailure hands a failure to an agent that drafts a GitHub issue for it
-// (root AGENTS.md "Smooth, Seamless, No Dead Ends" — "Report a bug" is a
-// standing action, not a form the operator fills in) rather than widening the
-// existing prefilled-URL handoff. Reuses investigateFailure's exact spawn
-// plumbing and its shared investigation_bounds.go population, so the three
-// outcomes ReportBugFailure can return are handled the same way here:
-//   - admitted: the draft session is focused, the same "reachable, not modal"
-//     feedback investigateFailure already uses instead of a bespoke dialog.
-//   - refused, naming an existing draft/investigation for the same failure:
-//     that session is focused instead, and an info notice says why — the
-//     "repeat click focuses the draft" requirement, not a second agent.
-//   - any other refusal (or no agent available): falls back to the existing
-//     prefilled-URL report, naming the refusal so the operator knows why the
-//     agent path did not apply, never as a silent downgrade.
+// reportFailure focuses an existing draft for the same failure; any other refusal
+// falls back to the prefilled URL, naming the refusal.
 export const reportFailure =
   (report: string, summary: string, tenant: string, environment: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -341,11 +280,6 @@ export const reportFailure =
     }
   };
 
-// openFallbackReportURL is the existing DebugPanel.Report.tsx path (a
-// prefilled github.com/sophium/erun issue the operator reviews and submits in
-// the browser), reused here as the never-a-dead-end floor: no agent could
-// draft this report, but the operator still gets a form pre-filled with the
-// evidence rather than an error with nothing behind it.
 const openFallbackReportURL =
   (
     report: string,

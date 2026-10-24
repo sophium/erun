@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// A terminal the desktop opens is a fresh top-level session, so what the desktop
-// itself was launched with must not decide how the child renders or how a Claude
-// Code inside it identifies itself.
-
 func envValue(t *testing.T, env []string, name string) (string, bool) {
 	t.Helper()
 	value := ""
@@ -66,9 +62,7 @@ func TestTerminalSessionEnvStripsForeignClaudeSessionMarkers(t *testing.T) {
 }
 
 func TestTerminalSessionEnvLetsTheCallerOverrideAStrippedName(t *testing.T) {
-	// The orchestrator sets CLAUDE_CODE_SUBAGENT_MODEL for the session it is
-	// launching, which is the desktop's own decision rather than an inherited
-	// marker, so it must survive the scrub.
+	// CLAUDE_CODE_SUBAGENT_MODEL is the desktop's own setting, not an inherited marker.
 	requested := []string{"CLAUDE_CODE_SUBAGENT_MODEL=opus", "NO_COLOR=1"}
 
 	env := terminalSessionEnv([]string{"CLAUDE_CODE_SUBAGENT_MODEL=haiku"}, requested)
@@ -79,8 +73,6 @@ func TestTerminalSessionEnvLetsTheCallerOverrideAStrippedName(t *testing.T) {
 	if value, found := envValue(t, env, "NO_COLOR"); !found || value != "1" {
 		t.Fatalf("NO_COLOR = %q (found %v), want the caller's explicit value", value, found)
 	}
-	// The terminal capabilities are appended last so they are what the child ends
-	// up with, but a caller that names them explicitly is not the case here.
 	if index := slices.Index(env, "TERM=xterm-256color"); index != len(env)-2 {
 		t.Fatalf("TERM sits at index %d of %d, want the second-to-last entry", index, len(env))
 	}

@@ -49,8 +49,7 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
-  // Tracks the source session of each in-flight xterm write so terminal query
-  // replies route back to the asking session, not the currently-selected one.
+  // Source session of each in-flight write, so query replies reach the asking session.
   private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
@@ -88,10 +87,8 @@ export class TerminalController {
     getTreeContainer: () => this.treeContainer,
   });
   private reviewDiffKeydownDisposable: (() => void) | null = null;
-  // When the active session ends in "main screen + cursor hidden" with no
-  // further output, restore the cursor so an unmatched hide leaked by
-  // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
-  // prompt with no visible cursor. Alt-screen TUIs are exempt by design.
+  // Restores a cursor left hidden on the main screen by a leaked hide sequence;
+  // alt-screen TUIs are exempt.
   private liveCursorState: CursorVisibilityState = { altScreen: false, cursorHidden: false };
   private cursorRestoreTimer = 0;
   private static readonly CURSOR_RESTORE_DELAY_MS = 250;
@@ -133,10 +130,8 @@ export class TerminalController {
     return this._diffList;
   }
 
-  // A callback ref rather than part of mount(): the changed-files tree is only
-  // rendered while its section is open, so it mounts and unmounts independently
-  // of the one-time controller mount — passing null on unmount avoids a stale
-  // reference that would break the diff→tree scrollspy.
+  // Callback ref: the tree mounts independently of the controller; null on
+  // unmount avoids a stale scrollspy target.
   setTreeContainer(element: HTMLDivElement | null): void {
     this.treeContainer = element;
   }
@@ -158,12 +153,8 @@ export class TerminalController {
     this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
-  // Wires the OS-clipboard copy/paste handlers: the WebView2 embedding does not
-  // deliver the browser paste event to xterm, so Ctrl+V / right-click / paste
-  // route through TerminalClipboard, which reads the OS clipboard via the Wails
-  // runtime and feeds it through xterm's paste path. The OSC 52 handler is the
-  // other direction: a program inside the session asking for text to be placed
-  // on the host clipboard.
+  // WebView2 does not deliver paste events to xterm, so paste reads the OS
+  // clipboard via Wails; OSC 52 handles session-to-host copies.
   private installClipboardHandlers(root: HTMLDivElement): void {
     const terminal = this.terminal;
     if (terminal) {
@@ -219,11 +210,7 @@ export class TerminalController {
     this.terminal.open(elements.terminalRoot);
     safeFit(this.fitAddon);
     this.publishTerminalDims();
-    // This xterm is brand new and holds nothing, whatever the one it replaced
-    // was showing. The queue's record of the pane's ownership outlives the
-    // pane, so it has to be told: left alone it names the session the disposed
-    // terminal was on, and the next switch would capture this blank pane under
-    // that session's name (see TerminalSwitchQueue.noteRendered).
+    // The new pane is blank; reset the queue's record of what it holds.
     this.switchQueue.noteRendered(0);
     this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
@@ -232,23 +219,17 @@ export class TerminalController {
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      // Reply to the session whose output xterm is parsing right now, not the
-      // live selection: the user may have switched sessions during a deferred
-      // parse, which would misroute the reply.
+      // Reply to the session being parsed, not the live selection.
       (data) =>
         SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
         store.dispatch(showTerminalError(readError(error)));
       },
-      // Suppress replies to queries re-parsed from a replayed display buffer:
-      // the asking tool consumed the live reply long ago, so a second reply
-      // would land on the session's shell as typed input.
+      // Replayed buffers must not answer queries again; the reply would land as input.
       () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
-      // Before the write, not after: a synthetic resize cycle in flight has to
-      // stand down as early as possible, because it is the reflow landing on a
-      // line being typed that corrupts the submission (#1330).
+      // Before the write: a pending resize cycle must stand down before input lands.
       this.reattachRepaint.noteInput();
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
         store.dispatch(showTerminalError(readError(error)));
@@ -270,13 +251,8 @@ export class TerminalController {
       void store.dispatch(boot());
     }
     this.scheduleIdleStatusPoll(0);
-    // A remounted pane is blank, and no switch is due to fill it: setSessionId
-    // reaches the queue only when the store's session *changes*, and tearing
-    // the pane down does not change it. Ask for the session the store names so
-    // the pane and the store agree again -- without this the reader is left
-    // staring at an empty terminal with the tab strip naming the session it
-    // should be showing, and nothing that will ever repaint it. A first mount
-    // has no session yet (boot() restores it), so this is a no-op there.
+    // A remounted pane is blank and no switch will fill it; re-request the
+    // store's session.
     const restoredSessionId = store.getState().terminal.sessionId;
     if (restoredSessionId > 0) {
       this.switchQueue.request(restoredSessionId);
@@ -288,9 +264,7 @@ export class TerminalController {
   }
 
   private unmountTerminal(): void {
-    // xterm drops pending write-completion callbacks on dispose, so a switch
-    // queued behind one never runs: drop the request with it rather than carry
-    // it into a later mount, where it would move a pane it knows nothing about.
+    // xterm drops pending write callbacks on dispose, so cancel the queued switch.
     this.switchQueue.cancel();
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
@@ -318,8 +292,7 @@ export class TerminalController {
     this.terminal = null;
     this.fitAddon = null;
     this.serializeAddon = null;
-    // xterm drops pending write-completion callbacks on dispose, so reset the
-    // source queue to avoid carrying a stale head into the next mount.
+    // xterm drops pending write callbacks on dispose; clear the source queue too.
     this.writeSources.clear();
   }
 
@@ -356,14 +329,8 @@ export class TerminalController {
     }, delay);
   }
 
-  // Reset is not always the caller's to run. Both direct callers
-  // (globalConfigCloudThunks' startCloudInitSession, manageDeleteThunks'
-  // submitManageDelete) dispatch setSessionId and then reset on the next
-  // statement, in the same synchronous run of the thunk body, which is a switch
-  // this queue already owns: it clears the pane itself, between capturing the
-  // outgoing session's screen and activating the incoming one. Asking the queue
-  // whether that clear is already accounted for is deliberately not a question
-  // about xterm's queue -- see resetIsAlreadySatisfied.
+  // A reset dispatched right after setSessionId is already performed by the
+  // switch queue (see resetIsAlreadySatisfied).
   resetTerminal(): void {
     if (this.switchQueue.resetIsAlreadySatisfied(store.getState().terminal.sessionId)) {
       return;
@@ -374,10 +341,7 @@ export class TerminalController {
   private resetPane(): void {
     this.terminal?.reset();
     this.terminal?.clear();
-    // The pane holds nothing now, and is recorded as holding nothing rather
-    // than as holding session 0 -- zero is a real switch target (a close clears
-    // the pane), so stamping the pane with it would say it holds a session it
-    // does not. See TerminalSwitchQueue.noteRendered.
+    // Record the pane as empty, not session 0: zero is a real switch target.
     this.switchQueue.noteRendered(0);
     this.cancelCursorRestoreTimer();
     this.reattachRepaint.clear();
@@ -409,7 +373,6 @@ export class TerminalController {
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
-    // Decoded once here and handed to every step that reads the chunk as text.
     const text = new TextDecoder().decode(data);
     if (this.sessions.isOpenSession(payload.sessionId)) {
       store.dispatch(updateOpenStatusFromOutput(payload.sessionId, plainTerminalText(text)));
@@ -417,14 +380,8 @@ export class TerminalController {
     const display = filterTerminalDisplay(data, text);
     const displayData = display.data;
     this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
-    // Not rendered, not lost: only the store's active session is on screen
-    // (the middleware in terminalDisplayMiddleware pairs every change of it
-    // with a reset and an activateSession), and what is buffered above is
-    // replayed by that session's next activation. The one way a render is lost
-    // for good is a session the user is looking at having the store moved off
-    // it, because nothing activates it again -- so the store must not be
-    // re-pointed off a tab the user has picked, which is finishOpenSession's
-    // restore to keep.
+    // Inactive sessions are buffered and replayed on their next activation, so
+    // the store must never move off a tab the user picked.
     if (payload.sessionId !== store.getState().terminal.sessionId) {
       return;
     }
@@ -461,9 +418,7 @@ export class TerminalController {
   }
 
   applyLayoutVars(): void {
-    // Re-derive the sidebar's collapsed state on every layout pass (mount,
-    // window resize, any panel toggle) — a window resized rather than dragged
-    // needs the same auto-collapse a narrow launch already gets.
+    // Resized windows need the same auto-collapse as a narrow launch.
     store.dispatch(reconcileSidebarForViewport());
     applyTerminalLayoutVars({
       reviewView: this._reviewView,
@@ -478,12 +433,8 @@ export class TerminalController {
     }, 40);
   };
 
-  // One-shot layout toggles (review/sidebar/debug) call this so the shell sees
-  // the new cols before its next prompt redraw, rather than waiting on the
-  // debounce queueTerminalResize uses to coalesce drag bursts. Otherwise an
-  // opened review squashes the terminal and only partially un-squashes on
-  // close, because the PTY was still on the narrow cols when the next prompt
-  // was emitted.
+  // Bypasses the resize debounce so the PTY has the new cols before the shell's
+  // next prompt redraw.
   flushTerminalResize = (): void => {
     window.clearTimeout(this.resizeTimer);
     this.resizeTimer = 0;
@@ -506,10 +457,7 @@ export class TerminalController {
     }
   }
 
-  // resizeActiveSession pushes the current terminal geometry to the active PTY.
-  // Called when the active session changes so a session spawned at a default
-  // size (e.g. an orchestrator) is resized to the pane instead of rendering its
-  // UI at the wrong width.
+  // resizeActiveSession pushes the pane geometry to the active PTY.
   resizeActiveSession(): void {
     this.runTerminalResize();
   }
@@ -529,17 +477,13 @@ export class TerminalController {
     if (!visible) {
       return;
     }
-    // The selection every reader compares against is env-keyed (diffPathKey);
-    // only the tree lookup below takes the bare path.
+    // Selection is env-keyed; only the tree lookup takes the bare path.
     const selected = diffPathKey(visible.envKey, visible.path);
     if (selected === store.getState().review.selectedDiffPath) {
       return;
     }
     store.dispatch(setSelectedDiffPath(selected));
-    // Keep the now-active node visible in the changed-files tree. Only
-    // the diff→tree direction drives this, and it scrolls the tree container,
-    // never the diff — so it can't feed back into visibleDiffFile above (which
-    // reads the diff/reviewMain scroll position) and re-trigger selection.
+    // Scrolls only the tree container, so it cannot feed back into diff selection.
     scrollSelectedTreeNodeIntoView(this.treeContainer, visible.path);
   }
 
@@ -561,28 +505,13 @@ export class TerminalController {
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
 
-  // requestSessionSwitch is what a setSessionId dispatch asks for. It is a
-  // request rather than a hand-off because the pane may not have moved yet when
-  // the next one arrives: two dispatches inside one task coalesce onto a single
-  // switch instead of each snapshotting, resetting and activating in turn (see
-  // TerminalSwitchQueue). A no-op when there is no terminal to move.
+  // requestSessionSwitch queues a switch; dispatches within one task coalesce.
   requestSessionSwitch(sessionId: number): void {
     this.switchQueue.request(sessionId);
   }
 
-  // performSwitch carries out the hand-off TerminalSwitchQueue settled on, from
-  // inside xterm's own queue: an empty write's completion callback fires once
-  // every chunk queued ahead of it has parsed, so the capture below is taken of
-  // a screen that already carries the outgoing session's last output and the
-  // reset cannot land in front of it.
-  //
-  // `from` is the session the pane really holds (null when it holds nothing),
-  // so the capture takes its own screen, up to the append sequence the switch
-  // was asked for -- output for that session arriving in between was never
-  // written to the pane and is not in `serialized`, so the capture keeps it
-  // rather than dropping it with the rest of the buffer (see captureSnapshot).
-  // `to <= 0` clears the pane without activating anything, which is how a close
-  // lands.
+  // performSwitch runs inside xterm's write queue, so the capture includes the
+  // outgoing session's last output. `to <= 0` only clears the pane.
   private performSwitch(from: number | null, to: number, appendedAtRequest: number): void {
     this.snapshotSession(from ?? 0, appendedAtRequest);
     this.resetPane();
@@ -590,24 +519,11 @@ export class TerminalController {
       return;
     }
     this.activateSession(to);
-    // Push the pane geometry to the newly-active PTY so a session spawned at a
-    // default size (an orchestrator starts at 80x24) redraws at the real width
-    // instead of rendering its UI clipped.
     this.resizeActiveSession();
   }
 
-  // snapshotSession captures the outgoing session's rendered screen (its
-  // current scrollback + cursor state, via @xterm/addon-serialize) before a
-  // switch moves the shared xterm instance onto another session, and drops the
-  // display buffer entries that screen carries -- everything up to the capture
-  // is in the snapshot, so only output that arrives after it needs replaying on
-  // the next switch back to it. This is what makes a later switch back O(time
-  // since last visit) instead of O(session's total history). A no-op for
-  // sessionId <= 0 (no prior session was actually showing).
-  //
-  // `appendedAtDispatch` bounds which buffer entries that is: see
-  // performSwitch's caller, which is the only one that has output it must not
-  // drop. Called on its own, it captures everything the buffer holds.
+  // snapshotSession captures the outgoing screen and drops buffered output it
+  // already contains, so switching back replays only the delta.
   snapshotSession(sessionId: number, appendedAtDispatch = Number.POSITIVE_INFINITY): void {
     if (sessionId <= 0 || !this.terminal || !this.serializeAddon) {
       return;
@@ -615,45 +531,24 @@ export class TerminalController {
     this.sessions.captureSnapshot(sessionId, this.serializeAddon.serialize(), appendedAtDispatch);
   }
 
-  // activateSession renders `sessionId` into the (already-reset) shared
-  // terminal. A session with a prior snapshot (captured by snapshotSession the
-  // last time it was switched away from) restores that snapshot in one write
-  // and replays only the delta buffered since -- bounded, and independent of
-  // how long the session has been running. A session with no snapshot yet
-  // (never switched away from in this window) falls back to a bounded replay
-  // of its retained history, same as before #1322.
+  // activateSession renders sessionId from its snapshot plus delta, or from a
+  // bounded replay of its history.
   activateSession(sessionId: number): void {
     this.switchQueue.noteRendered(sessionId);
     const snapshot = this.sessions.snapshot(sessionId);
     let cursorHidden: boolean;
-    // The writes this activation makes, resolved before any of them run so
-    // their number is the whole of what the switch costs (see
-    // publishTerminalActivation). The trailing empty write that only schedules
-    // the scroll to the bottom is not content and is not among them.
+    // Resolved up front so their count is the switch's cost; excludes the
+    // trailing scroll-only write.
     let writes: TerminalWriteData[];
     if (snapshot !== undefined) {
       const delta = this.sessions.displayBuffer(sessionId);
       writes = [snapshot, ...delta];
-      // A snapshot's own trailing state (whether its cursor was hidden) isn't
-      // re-derived here -- only the delta is scanned, from a "visible cursor"
-      // baseline. The alt-screen verdict below instead comes straight from
-      // the live buffer xterm just reconstructed, which is authoritative
-      // regardless of what was or wasn't in the delta.
+      // Only the delta is scanned; alt-screen state comes from the live buffer.
       cursorHidden = bufferCursorVisibility(delta).cursorHidden;
     } else {
       const chunks = this.sessions.displayBuffer(sessionId);
-      // Rehydrate live cursor tracking from the full buffer (a cheap scan, not
-      // a render); its final alt-screen verdict also decides how much to
-      // replay. Main-screen shells: replay only the tail that fills xterm's
-      // scrollback — replaying the whole history just scroll-renders lines
-      // xterm then discards (the ~20s scroll-through this cap fixed).
-      // Alt-screen TUIs (claude/codex): the visible frame is drawn by
-      // cursor-addressed redraws whose alt-screen enter (`?1049h`) + initial
-      // paint live in the buffer HEAD, so trimming the head would leave those
-      // redraws on a blank main screen — a black pane. Alt-screen has no
-      // scrollback, so a full replay carries no scroll-through cost; replay it
-      // whole. This cold path only runs once per session per window lifetime
-      // (its first display), since every later switch-back has a snapshot.
+      // Main-screen shells replay only what fits in scrollback; alt-screen TUIs need
+      // the whole buffer because their initial paint lives at its head.
       const finalState = bufferCursorVisibility(chunks);
       writes = finalState.altScreen
         ? chunks
@@ -669,33 +564,17 @@ export class TerminalController {
       altScreen: this.terminal?.buffer.active.type === 'alternate',
     };
     this.cancelCursorRestoreTimer();
-    // xterm parses write() calls asynchronously, so a synchronous scroll would
-    // run before the replayed chunks are laid out. The empty write's callback
-    // fires only after every replayed chunk has flushed, so switching sessions
-    // lands at the live prompt rather than mid-history.
+    // write() parses asynchronously; scroll once the replay has flushed.
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });
-    // AI TUIs (claude/codex) render on the MAIN screen — not the alt-screen — and
-    // only repaint on a real geometry change, so a trimmed cold-path replay can't
-    // reconstruct their frame and the pane is blank on switch until the app next
-    // emits a diff (the black-pane the operator hit). An orchestrator pane runs
-    // the same kind of TUI. Nudge the backend pty on every switch to raise a
-    // genuine WINCH and force a full repaint; the Go side (RepaintSession)
-    // applies it only to AI and orchestrator sessions and no-ops for plain
-    // shells and alt-screen apps (which reconstruct from the replay), so this is
-    // safe to call unconditionally. The local xterm is never resized — no
-    // visible reflow.
+    // AI TUIs repaint only on a real geometry change; the backend forces a WINCH
+    // for AI/orchestrator sessions and ignores others.
     void RepaintSession(sessionId);
-    // A pty-only WINCH (RepaintSession above) does not reach a reattached
-    // main-screen TUI, so if this session stays blank after selection (a
-    // reattached AI tab or orchestrator pane) the reattach-repaint helper
-    // forces a real xterm+pty resize cycle. See TerminalReattachRepaint.
+    // A pty-only WINCH misses reattached TUIs; this forces a real resize cycle if
+    // the pane stays blank.
     this.reattachRepaint.schedule(sessionId);
-    // A spinner elsewhere in the session's history can leave the cursor
-    // hidden on a plain shell prompt with no further output ever coming to
-    // re-show it (handleTerminalOutput's own timer only fires from live
-    // writes). Re-run the same stuck check after a switch lands on that state.
+    // Replayed history can leave a shell's cursor hidden with no further output.
     this.scheduleCursorRestoreIfStuck();
   }
 }

@@ -20,9 +20,7 @@ test('http scheme is never treated as pending or ready TLS', () => {
   );
 });
 
-// The whole point: an Ingress carrying a tls block is not the same as a
-// certificate that has actually issued -- cert-manager writes the block
-// before issuance completes.
+// cert-manager writes the tls block before the certificate issues.
 test('https with no confirmed-ready certificate is pending, not ready', () => {
   assert.equal(
     exposedServiceStatus({ service: 'web', hostname: 'web.test', scheme: 'https' }),

@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// mergeRegressionFiles is a read-only tree for the policy: a path not in the
-// map does not exist.
 func mergeRegressionFiles(files map[string]string) func(string) ([]byte, error) {
 	return func(path string) ([]byte, error) {
 		content, ok := files[path]
@@ -25,8 +23,7 @@ var (
 	mergeRegressionStagedWithTest = []string{"erun-common/thing.go", "erun-integration/thing_test.go"}
 )
 
-// mergeRegressionPolicyCases asserts both directions of every rule: what the
-// policy must refuse, and the legitimate shapes it must let through.
+// mergeRegressionPolicyCases covers both what the policy refuses and what it lets through.
 var mergeRegressionPolicyCases = []struct {
 	name    string
 	branch  string

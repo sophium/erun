@@ -6,11 +6,8 @@ import (
 	"fmt"
 )
 
-// MCPLocalTool is a tool the stdio proxy answers itself instead of relaying to
-// the environment's edge. Almost everything belongs in the pod, where the
-// environment's own toolchain is; the exception is work whose subject lives on
-// this host — the review mirror — which the edge structurally cannot reach. A
-// client sees no difference: the tool is listed and called like any other.
+// MCPLocalTool is served by the stdio proxy itself, for host-side subjects (the review mirror)
+// the pod's edge cannot reach.
 type MCPLocalTool struct {
 	Name        string
 	Description string
@@ -52,8 +49,7 @@ type mcpReplyEnvelope struct {
 	Result  json.RawMessage `json:"result"`
 }
 
-// McpLocalToolFor reports the local tool a tools/call message addresses, so the
-// proxy can answer it without a round trip to the edge.
+// McpLocalToolFor reports the local tool a tools/call message addresses.
 func McpLocalToolFor(message []byte, tools []MCPLocalTool) (MCPLocalTool, json.RawMessage, bool) {
 	if len(tools) == 0 {
 		return MCPLocalTool{}, nil, false
@@ -75,9 +71,7 @@ func mcpIsToolsList(message []byte) bool {
 	return json.Unmarshal(message, &envelope) == nil && envelope.Method == "tools/list"
 }
 
-// McpAppendLocalTools merges the locally served tools into the edge's tools/list
-// reply, so a client discovers them the only way it can. A reply it cannot parse
-// is passed through untouched rather than dropped.
+// McpAppendLocalTools merges local tools into the edge's tools/list reply; an unparseable reply passes through.
 func McpAppendLocalTools(reply []byte, tools []MCPLocalTool) []byte {
 	if len(tools) == 0 {
 		return reply
@@ -113,9 +107,7 @@ func McpAppendLocalTools(reply []byte, tools []MCPLocalTool) []byte {
 	return merged
 }
 
-// McpLocalToolReply renders a local tool's outcome in the shape a client expects
-// from any tool, including a failure: an error is content the model reads and
-// can act on, not a transport fault.
+// McpLocalToolReply reports a failure as tool content the model can act on, not a transport fault.
 func McpLocalToolReply(id json.RawMessage, text string, callErr error) ([]byte, error) {
 	result := mcpToolCallResult{Content: []mcpTextContent{{Type: "text", Text: text}}}
 	if callErr != nil {

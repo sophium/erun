@@ -59,8 +59,7 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       envType: 'remote-agent',
       localRepoPath: '',
       noGit: false,
-      // Don't pre-check "set as default tenant": creating an environment should
-      // not silently repoint the operator's default tenant. They can opt in.
+      // Creating an environment must not silently repoint the default tenant.
       setDefaultTenant: false,
       versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
       choicesOpen: false,
@@ -149,19 +148,13 @@ export const submitEnvironmentDialog =
     }
     const selection = environmentDialogSelection(dialog, state.tenants.versionSuggestions);
     if (!selection) {
-      // The submit gate keeps the Create button disabled while a required field
-      // is missing, but Enter-key submits bypass the button — surface the reason
-      // as a visible error rather than only the native validity bubble, which the
-      // Wails WebView does not reliably render.
+      // Enter-key submits bypass the disabled button, and the Wails WebView does not
+      // reliably show native validity bubbles.
       dispatch(patchEnvironmentDialog({ error: missingRequiredFieldReason(dialog) ?? '' }));
       form.reportValidity();
       return;
     }
-    // Asked through the same helper the submit gate uses, so a host env is
-    // exempt here exactly as it is there: the gate enables Create for a host env
-    // by skipping the cluster-shaped blockers, and a resource check that still
-    // fired here would refuse that Create with a message the host form renders no
-    // field to clear.
+    // Same helper as the submit gate, so host envs are exempt here too.
     const resourceError = environmentDialogResourceLimitMessage(dialog);
     if (resourceError) {
       dispatch(patchEnvironmentDialog({ error: resourceError }));
@@ -196,9 +189,7 @@ function environmentDialogSelection(
     return null;
   }
   const values = normalizedEnvironmentDialogValues(dialog);
-  // noGit only affects the remote-worktree init path; local-agent and host both
-  // resolve their worktree from a directory on this machine and so have no
-  // remote repo, so ignore any stale noGit left by a previous type selection.
+  // noGit applies only to remote worktrees; ignore a stale value from another type.
   const noGit =
     dialog.envType === 'local-agent' || dialog.envType === 'host' ? false : dialog.noGit;
   return {
@@ -216,16 +207,10 @@ function environmentDialogInitFields(
   values: ReturnType<typeof normalizedEnvironmentDialogValues>,
 ): Partial<UISelection> {
   const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
-  // Both local-agent and host carry the directory the env lives in. A host env
-  // is that directory outright rather than a pod's mount of it, but init takes
-  // it through the same --project-root and refuses the create without it.
+  // Host envs also pass their directory through --project-root.
   const carriesLocalRepoPath = dialog.envType === 'local-agent' || dialog.envType === 'host';
-  // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
-  // omit the static container-registry string (the two are mutually exclusive).
-  // useErunRegistry only takes effect once the reachability probe has actually
-  // confirmed the hosted registry is available — otherwise this would resolve
-  // to an environment whose pushes go nowhere, mirroring how useClusterRegistry
-  // is already gated on clusterRegistry?.deployed below.
+  // The in-cluster registry replaces the static registry string. The hosted
+  // registry counts only once its probe confirms it is available.
   const useErunRegistry = dialog.useErunRegistry && dialog.hostedRegistry?.available === true;
   const useClusterRegistry =
     !useErunRegistry && dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
@@ -326,9 +311,7 @@ const refreshEnvironmentRuntimeResources =
     if (!dialog.open) {
       return;
     }
-    // No selected context → there is no cluster to measure. Clear any capacity
-    // fetched for a previously selected/auto-resolved context so the dialog never
-    // shows a stale capacity figure under an empty selection.
+    // Clear capacity from a previous context so no stale figure shows.
     if (!context) {
       dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;

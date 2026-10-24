@@ -3,36 +3,23 @@ package doctor
 import (
 	"fmt"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// reportGitPushAccess flags the asymmetry that makes this expensive to
-// discover the hard way: a public GitHub repository fetches anonymously for
-// the entire life of a piece of work, so an environment whose worktree lives
-// in a pod (remote-agent, runtime) can look completely healthy right up to
-// the moment an agent tries to push a branch or use gh -- the worst possible
-// time to discover there is no credential. Runs only for an environment whose
-// worktree actually lives in a pod; a local-agent or host env pushes from the
-// operator's own machine, which already carries the operator's own git/gh
-// credentials.
-//
-// The read execs into the runtime pod, which is exactly the state doctor most
-// needs to diagnose when it is down -- reading it must degrade to a clear
-// "could not read" report rather than aborting the rest of doctor's checks.
-// When an earlier section already confirmed the cluster is unreachable
-// (diagnosis.ClusterUnreachable), this reports the same skip instead of
-// paying its own kubectl exec timeout to rediscover it.
-func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+// reportGitPushAccess flags a pod worktree with no push credential, which anonymous
+// fetches of a public repo hide until the first push. Degrades on an unreachable pod.
+func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis model.DeployDiagnosisResult) error {
 	if !result.EnvConfig.RemoteWorktree() {
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Git push access")
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	status, err := gitx.InspectGitPushAccess(ctx, nil, req, result.RepoPath)
 	if err != nil {
 		if ctx.DryRun {
@@ -48,14 +35,14 @@ func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis c
 	return err
 }
 
-func gitFetchStatusLine(status gitx.GitPushAccessStatus) string {
+func gitFetchStatusLine(status model.GitPushAccessStatus) string {
 	if status.FetchOK {
 		return "ok"
 	}
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func gitPushStatusLine(result config.OpenResult, status gitx.GitPushAccessStatus) string {
+func gitPushStatusLine(result config.OpenResult, status model.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

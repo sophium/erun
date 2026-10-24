@@ -1,5 +1,4 @@
-/* Brand palette derived from the ERun Mac app icon:
-   charcoal squircle ground, glowing cyan accent, white contrast. */
+/* Brand palette derived from the ERun Mac app icon. */
 
 :root {
   --erun-charcoal: #0f1320;
@@ -32,7 +31,6 @@
   --docusaurus-highlighted-code-line-bg: rgba(34, 211, 238, 0.12);
 }
 
-/* Lead paragraph after H1 reads as a tagline. */
 .markdown > h1 + p strong:first-child {
   font-size: 1.15rem;
   line-height: 1.55;
@@ -40,7 +38,6 @@
   color: var(--ifm-color-emphasis-900);
 }
 
-/* Mermaid diagrams: clean centering + responsive width. */
 .docusaurus-mermaid-container {
   margin: 1.75rem auto;
   text-align: center;
@@ -50,14 +47,12 @@
   height: auto;
 }
 
-/* Section dividers (`---`) — subtle but visible. */
 .markdown hr {
   border: 0;
   border-top: 1px solid var(--ifm-color-emphasis-200);
   margin: 2.25rem 0;
 }
 
-/* Hero figure on the welcome page. */
 .erun-hero-figure {
   margin: 2rem auto;
   max-width: 920px;
@@ -76,9 +71,7 @@
   letter-spacing: 0.005em;
 }
 
-/* Navbar gets a darker baseline to harmonize with the charcoal app-icon
-   mark in light mode (matches dark mode default). Subtle enough to keep
-   text readable. */
+/* Charcoal navbar in both themes, matching the app icon. */
 .navbar {
   background-color: #0f1320;
   --ifm-navbar-link-color: rgba(255, 255, 255, 0.85);

@@ -47,16 +47,14 @@ export function ErunTracePane({
 }): React.ReactElement {
   const { trace, refresh } = useEnvTracePoll(tenant, environment);
   const content = trace?.content ?? '';
-  // Clear is view-only: Copy and Copy report read the full content, so a
-  // cleared view never truncates a bug report.
+  // Clear is view-only; copies read the full content.
   const { cleared, rotatedOut, visibleContent, clear, showAll } = useErunTraceBaseline(
     `${tenant}/${environment}`,
     content,
   );
   const { outputRef, handleScroll } = useStickToBottom(visibleContent);
 
-  // Toolbar and the cleared notice sit in their own grid rows, outside the
-  // scroll region, so stick-to-bottom cannot scroll the actions out of view.
+  // Kept outside the scroll region so stick-to-bottom cannot hide the actions.
   return (
     <div
       className={cn(
@@ -89,9 +87,6 @@ export function ErunTracePane({
   );
 }
 
-// ClearedNotice explains why earlier lines vanished after Clear and offers a
-// one-click return to the full view: Clear only hides scrollback, the
-// persistent log is untouched and always recoverable.
 function ClearedNotice({
   rotatedOut,
   onShowAll,
@@ -146,8 +141,6 @@ function ErunTraceBody({
     return null;
   }
   if (trace.available) {
-    // When cleared and nothing new has arrived yet, say so rather than
-    // render a blank pane.
     return (
       <>
         <TraceNotice notice={trace.notice} />
@@ -169,8 +162,6 @@ function ErunTraceBody({
   );
 }
 
-// TraceNotice surfaces a non-fatal caveat (e.g. a remote env's in-pod trace
-// could not be included); the content shown is still real.
 function TraceNotice({ notice }: { notice?: string }): React.ReactElement | null {
   if (!notice) {
     return null;

@@ -6,12 +6,8 @@ import (
 	"testing"
 )
 
-// The guard must refuse a turn that hands the operator a decision without
-// refusing a turn that merely reports one. Quoting an earlier violation -- the
-// defect text, the contract, the guard's own reason -- is how a verification
-// report describes the fix, so a guard that fires on the quotation makes the
-// report unwritable. Both directions are asserted here: every quotation is let
-// go, and the turn's own unquoted offer is still refused.
+// Quoting an earlier violation is how a report describes the fix, so only the
+// turn's own unquoted words may trip the guard.
 func TestOrchestratorNoAskStopGuardReadsOnlyTheTurnsOwnUnquotedWords(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {

@@ -18,7 +18,7 @@ func postProvision(t *testing.T, tenants ConfigTenantRepository, environments *s
 	return rec
 }
 
-// The tenant Name (not ID) forms the <tenant>-<env> namespace and runtime release name asserted below.
+// acmeTenant's Name, not ID, forms the <tenant>-<env> namespace.
 var acmeTenant = stubConfigTenantRepository{tenant: model.Tenant{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
 
 func decodeProvisionResponse(t *testing.T, rec *httptest.ResponseRecorder) provisionResponse {
@@ -30,7 +30,6 @@ func decodeProvisionResponse(t *testing.T, rec *httptest.ResponseRecorder) provi
 	return response
 }
 
-// mustPlanLine fails with why unless the preview plan carries the expected line.
 func mustPlanLine(t *testing.T, plan []string, want string, why string) {
 	t.Helper()
 	if !planContains(plan, want) {
@@ -38,8 +37,6 @@ func mustPlanLine(t *testing.T, plan []string, want string, why string) {
 	}
 }
 
-// mustNotPlanLine fails with why when the preview plan carries a line it should
-// not have planned.
 func mustNotPlanLine(t *testing.T, plan []string, unwanted string, why string) {
 	t.Helper()
 	if planContains(plan, unwanted) {
@@ -66,7 +63,6 @@ func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("unexpected status: %d", rec.Code)
 			}
-			// Provision is preview-only — it must never create an env row.
 			if environments.createCalls != 0 {
 				t.Fatalf("provision must never call Create, got %d calls", environments.createCalls)
 			}
@@ -74,13 +70,7 @@ func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 	}
 }
 
-// TestProvisionWithNewClusterComposesFullPlan proves a new-cluster provision previews the full ordered plan — including cloud bootstrap — without persisting.
-// remote-agent (not runtime): the v1 single-cluster placement decision
-// (TestProvisionRejectsCrossClusterPlacementForRuntime) refuses a runtime
-// environment naming a new cluster to bootstrap, since the deploy Job it
-// would need has no mechanism to reach any cluster but the control plane's
-// own; a remote-agent environment is never server-side deployed at all, so
-// naming an unrelated context to bootstrap remains a valid preview.
+// remote-agent: a runtime env cannot name a new cluster to bootstrap.
 func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -116,11 +106,7 @@ func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 	mustNotPlanLine(t, response.Plan, "deploy:", "a remote-agent environment is never server-side deployed, so the plan must not claim a deploy")
 }
 
-// TestProvisionRejectsCrossClusterPlacementForRuntime: the v1 single-cluster
-// placement decision applies identically here and on the executing
-// POST /v1/environments (TestCreateEnvironmentRejectsCrossClusterPlacement)
-// — both call resolveDeployPlacement, so a preview can never promise a
-// placement the real create/deploy path would then refuse.
+// Both paths call resolveDeployPlacement, so a preview never promises a refused placement.
 func TestProvisionRejectsCrossClusterPlacementForRuntime(t *testing.T) {
 	cases := map[string]string{
 		"new cluster": `{
@@ -143,9 +129,6 @@ func TestProvisionRejectsCrossClusterPlacementForRuntime(t *testing.T) {
 	}
 }
 
-// TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement: the only
-// valid runtime provision shape in v1 — no context named at all — previews
-// the deploy landing on the platform's own cluster.
 func TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -163,7 +146,6 @@ func TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement(t *testing
 	mustPlanLine(t, response.Plan, "tls: would provision a per-env wildcard certificate", "plan missing the tls provisioning line")
 }
 
-// TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.
 func TestProvisionReusesExistingContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 0}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -186,7 +168,6 @@ func TestProvisionReusesExistingContext(t *testing.T) {
 	mustNotPlanLine(t, response.Plan, "expose:", "a non-runtime environment is never server-side deployed, so it must plan no exposure")
 }
 
-// TestProvisionOverCapReturnsPlanWithQuotaBlocked proves over-cap provisioning still returns a 200 preview with quotaOk=false, not a 4xx.
 func TestProvisionOverCapReturnsPlanWithQuotaBlocked(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 10}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -205,7 +186,5 @@ func TestProvisionOverCapReturnsPlanWithQuotaBlocked(t *testing.T) {
 		t.Fatalf("expected quotaOk=false at the cap, got true: %v", response.Plan)
 	}
 	mustPlanLine(t, response.Plan, "quota: tenant has 10 of 10 environments — WOULD EXCEED, provisioning blocked", "plan missing the blocked-quota line")
-	// Even when blocked, the rest of the plan is shown so the operator sees the
-	// full intended work alongside the blocking reason.
 	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "blocked plan should still show the full intended actions")
 }

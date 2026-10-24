@@ -66,9 +66,7 @@ const spawnDefaultTab =
     }
   };
 
-// Starts an ERun tab without flipping the active session; the bookkeeping
-// is inlined rather than reusing registerOpenSessionResult, which would
-// flip the active session and steal the user's current view.
+// Starts an ERun tab without stealing the active session.
 const spawnERunTabPassive =
   (key: string, runSelection: UISelection, cols: number, rows: number): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -98,9 +96,7 @@ const spawnDefaultKind =
     }
   };
 
-// Repoints the remembered selection from the dead session to the respawned
-// tab; otherwise restoreSelectedTabForEnv sees a stale id that matches no
-// live tab, bails, and never surfaces the live PTY.
+// Repoints the remembered tab at the respawned session so restoreSelectedTabForEnv finds it.
 const repointRememberedAfterRespawn =
   (key: string, previous: TerminalTab, kind: TerminalTabKind): AppThunk =>
   (dispatch, getState) => {
@@ -112,10 +108,7 @@ const repointRememberedAfterRespawn =
     }
   };
 
-// The dead-tab respawn branch keeps the "stopped reconnecting … click the
-// environment in the sidebar to retry" marker from being a false promise:
-// AI/Local tabs register no openSelection, so their zombie tab lingers in
-// tabsByEnv after exit and would otherwise never be replaced with a live PTY.
+// AI/Local tabs register no openSelection, so their dead tab must be replaced here.
 const ensureLiveDefaultTab =
   (
     key: string,
@@ -144,14 +137,7 @@ const ensureLiveDefaultTab =
 export const ensureDefaultEnvTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    // A host env has no pod, so two of the three default tabs have nothing to
-    // attach to: the ERun tab's `erun open` refuses the env outright ("it has no
-    // pod and no cluster to open a shell into"), and an AI tab has no pod to run
-    // its harness in. Spawning either would leave a refused tab plus a
-    // runtime-ensure warning about an environment that will never have a
-    // runtime. The Local tab is a shell in the directory, which is what opening
-    // a host env means — the same decision resolveAutoStartGate makes, so the
-    // two paths agree on what opening one produces.
+    // A host env has no pod, so only the Local tab applies, matching resolveAutoStartGate.
     const envType = selectEnvironmentType(
       getState(),
       runSelection.tenant,
@@ -166,9 +152,7 @@ export const ensureDefaultEnvTabs =
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'ai', 'AI', cols, rows));
   };
 
-// Repoints the visible terminal at the new env's session so the previous
-// env's output stops painting while the new env's slower StartSession is in
-// flight — the renderer drops PTY writes that don't match the current sessionId.
+// The renderer drops PTY writes that don't match the current sessionId.
 const surfaceEnvSession =
   (key: string): AppThunk =>
   (dispatch, getState) => {
@@ -181,11 +165,8 @@ const surfaceEnvSession =
     dispatch(setSessionId(next));
   };
 
-// Records the session bookkeeping that must fire even after the user
-// navigates away, so a later sidebar click reuses the session instead of
-// double-spawning. The stale-selection path calls only this, not
-// registerOpenSessionResult, so an abandoned long-running open never steals
-// the terminal from the env the user has moved to.
+// Records session bookkeeping even after the user navigates away, without
+// stealing the terminal.
 const trackOpenSessionMetadata =
   (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
   (dispatch) => {
@@ -201,9 +182,7 @@ export const registerOpenSessionResult =
   (dispatch, getState) => {
     dispatch(trackOpenSessionMetadata(key, result, runSelection));
     dispatch(setSessionId(result.sessionId));
-    // Preserve the user's prior tab choice for this env across re-opens
-    // (Nielsen #4: consistency / user control): only seed the selection
-    // when nothing valid is remembered.
+    // Only seed the tab selection when nothing valid is remembered.
     const state = getState();
     const remembered = state.terminal.selectedSessionByEnv[key];
     const liveTabs = state.terminal.tabsByEnv[key] ?? [];
@@ -220,20 +199,13 @@ const prepareOpenSelection =
     const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
     const newKey = selectionKey(selection);
     if (newKey !== previousKey) {
-      // Reset the range for the environment being opened. Scope and commit are
-      // per-env now, so resetting them globally would clear an unrelated
-      // section's selection (#1178).
+      // Range is per-env; reset only the env being opened.
       const envKey = `${selection.tenant}/${selection.environment}`;
       dispatch(setEnvReviewScope({ envKey, scope: 'current' }));
       dispatch(setEnvReviewCommit({ envKey, commit: '' }));
       dispatch(setSelectedDiffPath(''));
     }
-    // setSelected is observed by selectionSyncMiddleware, which reconciles
-    // state.terminal.sessionId with the new env's tabs in the same tick.
-    // Every setSelected dispatch — including re-clicks where newKey ===
-    // previousKey but the terminal happens to point at a stale session
-    // from another env — flows through the listener, so no caller has to
-    // remember to pair setSelected with a manual surface.
+    // selectionSyncMiddleware reconciles terminal.sessionId on every setSelected.
     dispatch(setSelected(selection));
     dispatch(setIdleStatus(null));
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
@@ -297,20 +269,12 @@ export const openSelection =
     const key = selectionKey(runSelection);
     const previousSessionId = getState().terminal.sessionId;
     const previousKnownSessionId = getState().sessions.selectionToSessionId[key] ?? 0;
-    // Capture the prior selection so a failed StartSession can roll the
-    // sidebar back: prepareOpenSelection already moved it to the new env, and
-    // without rollback the sidebar and terminal would show different envs.
+    // Captured so a failed StartSession can roll the sidebar back.
     const previousSelected = getState().selection.selected;
 
     const verdict = await resolveAutoStartGate(selection, getState);
-    // resolveAutoStartGate can await real backend work. If the terminal's
-    // active session or selection has changed while it was resolving --
-    // most commonly an orchestrator session (or a different environment)
-    // grabbing focus while this was boot()'s own automatic
-    // default-landing-environment open still in flight -- that newer focus
-    // change already won and must not be dragged back by this stale call
-    // going on to dispatch prepareOpenSelection's unconditional setSelected
-    // underneath it.
+    // A focus change during the gate (e.g. an orchestrator session) already won;
+    // this stale call must not reclaim it.
     const stateAfterGate = getState();
     if (
       stateAfterGate.terminal.sessionId !== previousSessionId ||
@@ -337,9 +301,6 @@ export const openSelection =
       options.isDefaultLandingOpen,
     );
 
-    // The previous click's openSelection is still in flight; reset before the
-    // new selection paints its spinner so the sidebar spinner does not linger
-    // on the env the user has navigated away from.
     dispatch(resetEnvOpening());
     dispatch(prepareOpenSelection(selection, previousSessionId, previousKnownSessionId));
     controller.fitTerminal();
@@ -347,24 +308,15 @@ export const openSelection =
 
     dispatch(markEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     try {
-      // Spawn (or respawn if dead) Local first so subsequent ERun/AI
-      // spawns can log into it, and so the marker-promised sidebar-click
-      // recovery actually swaps a zombie Local for a live PTY.
+      // Local first so later spawns can log into it.
       await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
       if (!isCurrentSelection()) {
         return;
       }
-      // prepareOpenSelection cleared sessionId to 0 on an env change; fill it
-      // back with the just-spawned Local so the user sees their new env's
-      // terminal while ERun cold-starts.
       dispatch(surfaceEnvSession(key));
 
       if (!shouldSpawnERun) {
-        // autoStart=never path: navigation completes with Local only. The
-        // user can flip the policy from the manage-env dialog or click the
-        // titlebar Play button to start the cloud context on demand, which
-        // will surface "running" on the next idle poll and lets a follow-up
-        // sidebar click spawn the ERun tab.
+        // autoStart=never: Local only.
         dispatch(hideTerminalMessage());
         controller.focusTerminalSoon();
         controller.queueTerminalResize();
@@ -387,10 +339,7 @@ export const openSelection =
     }
   };
 
-// When the user has navigated away (isCurrentSelection() === false), the
-// spawned session is recorded for later reuse but not promoted to the visible
-// terminal — so a long-running cold EC2 open in env A no longer paints
-// "Opening A..." over env B that the user has since clicked into.
+// A session opened after the user navigated away is recorded but not shown.
 const finishOpenSession =
   (
     key: string,
@@ -409,27 +358,15 @@ const finishOpenSession =
     }
     dispatch(registerOpenSessionResult(key, result, runSelection));
     dispatch(showOpenSelectionStatus(result.sessionId, selection));
-    // The session this open claimed the pane for. registerOpenSessionResult
-    // sets it unconditionally; everything between here and the restore below
-    // may hand it on.
     const claimedSessionId = result.sessionId;
 
     await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
-    // Fire-and-forget: rebuilding tabs for pod sessions another window
-    // created must not block the open flow, and trackOpenSessionMetadata
-    // records them safely even if the user has navigated away meanwhile.
     void dispatch(reattachRemoteTerminalTabs(runSelection, key, cols, rows));
     if (!isCurrentSelection()) {
       return;
     }
-    // isCurrentSelection tracks the environment, and stays true while the user
-    // picks a different tab of the same one -- which is exactly the move this
-    // restore would undo. ensureDefaultEnvTabs awaits a spawn per default tab,
-    // so that pick has had the whole of it to land, and a pane that has moved
-    // on is no longer this open's to re-point. Taking it back anyway strands
-    // the tab the user is on: the renderer writes only the session the store
-    // names, so everything that tab emits from then on is dropped, and with
-    // nothing left to dispatch the pane stays blank rather than recovering.
+    // Don't re-point a pane the user moved to another tab of this env; the
+    // renderer drops writes for any other session, leaving it blank.
     if (getState().terminal.sessionId === claimedSessionId) {
       dispatch(restoreSelectedTabForEnv(key));
     }
@@ -444,22 +381,13 @@ const finishOpenSession =
     controller.queueTerminalResize();
   };
 
-// activateLocalAfterCommand promotes the freshly-spawned Local session as
-// the active tab once an init/deploy command finishes. Init does not
-// spawn dependent tabs because the env config does not yet exist; the
-// environment-initialized handler reopens the env once the backend
-// confirms creation.
+// activateLocalAfterCommand activates the Local session after init/deploy.
 export const activateLocalAfterCommand =
   (selection: UISelection, result: StartSessionResult): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     if (result.orchestrated) {
-      // Agent-env deploy is a background build -> push -> deploy orchestration
-      // with no foreground PTY: there is no Local tab to attach, and recording
-      // one against the zero session id would create a dead tab. Status comes
-      // from the activity queue instead, so this branch only drops the
-      // transient "Deploying…" overlay before it lingers over a deploy this
-      // thunk no longer owns.
+      // Agent-env deploy runs in the background with no PTY to attach.
       dispatch(hideTerminalMessage());
       return;
     }
@@ -477,13 +405,8 @@ export const activateLocalAfterCommand =
     controller.queueTerminalResize();
   };
 
-// Visibility of system status (Nielsen #1) for `erun init` is provided by
-// three persistent surfaces: the sidebar placeholder row, the activity
-// drawer init entry, and the live `erun init` output in the Local tab.
-// Setting state.terminalMessage would flash a busy overlay for ~150 ms
-// inside the still-open modal and then be cleared by
-// activateLocalAfterCommand before the user could register it — see
-// erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3.
+// No terminalMessage for init: the modal is still open and the message would
+// only flash (erun-ui/AGENTS.md "UX Impact Review Checklist" item 3).
 export const startInitSelection =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, _getState, extra) => {
@@ -498,10 +421,6 @@ export const startInitSelection =
     await dispatch(activateLocalAfterCommand(selection, result));
   };
 
-// runDeploySessionSelection is the shared body for the deploy-family thunks:
-// surface the deploy status, size the terminal, invoke the given Start*Session
-// binding, then activate Local. Only the Wails method and the status message
-// differ across the three.
 const runDeploySessionSelection =
   (
     selection: UISelection,
@@ -521,8 +440,7 @@ const runDeploySessionSelection =
     await dispatch(activateLocalAfterCommand(selection, result));
   };
 
-// startDeploySelection installs an already-published version by reference — the
-// Deploy button. It never builds.
+// startDeploySelection installs an already-published version; it never builds.
 export const startDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runDeploySessionSelection(
     selection,
@@ -530,9 +448,7 @@ export const startDeploySelection = (selection: UISelection): AppThunk<Promise<v
     `Deploying runtime for ${selection.tenant} / ${selection.environment}...`,
   );
 
-// startInitialDeploySelection stands a freshly-created env up: build+push+deploy
-// for a builds-here env, install-by-reference for a runtime env (the env-create
-// flow's first deploy — the explicit act of producing the env's first version).
+// startInitialDeploySelection performs a new env's first deploy.
 export const startInitialDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runDeploySessionSelection(
     selection,
@@ -540,9 +456,7 @@ export const startInitialDeploySelection = (selection: UISelection): AppThunk<Pr
     `Deploying runtime for ${selection.tenant} / ${selection.environment}...`,
   );
 
-// startCreateVersionSelection is the explicit "create & deploy new version":
-// build this env's working tree into a fresh version, push it, and deploy it —
-// local-agent envs only.
+// startCreateVersionSelection builds, pushes and deploys a new version (local-agent only).
 export const startCreateVersionSelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runDeploySessionSelection(
     selection,
@@ -577,9 +491,5 @@ export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, ge
   }
 };
 
-// Re-exported here so existing session-thunks imports still resolve. The
-// environment-scoped teardown and single-tab selection live in their own
-// modules to keep this file under the max-lines cap; this flow owns the
-// multi-step selections only.
 export { closeEnvironment } from './closeEnvironmentThunks';
 export { closeTerminalTab, selectTerminalTab };

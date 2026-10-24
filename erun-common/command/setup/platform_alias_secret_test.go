@@ -6,17 +6,18 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-func testPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func testPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.erunpaas.com@erun",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "erun",
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
@@ -24,8 +25,6 @@ func testPlatformAliasProvider() configpkg.CloudProviderConfig {
 	}
 }
 
-// staticCloudStore is a CloudReadStore holding one already-resolved root config,
-// so alias resolution is exercised without touching the operator's own config.
 type staticCloudStore struct {
 	config configpkg.ERunConfig
 }
@@ -34,8 +33,6 @@ func (s staticCloudStore) LoadERunConfig() (configpkg.ERunConfig, string, error)
 	return s.config, "", nil
 }
 
-// installCapturingKubectl points ERUN_KUBECTL_BIN at a stub that records its
-// stdin, so the applied manifest can be asserted on rather than mocked away.
 func installCapturingKubectl(t *testing.T) *capturedManifest {
 	t.Helper()
 	dir := t.TempDir()
@@ -62,17 +59,14 @@ func (c *capturedManifest) read(t *testing.T) string {
 	return string(data)
 }
 
-// secondPlatformAliasProvider is a second erun-type alias on the same host:
-// what makes resolution ambiguous, and therefore what the operator's own
-// selection has to disambiguate.
-func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func secondPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.acme.services.erunpaas.com@acme",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "acme",
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
@@ -80,10 +74,7 @@ func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
 	}
 }
 
-// ambiguousHostStore is a host configured with two erun-type aliases and
-// signed in to both: the state the sole-alias default cannot answer, and the
-// state the explicit selection exists for. Both sessions are stored so the only
-// reason to decline is the ambiguity itself, never a missing token.
+// Both sessions are stored, so only the ambiguity can cause a decline.
 func ambiguousHostStore(t *testing.T) staticCloudStore {
 	t.Helper()
 	redirectConfigHomeForTest(t)
@@ -91,7 +82,7 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
-	providers := []configpkg.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
+	providers := []model.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
 	for _, provider := range providers {
 		if err := secretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 			t.Fatalf("save refresh token for %s: %v", provider.Alias, err)

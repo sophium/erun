@@ -3,18 +3,20 @@ package core
 import (
 	"fmt"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestSummarizeTimingRecordForProfileKeepsWholeTreeUnderTheCap(t *testing.T) {
-	record := TimingRecord{
+	record := model.TimingRecord{
 		DurationSeconds: 10,
 		Failed:          false,
-		Steps: []TimingStepJSON{
+		Steps: []model.TimingStepJSON{
 			{Name: "fast-image", DurationSeconds: 1},
 			{
 				Name:            "slow-image",
 				DurationSeconds: 9,
-				Steps: []TimingStepJSON{
+				Steps: []model.TimingStepJSON{
 					{Name: "linux/amd64", DurationSeconds: 5},
 					{Name: "linux/arm64", DurationSeconds: 4},
 				},
@@ -45,14 +47,14 @@ func TestSummarizeTimingRecordForProfileKeepsWholeTreeUnderTheCap(t *testing.T) 
 }
 
 func TestSummarizeTimingRecordForProfileBoundsToTopNCostliestSteps(t *testing.T) {
-	var steps []TimingStepJSON
+	var steps []model.TimingStepJSON
 	for i := 0; i < buildProfileTopStepCount+5; i++ {
-		steps = append(steps, TimingStepJSON{
+		steps = append(steps, model.TimingStepJSON{
 			Name:            fmt.Sprintf("step-%02d", i),
 			DurationSeconds: float64(i), // step-24 is costliest, step-00 cheapest
 		})
 	}
-	record := TimingRecord{DurationSeconds: 100, Steps: steps}
+	record := model.TimingRecord{DurationSeconds: 100, Steps: steps}
 
 	summary := SummarizeTimingRecordForProfile(record)
 
@@ -77,12 +79,12 @@ func TestSummarizeTimingRecordForProfileBoundsToTopNCostliestSteps(t *testing.T)
 }
 
 func TestSummarizeTimingRecordForProfileCarriesCgroupMetricsThrough(t *testing.T) {
-	recordCgroup := &BuildCgroupMetrics{Available: true, CPUSeconds: 12.5}
-	stepCgroup := &BuildCgroupMetrics{Available: false, Unavailable: "build cgroup counters were not readable"}
-	record := TimingRecord{
+	recordCgroup := &model.BuildCgroupMetrics{Available: true, CPUSeconds: 12.5}
+	stepCgroup := &model.BuildCgroupMetrics{Available: false, Unavailable: "build cgroup counters were not readable"}
+	record := model.TimingRecord{
 		DurationSeconds: 5,
 		Cgroup:          recordCgroup,
-		Steps: []TimingStepJSON{
+		Steps: []model.TimingStepJSON{
 			{Name: "image", DurationSeconds: 5, Cgroup: stepCgroup},
 		},
 	}
@@ -98,7 +100,7 @@ func TestSummarizeTimingRecordForProfileCarriesCgroupMetricsThrough(t *testing.T
 }
 
 func TestSummarizeTimingRecordForProfileHandlesNoSteps(t *testing.T) {
-	summary := SummarizeTimingRecordForProfile(TimingRecord{DurationSeconds: 1, Failed: true})
+	summary := SummarizeTimingRecordForProfile(model.TimingRecord{DurationSeconds: 1, Failed: true})
 
 	if summary.TotalStepCount != 0 || len(summary.TopSteps) != 0 || summary.TruncatedStepCount != 0 {
 		t.Fatalf("expected an empty step tree to summarize to no steps, got %+v", summary)

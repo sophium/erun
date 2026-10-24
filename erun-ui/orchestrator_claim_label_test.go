@@ -8,11 +8,7 @@ import (
 	"testing"
 )
 
-// claimLabelRunner is the GitHub boundary the provisioning path reaches,
-// recorded rather than crossed: it answers the label-existence probe from a
-// fixed label set and captures every command it was asked to run, so a test can
-// see both that a missing label is created and that an id which already has one
-// is left alone. No test here may reach a real repository.
+// claimLabelRunner records gh commands instead of running them.
 type claimLabelRunner struct {
 	labels []string
 	calls  [][]string
@@ -32,8 +28,6 @@ func (r *claimLabelRunner) run(_ context.Context, dir, name string, args ...stri
 	return "", nil
 }
 
-// createCalls returns the label-creating commands, which is the only call the
-// provisioning path makes that changes anything.
 func (r *claimLabelRunner) createCalls() [][]string {
 	var creates [][]string
 	for _, call := range r.calls {
@@ -44,18 +38,11 @@ func (r *claimLabelRunner) createCalls() [][]string {
 	return creates
 }
 
-// stubOrchestratorClaimLabel stands in for the GitHub boundary in every test
-// that reaches orchestrator provisioning without being about the claim label.
-// The production runner shells out to `gh` and, when the label is absent,
-// creates it — so a test that reached it would mint a real label on a real
-// repository. Nothing in this package may cross that boundary.
+// stubOrchestratorClaimLabel keeps tests from minting real labels via gh.
 func stubOrchestratorClaimLabel(context.Context, string, string, ...string) (string, error) {
 	return "", nil
 }
 
-// claimLabelApp confines $HOME to a temp dir and stages the GitHub boundary, so
-// ensuring the workspace writes nothing outside the test and mints no label
-// anywhere real.
 func claimLabelApp(t *testing.T, runner workingIssueCommandRunner) *App {
 	t.Helper()
 	home := t.TempDir()
@@ -71,11 +58,6 @@ func claimLabelApp(t *testing.T, runner workingIssueCommandRunner) *App {
 	return app
 }
 
-// TestOrchestratorProvisioningMintsTheClaimLabel is the reported failure: a new
-// orchestrator id was provisioned with its role file and its SessionStart hook
-// but no `wip:<id>` label, so `gh issue edit --add-label wip:<id>` — the first
-// step of the claim protocol in erun-orchestrate — was rejected outright and
-// the claim could not be made at all.
 func TestOrchestratorProvisioningMintsTheClaimLabel(t *testing.T) {
 	runner := &claimLabelRunner{labels: []string{"bug", "enhancement", "wip:erun"}}
 	app := claimLabelApp(t, runner.run)
@@ -99,9 +81,6 @@ func TestOrchestratorProvisioningMintsTheClaimLabel(t *testing.T) {
 	if !reflect.DeepEqual(creates[0], want) {
 		t.Fatalf("claim label creation\n got %q\nwant %q", creates[0], want)
 	}
-	// The repository is named on the command, not inferred from where it runs:
-	// the probe runs in the shared orchestrators root, which is not a git
-	// checkout, so `gh` there fails with "fatal: not a git repository".
 	for _, callDir := range runner.dirs {
 		if callDir != dir {
 			t.Fatalf("label command ran in %q, want the orchestrators root %q", callDir, dir)
@@ -109,10 +88,6 @@ func TestOrchestratorProvisioningMintsTheClaimLabel(t *testing.T) {
 	}
 }
 
-// TestOrchestratorProvisioningLeavesAnExistingClaimLabelAlone is the other
-// direction: the label an id already has is what a live holder is claiming
-// under, so provisioning must find it and stop rather than re-create it or
-// rewrite its colour and description.
 func TestOrchestratorProvisioningLeavesAnExistingClaimLabelAlone(t *testing.T) {
 	runner := &claimLabelRunner{labels: []string{"bug", "wip:erun-ideas", "wip:erun"}}
 	app := claimLabelApp(t, runner.run)
@@ -130,9 +105,6 @@ func TestOrchestratorProvisioningLeavesAnExistingClaimLabelAlone(t *testing.T) {
 	}
 }
 
-// TestOrchestratorClaimLabelProbeMatchesWholeNames pins the probe's comparison:
-// an id is present only when the repository carries that exact label, so an
-// orchestrator whose id is a prefix of another one's still gets its own.
 func TestOrchestratorClaimLabelProbeMatchesWholeNames(t *testing.T) {
 	runner := &claimLabelRunner{labels: []string{"wip:erun"}}
 	app := claimLabelApp(t, runner.run)
@@ -148,11 +120,6 @@ func TestOrchestratorClaimLabelProbeMatchesWholeNames(t *testing.T) {
 	}
 }
 
-// TestOrchestratorClaimLabelFailureIsReportedNotGuessedAt pins the failure
-// contract. The step is best-effort — an unreachable GitHub must not stop an
-// orchestrator launching — but a probe that could not answer must never be read
-// as "the label is missing" and turned into a creation attempt against a
-// repository erun could not read.
 func TestOrchestratorClaimLabelFailureIsReportedNotGuessedAt(t *testing.T) {
 	runner := &claimLabelRunner{err: errors.New("gh: command not found")}
 	app := claimLabelApp(t, runner.run)
@@ -170,8 +137,6 @@ func TestOrchestratorClaimLabelFailureIsReportedNotGuessedAt(t *testing.T) {
 	}
 }
 
-// TestOrchestratorClaimLabelSkippedWithoutAnID locks that a transient session —
-// which has no id and claims nothing — reaches GitHub with nothing at all.
 func TestOrchestratorClaimLabelSkippedWithoutAnID(t *testing.T) {
 	runner := &claimLabelRunner{}
 	app := claimLabelApp(t, runner.run)
@@ -185,9 +150,6 @@ func TestOrchestratorClaimLabelSkippedWithoutAnID(t *testing.T) {
 	}
 }
 
-// TestOrchestratorClaimLabelRefusesAnIDThatCannotNameOne pins the trust
-// boundary: a hand-edited config.yaml id is not trusted to name a label, since
-// whitespace in one would make the probe's whole-line comparison meaningless.
 func TestOrchestratorClaimLabelRefusesAnIDThatCannotNameOne(t *testing.T) {
 	runner := &claimLabelRunner{}
 	app := claimLabelApp(t, runner.run)

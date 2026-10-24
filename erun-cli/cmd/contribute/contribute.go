@@ -1,15 +1,14 @@
 package contribute
 
 import (
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
 )
 
-// NewContributeCmd groups the `erun contribute …` subcommands that drive
-// contribute-mode workflows.
-func NewContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
+// NewContributeCmd groups the `erun contribute …` subcommands.
+func NewContributeCmd(runGit seam.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contribute",
 		Short: "Run contribute-mode workflows that target the ERun source repository",
@@ -18,7 +17,7 @@ func NewContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	return cmd
 }
 
-func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
+func newContributeCloneCmd(runGit seam.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "clone",
 		Short:         "Clone the ERun repository into $HOME/git/erun for contribute mode if it is not already present",
@@ -26,10 +25,10 @@ func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			return review.RunContributeClone(ctx, "", runGit)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

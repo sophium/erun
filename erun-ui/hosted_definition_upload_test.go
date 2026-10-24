@@ -14,6 +14,7 @@ import (
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -25,10 +26,7 @@ const (
 	hostedUploadContext     = "test-context"
 )
 
-// hostedUploadRow is the platform row the stub serves. Its name, type and
-// Kubernetes context have to agree with the local config or the shared push
-// refuses before it uploads anything — which is the refusal working, not a
-// fixture problem.
+// hostedUploadRow must agree with the local config or the push refuses.
 func hostedUploadRow() map[string]any {
 	return map[string]any{
 		"environmentId":     "env-1",
@@ -40,8 +38,6 @@ func hostedUploadRow() map[string]any {
 	}
 }
 
-// hostedUploadConfig is a local environment already marked as hosted on the
-// stub's row, with one portable setting set so a change has something to move.
 func hostedUploadConfig(apiHost string) configpkg.EnvConfig {
 	return configpkg.EnvConfig{
 		Name:              hostedUploadEnvironment,
@@ -56,10 +52,7 @@ func hostedUploadConfig(apiHost string) configpkg.EnvConfig {
 	}
 }
 
-// hostedUploadPlatform is a stub platform that records every definition upload
-// it receives. A test asserts on what actually reached the platform rather
-// than on what the desktop intended to send, which is the only way to tell "the
-// watcher did not fire" from "the watcher fired and was told to skip".
+// hostedUploadPlatform records uploads so tests assert on what reached it.
 type hostedUploadPlatform struct {
 	*httptest.Server
 
@@ -96,15 +89,12 @@ func newHostedUploadPlatform(t *testing.T) *hostedUploadPlatform {
 	return platform
 }
 
-// uploadCount is how many definition writes the platform has received.
 func (p *hostedUploadPlatform) uploadCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.uploads)
 }
 
-// lastUpload is the payload of the most recent write, or nil when there is
-// none.
 func (p *hostedUploadPlatform) lastUpload() map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -114,9 +104,7 @@ func (p *hostedUploadPlatform) lastUpload() map[string]any {
 	return p.uploads[len(p.uploads)-1]
 }
 
-// isolateHostedUploadConfig points the shared xdg config dir at a temp
-// directory for one test. The adrg/xdg package caches its resolved base
-// directories at process init, so the env var alone is not enough.
+// adrg/xdg caches base dirs at init, so the env var alone is not enough.
 func isolateHostedUploadConfig(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -126,10 +114,6 @@ func isolateHostedUploadConfig(t *testing.T) string {
 	return home
 }
 
-// newHostedUploadApp builds an App whose config tree is a real temporary
-// directory and whose tenant platform is a real HTTP stub, so every step the
-// watcher drives — the local read, the push, the stamp write — is the
-// production one.
 func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	t.Helper()
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
@@ -137,15 +121,15 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
-	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    testERunAlias,
 		Provider: configpkg.CloudProviderERun,
 		Username: "erun",
-		ERun:     &configpkg.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+		ERun:     &model.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
-	if err := configpkg.SaveTenantConfig(configpkg.TenantConfig{Name: hostedUploadTenant}); err != nil {
+	if err := configpkg.SaveTenantConfig(model.TenantConfig{Name: hostedUploadTenant}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
@@ -163,10 +147,7 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	})
 }
 
-// changeHostedUploadConfig edits the environment's config the way an outside
-// writer does: read the file, change one setting, write it back. Rebuilding a
-// config from a fixture instead would drop the marker's digest, and the digest
-// is the very thing half of these tests are about.
+// Edits in place: rebuilding from a fixture would drop the marker's digest.
 func changeHostedUploadConfig(t *testing.T, mutate func(*configpkg.EnvConfig)) configpkg.EnvConfig {
 	t.Helper()
 	config, _, err := configpkg.LoadEnvConfig(hostedUploadTenant, hostedUploadEnvironment)
@@ -180,8 +161,6 @@ func changeHostedUploadConfig(t *testing.T, mutate func(*configpkg.EnvConfig)) c
 	return config
 }
 
-// seededHostedUploadApp is the common setup: an isolated config tree holding
-// one hosted environment, and an App over it.
 func seededHostedUploadApp(t *testing.T) (*App, *hostedUploadPlatform, string) {
 	t.Helper()
 	isolateHostedUploadConfig(t)
@@ -194,50 +173,29 @@ func seededHostedUploadApp(t *testing.T) (*App, *hostedUploadPlatform, string) {
 	return newHostedUploadApp(t, platform), platform, apiHost
 }
 
-// TestTheOriginFilterIsWhatTurnsTheWatchersOwnWriteAway isolates the origin
-// filter from the digest, which the end-to-end case below cannot.
-//
-// Both guards stop the ordinary case: a transfer stamps the digest of what it
-// sent, so the watcher's reaction to that very write finds nothing to upload
-// whether or not the filter is consulted. Staging the one state where the
-// digest cannot speak — a marker recording no digest, which asks for an upload
-// by definition — is what leaves the filter as the only thing between the
-// event and a second upload.
+// A digest-less marker always asks for an upload, leaving the filter as the
+// only guard.
 func TestTheOriginFilterIsWhatTurnsTheWatchersOwnWriteAway(t *testing.T) {
 	isolateHostedUploadConfig(t)
 	platform := newHostedUploadPlatform(t)
-	// No digest recorded, so HasUnsentChange() is true and an unfiltered
-	// reaction would upload.
 	if err := configpkg.SaveEnvConfig(hostedUploadTenant, hostedUploadConfig(platform.URL)); err != nil {
 		t.Fatalf("seed env config: %v", err)
 	}
 	app := newHostedUploadApp(t, platform)
 	target := []definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}}
 
-	// The write a transfer is about to make, recorded by the filter.
 	app.definitionWriteOrigin.mark(hostedUploadTenant, hostedUploadEnvironment)
 	app.reactToConfigWatchTargets(target)
 	if got := platform.uploadCount(); got != 0 {
 		t.Fatalf("the watcher fired on this desktop's own write: %d uploads, want 0", got)
 	}
 
-	// The same reaction with no mark is an outside change, and it uploads:
-	// the refusal above is the filter's, not an environment with nothing to
-	// send.
 	app.reactToConfigWatchTargets(target)
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("an outside change did not reach the platform: %d uploads, want 1", got)
 	}
 }
 
-// TestADesktopDefinitionWriteDoesNotReFireTheUpload is the loop this feature
-// would otherwise ship, walked one iteration at a time through the real
-// transaction: the desktop uploads, which stamps the environment's config
-// (that write is what the watcher sees); the watcher then reacts to that very
-// write, exactly as its own flush does; and only after that does an outside
-// change — `erun cloud set`, `erun init`, a deploy — land. Without the two
-// guards the middle step uploads, which stamps again, which the watcher sees
-// again. The test above is which guard is doing what.
 func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 
@@ -248,13 +206,11 @@ func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
 		t.Fatalf("the desktop's own upload reached the platform %d times, want 1", got)
 	}
 
-	// The watcher's reaction to the config write the upload just made.
 	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("the watcher fired on this desktop's own definition write: the platform received %d uploads, want 1", got)
 	}
 
-	// An outside change, made the way `erun init` / `erun cloud set` make one.
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "9.9.9" })
 	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 2 {
@@ -265,15 +221,9 @@ func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
 	}
 }
 
-// TestTheOriginMarkIsClearedWhenTheUploadWritesNothing keeps the filter from
-// swallowing a change it did not cause: a transfer that fails before its write
-// must not leave a live mark behind, or the next genuine outside change would
-// be reported as this desktop's own write and silently dropped.
 func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
-	// A marker naming a row the platform does not serve fails the transfer at
-	// its first step — the resolved row is not the one the marker names — so
-	// nothing is written and no config event follows.
+	// A marker naming an unknown row fails before any write.
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.Hosted.EnvironmentID = "some-other-row" })
 
 	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err == nil {
@@ -283,8 +233,6 @@ func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 		t.Fatalf("a refused upload reached the platform %d times", got)
 	}
 
-	// An outside change after the failure, which is exactly the change a mark
-	// left behind by the failed transfer would swallow.
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) {
 		config.Hosted.EnvironmentID = "env-1"
 		config.RuntimeVersion = "4.5.6"
@@ -295,20 +243,13 @@ func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 	}
 }
 
-// TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded is the
-// dirty flag's demonstration. The change is written with no watcher armed,
-// which is what "while the desktop was closed" means; it must be visible
-// before anything uploads it, and the launch pass must then converge it.
 func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 
-	// Establish a transfer, so there is a digest to compare against.
 	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
-	// An offline change: nothing is watching, and nothing will report it
-	// unless the marker itself can tell.
 	offline := changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "7.7.7" })
 
 	marker := hostedEnvironmentToUI(offline)
@@ -322,7 +263,6 @@ func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing
 		t.Error("the divergence is not rendered as a sentence the panel can show")
 	}
 
-	// Starting the desktop converges it.
 	app.catchUpHostedDefinitions()
 	if got := platform.uploadCount(); got != 2 {
 		t.Fatalf("the launch pass did not upload the offline change: %d uploads, want 2", got)
@@ -332,9 +272,6 @@ func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing
 	}
 }
 
-// TestAHostOwnedChangeIsNotUploaded is the digest guard's negative half: the
-// settings that never leave the machine are not a reason to spend an upload,
-// and a change to one must not read as divergence in the panel either.
 func TestAHostOwnedChangeIsNotUploaded(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 
@@ -355,9 +292,6 @@ func TestAHostOwnedChangeIsNotUploaded(t *testing.T) {
 	}
 }
 
-// TestAnUnhostedEnvironmentIsNeverUploaded pins the allowlist's outer edge: an
-// environment with no marker is not a definition transfer target at all, and a
-// config change to one must not reach the platform.
 func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 	unhosted := hostedUploadConfig(platform.URL)
@@ -374,17 +308,11 @@ func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
 	}
 }
 
-// TestTheWatcherUploadsAnOutsideChangeEndToEnd runs the real fsnotify watcher
-// over a real config tree against the stub platform, so the plumbing that
-// attributes a file event to an environment and reaches the upload is exercised
-// as the desktop actually runs it, rather than only at its decision function.
 func TestTheWatcherUploadsAnOutsideChangeEndToEnd(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 	app.startConfigWatcher()
 	t.Cleanup(app.stopConfigWatcher)
 
-	// A change made the way an outside writer makes one, with the watcher
-	// armed — the case that exists precisely because the desktop is running.
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "3.3.3" })
 
 	waitForUploadCount(t, platform, 1)
@@ -393,10 +321,7 @@ func TestTheWatcherUploadsAnOutsideChangeEndToEnd(t *testing.T) {
 	}
 }
 
-// waitForUploadCount blocks until the platform has seen want uploads. It waits
-// on the observable outcome rather than on a wall clock: the watcher debounces,
-// so how long a change takes to arrive is not something a fixed sleep can
-// assert, and a sleep that happened to pass would prove nothing.
+// Waits on the outcome, not a clock: the watcher debounces.
 func waitForUploadCount(t *testing.T, platform *hostedUploadPlatform, want int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -409,15 +334,11 @@ func waitForUploadCount(t *testing.T, platform *hostedUploadPlatform, want int) 
 	t.Fatalf("the platform saw %d uploads, want %d", platform.uploadCount(), want)
 }
 
-// TestDefinitionWatchTargetForAttributesOnlyAnEnvironmentsOwnConfig is the
-// attribution rule the upload path rests on, and it is deliberately narrow.
-// The root config.yaml holds CloudContextConfig.AdminToken in plaintext, and
-// every live config sits beside its own dated backup.
+// The root config.yaml holds an admin token in plaintext, and every config has
+// a dated backup beside it.
 func TestDefinitionWatchTargetForAttributesOnlyAnEnvironmentsOwnConfig(t *testing.T) {
 	isolateHostedUploadConfig(t)
-	// The root is the watcher's own root — the directory the config store
-	// resolves under — not an unrelated temp tree, or every case below would
-	// be rejected for the wrong reason and prove nothing.
+	// Use the watcher's real root, or every case is rejected for the wrong reason.
 	root, err := configpkg.ERunConfigDir()
 	if err != nil {
 		t.Fatalf("resolve config dir: %v", err)
@@ -453,10 +374,6 @@ func TestDefinitionWatchTargetForAttributesOnlyAnEnvironmentsOwnConfig(t *testin
 	}
 }
 
-// TestTheOriginFilterConsumesAtMostOncePerMark pins the filter's own contract:
-// a mark is spent by the first decision, so a burst that straddles a debounce
-// window cannot swallow a second change, and an explicit clear drops a mark
-// whose write never happened.
 func TestTheOriginFilterConsumesAtMostOncePerMark(t *testing.T) {
 	var origin definitionWriteOrigin
 	if origin.consume("team", "dev") {
@@ -485,9 +402,6 @@ func TestTheOriginFilterConsumesAtMostOncePerMark(t *testing.T) {
 	origin.consume("team", "dev")
 }
 
-// TestTheDirtyFlagIsStampedOnDisk is the persisted half of the dirty flag: the
-// digest has to survive the process, or a change made while the desktop was
-// closed is indistinguishable from one made while it was open.
 func TestTheDirtyFlagIsStampedOnDisk(t *testing.T) {
 	app, _, _ := seededHostedUploadApp(t)
 	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {

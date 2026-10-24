@@ -5,15 +5,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, deployHelmChart common.HelmChartDeployerFunc, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{
@@ -48,7 +53,7 @@ func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
 			result, err := lifecycle.RunRuntimeResize(ctx, lifecycle.RuntimeResizeDependencies{
 				Store:                          store,
 				SaveEnvConfig:                  saveEnvConfig,
@@ -58,10 +63,10 @@ func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				Now:                            time.Now,
 				DeployHelmChart:                deployHelmChart,
 				LoadActivityLeases:             resizeActivityLeaseLoader(cmd.Context(), ctx, resolveOpen),
-			}, lifecycle.RuntimeResizeParams{
+			}, model.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
-				Input: lifecycle.RuntimeResizeInput{
+				Input: model.RuntimeResizeInput{
 					CPU:                 cpu,
 					Memory:              memory,
 					DindCPU:             dindCPU,
@@ -69,18 +74,18 @@ func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 					ApplyRecommendation: applyRecommendation,
 				},
 				OverrideLease: overrideLease,
-				Holder:        activity.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
+				Holder:        model.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			})
 			if err != nil {
 				return err
 			}
-			if ctx.Output == core.OutputJSON {
+			if ctx.Output == model.OutputJSON {
 				return ctx.WriteResult(result)
 			}
 			return writeResizeResult(ctx, result)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&cpu, "cpu", "", "Explicit CPU limit for the runtime pod (Kubernetes quantity, e.g. 6); omit to leave CPU unchanged unless --apply-recommendation")
@@ -93,35 +98,22 @@ func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	return cmd
 }
 
-// resizeActivityLeaseLoader gives RunRuntimeResize's occupancy check a lease
-// reader that actually reaches the target environment. LoadEnvironmentActivityLeases
-// reads whatever filesystem the calling process itself runs on; a resize invoked
-// from the operator's own machine against a remote environment runs on a
-// different filesystem than that environment's own lease store (the same
-// "two homes" split environment_call.go documents for activity/job/idle), so
-// reading locally there always finds nothing and the guard never fires. When
-// this process is not itself the target environment, dispatch through the
-// environment's own MCP edge instead, exactly like `erun activity lease list`
-// already does off-environment.
-//
-// The dispatch runs even under --dry-run, unlike callEnvironmentTool's normal
-// dry-run behavior of only tracing the call: resize's own dry-run exists to
-// answer "would this be refused", and a stale "no leases" answer would silently
-// defeat that. Reading leases has no side effect, so forcing the real call here
-// costs nothing dry-run is meant to avoid.
-func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver) func(string, string, time.Time) ([]activity.EnvironmentActivityLease, error) {
+// resizeActivityLeaseLoader reads leases from the target environment's own store,
+// via its MCP edge when off-environment. It runs even under --dry-run, since
+// dry-run must still answer "would this be refused".
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver) func(string, string, time.Time) ([]model.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false
-	return func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error) {
-		if shared.EnvironmentTargetsItself() {
+	return func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error) {
+		if envcall.EnvironmentTargetsItself() {
 			return activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 		}
-		leases, _, err := shared.ListLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
+		leases, _, err := envcall.ListLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
 		return leases, err
 	}
 }
 
-func writeResizeResult(ctx core.Context, result lifecycle.RuntimeResizeResult) error {
+func writeResizeResult(ctx core.Context, result model.RuntimeResizeResult) error {
 	if ctx.DryRun {
 		return nil
 	}

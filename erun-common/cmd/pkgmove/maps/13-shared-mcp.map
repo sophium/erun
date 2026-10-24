@@ -1,0 +1,72 @@
+# Split erun-mcp/tools/shared into one small package per concern, so a tool
+# group imports only the helpers it uses and an edit rebuilds only their users.
+
+# Run from erun-mcp, paths relative to the erun-mcp module root:
+#   go run ../erun-common/cmd/pkgmove plan -map <this map> \
+#     -dir . -module github.com/sophium/erun/erun-mcp -importers .
+
+# Caller identity and the authz audit line (infra/mcptools only).
+tools/shared/callerid tools/shared/capabilities.go:AuthIdentity
+tools/shared/callerid tools/shared/capabilities.go:authContextKey
+tools/shared/callerid tools/shared/capabilities.go:WithAuthIdentity
+tools/shared/callerid tools/shared/capabilities.go:AuthIdentityFrom
+tools/shared/callerid tools/shared/capabilities.go:AuditToolDecision
+tools/shared/callerid tools/shared/capabilities.go:orUnset
+
+# Tool registration, descriptor metadata, preview advertising and the call guard.
+tools/shared/registrar tools/shared/capabilities.go
+tools/shared/registrar tools/shared/metrics.go:mcpCallResultLabel
+tools/shared/registrar tools/shared/metrics.go:commandOutputExecuted
+
+# Prometheus series the server and the call guard record into (no erun package).
+tools/shared/toolmetrics tools/shared/metrics.go
+
+# Bearer/OIDC edge authentication (infra/mcpauth).
+tools/shared/edgeauth tools/shared/auth*.go
+
+# Build stamp set by -ldflags.
+tools/shared/buildinfo tools/shared/buildinfo.go
+
+# Thin cloud dependency constructor (infra/cloud).
+tools/shared/clouddeps tools/shared/cloud.go
+
+# Job handle view (primitive/shared).
+tools/shared/jobresult tools/shared/job.go
+
+# Light output, trace and context helpers every tool shares (base/* only).
+tools/shared/toolio tools/shared/doctor.go
+tools/shared/toolio tools/shared/pin.go
+tools/shared/toolio tools/shared/platform.go
+tools/shared/toolio tools/shared/runtime.go:RuntimeContext
+tools/shared/toolio tools/shared/runtime.go:CommandOutput
+tools/shared/toolio tools/shared/runtime.go:ansiRegexp
+tools/shared/toolio tools/shared/runtime.go:RuntimeRepoPath
+tools/shared/toolio tools/shared/runtime.go:captureCommandOutput
+tools/shared/toolio tools/shared/runtime.go:MirrorToJobLog
+tools/shared/toolio tools/shared/runtime.go:RunCommandOutput
+tools/shared/toolio tools/shared/runtime.go:RuntimeFindProjectRoot
+tools/shared/toolio tools/shared/runtime.go:FirstNonEmpty
+tools/shared/toolio tools/shared/runtime.go:RuntimeCallContext
+tools/shared/toolio tools/shared/runtime.go:NormalizeTraceLines
+
+# Running a runtime command with env trace and cloud preflight (command/e2e, infra/cloud).
+tools/shared/runcmd tools/shared/runtime.go:RunRuntimeCommand
+tools/shared/runcmd tools/shared/job_envelope.go:SimpleJobExecute
+
+# The wait/background job envelope (command/jobs).
+tools/shared/jobenvelope tools/shared/job_envelope.go
+
+# Recording runtime activity (infra/activity).
+tools/shared/activityrec tools/shared/server.go
+
+# Used by tools/build alone.
+tools/build tools/shared/runtime.go:RuntimePushFunc
+
+# Used by the server package alone.
+. tools/shared/credentials*.go
+
+# The server's runtime wiring and its own-environment scoping.
+tools/shared/runtimecfg tools/shared/runtime.go
+tools/shared/runtimecfg tools/shared/tenant_scope*.go
+tools/shared/runtimecfg tools/shared/local_target_test.go
+tools/shared/runtimecfg tools/shared/suite_main_test.go

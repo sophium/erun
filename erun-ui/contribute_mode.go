@@ -6,8 +6,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -24,13 +25,9 @@ type uiContributeAppLaunch struct {
 
 const contributeChangedEvent = "contribute:changed"
 
-// reservedContributeTenant is the tenant name that owns the ERun project
-// itself. Contribute mode lets users contribute back TO that project
-// from any other env; offering it inside the erun tenant would be
-// self-referential and confusing, so the toggle is hidden there.
+// reservedContributeTenant owns ERun itself; contributing from it would be self-referential.
 const reservedContributeTenant = "erun"
 
-// IsContributeEligible reports whether contribute mode is allowed for the given env.
 func (a *App) IsContributeEligible(selection uiSelection) bool {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -43,15 +40,16 @@ func (a *App) IsContributeEligible(selection uiSelection) bool {
 	if err != nil {
 		return false
 	}
-	switch config.EnvironmentType(envConfig.Type) {
+	switch envConfig.Type {
 	case config.EnvironmentTypeLocalAgent, config.EnvironmentTypeRemoteAgent:
 		return true
+	case config.EnvironmentTypeRuntime, config.EnvironmentTypeHost:
+		fallthrough
 	default:
 		return false
 	}
 }
 
-// GetContributeMode reports whether the env is currently flagged in contribute mode.
 func (a *App) GetContributeMode(selection uiSelection) bool {
 	if a.contribute == nil {
 		return false
@@ -59,11 +57,8 @@ func (a *App) GetContributeMode(selection uiSelection) bool {
 	return a.contribute.get(selection)
 }
 
-// SetContributeMode toggles contribute mode for the env; enabling it
-// requires an eligible env and clones ERun into it first.
-//
-// The caller (the frontend thunk) spawns or closes the contribute tabs
-// after this returns; this method does not touch them.
+// SetContributeMode toggles contribute mode, cloning ERun first when enabling.
+// The frontend manages the contribute tabs.
 func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeState, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("set contribute mode", selection.Tenant, selection.Environment); err != nil {
@@ -96,7 +91,7 @@ func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeSta
 }
 
 func (a *App) runEnsureErunClone(selection uiSelection) error {
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -131,7 +126,7 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	if !a.GetContributeMode(selection) {
 		return 0, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -145,9 +140,7 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	return port, nil
 }
 
-// StartContributeApp backs the "Open contribute app" affordance: it runs
-// the headless ERun app in the env's contribute tab and returns the URL
-// the frontend opens in the browser.
+// StartContributeApp runs the headless app in the contribute tab and returns its URL.
 func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
 	selection = normalizeSelection(selection)
 	port, err := a.resolveContributeAppPort(selection)
@@ -155,10 +148,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		return uiContributeAppLaunch{}, err
 	}
 
-	// Run the headless server inside the contribute tab (not silently) so
-	// the user sees build progress and can Ctrl-C it in the terminal they
-	// already have open. Best-effort: if that tab is gone, the port-forward
-	// below still reaches a manually-launched headless on the same port.
+	// Run in the contribute tab so the user sees the build and can Ctrl-C it. Best-effort.
 	a.sendCommandToContributeERunSession(selection, contributeAppLaunchCommand(port))
 
 	if a.contributeApps == nil {
@@ -180,9 +170,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		return uiContributeAppLaunch{}, err
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", localPort)
-	// window.open from the React side stays inside the WKWebView and never
-	// reaches an external browser, so open the URL through the Wails runtime
-	// instead — otherwise the launcher button feels broken.
+	// window.open stays inside the WKWebView, so open through the Wails runtime.
 	if a.ctx != nil {
 		runtime.BrowserOpenURL(a.ctx, url)
 	}
@@ -199,8 +187,7 @@ func (a *App) stopContributeAppForward(selection uiSelection) {
 			forward.stop()
 		}
 	}
-	// 0x03 (Ctrl-C) interrupts the foreground headless process in the
-	// interactive contribute shell without killing the shell itself.
+	// Ctrl-C stops the headless process without killing the shell.
 	a.sendCommandToContributeERunSession(selection, "\x03")
 }
 

@@ -11,18 +11,9 @@ import {
   uniqueEnvironmentName,
 } from '../../fixtures/seedRoot.js';
 
-// Fault-injection reproduction of the field redeploy loop: on the erun-k3s (WSL2)
-// cluster the MCP port-forward keeps dropping while the pod stays healthy, and the
-// desktop reacts by redeploying — forever. k3d's port-forward is reliable, so this
-// spec MANUFACTURES the same condition by repeatedly rolling the runtime pod (each
-// roll drops the forward to the now-terminating pod, exactly like the field). The
-// desktop's automatic reconnect runs `erun open --no-shell` (no --deploy), which
-// must NEVER redeploy: a dropped forward against an already-deployed env issues no
-// deploy. Fails (naming the culprit method) if it does.
-//
-// The env is a runtime (remote-worktree) type, so `erun init` deploys it once and
-// the desktop opens directly — there is no frontend deploy at all. Any deploy call
-// observed here is therefore an unwanted reconnect-triggered redeploy.
+// Rolling the runtime pod drops the MCP forward while the env stays deployed;
+// the reconnect (`erun open --no-shell`) must never redeploy. A runtime env is
+// deployed by `erun init` alone, so any frontend deploy call here is a defect.
 
 function deployMethodOf(request: Request): string | null {
   const body = request.postData() ?? '';
@@ -69,10 +60,7 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
         /* pod may be mid-roll; ignore */
       }
     };
-    // Each roll is bounded by the cluster's own rollout completing rather than
-    // by a guessed sleep: the condition this spec manufactures is "the forward
-    // dropped and the pod came back", and that is exactly what rollout status
-    // reports.
+    // Bounded by rollout status, not a sleep.
     const waitForRuntimeRollout = (): void => {
       execFileSync(
         'kubectl',
@@ -103,8 +91,6 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
     });
 
     try {
-      // Stand the env up the real way: `erun init` for a runtime env deploys the
-      // runtime itself and the desktop opens directly (no frontend deploy).
       await app.page.evaluate(
         (sel) => {
           const boundApp = (
@@ -130,16 +116,11 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
         },
       );
 
-      // Init's deploy + the direct open completes (real ghcr pull + helm rollout +
-      // MCP bind); the ERun tab binds only once the pod is Ready.
       await expect(app.page.getByRole('tab', { name: 'ERun', exact: true })).toBeVisible({
         timeout: 8 * 60 * 1000,
       });
       const deploysAfterOpen = deploys.length;
 
-      // Now manufacture the field condition: roll the pod nine times, waiting
-      // each time for it to come back, so the desktop repeatedly sees the MCP
-      // forward drop against a healthy, already-deployed env.
       for (let roll = 0; roll < 9; roll += 1) {
         rollPod();
         waitForRuntimeRollout();

@@ -8,16 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// zzReinvocationStubClaude puts a stub `claude` on PATH — the name both the
-// original argv and the resume argv are built with, so the stub stands in for
-// the real tool on every turn, exactly as the integration harness's own stub
-// does. It reports a session id on every turn, and appends its own argv to
-// capture every time it is invoked as a *resumed* turn. capture is how a test
-// reads back the prompt the supervisor actually handed the resumed turn,
-// rather than the string it meant to hand it.
+// zzReinvocationStubClaude stubs `claude` on PATH, reporting a session id and
+// appending each resumed turn's argv to capture.
 func zzReinvocationStubClaude(t *testing.T, capture string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -38,12 +35,9 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// zzRunLaneWithFailedProbe runs a real agent-job supervisor for a lane whose
-// own probe sub-job has already finished, failed, and been recorded — the
-// state every reproduction lane ends in, and the state that makes the
-// supervisor resume the lane's session. It returns the lane's final record and
-// the argv the resumed turn was actually run with.
-func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.EnvironmentJob, string) {
+// zzRunLaneWithFailedProbe runs an agent lane whose probe sub-job already failed,
+// returning the lane record and the resumed turn's argv.
+func zzRunLaneWithFailedProbe(t *testing.T, task string) (jobstate.EnvironmentJob, string) {
 	t.Helper()
 	isolateActivityCache(t)
 
@@ -51,7 +45,7 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 	const environment = "lane"
 	const laneID = "lane"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -59,16 +53,12 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 
-	// The lane's own probe: a job it started, that reds on purpose, and that
-	// had already finished by the time the lane's own process ended. Nothing
-	// about the record distinguishes "red on purpose" from any other failure —
-	// that is the whole point, and why the resumption prompt is the only place
-	// the lane's finding can be protected.
+	// The probe reds on purpose; its record looks like any other failure.
 	probeCode := 1
-	if err := writeEnvironmentJob(dir, eruncommon.EnvironmentJob{
+	if err := writeEnvironmentJob(dir, jobstate.EnvironmentJob{
 		ID:             "probe",
 		Name:           "probe",
-		State:          eruncommon.EnvironmentJobStateExited,
+		State:          jobstate.EnvironmentJobStateExited,
 		StartedAt:      time.Now(),
 		EndedAt:        time.Now(),
 		ExitCode:       &probeCode,
@@ -81,14 +71,12 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 	capture := filepath.Join(t.TempDir(), "resumed-argv")
 	zzReinvocationStubClaude(t, capture)
 
-	// The lane's own argv, built by the same constructor production uses, and
-	// recorded verbatim — exactly the shape a real record keeps.
 	command, err := AgentJobCommand("claude", task)
 	if err != nil {
 		t.Fatalf("AgentJobCommand: %v", err)
 	}
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          laneID,
@@ -110,25 +98,13 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 	return lane, string(captured)
 }
 
-// The reproduction of the reported loss. A lane is dispatched with a brief that
-// asks for a failing probe, which is what every reproduction is: the probe reds on
-// purpose, the supervisor resumes the lane to account for it, and the lane
-// answers *that* — so the finding the brief asked for is never delivered, and
-// the job still reads as `exited 0`.
-//
-// The decisive part is what the resumed turn is handed. Before this change the
-// resumption carried only the failure, so the resumed turn's final message —
-// the only channel a one-shot run's finding has — was an explanation of the
-// lane's own scratch probe. Here the argv the supervisor actually runs is read
-// back and must still carry the task the run was originally given, so the
-// final message has somewhere to put the answer.
+// A resumed turn must still carry the original task, or its final message
+// explains the probe instead of delivering the finding.
 func TestReinvocationResumesWithTheTaskTheRunWasOriginallyGiven(t *testing.T) {
 	const task = "verify the titlebar budget mechanism and report the verdict"
 
 	lane, resumedArgv := zzRunLaneWithFailedProbe(t, task)
 
-	// The resumption is still the bounded recovery it was: the same job, the
-	// same session, the same failure named, the same bound.
 	if lane.ReinvocationCount != resolveEnvironmentJobMaxReinvocations() {
 		t.Fatalf("ReinvocationCount = %d, want the bound %d", lane.ReinvocationCount, resolveEnvironmentJobMaxReinvocations())
 	}
@@ -147,16 +123,13 @@ func TestReinvocationResumesWithTheTaskTheRunWasOriginallyGiven(t *testing.T) {
 	}
 }
 
-// The other half of the contract, asserted directly because the reproduction
-// above can only exercise the recoverable case: a job whose agent argv is not
-// recoverable gets today's prompt verbatim, with nothing invented in place of
-// a task nobody recorded.
+// An unrecoverable argv gets the plain prompt, with no invented task.
 func TestReinvocationPromptInventsNoTaskItCannotRecover(t *testing.T) {
-	job := eruncommon.EnvironmentJob{
+	job := jobstate.EnvironmentJob{
 		Kind:      EnvironmentJobKindAgent,
 		AgentTool: "claude",
 		Command:   []string{"claude", "--output-format", "stream-json", "-p", "task"},
-		Progress:  &eruncommon.AgentJobProgress{SessionID: "session"},
+		Progress:  &jobstate.AgentJobProgress{SessionID: "session"},
 	}
 	got := buildEnvironmentJobReinvocationPrompt(job, "the job this job started (gate) did not succeed")
 	if strings.Contains(got, "The task you were given was") {
@@ -166,20 +139,16 @@ func TestReinvocationPromptInventsNoTaskItCannotRecover(t *testing.T) {
 		t.Fatalf("the outcome is no longer named: %q", got)
 	}
 
-	commandJob := eruncommon.EnvironmentJob{
+	commandJob := jobstate.EnvironmentJob{
 		Kind:     EnvironmentJobKindCommand,
 		Command:  []string{"make", "check"},
-		Progress: &eruncommon.AgentJobProgress{SessionID: "session"},
+		Progress: &jobstate.AgentJobProgress{SessionID: "session"},
 	}
 	if got := buildEnvironmentJobReinvocationPrompt(commandJob, "outcome"); strings.Contains(got, "The task you were given was") {
 		t.Fatalf("a command job's argv was read back as an agent task: %q", got)
 	}
 }
 
-// AgentJobCommandPrompt is the inverse of AgentJobCommand or it is a way to
-// hand a resumed turn a fragment of some unrelated argv, so the round trip is
-// pinned for every tool and the refusals are pinned for the shapes it must not
-// guess at.
 func TestAgentJobCommandPromptIsAgentJobCommandsInverse(t *testing.T) {
 	for _, tool := range AgentJobTools {
 		const task = "check the budget mechanism, and say what it does with an unspent window"

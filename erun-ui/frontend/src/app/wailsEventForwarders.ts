@@ -7,18 +7,14 @@ import { dismissNotificationForEnv } from './slices/notificationSlice';
 import type { AppDispatch } from './store';
 import { handleEventsDropped } from './wailsEventThunks';
 
-// Payload shape of the "app-close-gate" event PrepareWindowClose emits (Go
-// main.uiCloseGate). Only the running list matters here: the event only
-// fires when blocked is true.
+// The event only fires when blocked is true.
 interface AppCloseGatePayload {
   blocked: boolean;
   running?: ActivityQueueEntry[];
 }
 
-// attachWailsEventForwarders bridges Go runtime events into Redux with
-// page-lifetime subscriptions we never tear down. createListenerMiddleware is
-// unusable here: its abort signal unsubscribes every callback the moment the
-// async effect resolves, so activity entries never reach the store.
+// createListenerMiddleware cannot be used: its abort signal unsubscribes when
+// the effect resolves.
 export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   EventsOn('activity:state', (entry: ActivityQueueEntry) => {
     dispatch(upsertActivityEntry(entry));
@@ -26,9 +22,6 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   EventsOn('activity:lock', (event: ActivityLockEvent) => {
     dispatch(setActivityLock(event));
   });
-  // Retire an env-tagged notification once the state it described has moved on:
-  // the runtime-unreachable warning clears when a deploy for its env starts or
-  // the runtime becomes reachable.
   EventsOn('app-notification-clear', (event: AppNotificationClearPayload) => {
     dispatch(
       dismissNotificationForEnv({
@@ -41,10 +34,6 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   EventsOn('app-close-gate', (gate: AppCloseGatePayload) => {
     dispatch(openCloseGate(gate.running ?? []));
   });
-  // Reserved gap marker from the headless HTTP+SSE bridge (see
-  // headlessserver.eventsDroppedName) -- see handleEventsDropped's own
-  // comment for why this tab reacts rather than reading the marker's absence
-  // from every other handler above as "nothing happened".
   EventsOn('erun:events-dropped', (missed: number) => {
     void dispatch(handleEventsDropped(missed));
   });

@@ -45,10 +45,10 @@ func loadSettingsFile(path string) (map[string]json.RawMessage, error) {
 	if len(data) == 0 {
 		return settings, nil
 	}
-	if jsonErr := json.Unmarshal(data, &settings); jsonErr != nil || settings == nil {
-		return make(map[string]json.RawMessage), nil
+	if json.Unmarshal(data, &settings) == nil && settings != nil {
+		return settings, nil
 	}
-	return settings, nil
+	return make(map[string]json.RawMessage), nil
 }
 
 func isBypassPermissionsConfigured(settings map[string]json.RawMessage) bool {

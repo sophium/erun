@@ -2,6 +2,5 @@
 
 package main
 
-// importLoginShellEnv is a no-op off macOS: Linux and Windows GUI apps
-// already inherit the user's login environment, so there is nothing to import.
+// GUI apps off macOS already inherit the login environment.
 func importLoginShellEnv() {}

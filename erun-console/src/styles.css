@@ -1,14 +1,7 @@
 @import 'erun-kit/theme.css';
-/* erun-kit ships Tailwind utility classes in its component source, which lives
-   under node_modules via the workspace symlink and is excluded from Tailwind's
-   default content scan; @source opts it back in so those classes still emit. */
+/* erun-kit's source sits under node_modules, which Tailwind's default scan skips. */
 @source '../../erun-kit/src';
 
-/* erun-kit's theme.css already sets background/color/font-family on :root and
-   body (@layer base); this file only needs the true global that isn't part of
-   the shared token contract. Every surface below the root is now built from
-   erun-kit widgets and shadcn primitives styled with Tailwind utilities in
-   each component — see erun-console/AGENTS.md § Toolchain. */
 * {
   box-sizing: border-box;
 }

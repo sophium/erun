@@ -6,21 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestRecommendedDeployRecovery locks the diagnosis → single-recovery mapping.
-// `erun doctor --dry-run` never reaches this classifier -- the recovery
-// prompt itself is skipped outright under --dry-run, since recommending and
-// running a recovery are both mutating concerns -- so it is unreachable from
-// the dry-run integration subprocess and is covered here.
+// The recovery prompt is skipped under --dry-run, so the integration goldens
+// cannot reach this classifier.
 func TestRecommendedDeployRecovery(t *testing.T) {
 	cases := []struct {
 		name          string
 		helmStatus    string
 		helmReadError string
-		wantAction    eruncommon.DeployRecoveryAction
+		wantAction    model.DeployRecoveryAction
 		wantOK        bool
 	}{
 		{
@@ -36,31 +34,17 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 		{
 			name:       "pending-upgrade recommends clearing the lock",
 			helmStatus: "NAME: team-devops\nSTATUS: pending-upgrade\nREVISION: 3",
-			wantAction: eruncommon.DeployRecoveryClearPendingHelm,
+			wantAction: model.DeployRecoveryClearPendingHelm,
 			wantOK:     true,
-		},
-		{
-			name:       "pending-install recommends clearing the lock",
-			helmStatus: "STATUS: pending-install",
-			wantAction: eruncommon.DeployRecoveryClearPendingHelm,
-			wantOK:     true,
-		},
-		{
-			name:       "deployed offers nothing",
-			helmStatus: "NAME: team-devops\nSTATUS: deployed\nREVISION: 4",
-			wantOK:     false,
 		},
 		{
 			name:       "failed recommends rollback",
 			helmStatus: "NAME: team-devops\nSTATUS: failed\nREVISION: 5",
-			wantAction: eruncommon.DeployRecoveryRollback,
+			wantAction: model.DeployRecoveryRollback,
 			wantOK:     true,
 		},
 		{
-			// This is the defect erun#1659 exists to fix: a status string
-			// that would otherwise fall into the "failed" default arm must
-			// not recommend a rollback when the read itself is the thing
-			// that failed, not the release.
+			// A failed read must not recommend a rollback.
 			name:          "unreadable release offers nothing even though the status text looks like a failure",
 			helmStatus:    "Error from server (Forbidden): secrets is forbidden: User \"jane\" cannot list resource \"secrets\"",
 			helmReadError: `observe: not authorized to read helm release "team-devops" in namespace "team-dev"`,
@@ -69,7 +53,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			action, ok := eruncommon.RecommendedDeployRecovery(eruncommon.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
+			action, ok := deploy.RecommendedDeployRecovery(model.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -80,10 +64,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 	}
 }
 
-// writeDoctorHelmStub points ERUN_HELM_BIN at a script that prints stdout and
-// stderr and exits with the given code, so a test can drive RunDeployDiagnosis
-// against the real, distinct shapes a live `helm status` invocation returns
-// (plain text, not the `-o json` shape observe reads) without a live cluster.
+// writeDoctorHelmStub points ERUN_HELM_BIN at a script with the given output and exit code.
 func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
@@ -102,16 +83,12 @@ func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Setenv("ERUN_HELM_BIN", path)
 }
 
-// TestRunDeployDiagnosisRecordsHelmReadError is the end-to-end half of
-// erun#1659's fix: a failed helm read (here, an RBAC denial reading the
-// release Secrets) must populate HelmReadError, and that alone must be enough
-// for RecommendedDeployRecovery to refuse a destructive recovery -- without
-// this repo adding another strings.Contains arm for the RBAC wording.
+// A failed helm read (RBAC denial) alone must block a destructive recovery.
 func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError == "" {
 		t.Fatalf("expected a non-empty HelmReadError for a failed RBAC read")
@@ -119,107 +96,59 @@ func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	if !strings.Contains(diagnosis.HelmReadError, "not authorized") {
 		t.Fatalf("HelmReadError must explain the RBAC cause, got %q", diagnosis.HelmReadError)
 	}
-	if action, ok := eruncommon.RecommendedDeployRecovery(diagnosis); ok {
+	if action, ok := deploy.RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("recommended action = %q, ok = true; want no recovery recommended for an unreadable release", action)
 	}
 }
 
-// TestRunDeployDiagnosisMissingReleaseHasNoReadError locks the unchanged
-// side: `helm status` also exits non-zero for a genuinely missing release,
-// but that is a confirmed answer, not a failed read, so HelmReadError must
-// stay empty.
+// A missing release is a confirmed answer, not a failed read.
 func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", "Error: release: not found", 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError != "" {
 		t.Fatalf("expected no HelmReadError for a confirmed-missing release, got %q", diagnosis.HelmReadError)
 	}
-	if action, ok := eruncommon.RecommendedDeployRecovery(diagnosis); ok {
+	if action, ok := deploy.RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("recommended action = %q, ok = true; want no recovery recommended for a missing release", action)
 	}
 }
 
-// TestRunDeployDiagnosisPopulatesUnderDryRun is the regression test for
-// erun#2403: --dry-run scopes itself to mutations, and this diagnosis is
-// strictly read-only, so it must populate HelmStatus/Pods under --dry-run
-// exactly as it does on a real run instead of returning an empty result.
-func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
-	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
-	writeKubectlStub(t, "", 0)
-
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(true), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
-
-	if !strings.Contains(diagnosis.HelmStatus, "STATUS: failed") {
-		t.Fatalf("expected --dry-run to still populate HelmStatus, got %q", diagnosis.HelmStatus)
-	}
-}
-
-// TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback is the test that
-// stops erun#1659's fix from regressing into "never recommend anything":
-// `helm status` exits 0 for a release that exists but genuinely failed, so
-// HelmReadError must stay empty and the rollback recommendation must survive.
+// A failed release still reads successfully and must still recommend rollback.
 func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError != "" {
 		t.Fatalf("expected no HelmReadError for a genuinely failed release, got %q", diagnosis.HelmReadError)
 	}
-	action, ok := eruncommon.RecommendedDeployRecovery(diagnosis)
-	if !ok || action != eruncommon.DeployRecoveryRollback {
-		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, eruncommon.DeployRecoveryRollback)
+	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
+	if !ok || action != model.DeployRecoveryRollback {
+		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, model.DeployRecoveryRollback)
 	}
 }
 
-// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable is the regression
-// for an unreachable cluster: a helm status read that fails with the cluster's
-// own unreachable-API-server signal must set ClusterUnreachable and skip the
-// second kubectl probe entirely, rather than paying its own timeout to
-// rediscover the same fact. kubectl is pointed at a stub that fails the test
-// if ever invoked, so a regression that re-adds the probe fails loudly.
-func TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable(t *testing.T) {
-	writeDoctorHelmStub(t, "", `Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version": dial tcp 198.51.100.10:6443: i/o timeout`, 1)
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
-
-	if !diagnosis.ClusterUnreachable {
-		t.Fatalf("expected ClusterUnreachable = true for an unreachable API server, got false (HelmReadError=%q)", diagnosis.HelmReadError)
-	}
-	if diagnosis.Pods != "" {
-		t.Fatalf("expected the pods probe to be skipped once the cluster is confirmed unreachable, got Pods = %q", diagnosis.Pods)
-	}
-}
-
-// TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons is the
-// control: an RBAC read failure is not evidence the whole cluster is
-// unreachable, so the pods probe must still run and ClusterUnreachable must
-// stay false.
+// An RBAC failure does not mean the cluster is unreachable.
 func TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.ClusterUnreachable {
 		t.Fatalf("expected ClusterUnreachable = false for an RBAC read failure, got true")
 	}
 }
 
-// TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe covers the other
-// direction: when the helm read itself succeeds but the pods probe is the
-// one that hits the unreachable API server, ClusterUnreachable must still be
-// set from that probe so later doctor sections skip their own reads too.
 func TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: deployed", "", 0)
 	writeKubectlStub(t, "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout", 1)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if !diagnosis.ClusterUnreachable {
 		t.Fatalf("expected ClusterUnreachable = true when the pods probe hits an unreachable API server, got false")

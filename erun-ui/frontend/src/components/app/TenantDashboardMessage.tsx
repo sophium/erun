@@ -13,12 +13,8 @@ import { InlineAlert } from '@/components/app/InlineAlert';
 
 export type TenantDashboardData = AppState['tenantDashboard']['data'];
 
-// PanelBody renders one panel's three distinguishable outcomes: it failed,
-// there is nothing in it, or here it is. "You may not read this" never
-// reaches here — a restricted panel has no tab to open. Shared by every
-// TenantDashboardPanels* file rather than duplicated per panel, and kept in
-// this message-focused module (not TenantDashboardPanels.tsx) so the panel
-// files can both depend on it without importing each other.
+// PanelBody renders one panel's failure, empty, or populated state. Lives here
+// so panel files can share it without importing each other.
 export function PanelBody({
   data,
   tab,
@@ -58,9 +54,7 @@ export function PanelBody({
   return <>{children}</>;
 }
 
-// DashboardMessage is the one case an inline dashboard message isn't a
-// failure or a permission state: a transient loading line. Failures route
-// through InlineAlert instead (see PanelBody and GenericLoadFailure).
+// DashboardMessage renders a transient loading line; failures go through InlineAlert.
 export function DashboardMessage({
   message,
   icon,
@@ -87,19 +81,9 @@ export function DataTable({
 }: {
   headers: string[];
   children: React.ReactNode;
-  // minWidthClassName floors a wide table (many columns, e.g. the reviews
-  // table's Review/Status/Author/Target/Source/Updated/Threads) so a narrow
-  // viewport scrolls the table horizontally (the panel around it is already
-  // overflow-auto) instead of table-fixed shrinking every column past
-  // readability — a status badge missing its last letter is unreadable, not
-  // truncated. Omitted for narrower tables (Users, Builds, Audit), which fit
-  // without it.
+  // Floors a wide table so a narrow viewport scrolls instead of crushing columns.
   minWidthClassName?: string;
-  // columnWidths sets each header's width class, same length/order as
-  // headers; a header left without one shares the width table-fixed leaves
-  // over once the sized columns are subtracted. Lets a table give most of its
-  // width to one dominant column (the reviews table's Review cell) instead of
-  // table-fixed's default equal split.
+  // Width class per header; unsized headers share the remainder.
   columnWidths?: string[];
 }): React.ReactElement {
   return (
@@ -118,9 +102,7 @@ export function DataTable({
   );
 }
 
-// RelativeTime renders a scannable relative phrase ("2 days ago") with the
-// exact timestamp one hover away — nobody scans a column of absolute
-// timestamps, but the exact moment still matters and must not be lost (#1378).
+// RelativeTime renders a relative phrase with the exact timestamp on hover.
 export function RelativeTime({
   value,
   className,
@@ -135,12 +117,7 @@ export function RelativeTime({
   );
 }
 
-// BranchArrow is the review object's "where it's headed" line — source →
-// target — shared by the reviews list row and the review detail dialog's
-// header (#1378) so the two read as one treatment. Each side middle-ellipses
-// on its own (keeping both the identifying prefix and suffix, unlike a
-// trailing "…") with the full value one hover away, so a long branch name
-// never pushes the arrow off-row or wraps the header into several lines.
+// BranchArrow renders source → target, each side middle-ellipsed with the full value on hover.
 export function BranchArrow({
   source,
   target,

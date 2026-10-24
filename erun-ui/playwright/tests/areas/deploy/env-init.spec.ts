@@ -3,26 +3,11 @@ import type { Page } from '@playwright/test';
 import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// stubDialogCluster makes the env-init dialog behave as if a real cluster were
-// reachable: the kubectl stub in the isolated harness reports no contexts (the
-// deterministic empty state), so without this the context blocker masks every
-// other gate reason. One context lets the dialog auto-select it, and an
-// available resource status clears the capacity blocker, leaving the value
-// requirements (environment name, container registry) as the only blockers —
-// which is exactly what this spec exercises.
-// clusterRegistryFailure, when set, makes the LoadClusterRegistry stub return
-// this error instead of the endpoint's usual pass-through — used by
-// stubDialogClusterWithRegistryFailure below. hostedRegistryAvailable, when
-// true, makes the LoadHostedRegistry stub report available instead of the
-// harness's default answer (ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE=0 in
-// backendEnv(), since page.route cannot intercept the real outbound HTTP call
-// underneath that Wails method) — used by
-// stubDialogClusterWithHostedRegistryAvailable below. A single page.route
-// handler (not two stacked registrations) is required: Playwright runs the
-// most-recently registered handler first, and its route.continue() sends the
-// request to the real backend rather than falling through to an earlier
-// handler, so stacking silently defeated the first stub instead of composing
-// with it.
+// Fakes a reachable cluster so value requirements are the only gate blockers.
+// One route handler, not stacked ones: route.continue() goes to the real backend
+// rather than an earlier handler, so stacking defeats the first stub.
+// LoadHostedRegistry makes a real outbound call page.route can't intercept, so the
+// harness default (unavailable) comes from ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE=0.
 async function stubDialogCluster(
   page: Page,
   clusterRegistryFailure?: string,
@@ -39,11 +24,7 @@ async function stubDialogCluster(
       });
     }
     if (body.method === 'LoadRuntimeResourceStatus') {
-      // holdResourceStatusMs makes the capacity reading land a fixed window
-      // after the context selection that asked for it, so a step that is
-      // merely slow can be told apart from a step that never converges. Held
-      // on the first read only -- a refetch is a separate step with its own
-      // convergence.
+      // Held on the first read only, so slow can be told apart from never-converging.
       if (holdResourceStatusMs && holdUntil === 0) {
         holdUntil = Date.now() + holdResourceStatusMs;
       }
@@ -51,11 +32,7 @@ async function stubDialogCluster(
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
       }
-      // Mirrors the backend's contract: a reading always names the node it came
-      // from and carries two readings, each stating which question it answers --
-      // the scheduler's (it places by requests) and the worst case's (what is
-      // left if everything bursts to its declared limit at once). Neither is a
-      // fixed ceiling, so each carries its own live message.
+      // Mirrors the backend contract: a node name plus scheduler and worst-case readings.
       const schedulable = {
         cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8', floored: false },
         memory: {
@@ -115,19 +92,11 @@ async function stubDialogCluster(
   });
 }
 
-// stubDialogClusterWithRegistryFailure makes a context resolve and its
-// capacity load, but the cluster-registry probe (LoadClusterRegistry) fail —
-// a VPN hiccup or an RBAC gap, not a real "no registry deployed" answer. This
-// used to be a bare `catch { ... }` that silently reset
-// clusterRegistry/useClusterRegistry with no error surfaced anywhere,
-// indistinguishable from "no in-cluster registry found". The dialog must show
-// the probe failure instead.
+// The probe fails (VPN, RBAC), which must not read as "no registry found".
 async function stubDialogClusterWithRegistryFailure(page: Page): Promise<void> {
   await stubDialogCluster(page, 'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER');
 }
 
-// stubDialogClusterWithHostedRegistryAvailable is the one route a spec needs
-// to exercise the "available" branch of the hosted-registry gate.
 async function stubDialogClusterWithHostedRegistryAvailable(page: Page): Promise<void> {
   await stubDialogCluster(page, undefined, true);
 }
@@ -150,19 +119,12 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // The reported gap: Create sat disabled with no on-field cue for which values
-    // were mandatory — only a one-at-a-time footer reason. Every required field now
-    // carries a marker, and the requirement folds into the accessible name via the
-    // label's visually-hidden "(required)", so it is conveyed non-visually too.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // getByRole(name) reads the accessible name — the exact surface this test is
-    // about: the "(required)" folds in via the sr-only span, while the visible
-    // "*" glyph (aria-hidden) is excluded. getByLabel matches raw label
-    // textContent, which includes that glyph ("Tenant* (required)"), so it is the
-    // wrong query for an accessible-name assertion.
+    // getByRole reads the accessible name ("(required)" in, aria-hidden "*" out);
+    // getByLabel would include the glyph.
     for (const name of [
       'Tenant (required)',
       'Environment (required)',
@@ -173,10 +135,8 @@ test.describe('environment init dialog', () => {
       await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
     }
 
-    // The visible marker is a glyph, present in the label DOM.
     await expect(page.locator('label[for="environment-container-registry"]')).toContainText('*');
 
-    // Optional fields (e.g. Runtime version) carry no requirement marker.
     await expect(page.getByLabel('Runtime version (required)', { exact: true })).toHaveCount(0);
 
     await app.envInitDialog.cancel();
@@ -189,12 +149,11 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // Two copy branches (pre-populated vs blank) both carry "Create", so match loosely.
+    // Both copy branches contain "Create", so match loosely.
     const dialog = app.envInitDialog.locator();
     await expect(dialog.getByText(/Create|create/).first()).toBeVisible();
 
-    // The live region stays mounted even with no blockers, so a blocking reason can
-    // appear without a layout shift.
+    // Stays mounted with no blockers so a reason appears without a layout shift.
     const reason = app.page.locator('#environment-dialog-submit-reason');
     await expect(reason).toHaveCount(1);
 
@@ -224,9 +183,7 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // The control's accessible name carries the folded-in "(required)"; match it
-    // by role+name rather than getByLabel (which sees the raw label textContent,
-    // including the aria-hidden "*").
+    // By role+name: getByLabel would include the aria-hidden "*".
     const typeSelect = page.getByRole('combobox', { name: 'Environment type (required)' });
     const localRepoPathInput = page.locator('#environment-local-repo-path');
     const browseButton = page.getByRole('button', { name: /Browse/ });
@@ -237,8 +194,7 @@ test.describe('environment init dialog', () => {
     await expect(browseButton).toHaveCount(0);
     await expect(noGitCheckbox).toBeVisible();
 
-    // The no-Git toggle is hidden for local-agent because it does not affect that
-    // init path (see EnvironmentCreateChecks).
+    // The no-Git toggle doesn't affect local-agent init (see EnvironmentCreateChecks).
     await typeSelect.click();
     await page.getByRole('option', { name: 'Local agent' }).click();
     await expect(localRepoPathInput).toBeVisible();
@@ -259,11 +215,7 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Regression guard: an environments-changed tick used to wipe the kube-context
-    // dropdown because the Go uiState never carried that field. Firing the event
-    // while the dialog is open must leave the same surface visible. The harness's
-    // kubectl stub reports no contexts, so that surface is the empty state, never a
-    // populated select.
+    // The kubectl stub reports no contexts, so the surface is the empty state.
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
@@ -294,14 +246,7 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Regression (the reported bug): the submit gate only checked that the
-    // Kubernetes-context *list* was non-empty — never that a context was actually
-    // selected or a container registry chosen. A context can be available yet
-    // unselected (the reported state), so the button looked active, but clicking
-    // hit the invalid-selection branch whose only feedback was a native validity
-    // bubble the Wails WebView does not render — Create silently did nothing. The
-    // gate now derives from the same required-field rules submit enforces and
-    // surfaces the first missing value, walking the fields as the user fills them.
+    // The WebView shows no native validity bubbles, so the gate names the first missing value.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
@@ -309,14 +254,7 @@ test.describe('environment init dialog', () => {
     const createButton = app.envInitDialog.createButton();
     const reason = app.envInitDialog.submitReason();
 
-    // The stub populates one context but the dialog does not preselect it — the
-    // trigger sits on its placeholder, reproducing the reported state. The
-    // load itself is the first thing to converge on: asserted after the
-    // trigger has resolved, "No Kubernetes contexts found" is absent because
-    // the list arrived, not because nothing had been read yet. Every read
-    // below is the answer to a Kubernetes-context or capacity round trip, so
-    // each waits on the budget this test declares rather than expect's 10s
-    // default — see the held-read case at the end of this file.
+    // The context is listed but not preselected. Reads wait on the test's budget.
     await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
       'Select Kubernetes context',
       withTestBudget(),
@@ -325,24 +263,17 @@ test.describe('environment init dialog', () => {
       0,
     );
 
-    // Empty environment name is the first blocker; Create is disabled and says why.
     await expect(createButton).toBeDisabled();
     await expect(reason).toHaveText('Enter a tenant and environment name.');
 
-    // Name provided, context still unselected: the button stays disabled and now
-    // names the missing selection instead of silently doing nothing on click.
     await app.envInitDialog.fillEnvironment('review');
     await expect(createButton).toBeDisabled();
     await expect(reason).toHaveText('Select a Kubernetes context.', withTestBudget());
 
-    // Selecting the context advances to the container registry — the required
-    // field the old gate never checked, which is what left Create wrongly active.
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await expect(createButton).toBeDisabled();
     await expect(reason).toHaveText('Select a container registry.', withTestBudget());
 
-    // Providing the registry clears the last value blocker, so Create activates
-    // and the reason line goes quiet.
     await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
     await expect(createButton).toBeEnabled(withTestBudget());
     await expect(reason).toHaveText('', withTestBudget());
@@ -355,28 +286,19 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Reported bug: the RUNTIME RESOURCES panel showed a capacity reading
-    // ("Right now on <node> …") while the context dropdown still sat on its
-    // "Select Kubernetes context" placeholder — capacity for a cluster the user
-    // never chose. The
-    // dialog no longer auto-resolves contexts[0] for the capacity fetch, so
-    // capacity appears only for an explicitly selected context.
+    // Capacity appears only for an explicitly selected context.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
     const capacity = app.envInitDialog.locator().getByText(/Right now on /);
 
-    // One context is available but not preselected — so no capacity is shown.
     await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
       'Select Kubernetes context',
       withTestBudget(),
     );
     await expect(capacity).toHaveCount(0);
 
-    // Selecting the context fetches and reveals its capacity: a state
-    // transition the dialog reaches from the capacity read, so it converges on
-    // that state rather than racing the render.
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await capacity.waitFor({ state: 'visible' });
 
@@ -391,12 +313,9 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // "Set as default tenant" is OFF by default — creating an environment must not
-    // silently repoint the operator's default tenant.
+    // Off by default: creating an env must not repoint the default tenant.
     await expect(page.locator('#environment-default-tenant')).not.toBeChecked();
 
-    // A remote-agent (the default type) offers skipping the Git checkout, off by
-    // default and toggleable — the way to create without the remote-worktree flow.
     const skipGit = page.locator('#environment-no-git');
     await expect(skipGit).toBeVisible();
     await expect(skipGit).not.toBeChecked();
@@ -407,10 +326,7 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: VersionNotices used to render inside the version popover,
-  // whose open state required suggestions.length > 0 — so a listing failure
-  // (zero suggestions, one notice) computed the exact recovery advice and
-  // then put it in a surface that could structurally never open.
+  // The popover needs suggestions, so notices render outside it.
   test('shows the version recovery advice even when the popover has nothing to list', async ({
     app,
     page,
@@ -434,10 +350,6 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // Visible directly, without ever opening the (now correctly disabled,
-    // nothing-to-pick) popover. The notices are the answer to the
-    // LoadVersionSuggestions read, so they converge on arriving rather than on
-    // expect's 10s default.
     await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled(withTestBudget());
     const notices = app.envInitDialog.versionNotices();
     await notices.waitFor({ state: 'visible' });
@@ -448,9 +360,6 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: the in-app route that unblocks a user with no local kubectl
-  // context (Settings → Cloud aliases → Add AWS account → Cloud contexts →
-  // Init provisions a managed cluster) was never named on this screen.
   test('names the managed-cloud-cluster route when no Kubernetes contexts are found', async ({
     app,
   }) => {
@@ -467,9 +376,7 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: this dialog IS the documented Windows getting-started path
-  // (erun-docs/docs/getting-started/first-environment.md), but its recovery
-  // copy assumed macOS (~/.zshenv, brew) unconditionally.
+  // The documented Windows getting-started path; copy must not assume macOS.
   test.describe('on a Windows user agent', () => {
     test.use({
       userAgent:
@@ -490,9 +397,6 @@ test.describe('environment init dialog', () => {
     });
   });
 
-  // erun#1217: a fresh install's container registry field offered no
-  // placeholder, no helper, and no suggestions — nothing to go on for a
-  // required free-text value.
   test('explains the container registry format and the auto-detect route when nothing is detected', async ({
     app,
     page,
@@ -501,9 +405,7 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // stubDialogCluster resolves a context but the harness's kubectl stub
-    // cannot reach a real cluster, so no in-cluster registry is detected —
-    // the "nothing to go on" state this fix targets.
+    // The kubectl stub can't reach a cluster, so no registry is detected.
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await expect(page.getByText('Use in-cluster registry', { exact: false })).toHaveCount(0);
 
@@ -524,10 +426,8 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // Selecting the context fires refreshDialogClusterRegistry, which fails.
     await app.envInitDialog.selectKubernetesContext('orbstack');
 
-    // The failure is the probe's own answer arriving after the selection.
     await expect(app.envInitDialog.locator().getByRole('alert')).toContainText(
       'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER',
       withTestBudget(),
@@ -537,22 +437,8 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // The dialog's reads are answers to round trips this spec's own stub owns,
-  // and an assertion on one carries no timeout of its own: `toContainText`,
-  // `toBeEnabled` and a bare `toBeVisible` have no waitFor equivalent that
-  // outlives expect's default, so each resolved to a 10s clock the test never
-  // declared. Under contention a read that is merely slow therefore reds the
-  // test with its own clock unspent, which is how a loaded builder turns a
-  // green branch red. The hold below is deliberately just past that 10s
-  // default: the smallest delay that discriminates, so the suite pays seconds
-  // here rather than the tens a genuinely loaded machine would. It is injected
-  // at LoadRuntimeResourceStatus -- the read this step waits on -- rather than
-  // by loading the machine, so the reproduction is deterministic on a quiet
-  // host.
-  //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; converged on the state the read produces, it passes when the
-  // reading actually lands.
+  // LoadRuntimeResourceStatus is held just past expect's 10s default; the reading must
+  // still be waited out on the test's own budget.
   test('a capacity reading that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -572,20 +458,12 @@ test.describe('environment init dialog', () => {
   });
 
   test('offers the hosted registry only once it is confirmed reachable', async ({ app, page }) => {
-    // The reported defect: the hosted-registry option was offered
-    // unconditionally, with no check that registry.erunpaas.com was actually
-    // reachable, unlike the in-cluster registry which is already gated on
-    // clusterRegistry?.deployed. The harness's default answer (no stub) is
-    // "unavailable" — the same answer this host gets in real life — so the
-    // checkbox must stay disabled and explain why, and picking a different
-    // registry must still be possible.
+    // The harness default is "unavailable", so the checkbox stays disabled and explains why.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // The checkbox's state is the hosted-registry probe's answer — a real
-    // outbound call, the slowest read on this dialog — so it waits on the
-    // budget this test declares rather than expect's 10s default.
+    // The hosted-registry probe is a real outbound call, the slowest read here.
     const hosted = app.envInitDialog.hostedRegistryCheckbox();
     await hosted.waitFor({ state: 'visible' });
     await expect(hosted).toBeDisabled(withTestBudget());
@@ -608,13 +486,12 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // Enabled here is the same probe's answer, this time a reachable one.
     const hosted = app.envInitDialog.hostedRegistryCheckbox();
     await expect(hosted).toBeEnabled(withTestBudget());
 
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await app.envInitDialog.fillEnvironment('review');
-    // No container registry is filled in — the hosted registry needs none.
+    // The hosted registry needs no container registry value.
     await expect(app.envInitDialog.createButton()).toBeDisabled(withTestBudget());
 
     await hosted.click();

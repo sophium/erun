@@ -1,9 +1,6 @@
 import { expect, type Locator } from '@playwright/test';
 
-// Geometry helper for the layout specs. boundingBox() is nullable, and
-// narrowing it inside a test body is a conditional — which the flake rules ban,
-// because a spec that returns early on a null box silently asserts nothing. The
-// check lives here instead, so a missing box fails the spec by name.
+// A null box fails the spec by name here, since tests may not branch on it.
 
 export interface ElementBox {
   x: number;
@@ -12,14 +9,7 @@ export interface ElementBox {
   height: number;
 }
 
-// boundingBox() carries no timeout of its own: with no explicit one it waits
-// for the element until the enclosing test's clock expires. A caller reading a
-// surface that can be dropped and put back -- a hover card, a status pill
-// cleared by terminal output -- therefore cannot be wrapped in a re-drivable
-// block without one, because a dropped element does not fail the attempt, it
-// consumes the whole budget inside it. `timeoutMs` bounds a single attempt so
-// the caller can retry; the default keeps the unbounded behaviour every other
-// caller has today.
+// boundingBox() otherwise waits out the whole test; `timeoutMs` bounds one attempt so callers can retry.
 export async function boundingBoxOf(
   locator: Locator,
   label: string,
@@ -35,14 +25,8 @@ export async function boundingBoxOf(
   return box;
 }
 
-// Guards the dialog-card overflow regression (erun-kit's DialogContent):
-// with no explicit grid-template-columns, the browser sizes the implicit
-// single column to the max-content width of its widest descendant — an
-// unbroken string with no min-w-0 anywhere above it forces that column, and
-// therefore every sibling grid item, wider than the card's own box. The
-// card's background/border still paint at the correct (clamped) width, so the
-// break is visible only by measuring descendants against it, never by
-// measuring the card alone.
+// Without explicit grid columns an unbreakable descendant widens the card's grid track while the
+// card itself paints clamped, so overflow shows only by measuring descendants.
 export interface OverflowingDescendant {
   tag: string;
   dataSlot: string | null;
@@ -55,12 +39,7 @@ async function overflowingDescendants(card: Locator): Promise<OverflowingDescend
   return card.evaluate((cardEl) => {
     const cardRect = cardEl.getBoundingClientRect();
     const entries: OverflowingDescendant[] = [];
-    // An element inside a scroll container is clipped by it, so it cannot paint
-    // over what is behind the dialog however far its box extends -- scrolled
-    // content legitimately reaches past the card. Only unclipped descendants
-    // can produce the defect this guards, so anything under a scroller is not
-    // a finding. (The settings dialog has two such containers, which is why
-    // this matters and not only in theory.)
+    // Descendants inside a scroll container are clipped and cannot overflow visibly.
     const isClipped = (el: Element): boolean => {
       for (let a = el.parentElement; a && a !== cardEl; a = a.parentElement) {
         const style = getComputedStyle(a);
@@ -73,7 +52,7 @@ async function overflowingDescendants(card: Locator): Promise<OverflowingDescend
     while (node) {
       const el = node as Element;
       const rect = el.getBoundingClientRect();
-      // 1px tolerance absorbs sub-pixel layout rounding, not the regression.
+      // 1px tolerance absorbs sub-pixel rounding.
       if (rect.width > 0 && rect.height > 0 && rect.right - cardRect.right > 1 && !isClipped(el)) {
         entries.push({
           tag: el.tagName,
@@ -94,9 +73,7 @@ export async function expectDialogContentStaysWithinCard(
   label: string,
 ): Promise<void> {
   const entries = await overflowingDescendants(card);
-  // One blown-out grid track drags every descendant with it, so a raw dump is
-  // hundreds of near-identical entries and the actual culprit is invisible.
-  // Name the widest few, which are the ones sizing the track.
+  // One blown-out track drags every descendant along; the widest few are the culprits.
   const worst = [...entries]
     .sort((a, b) => b.rectWidth - a.rectWidth)
     .slice(0, 5)

@@ -78,7 +78,7 @@ Every series is labelled with the env's tenant + environment, derived from `ERUN
 |---|---|
 | Type | `counter` |
 | Labels | `tenant`, `environment`, `tool`, `result` |
-| `tool` values | The MCP tool name as registered in `erun-mcp/server.go` — see [MCP overview](/mcp/overview) for the current list rather than duplicating it here; a prior version of this page listed 13 example names, several of which (`logs`, `open`) do not exist as tool names and several of which (most of the surface) it omitted. |
+| `tool` values | The MCP tool name as registered in `erun-mcp/server*.go` — see [MCP overview](/mcp/overview) for the current list rather than duplicating it here; a prior version of this page listed 13 example names, several of which (`logs`, `open`) do not exist as tool names and several of which (most of the surface) it omitted. |
 | `result` values | `success`, `error`, or `dry_run`. Derived from `guardTool`, the one dispatch point every tool call passes through: an error return is `error`; absent an error, a tool whose result carries the shared `CommandOutput.Executed` field (the delivery tools — `build`, `push`, `deploy`, `doctor`, `pin`, `terraform`, and the rest) reports `dry_run` when `Executed` is false; every other tool (read-only tools with no preview concept, e.g. `idle`, `list`, `version`, `usage`) reports `success` whenever it returns no error. |
 | Reset on | Process restart. (Counters are monotonic within a process.) |
 

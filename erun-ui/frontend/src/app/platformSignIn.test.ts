@@ -10,13 +10,6 @@ import {
   tenantNeedsSignIn,
 } from './platformSignIn';
 
-// These pin the exact sentence a review write's stale-identity failure
-// resolves to a sign-in action, and that every other message — the "ask an
-// administrator" permission notices included — stays action-less. The
-// dashboard's own whole-dashboard load no longer goes through this
-// string-matching contract at all — it renders directly off
-// UITenantDashboard.platformState.
-
 test('the known stale-identity sentence needs a sign-in action', () => {
   assert.equal(tenantNeedsSignIn(TENANT_SIGN_IN_AGAIN_MESSAGE), true);
 });

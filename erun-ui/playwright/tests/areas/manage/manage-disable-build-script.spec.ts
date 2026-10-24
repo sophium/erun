@@ -1,8 +1,5 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// The Manage dialog Runtime tab's "Ignore project build.sh" toggle changes how a
-// redeploy rebuilds the runtime image, so saving it raises the Pending-redeploy
-// banner.
 test.describe('manage dialog disable-build-script toggle (#533)', () => {
   test('lights the Runtime dot, raises the redeploy banner, and persists', async ({
     app,
@@ -35,13 +32,8 @@ test.describe('manage dialog disable-build-script toggle (#533)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // A host env has no pod and no cluster, so the Runtime tab replaces its pod
-  // and cluster controls with the "not available for this environment type"
-  // notice. This toggle is not one of them: erun build resolves its Docker and
-  // release contexts from any env whose builds run in that env's own directory,
-  // a host env included, and this dialog is the only desktop surface that sets
-  // it. Losing it here would leave the setting reachable only by hand-editing
-  // config.yaml.
+  // A host env builds in its own directory, so this toggle must survive the host
+  // env's pod/cluster-control notice.
   test('renders for a host environment, which has no pod but does build', async ({
     app,
     seededHostEnv,

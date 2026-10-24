@@ -9,18 +9,16 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
 	"github.com/spf13/cobra"
 )
 
-// VersionCommandInfo keeps erun's own build identity separate from the version of
-// whatever project the caller happens to stand in. Collapsing the two made
-// `erun version` report a project's VERSION as erun's, which reads as a runtime
-// stranded many releases behind the `latest stable:` line right beneath it.
+// VersionCommandInfo keeps erun's build version separate from the current project's VERSION.
 type VersionCommandInfo struct {
 	Build           model.BuildInfo
 	ProjectName     string
@@ -48,13 +46,13 @@ type versionProjectResult struct {
 }
 
 // NewVersionCmd returns a Cobra command that prints the build information.
-func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) *cobra.Command {
+func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveRegistryVersions seam.RuntimeRegistryVersionResolverFunc) *cobra.Command {
 	var noRegistry bool
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print build information",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			info, err := resolveBuildInfo()
 			if err != nil {
 				return err
@@ -65,25 +63,25 @@ func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveR
 				ctx.Logger.Debug("resolved project version from " + info.VersionFilePath)
 			}
 
-			versions := registry.RuntimeRegistryVersions{}
+			versions := model.RuntimeRegistryVersions{}
 			if !noRegistry {
 				versions = resolveRegistryVersionsForVersionCommand(cmd.Context(), ctx, resolveRegistryVersions)
 			}
-			if ctx.Output == core.OutputJSON {
+			if ctx.Output == model.OutputJSON {
 				return ctx.WriteResult(versionCommandResultFor(info, versions))
 			}
 			return writeVersionLines(ctx, info, versions)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&noRegistry, "no-registry", false, "Skip remote registry version lookup")
 	cmd.Example = "  erun version\n  erun -v version\n  erun version --dry-run"
 	cmd.Long = fmt.Sprintf("%s\n\nThe `erun` line is always erun's own build version, so it is comparable with the `latest stable:` line. A project VERSION resolved from the current directory is reported separately on its own `project` line.\n\nVerbosity levels:\n  -v    print trace logs for command flow and side effects\n\nDry-run:\n  --dry-run runs the same resolution flow but skips mutating operations", cmd.Short)
 	return cmd
 }
 
-func versionCommandResultFor(info VersionCommandInfo, versions registry.RuntimeRegistryVersions) versionCommandResult {
-	build := model.NormalizeBuildInfo(info.Build)
+func versionCommandResultFor(info VersionCommandInfo, versions model.RuntimeRegistryVersions) versionCommandResult {
+	build := core.NormalizeBuildInfo(info.Build)
 	result := versionCommandResult{
 		Erun: versionBuildResult{
 			Version: build.Version,
@@ -103,8 +101,8 @@ func versionCommandResultFor(info VersionCommandInfo, versions registry.RuntimeR
 	return result
 }
 
-func writeVersionLines(ctx core.Context, info VersionCommandInfo, versions registry.RuntimeRegistryVersions) error {
-	if _, err := fmt.Fprintln(ctx.Stdout, model.FormatVersionLine(info.Build)); err != nil {
+func writeVersionLines(ctx core.Context, info VersionCommandInfo, versions model.RuntimeRegistryVersions) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, core.FormatVersionLine(info.Build)); err != nil {
 		return err
 	}
 	if line := formatProjectVersionLine(info); line != "" {
@@ -136,21 +134,20 @@ func formatProjectVersionLine(info VersionCommandInfo) string {
 	return "project " + version
 }
 
-// A registry lookup failure is not fatal: the local build version is still worth
-// printing, so the error is traced and the lines are simply omitted.
-func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) registry.RuntimeRegistryVersions {
+// A registry lookup failure is traced, not fatal.
+func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions seam.RuntimeRegistryVersionResolverFunc) model.RuntimeRegistryVersions {
 	if resolveRegistryVersions == nil {
-		return registry.RuntimeRegistryVersions{}
+		return model.RuntimeRegistryVersions{}
 	}
 	versions, err := resolveRegistryVersions(ctx)
 	if err != nil {
 		commandCtx.Logger.Debug("resolve runtime registry versions: " + err.Error())
-		return registry.RuntimeRegistryVersions{}
+		return model.RuntimeRegistryVersions{}
 	}
 	return versions
 }
 
-func ResolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (VersionCommandInfo, error) {
+func ResolveVersionCommandBuildInfo(findProjectRoot seam.ProjectFinderFunc) (VersionCommandInfo, error) {
 	info := VersionCommandInfo{Build: shared.CurrentBuildInfo()}
 
 	buildDir, err := os.Getwd()
@@ -166,9 +163,9 @@ func ResolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (V
 		projectRoot = ""
 	}
 
-	version, _, versionFilePath, err := common.ResolveDockerBuildVersion(buildDir, projectRoot, "")
+	version, _, versionFilePath, err := buildversion.ResolveDockerBuildVersion(buildDir, projectRoot, "")
 	if err != nil {
-		if errors.Is(err, shared.ErrVersionFileNotFound) {
+		if errors.Is(err, ErrVersionFileNotFound) {
 			return info, nil
 		}
 		return info, err
@@ -180,8 +177,7 @@ func ResolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (V
 	return info, nil
 }
 
-// The project's name is taken from the directory holding the VERSION file, which
-// is what an operator recognizes it by.
+// projectNameForVersionFile names the project after the directory holding VERSION.
 func projectNameForVersionFile(versionFilePath string) string {
 	dir := strings.TrimSpace(filepath.Dir(strings.TrimSpace(versionFilePath)))
 	if dir == "" || dir == "." || dir == string(filepath.Separator) {

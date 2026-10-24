@@ -7,8 +7,7 @@ afterEach(() => {
   cleanup();
 });
 
-// The logo is decorative (the brand name is always rendered as text beside
-// it), so it carries alt="" and has no accessible name to query by role.
+// The logo is decorative (alt=""), so it has no accessible name to query.
 function logo(): HTMLElement | null {
   return document.querySelector('img');
 }
@@ -44,9 +43,6 @@ describe('BrandMark', () => {
   });
 
   it('degrades to the fallback mark when a configured logo fails to load', () => {
-    // An operator's logo lives on their own host, so a moved asset or a typo
-    // must not leave a broken-image icon on the front door with nothing on
-    // the page to explain it.
     render(<BrandMark brand="Acme" logoUrl="https://cdn.acme.example/missing.svg" />);
 
     fireEvent.error(requireLogo());

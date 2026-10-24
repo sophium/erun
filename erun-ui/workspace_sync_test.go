@@ -7,6 +7,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
@@ -23,9 +24,9 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -56,9 +57,9 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -90,9 +91,9 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -113,8 +114,7 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 }
 
 func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
-	// A plain (non-git) directory is a valid sync target: the mirror is a
-	// one-way copy the sync owns and needs no local git.
+	// A mirror needs no local git.
 	localRoot := t.TempDir()
 	store := workspaceSyncStore(true)
 	env := store.envs["frs/dev"]
@@ -132,9 +132,9 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			started <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -219,9 +219,9 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 1}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 1}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -238,10 +238,6 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 	}
 }
 
-// Detaching a mirror is done the same way linking is — by editing config while
-// the app runs — so a worker whose env is no longer linked has to stop. Left
-// running it keeps writing into a directory the operator has stopped treating as
-// a mirror.
 func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T) {
 	store := workspaceSyncStore(true)
 	passed := make(chan struct{}, 8)
@@ -251,12 +247,12 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Millisecond,
-		syncWorkspace: func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			select {
 			case passed <- struct{}{}:
 			default:
 			}
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -268,7 +264,6 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 		t.Fatal("expected the linked env to start syncing")
 	}
 
-	// The operator unlinks it outside the app, which is where links are made.
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.Enabled = false
 	store.envs["frs/dev"] = env
@@ -288,9 +283,9 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -304,10 +299,6 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	}
 }
 
-// TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath locks the
-// reclassification of the "workspace sync has no local path" notice: it used
-// to go out on the unclassified emitAppStatus channel, and now goes out as a
-// classified, env-tagged warning.
 func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T) {
 	store := workspaceSyncStore(true)
 	env := store.envs["frs/dev"]
@@ -318,9 +309,7 @@ func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		// Without this, the default findProjectRoot walks the real
-		// filesystem from the test binary's cwd and resolves a real project
-		// root, masking the "no local path" case this test exercises.
+		// Otherwise the real cwd resolves a project root and masks the case.
 		findProjectRoot: func() (string, string, error) { return "", "", errors.New("not found") },
 	})
 	app.emitFn = emits.fn()
@@ -350,9 +339,6 @@ func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T
 	}
 }
 
-// TestSetWorkspaceSyncErrorEmitsClassifiedError locks the reclassification of
-// a workspace sync failure from the unclassified emitAppStatus channel to a
-// classified, env-tagged error.
 func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn(), workspaceSyncs: map[string]*workspaceSyncWorker{
@@ -382,7 +368,7 @@ func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -393,7 +379,7 @@ func workspaceSyncStore(enabled bool) stubUIStore {
 				Type:              configpkg.EnvironmentTypeRuntime,
 				SSHD: configpkg.SSHDConfig{
 					Enabled: true,
-					WorkspaceSync: configpkg.SSHDWorkspaceSyncConfig{
+					WorkspaceSync: model.SSHDWorkspaceSyncConfig{
 						Enabled:   enabled,
 						LocalPath: "/tmp/frs-local",
 					},

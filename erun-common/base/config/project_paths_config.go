@@ -6,49 +6,27 @@ import (
 	"strings"
 )
 
-// ProjectPathsConfig overrides where erun discovers a project's devops assets,
-// declared under `paths:` in a project's `.erun/config.yaml`. It is
-// project-global (not per-environment). Every field is optional; an unset field
-// keeps the conventional location: docker/ and k8s/ under <tenant>-devops/,
-// Terraform roots at terraform-<tenant>/, and the VERSION file discovered by
-// walking up from the build dir to the project root.
-//
-// A configured path resolves relative to the project root (an absolute path is
-// honored as-is). The override relocates the canonical folders — the docker and
-// k8s directories still carry their conventional names — so only where erun
-// looks changes, not the layout inside those folders.
+// ProjectPathsConfig is the project-global `paths:` block relocating devops asset
+// folders; unset fields keep the convention.
 type ProjectPathsConfig struct {
-	// Docker is the directory (named "docker") whose subdirectories are the
-	// per-component build contexts. Default <tenant>-devops/docker.
+	// Docker holds per-component build contexts. Default <tenant>-devops/docker.
 	Docker string `yaml:"docker,omitempty"`
-	// DockerContext selects the Docker build context root, overriding the
-	// positional heuristic that only picks the repo root for the conventional
-	// <devops-root>/docker/<component> layout. Values: "repo-root" (context =
-	// project root) or "component" (context = the component build dir). Empty
-	// keeps the heuristic. Lets a Dockerfile nested at a non-conventional depth
-	// COPY from elsewhere in the repo by opting into repo-root context.
+	// DockerContext is "repo-root" or "component", overriding the build-context
+	// heuristic; empty keeps the heuristic.
 	DockerContext string `yaml:"dockercontext,omitempty"`
-	// K8s is the directory (named "k8s") whose subdirectories are the
-	// per-component Helm charts. Default <tenant>-devops/k8s.
+	// K8s holds per-component Helm charts. Default <tenant>-devops/k8s.
 	K8s string `yaml:"k8s,omitempty"`
-	// Terraform is the base directory under which per-environment Terraform
-	// roots live; erun still appends /<environment>. Default terraform-<tenant>.
+	// Terraform is the base for per-environment roots. Default terraform-<tenant>.
 	Terraform string `yaml:"terraform,omitempty"`
-	// Version is the path to the VERSION file that mints the build version. A
-	// directory is accepted and resolves to <dir>/VERSION.
+	// Version is the VERSION file, or a directory containing it.
 	Version string `yaml:"version,omitempty"`
-	// E2E is the directory whose subdirectories are the project's e2e suites,
-	// one Dockerfile with an `e2e` stage per suite, mirroring docker/ and k8s/.
-	// Default <tenant>-devops/e2e. Read under paths: only; erun e2e refuses it
-	// under components:.
+	// E2E holds e2e suites, one Dockerfile with an `e2e` stage each. Default
+	// <tenant>-devops/e2e; refused under components:.
 	E2E string `yaml:"e2e,omitempty"`
-	// Playwright is retired: it named a host-run Playwright suite, and erun e2e
-	// refuses it with the migration to E2E rather than silently ignore it.
+	// Playwright is retired; erun e2e refuses it with a migration hint.
 	Playwright string `yaml:"playwright,omitempty"`
 }
 
-// IsZero reports whether no path override is set, i.e. every folder uses its
-// conventional location.
 func (c ProjectPathsConfig) IsZero() bool {
 	return strings.TrimSpace(c.Docker) == "" &&
 		strings.TrimSpace(c.DockerContext) == "" &&
@@ -59,9 +37,8 @@ func (c ProjectPathsConfig) IsZero() bool {
 		strings.TrimSpace(c.Playwright) == ""
 }
 
-// ResolveProjectPath resolves a configured override against the project root.
-// An empty override yields "" so callers fall back to the convention; a
-// relative path is joined to projectRoot and an absolute path is used as-is.
+// ResolveProjectPath returns "" for an empty override, else joins a relative path
+// to projectRoot.
 func ResolveProjectPath(projectRoot, override string) string {
 	override = strings.TrimSpace(override)
 	if override == "" {
@@ -73,10 +50,8 @@ func ResolveProjectPath(projectRoot, override string) string {
 	return filepath.Join(filepath.Clean(strings.TrimSpace(projectRoot)), override)
 }
 
-// LoadProjectPaths reads a project's configured path overrides, tolerating an
-// uninitialized project (no .erun/config.yaml) as "no overrides" so convention
-// discovery still runs. A corrupt config surfaces as an error rather than being
-// silently treated as unset.
+// LoadProjectPaths reads path overrides; an uninitialized project has none, a
+// corrupt config is an error.
 func LoadProjectPaths(projectRoot string) (ProjectPathsConfig, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return ProjectPathsConfig{}, nil

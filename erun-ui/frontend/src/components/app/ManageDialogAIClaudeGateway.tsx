@@ -6,19 +6,8 @@ import type { effectiveClaudeModelDefaults } from '@/components/app/ManageDialog
 import { ClaudeBoolField } from '@/components/app/ManageDialogAITab';
 import type { UIEnvironmentConfig } from '@/types';
 
-// ClaudeGatewayFields edits how this environment uses the erun-level gateway
-// catalog. The catalog is one erun-level list rendered for every environment,
-// so without this an environment could only be moved on or off the gateway by
-// moving every environment with it.
-//
-// There is deliberately no credential field here. The credential is one
-// erun-level value in the operator's secret store, delivered into this
-// environment's namespace by deploy — so a per-environment reference would be a
-// second way to say the same thing, and the wrong one when the catalog is
-// global.
-//
-// It renders only when a catalog exists: a switch that changes nothing is worse
-// than no switch, and the operator meets the catalog in ERun settings.
+// ClaudeGatewayFields edits this env's use of the erun-level gateway catalog; it renders only when one exists.
+// The credential is erun-level and delivered by deploy, so there is no per-env credential field.
 export function ClaudeGatewayFields({
   claude,
   disabled,
@@ -45,13 +34,7 @@ export function ClaudeGatewayFields({
   );
 }
 
-// ClaudeGatewayModelsField stands in for the env's own "Available models" while
-// the gateway applies. The catalog is the selectable set then — the chart hands
-// the pod the whole catalog and the launch never reads the env's own list — so
-// ticking models here would record a choice nothing honours, and would leave
-// catalog ids in the env's own list for after it leaves the gateway. Typing an
-// id the catalog does not list stays possible: the gateway launch honours one,
-// so it is set as this env's default model directly.
+// ClaudeGatewayModelsField replaces the env's own model list while the gateway applies; a typed id becomes the default.
 export function ClaudeGatewayModelsField({
   effective,
   disabled,
@@ -120,8 +103,7 @@ export function ClaudeGatewayModelsField({
   );
 }
 
-// ClaudeProviderFields are the env's Mantle and Bedrock choices, which a gateway
-// overrides while it applies.
+// ClaudeProviderFields are the env's Mantle and Bedrock choices, overridden while a gateway applies.
 export function ClaudeProviderFields({
   claude,
   defaults,
@@ -169,8 +151,7 @@ export function ClaudeProviderFields({
   );
 }
 
-// providerHelper says when a provider choice is overridden: the gateway replaces
-// the model provider, so deploy renders Mantle and Bedrock off while it applies.
+// The gateway replaces the model provider, so deploy renders Mantle and Bedrock off.
 function providerHelper(helper: string, viaGateway: boolean): string {
   return viaGateway
     ? `${helper} Ignored while this environment uses the gateway, which replaces the model provider.`

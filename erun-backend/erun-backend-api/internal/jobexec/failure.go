@@ -13,28 +13,16 @@ import (
 )
 
 const (
-	// How much of the run's output to pull back. An actionable erun error runs to
-	// several lines — a runtime chart that cannot be pulled enumerates every
-	// registry and chart the deploy probed — and the tooling under it appends its
-	// own output, so the window has to be wider than a one-line error.
+	// erun's errors span several lines, and tooling appends its own output.
 	failureLogTailLines int64 = 200
-	// What survives into the recorded reason. erun writes its failure last, so the
-	// tail of the log is the failure; the leading lines are the trace that led
-	// there and are dropped first when the cap bites.
-	failureDetailLines     = 40
-	maxFailureDetailLength = 4000
-	// maxFailureLogBytes bounds what one failing run can pull into the control
-	// plane's memory; the detail is drawn from the end of the window regardless.
-	maxFailureLogBytes int64 = 256 * 1024
+	// erun writes its failure last, so leading lines are dropped first.
+	failureDetailLines           = 40
+	maxFailureDetailLength       = 4000
+	maxFailureLogBytes     int64 = 256 * 1024
 )
 
-// failureDetail explains why a Job did not succeed, in the words of the run
-// itself. The Job runs erun in the tenant's runtime image, so the
-// operator-actionable error — the version, the registries probed, the way out —
-// is already printed there; without pulling it back the control plane can only
-// record that a Job exited, which names nothing an operator can act on. When the
-// pod produced no output (it never ran, or the Job outlived it) the pod's own
-// status and then the Job's terminal condition stand in.
+// failureDetail returns the run's own failure output, falling back to the
+// pod's status and then the Job's terminal condition when there is no log.
 func (r *Runner) failureDetail(ctx context.Context, job *batchv1.Job) string {
 	pod := r.newestJobPod(ctx, job)
 	if pod != nil {
@@ -48,10 +36,7 @@ func (r *Runner) failureDetail(ctx context.Context, job *batchv1.Job) string {
 	return jobFailureDetail(r.options.Kind, job)
 }
 
-// newestJobPod finds the pod that ran this attempt. The Job's own selector is
-// authoritative once the API server has defaulted it; a Job that was never
-// admitted (or a fake in tests) has none, so the conventional per-Job pod label
-// stands in.
+// A Job never admitted (or a test fake) has no selector, so the per-Job pod label stands in.
 func (r *Runner) newestJobPod(ctx context.Context, job *batchv1.Job) *corev1.Pod {
 	selector := "job-name=" + job.Name
 	if job.Spec.Selector != nil {
@@ -70,9 +55,7 @@ func (r *Runner) newestJobPod(ctx context.Context, job *batchv1.Job) *corev1.Pod
 	return &items[len(items)-1]
 }
 
-// podLog reads the tail of the run container's output. A read failure is not
-// itself reportable — the pod may never have started a container — so it yields
-// nothing and lets the pod status explain instead.
+// A read failure yields nothing; the pod may never have started a container.
 func (r *Runner) podLog(ctx context.Context, pod *corev1.Pod) string {
 	tail := failureLogTailLines
 	stream, err := r.kube.CoreV1().Pods(pod.Namespace).
@@ -89,9 +72,6 @@ func (r *Runner) podLog(ctx context.Context, pod *corev1.Pod) string {
 	return string(content)
 }
 
-// failureFromLog distils the recorded reason out of the run's output. erun prints
-// its trace as it works and its failure last, so the trailing lines are the
-// failure plus just enough of the run to place it.
 func failureFromLog(logText string) string {
 	lines := make([]string, 0, failureDetailLines)
 	for _, line := range strings.Split(logText, "\n") {
@@ -108,9 +88,6 @@ func failureFromLog(logText string) string {
 	return truncateFailureDetail(strings.Join(lines, "\n"))
 }
 
-// truncateFailureDetail keeps the end of the detail, which is where the failure
-// is, and marks that something was dropped so a reader knows the record is a
-// tail rather than the whole run.
 func truncateFailureDetail(detail string) string {
 	if len(detail) <= maxFailureDetailLength {
 		return detail
@@ -118,9 +95,6 @@ func truncateFailureDetail(detail string) string {
 	return "…\n" + detail[len(detail)-maxFailureDetailLength:]
 }
 
-// podFailureDetail reports why the run's pod produced no output — an image the
-// cluster cannot pull, a scheduling refusal, a container that died before
-// writing. Without it those failures are indistinguishable from a silent run.
 func podFailureDetail(kind string, pod *corev1.Pod) string {
 	statuses := append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...)
 	for _, status := range statuses {
@@ -137,9 +111,7 @@ func podFailureDetail(kind string, pod *corev1.Pod) string {
 	return ""
 }
 
-// jobFailureDetail is the last resort: a Job whose pods the cluster already
-// reclaimed (a deadline overrun is the usual one) still carries its terminal
-// condition, and naming it beats recording nothing.
+// jobFailureDetail covers a Job whose pods were already reclaimed, e.g. after a deadline.
 func jobFailureDetail(kind string, job *batchv1.Job) string {
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {

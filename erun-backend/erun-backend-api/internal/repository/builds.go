@@ -41,12 +41,8 @@ func (r *BuildRepository) Create(ctx context.Context, build model.Build) (model.
 	return created, err
 }
 
-// classifyBuildError maps the builds table's foreign key and CHECK
-// constraints onto the repository's sentinel errors so callers see a 4xx
-// instead of a bare 500 — a reviewId the caller's tenant cannot see fails the
-// same foreign key check whether the row genuinely doesn't exist or just
-// isn't this tenant's, matching the "doesn't exist or isn't visible" 404
-// documented in collaboration/builds.md.
+// classifyBuildError maps constraint violations to sentinel errors; an invisible
+// reviewId fails the FK like a missing one, yielding 404.
 func classifyBuildError(err error) error {
 	code, ok := pgErrorCode(err)
 	if !ok {
@@ -64,15 +60,8 @@ func classifyBuildError(err error) error {
 	}
 }
 
-// Get returns a build owned by tenantID. The join onto reviews below is on
-// tenant and review together — it makes the build's review name readable, it
-// does not scope the read: for an OPERATIONS caller an id-only lookup
-// answered with a build belonging to any tenant, reachable through
-// GET /v1/reviews/{review_id}/builds/{build_id}, whose review_id segment was
-// never a filter either. tenantID is therefore an explicit predicate, and it
-// is the tenant that owns the read — the caller's own on the route, the
-// review's own where the merge service reads a build back for a review it
-// already holds.
+// Get returns a build owned by tenantID. tenantID is an explicit predicate
+// because an OPERATIONS caller's RLS policy does not scope the read.
 func (r *BuildRepository) Get(ctx context.Context, tenantID, buildID string) (model.Build, error) {
 	var build model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -90,11 +79,8 @@ func (r *BuildRepository) Get(ctx context.Context, tenantID, buildID string) (mo
 	return build, err
 }
 
-// List returns the caller's tenant's builds, optionally narrowed to one
-// review. Scoped explicitly by tenant_id from the security context rather
-// than left to RLS: erun_operations' policy is unconditional, so an
-// OPERATIONS caller's empty filter would otherwise read every tenant's
-// builds.
+// List returns the tenant's builds, optionally for one review. tenant_id is
+// filtered explicitly because erun_operations' RLS policy is unconditional.
 func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model.Build, error) {
 	var builds []model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -121,20 +107,11 @@ func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model
 	return builds, err
 }
 
-// buildListColumns is the SELECT list ListPage and List share, with the
-// review/environment display names both LEFT JOINed rather than INNER
-// JOINed: an ordinary erun build's review_id and environment_id are each
-// independently nullable, so an INNER JOIN on either would silently drop
-// exactly the rows this feature exists to surface.
+// buildListColumns LEFT JOINs review and environment names because both ids are nullable.
 const buildListColumns = `b.build_id, b.tenant_id, b.review_id, b.environment_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.profile, b.created_at, b.updated_at, r.name AS review_name, e.name AS environment_name`
 
-// BuildCursor identifies a row's position in the newest-first (created_at
-// DESC, build_id DESC) ordering ListPage always uses. The zero value means
-// "start from the newest row" -- builds is unbounded and grows continuously
-// (every `erun build` run across every environment reports one), so offset
-// pagination would degrade as it grows and would skip or repeat rows as new
-// builds are appended ahead of a later page, the same reasoning
-// AuditEventCursor documents.
+// BuildCursor is a keyset position in ListPage's (created_at DESC, build_id
+// DESC) order; the zero value starts at the newest row.
 type BuildCursor struct {
 	CreatedAt time.Time
 	BuildID   string
@@ -144,8 +121,7 @@ func (c BuildCursor) isZero() bool {
 	return c.CreatedAt.IsZero() && c.BuildID == ""
 }
 
-// String encodes the cursor as an opaque token for a caller to hand back to
-// resume after the last row it saw.
+// String encodes the cursor as an opaque token.
 func (c BuildCursor) String() string {
 	if c.isZero() {
 		return ""
@@ -153,8 +129,7 @@ func (c BuildCursor) String() string {
 	return c.CreatedAt.UTC().Format(time.RFC3339Nano) + "," + c.BuildID
 }
 
-// ParseBuildCursor decodes a token previously returned by ListPage. An empty
-// token decodes to the zero cursor.
+// ParseBuildCursor decodes a cursor token; empty decodes to the zero cursor.
 func ParseBuildCursor(token string) (BuildCursor, error) {
 	if token == "" {
 		return BuildCursor{}, nil
@@ -170,38 +145,27 @@ func ParseBuildCursor(token string) (BuildCursor, error) {
 	return BuildCursor{CreatedAt: parsed, BuildID: buildID}, nil
 }
 
-// BuildListFilter narrows a page of the caller's tenant-wide build history
-// (GET /v1/builds) -- unlike BuildFilter/List above, which the review-nested
-// route uses and which stays a small, naturally-bounded, unpaginated read.
+// BuildListFilter narrows a page of the tenant-wide build history (GET /v1/builds).
 type BuildListFilter struct {
 	EnvironmentID string
 	Kind          model.BuildKind
-	// CommitID narrows the history to builds of one commit -- how a caller
-	// finds the build recorded for a commit that landed.
-	CommitID string
-	// Successful is nil for "either", so a caller can distinguish "only
-	// failed builds" from "no opinion" the same way a bare bool could not.
+	CommitID      string
+	// Successful is nil for "either".
 	Successful *bool
 	Since      time.Time
 	Until      time.Time
 	Cursor     BuildCursor
-	// Limit caps the page size; non-positive defaults to defaultBuildLimit and
-	// any value above maxBuildLimit is capped there.
-	Limit int
+	Limit      int
 }
 
-// BuildPage is one newest-first page of a tenant's build history. NextCursor
-// is empty when the page reached the end of the history.
+// BuildPage is one newest-first page; NextCursor is empty at the end.
 type BuildPage struct {
 	Builds     []model.Build
 	NextCursor string
 }
 
-// ListPage returns one page of the caller's tenant's whole build history,
-// review-linked and unattached alike, newest first. Scoped explicitly by
-// tenant_id from the security context rather than left to RLS: erun_operations'
-// policy is unconditional, so an OPERATIONS caller's empty filter would
-// otherwise read every tenant's builds.
+// ListPage returns one page of the tenant's build history, newest first.
+// tenant_id is filtered explicitly because erun_operations' RLS policy is unconditional.
 func (r *BuildRepository) ListPage(ctx context.Context, filter BuildListFilter) (BuildPage, error) {
 	limit := filter.Limit
 	switch {
@@ -233,9 +197,7 @@ func (r *BuildRepository) ListPage(ctx context.Context, filter BuildListFilter) 
 	return page, nil
 }
 
-// buildListPageQuery builds the SELECT for ListPage. It fetches one row
-// beyond limit so a next page can be reported without a second round trip;
-// ListPage trims that extra row back off.
+// buildListPageQuery fetches limit+1 rows so ListPage can detect a next page.
 func buildListPageQuery(tenantID string, filter BuildListFilter, limit int) (string, []any) {
 	query := `
 		SELECT ` + buildListColumns + `

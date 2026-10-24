@@ -7,15 +7,8 @@ import { restartOrchestrator } from '@/app/orchestratorThunks';
 import { closeOrchestratorDialog, type OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { restartNoticeText } from '@/components/app/OrchestratorDialog.RestartNotice.helpers';
 
-// RestartRequiredNotice tells the operator, at the top of the form they just
-// opened, that their earlier edit did not take effect yet: a live Claude Code
-// session resolves its MCP toolset once at launch, so it still holds tools for
-// whatever it was linked to before and none for what was added since — only a
-// restart re-wires it. It carries the exact control that resolves
-// it (root AGENTS.md: "a message naming a remedy should carry the action that
-// resolves it") rather than pointing at the footer's Restart button below.
-// Takes the raw `editing` value and decides for itself whether there is
-// anything to say, so the caller stays a plain, unconditional render.
+// RestartRequiredNotice: a live session resolves its MCP tools at launch, so only a restart applies the edit.
+// It carries the restart control and decides for itself whether to render.
 export function RestartRequiredNotice({
   editing,
 }: {

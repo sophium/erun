@@ -13,17 +13,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// configWatcherDebounce coalesces the burst of files erun init writes in
-// quick succession (tool, tenant, env config) into one state reload.
+// configWatcherDebounce coalesces erun init's burst of writes into one reload.
 const configWatcherDebounce = 250 * time.Millisecond
 
-// configWatcher observes the on-disk erun config tree and notifies the
-// frontend when it changes. The dialog/init flow already gets a
-// targeted environment-initialized signal from the PTY trace handler;
-// this watcher exists to catch the cases that bypass the desktop's PTY
-// — `erun init` run from a separate terminal, `erun env delete`, a
-// user editing config files by hand, etc. See erun-ui/AGENTS.md
-// § "Command Completion And State-Refresh Wiring".
+// configWatcher catches config changes made outside the desktop's PTY (other
+// terminals, hand edits). See erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring".
 type configWatcher struct {
 	watcher *fsnotify.Watcher
 	cancel  context.CancelFunc
@@ -67,9 +61,6 @@ func (a *App) startConfigWatcher() {
 	go a.runConfigWatcher(ctx, cw, root)
 }
 
-// newFsnotifyConfigWatcher creates the fsnotify watcher rooted at root and
-// arms it on every existing subdirectory, naming which step failed so the
-// caller can surface it instead of leaving the watcher silently unstarted.
 func newFsnotifyConfigWatcher(root string) (*fsnotify.Watcher, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("create config directory %s: %w", root, err)
@@ -85,12 +76,7 @@ func newFsnotifyConfigWatcher(root string) (*fsnotify.Watcher, error) {
 	return watcher, nil
 }
 
-// reportConfigWatcherFailure surfaces a config watcher problem as an
-// actionable notification. Swallowing it — the previous behavior, for both a
-// failed start and a runtime error from the watcher itself — left config
-// changes made outside the desktop's own PTY (a hand-edited file, `erun env
-// delete` from another terminal, `erun init` in a separate shell) silently
-// unreflected, indistinguishable from "nothing changed".
+// reportConfigWatcherFailure surfaces watcher failures; silence would read as "nothing changed".
 func (a *App) reportConfigWatcherFailure(err error) {
 	a.emitAppNotification("warning", fmt.Sprintf(
 		"Could not watch the config directory for external changes: %s. Environments created or edited outside this window may not appear until you reopen the app.",
@@ -110,41 +96,25 @@ func (a *App) stopConfigWatcher() {
 		cw.cancel()
 	}
 	_ = cw.watcher.Close()
-	// runConfigWatcher does not close done until its debounce timer is stopped
-	// and any flush already running has finished, so once this returns no
-	// goroutine the watcher started is still reading config.
+	// runConfigWatcher closes done only after its debounce has stopped and any flush finished.
 	<-cw.done
 }
 
-// configDebouncer coalesces a burst of config-tree events into one flush of
-// the environments they touched, and owns the work that flush starts.
-//
-// Owning that work is the whole reason this is a type rather than a handful of
-// locals. A flush reads an environment's config, so a debounce callback still
-// running after the watcher was stopped reads process-global config state
-// whose lifetime its caller owns — `stop` is the contract that prevents it, and
-// it has to outlive any single closure to be one: once `stop` returns, no
-// flush is running and no further one can start.
+// configDebouncer coalesces config-tree events into one flush. Once stop returns,
+// no flush is running and none can start, since flushes read process-global config.
 type configDebouncer struct {
 	root  string
 	flush func([]definitionWatchTarget)
 
-	// mu guards the debounce state. The callback claims its slot under this
-	// lock, the same one `stop` sets stopped under, so a callback either
-	// claims before teardown — and is waited for — or sees stopped set and
-	// returns without reading. Stopping the timer alone cannot say which of
-	// those happened: Stop reports false both for a callback that has not been
-	// scheduled yet and for one that has already finished.
+	// mu: the callback claims its slot under the same lock stop sets stopped under;
+	// timer.Stop alone cannot tell not-yet-scheduled from already-finished.
 	mu      sync.Mutex
 	stopped bool
 	timer   *time.Timer
 	running sync.WaitGroup
 	pending map[definitionWatchTarget]struct{}
 
-	// flushMu keeps two debounce windows from overlapping. A flush performs a
-	// platform round trip, and two concurrent flushes for one environment
-	// would each decide their own upload from a pre-write read of the same
-	// config — two revisions written for one change.
+	// flushMu serializes flushes so one change cannot produce two uploaded revisions.
 	flushMu sync.Mutex
 }
 
@@ -156,9 +126,7 @@ func newConfigDebouncer(root string, flush func([]definitionWatchTarget)) *confi
 	}
 }
 
-// observe records one config-tree event. It (re)arms the debounce window
-// whether or not the path attributes to an environment, because a flush
-// carrying no targets still refreshes the state every change implies.
+// observe re-arms the window even for unattributed paths; an empty flush still refreshes state.
 func (d *configDebouncer) observe(path string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -175,8 +143,6 @@ func (d *configDebouncer) observe(path string) {
 	d.timer = time.AfterFunc(configWatcherDebounce, d.run)
 }
 
-// run is the debounce callback: it claims its slot, drains what was queued, and
-// flushes it.
 func (d *configDebouncer) run() {
 	d.mu.Lock()
 	d.timer = nil
@@ -193,7 +159,6 @@ func (d *configDebouncer) run() {
 	d.flush(d.take())
 }
 
-// take drains the queued targets, so one change is reported once.
 func (d *configDebouncer) take() []definitionWatchTarget {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -205,8 +170,7 @@ func (d *configDebouncer) take() []definitionWatchTarget {
 	return targets
 }
 
-// stop ends the debounce: it stops the pending timer, refuses any later
-// callback, and waits out a flush already in flight.
+// stop stops the timer, refuses later callbacks, and waits out an in-flight flush.
 func (d *configDebouncer) stop() {
 	d.mu.Lock()
 	d.stopped = true
@@ -221,8 +185,6 @@ func (d *configDebouncer) stop() {
 func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root string) {
 	defer close(cw.done)
 
-	// Stopped before done closes, so the caller waiting on done knows no flush
-	// is still reading.
 	debounce := newConfigDebouncer(root, a.reactToConfigWatchTargets)
 	defer debounce.stop()
 
@@ -244,23 +206,14 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 	}
 }
 
-// definitionWatchTarget is the environment a config-tree event was attributed
-// to — the unit the watcher decides an upload for.
 type definitionWatchTarget struct {
 	tenant      string
 	environment string
 }
 
-// definitionWatchTargetFor attributes a config-tree event to an environment,
-// and reports false for everything else under the root.
-//
-// Only an environment's own config.yaml counts, and the path is resolved back
-// through the config store's own resolver rather than pattern-matched, so the
-// names that pass are exactly the ones the store would accept. The rest of the
-// tree is deliberately out of reach rather than merely skipped: the root
-// config.yaml holds CloudContextConfig.AdminToken in plaintext, and every live
-// config sits beside its own dated backups (`config.yaml.2026-09-25.bak`),
-// which is why the match is on the whole resolved path and not on a suffix.
+// definitionWatchTargetFor attributes an event to an environment's own config.yaml,
+// resolved through the store's resolver and matched on the whole path: the root
+// config holds AdminToken in plaintext, and dated .bak backups sit beside each config.
 func definitionWatchTargetFor(root, path string) (definitionWatchTarget, bool) {
 	relative, err := filepath.Rel(root, path)
 	if err != nil {
@@ -278,8 +231,7 @@ func definitionWatchTargetFor(root, path string) (definitionWatchTarget, bool) {
 	return definitionWatchTarget{tenant: tenant, environment: environment}, true
 }
 
-// handleConfigWatchEvent adds newly-created config subdirs to the watch set
-// because fsnotify is not recursive and would otherwise miss writes inside them.
+// fsnotify is not recursive, so newly created subdirs must be added.
 func handleConfigWatchEvent(watcher *fsnotify.Watcher, event fsnotify.Event, queueEmit func(string)) {
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {

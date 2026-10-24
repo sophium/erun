@@ -5,64 +5,36 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
-// RegistryRole marks the part a registry plays in the build → copy → deploy
-// flow. A single registry entry may carry more than one role (commonly
-// build+deploy on a fresh project, or build+from on the source side of a
-// copy).
-type RegistryRole string
-
-const (
-	// RegistryRoleBuild marks the registry `erun build`/`erun push` push to.
-	RegistryRoleBuild RegistryRole = "build"
-	// RegistryRoleFrom marks the copy source consulted on deploy.
-	RegistryRoleFrom RegistryRole = "from"
-	// RegistryRoleTo marks a copy destination written on deploy.
-	RegistryRoleTo RegistryRole = "to"
-	// RegistryRoleDeploy marks the registry the cluster pulls from — the value
-	// rendered into the chart as containerRegistry.
-	RegistryRoleDeploy RegistryRole = "deploy"
-)
-
-// ContainerRegistryEntry is one registry in the project's marked list. It names
-// its target one of two ways: a static host (or host/namespace) in Registry, or
-// a Cluster block resolved from the env's kube-context. Exactly one is set.
+// ContainerRegistryEntry names a static Registry or a kube-context-resolved
+// Cluster; exactly one is set.
 type ContainerRegistryEntry struct {
-	Registry string           `yaml:"registry,omitempty" json:"registry,omitempty"`
-	Cluster  *ClusterRegistry `yaml:"cluster,omitempty" json:"cluster,omitempty"`
-	Roles    []RegistryRole   `yaml:"roles" json:"roles"`
-	// Insecure carries a cluster registry's plain-HTTP marker onto its
-	// concretized push/pull entries (expandClusterEntry). It is never set on a
-	// static `registry:` entry and never persisted — a raw config entry only
-	// ever carries insecurity under Cluster.Insecure.
+	Registry string               `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Cluster  *ClusterRegistry     `yaml:"cluster,omitempty" json:"cluster,omitempty"`
+	Roles    []model.RegistryRole `yaml:"roles" json:"roles"`
+	// Insecure is carried from Cluster.Insecure onto concretized entries; never persisted.
 	Insecure bool `yaml:"-" json:"-"`
 }
 
-// ClusterRegistry describes an in-cluster image registry whose addresses are
-// resolved from the env's kube-context rather than hardcoded. The cluster pulls
-// it at its in-cluster address (the DEPLOY role); operator-side roles
-// (BUILD/FROM/TO) reach it at a push address — the in-cluster address for an
-// in-pod build, or a managed port-forward (localhost:<port>) from the host.
+// ClusterRegistry is an in-cluster registry: the cluster pulls at the in-cluster
+// address, operator roles push via the in-cluster address or a port-forward.
 type ClusterRegistry struct {
 	Service   string `yaml:"service,omitempty" json:"service,omitempty"`
 	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`
 	Port      int    `yaml:"port,omitempty" json:"port,omitempty"`
-	// Insecure marks the registry as plain HTTP (a local dev registry), so the
-	// in-pod dind daemon is told to trust it and the resolver never assumes TLS.
-	Insecure bool `yaml:"insecure,omitempty" json:"insecure,omitempty"`
+	Insecure  bool   `yaml:"insecure,omitempty" json:"insecure,omitempty"`
 }
 
-// Cluster registry defaults match the erun-registry convention the local k3s
-// setup provisions, so a bare `cluster: {}` block resolves without extra config.
+// Defaults match the erun-registry the local k3s setup provisions.
 const (
 	DefaultClusterRegistryService   = "erun-registry"
 	DefaultClusterRegistryNamespace = "kube-system"
 	DefaultClusterRegistryPort      = 5000
 )
 
-// WithDefaults fills unset fields with the erun-registry convention.
 func (c ClusterRegistry) WithDefaults() ClusterRegistry {
 	if strings.TrimSpace(c.Service) == "" {
 		c.Service = DefaultClusterRegistryService
@@ -76,9 +48,7 @@ func (c ClusterRegistry) WithDefaults() ClusterRegistry {
 	return c
 }
 
-// identity names the entry for role tallies and dedup: the static host, or a
-// stable pseudo-host for a cluster entry so two cluster entries for the same
-// service collapse.
+// identity keys an entry for dedup; same-service cluster entries collapse.
 func (e ContainerRegistryEntry) identity() string {
 	if e.Cluster != nil {
 		c := e.Cluster.WithDefaults()
@@ -87,16 +57,14 @@ func (e ContainerRegistryEntry) identity() string {
 	return strings.TrimSpace(e.Registry)
 }
 
-// ContainerRegistries is the marked registry list. Build pushes to the BUILD
-// registry; deploy copies images FROM → every TO when both are set, then the
-// cluster pulls from the DEPLOY registry.
+// ContainerRegistries is the marked registry list.
 type ContainerRegistries []ContainerRegistryEntry
 
-func normalizeRole(role RegistryRole) RegistryRole {
-	return RegistryRole(strings.ToLower(strings.TrimSpace(string(role))))
+func normalizeRole(role model.RegistryRole) model.RegistryRole {
+	return model.RegistryRole(strings.ToLower(strings.TrimSpace(string(role))))
 }
 
-func (e ContainerRegistryEntry) HasRole(role RegistryRole) bool {
+func (e ContainerRegistryEntry) HasRole(role model.RegistryRole) bool {
 	for _, candidate := range e.Roles {
 		if normalizeRole(candidate) == role {
 			return true
@@ -105,12 +73,11 @@ func (e ContainerRegistryEntry) HasRole(role RegistryRole) bool {
 	return false
 }
 
-// IsZero reports whether the list carries no entries.
 func (r ContainerRegistries) IsZero() bool {
 	return len(r) == 0
 }
 
-func (r ContainerRegistries) registryEntryWithRole(role RegistryRole) (ContainerRegistryEntry, bool) {
+func (r ContainerRegistries) registryEntryWithRole(role model.RegistryRole) (ContainerRegistryEntry, bool) {
 	for _, entry := range r {
 		if entry.HasRole(role) {
 			if registry := strings.TrimSpace(entry.Registry); registry != "" {
@@ -121,44 +88,37 @@ func (r ContainerRegistries) registryEntryWithRole(role RegistryRole) (Container
 	return ContainerRegistryEntry{}, false
 }
 
-func (r ContainerRegistries) registryWithRole(role RegistryRole) (string, bool) {
+func (r ContainerRegistries) registryWithRole(role model.RegistryRole) (string, bool) {
 	entry, ok := r.registryEntryWithRole(role)
 	return strings.TrimSpace(entry.Registry), ok
 }
 
-// BuildRegistry returns the BUILD-marked registry. ok is false when no entry
-// carries the build role — callers treat that as "this environment cannot
-// build".
+// BuildRegistry returns the BUILD-marked registry; !ok means the environment cannot build.
 func (r ContainerRegistries) BuildRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleBuild)
+	return r.registryWithRole(model.RegistryRoleBuild)
 }
 
-// BuildRegistryInsecure reports whether the BUILD-marked registry is plain
-// HTTP. `docker manifest` never consults the daemon's insecure-registry list
-// (it talks to the registry directly and defaults to HTTPS), so callers that
-// shell out to it need this alongside the registry host itself.
+// BuildRegistryInsecure reports whether the BUILD registry is plain HTTP, which
+// `docker manifest` needs since it ignores the daemon's insecure-registry list.
 func (r ContainerRegistries) BuildRegistryInsecure() bool {
-	entry, ok := r.registryEntryWithRole(RegistryRoleBuild)
+	entry, ok := r.registryEntryWithRole(model.RegistryRoleBuild)
 	return ok && entry.Insecure
 }
 
-// FromRegistry returns the FROM-marked copy source.
 func (r ContainerRegistries) FromRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleFrom)
+	return r.registryWithRole(model.RegistryRoleFrom)
 }
 
-// DeployRegistry returns the registry the cluster pulls from. When more than
-// one entry carries the deploy role the first wins.
+// DeployRegistry returns the first DEPLOY-marked registry.
 func (r ContainerRegistries) DeployRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleDeploy)
+	return r.registryWithRole(model.RegistryRoleDeploy)
 }
 
-// ToRegistries returns every TO-marked copy destination in list order.
 func (r ContainerRegistries) ToRegistries() []string {
 	out := make([]string, 0, len(r))
 	seen := make(map[string]struct{}, len(r))
 	for _, entry := range r {
-		if !entry.HasRole(RegistryRoleTo) {
+		if !entry.HasRole(model.RegistryRoleTo) {
 			continue
 		}
 		registry := strings.TrimSpace(entry.Registry)
@@ -174,27 +134,21 @@ func (r ContainerRegistries) ToRegistries() []string {
 	return out
 }
 
-// ClusterRegistryAddresses is a cluster registry resolved to concrete hosts:
-// Push is where operator-side roles (build/from/to) read and write; Pull is the
-// in-cluster host the DEPLOY role renders into the chart for the cluster to pull.
+// ClusterRegistryAddresses is a resolved cluster registry: Push for operator roles,
+// Pull for the cluster.
 type ClusterRegistryAddresses struct {
 	Push string
 	Pull string
 }
 
-// ClusterRegistryResolver turns a cluster block into concrete push/pull hosts.
-// It is injected so resolution (kube-context queries, port-forward setup) stays
-// out of the pure config layer and is faked in tests.
+// ClusterRegistryResolver is injected to keep kube-context queries out of config.
 type ClusterRegistryResolver func(ClusterRegistry) (ClusterRegistryAddresses, error)
 
-// isClusterPullRole reports whether a role is served by the cluster itself
-// (DEPLOY) rather than the operator side; the cluster pulls at the pull host.
-func isClusterPullRole(role RegistryRole) bool {
-	return normalizeRole(role) == RegistryRoleDeploy
+func isClusterPullRole(role model.RegistryRole) bool {
+	return normalizeRole(role) == model.RegistryRoleDeploy
 }
 
-// HasClusterEntry reports whether any entry is a context-resolved cluster
-// registry, so callers know a resolver is required before use.
+// HasClusterEntry reports whether a resolver is needed before use.
 func (r ContainerRegistries) HasClusterEntry() bool {
 	for _, entry := range r {
 		if entry.Cluster != nil {
@@ -204,8 +158,7 @@ func (r ContainerRegistries) HasClusterEntry() bool {
 	return false
 }
 
-// ClusterEntry returns the first cluster block (defaults filled), if any —
-// callers use it to set up the port-forward and dind insecure trust.
+// ClusterEntry returns the first cluster block with defaults filled.
 func (r ContainerRegistries) ClusterEntry() (ClusterRegistry, bool) {
 	for _, entry := range r {
 		if entry.Cluster != nil {
@@ -215,10 +168,7 @@ func (r ContainerRegistries) ClusterEntry() (ClusterRegistry, bool) {
 	return ClusterRegistry{}, false
 }
 
-// Concrete expands cluster entries into plain per-role entries using resolved
-// push/pull hosts, so BuildRegistry/DeployRegistry/copy resolution operate on
-// static hosts unchanged. Plain entries pass through untouched. A cluster entry
-// splits by role: DEPLOY → pull host; BUILD/FROM/TO → push host.
+// Concrete expands cluster entries into static per-role entries.
 func (r ContainerRegistries) Concrete(resolve ClusterRegistryResolver) (ContainerRegistries, error) {
 	if !r.HasClusterEntry() {
 		return r, nil
@@ -241,14 +191,12 @@ func (r ContainerRegistries) Concrete(resolve ClusterRegistryResolver) (Containe
 	return out, nil
 }
 
-// expandClusterEntry resolves one cluster entry's push/pull hosts and splits its
-// roles into plain per-host entries: DEPLOY pulls; BUILD/FROM/TO push.
 func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryResolver) (ContainerRegistries, error) {
 	addrs, err := resolve(entry.Cluster.WithDefaults())
 	if err != nil {
 		return nil, err
 	}
-	var pull, push []RegistryRole
+	var pull, push []model.RegistryRole
 	for _, role := range entry.Roles {
 		if isClusterPullRole(role) {
 			pull = append(pull, role)
@@ -273,10 +221,8 @@ func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryRes
 	return out, nil
 }
 
-// Validate enforces the marker invariants. A DEPLOY registry need not carry
-// BUILD or TO — the image it serves may be published there externally (e.g. a
-// runtime env pulling a released image), which erun cannot police at config
-// time.
+// Validate enforces the marker invariants. DEPLOY need not pair with BUILD or TO,
+// since the image may be published externally.
 func (r ContainerRegistries) Validate() error {
 	if r.IsZero() {
 		return errors.New("registry list is empty")
@@ -323,26 +269,24 @@ func (r ContainerRegistries) tallyRoles() (registryRoleTally, error) {
 		if registry == "" {
 			return registryRoleTally{}, errors.New("registry list entry is missing a registry")
 		}
-		if entry.HasRole(RegistryRoleBuild) {
+		if entry.HasRole(model.RegistryRoleBuild) {
 			tally.build++
 		}
-		if entry.HasRole(RegistryRoleFrom) {
+		if entry.HasRole(model.RegistryRoleFrom) {
 			tally.from++
 			tally.fromRegistry = registry
 		}
-		if entry.HasRole(RegistryRoleTo) {
+		if entry.HasRole(model.RegistryRoleTo) {
 			tally.toRegistries[registry] = struct{}{}
 		}
-		if entry.HasRole(RegistryRoleDeploy) {
+		if entry.HasRole(model.RegistryRoleDeploy) {
 			tally.deploy++
 		}
 	}
 	return tally, nil
 }
 
-// Equal reports whether two lists carry the same registries with the same
-// roles in the same order. Used to collapse a per-env override that matches
-// the project default.
+// Equal reports whether two lists match in registries, roles and order.
 func (r ContainerRegistries) Equal(other ContainerRegistries) bool {
 	if len(r) != len(other) {
 		return false
@@ -369,15 +313,14 @@ func (r ContainerRegistries) Equal(other ContainerRegistries) bool {
 	return true
 }
 
-// Clone returns a deep copy so callers can mutate the result without aliasing
-// the stored config.
+// Clone returns a deep copy.
 func (r ContainerRegistries) Clone() ContainerRegistries {
 	if r == nil {
 		return nil
 	}
 	out := make(ContainerRegistries, len(r))
 	for i, entry := range r {
-		out[i] = ContainerRegistryEntry{Registry: entry.Registry, Roles: append([]RegistryRole(nil), entry.Roles...)}
+		out[i] = ContainerRegistryEntry{Registry: entry.Registry, Roles: append([]model.RegistryRole(nil), entry.Roles...)}
 		if entry.Cluster != nil {
 			cluster := *entry.Cluster
 			out[i].Cluster = &cluster
@@ -386,17 +329,15 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 	return out
 }
 
-// DefaultContainerRegistries is the seed a fresh project starts with: build and
-// pull from the same host, no copy.
+// DefaultContainerRegistries is the seed for a fresh project.
 func DefaultContainerRegistries() ContainerRegistries {
 	return ContainerRegistries{{
 		Registry: DefaultContainerRegistry,
-		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 
-// SingleContainerRegistries builds the one-entry list that seeds a project from
-// a single `--container-registry` value.
+// SingleContainerRegistries seeds a project from one `--container-registry` value.
 func SingleContainerRegistries(registry string) ContainerRegistries {
 	registry = strings.TrimSpace(registry)
 	if registry == "" {
@@ -404,45 +345,35 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 	}
 	return ContainerRegistries{{
 		Registry: registry,
-		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 
-// ClusterContainerRegistries builds the one-entry list that seeds a new env from
-// an in-cluster registry (e.g. the erun-registry the local k3s setup deploys),
-// marked build+deploy. Its addresses resolve from the env's kube-context, so the
-// same entry works for an in-pod build (ClusterIP) and a host build (managed
-// port-forward) without hardcoding a host that only one of them can reach.
+// ClusterContainerRegistries seeds a build+deploy in-cluster registry entry whose
+// addresses resolve per caller (ClusterIP in pod, port-forward on host).
 func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
 	c := cluster.WithDefaults()
 	return ContainerRegistries{{
 		Cluster: &c,
-		Roles:   []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:   []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 
-// HostedRegistryHost is erun's own hosted container registry, offered as an
-// out-of-the-box registry choice (`erun init --erun-registry`) alongside the
-// local in-cluster erun-registry convention. It is authenticated by the
-// tenant's own API token rather than a manually-run `docker login`.
+// HostedRegistryHost is erun's hosted registry, authenticated by the tenant's API token.
 const HostedRegistryHost = "registry.erunpaas.com"
 
-// HostedRegistryLoginUsername is the fixed, documented Basic-auth username the
-// hosted registry's token endpoint never inspects (the tenant is resolved from
-// the password's verified issuer instead) — see DockerRegistryLoginWithHostedRegistry.
+// HostedRegistryLoginUsername is ignored by the token endpoint; the tenant comes
+// from the password's issuer.
 const HostedRegistryLoginUsername = "erun"
 
-// HostedRegistryReference builds the tenant-namespaced reference under the
-// hosted registry, e.g. "registry.erunpaas.com/frs" for tenant "frs". Every
-// tenant pushes under its own namespace; the registry's token service clamps
-// pull/push scope to it (see RegistryTokenAudience).
+// HostedRegistryReference returns the tenant's namespace under the hosted registry;
+// the token service clamps scope to it.
 func HostedRegistryReference(tenant string) string {
 	return HostedRegistryHost + "/" + strings.TrimSpace(tenant)
 }
 
 // migrateLegacyContainerRegistry folds a legacy `containerregistry` scalar into
-// the marked list. The key is dropped on the next save, so the migration is
-// one-way.
+// the list; the next save drops the key.
 func migrateLegacyContainerRegistry(existing ContainerRegistries, legacy string) ContainerRegistries {
 	if !existing.IsZero() {
 		return existing
@@ -450,9 +381,7 @@ func migrateLegacyContainerRegistry(existing ContainerRegistries, legacy string)
 	return SingleContainerRegistries(legacy)
 }
 
-// UnmarshalYAML migrates the legacy `containerregistry` scalar into the marked
-// list so already-initialized projects keep working after the field was
-// removed from the struct.
+// UnmarshalYAML migrates the legacy `containerregistry` scalar.
 func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain ProjectConfig
 	aux := struct {
@@ -467,15 +396,11 @@ func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
-// actually drops the migrated key instead of preserving it forever as an
-// unrecognized field.
 func (ProjectConfig) legacyYAMLKeys() []string {
 	return []string{"containerregistry"}
 }
 
-// UnmarshalYAML migrates an env's legacy fields on read so configs written by
-// older binaries keep working after those fields were removed from the struct.
+// UnmarshalYAML migrates an env's legacy fields.
 func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain EnvConfig
 	aux := struct {
@@ -493,26 +418,17 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	if !c.Type.IsValid() {
 		c.Type = LegacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
 	}
-	// The legacy `repopath` fold is unconditional across all env types:
-	// EffectiveLocalRepoPath already resolved `repopath` for every type via its
-	// fallback, so only the stored field name moves. This intentionally broadens
-	// the old local-agent-only NormalizeEnvConfig backfill, which was
-	// inconsistent with that fallback.
 	if strings.TrimSpace(c.LocalRepoPath) == "" {
 		c.LocalRepoPath = strings.TrimSpace(aux.LegacyRepoPath)
 	}
 	return nil
 }
 
-// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
-// actually drops these migrated keys instead of preserving them forever as
-// unrecognized fields.
 func (EnvConfig) legacyYAMLKeys() []string {
 	return []string{"containerregistry", "remote", "snapshot", "repopath"}
 }
 
-// UnmarshalYAML migrates the per-env legacy `containerregistry` scalar the same
-// way as the project default.
+// UnmarshalYAML migrates the per-env legacy `containerregistry` scalar.
 func (c *ProjectEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain ProjectEnvironmentConfig
 	aux := struct {
@@ -527,17 +443,12 @@ func (c *ProjectEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
-// actually drops the migrated key instead of preserving it forever as an
-// unrecognized field.
 func (ProjectEnvironmentConfig) legacyYAMLKeys() []string {
 	return []string{"containerregistry"}
 }
 
-// ContainerRegistriesForEnvironment resolves the marked list for an
-// environment: the per-env override wins when set, otherwise the project
-// default. Returns nil when neither is configured (callers fall back to the
-// default seed).
+// ContainerRegistriesForEnvironment returns the per-env override, else the project
+// default, else nil.
 func (c ProjectConfig) ContainerRegistriesForEnvironment(environment string) ContainerRegistries {
 	environment = strings.TrimSpace(environment)
 	if environment != "" && c.Environments != nil {
@@ -548,10 +459,8 @@ func (c ProjectConfig) ContainerRegistriesForEnvironment(environment string) Con
 	return c.ContainerRegistries
 }
 
-// SetContainerRegistriesForEnvironment stores the marked list for an
-// environment. An empty environment sets the project default; an empty list
-// clears the per-env override; a per-env list equal to the project default is
-// collapsed rather than stored.
+// SetContainerRegistriesForEnvironment stores the list; an empty environment sets
+// the project default, and a per-env list equal to it is collapsed.
 func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string, list ContainerRegistries) {
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
@@ -559,19 +468,7 @@ func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string,
 		return
 	}
 	if list.IsZero() || list.Equal(c.ContainerRegistries) {
-		if c.Environments != nil {
-			if envConfig, ok := c.Environments[environment]; ok {
-				envConfig.ContainerRegistries = nil
-				if envConfig.isEmpty() {
-					delete(c.Environments, environment)
-				} else {
-					c.Environments[environment] = envConfig
-				}
-				if len(c.Environments) == 0 {
-					c.Environments = nil
-				}
-			}
-		}
+		c.clearEnvironmentContainerRegistries(environment)
 		return
 	}
 	if c.Environments == nil {
@@ -582,15 +479,27 @@ func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string,
 	c.Environments[environment] = envConfig
 }
 
-// isEmpty reports whether a per-env entry carries nothing worth persisting, so
-// a registry-only entry collapses away rather than being stored.
+func (c *ProjectConfig) clearEnvironmentContainerRegistries(environment string) {
+	envConfig, ok := c.Environments[environment]
+	if !ok {
+		return
+	}
+	envConfig.ContainerRegistries = nil
+	if envConfig.isEmpty() {
+		delete(c.Environments, environment)
+	} else {
+		c.Environments[environment] = envConfig
+	}
+	if len(c.Environments) == 0 {
+		c.Environments = nil
+	}
+}
+
 func (c ProjectEnvironmentConfig) isEmpty() bool {
 	return c.ContainerRegistries.IsZero() && c.Docker.IsZero() && c.K8s.IsZero()
 }
 
-// DistinctRegistries returns the unique registry hosts in the list, in order.
-// Version discovery queries each one so an offered version can be attributed to
-// the registry it came from.
+// DistinctRegistries returns the unique registry hosts in order.
 func (r ContainerRegistries) DistinctRegistries() []string {
 	out := make([]string, 0, len(r))
 	seen := make(map[string]struct{}, len(r))
@@ -608,13 +517,8 @@ func (r ContainerRegistries) DistinctRegistries() []string {
 	return out
 }
 
-// ResolveEnvironmentContainerRegistries returns the marked list an environment
-// is configured with: the per-env list carried on the env config (remote and
-// runtime envs) when set, otherwise the project's configured list resolved
-// through the env's local repo path. Best-effort and never errors; returns nil
-// when nothing is configured so callers can apply the default seed or omit the
-// field. Callers that report what an environment will actually use must go
-// through EffectiveEnvironmentContainerRegistries instead.
+// ResolveEnvironmentContainerRegistries returns the configured list, or nil.
+// Reporting must use EffectiveEnvironmentContainerRegistries instead.
 func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 	if !env.ContainerRegistries.IsZero() {
 		return env.ContainerRegistries
@@ -626,11 +530,8 @@ func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 	return configured
 }
 
-// EffectiveEnvironmentContainerRegistries returns the marked list an environment
-// actually resolves to, ending at the same default seed build and deploy execute
-// against when nothing is configured. Reporting reads through here: a reader
-// decides from it whether an environment can push at all, and showing nothing
-// for one that will in fact use the default reads as "this one cannot".
+// EffectiveEnvironmentContainerRegistries is ResolveEnvironmentContainerRegistries
+// with the default seed, so reporting matches what build and deploy use.
 func EffectiveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 	if configured := ResolveEnvironmentContainerRegistries(env); !configured.IsZero() {
 		return configured
@@ -638,9 +539,7 @@ func EffectiveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries 
 	return DefaultContainerRegistries()
 }
 
-// DeployTargetContainerRegistries resolves the marked list for a deploy target,
-// mirroring publishedDevopsChartRegistry's source order, and validates it so
-// marker errors surface at deploy time.
+// DeployTargetContainerRegistries resolves and validates the list for a deploy target.
 func DeployTargetContainerRegistries(target OpenResult) (ContainerRegistries, error) {
 	if !target.EnvConfig.ContainerRegistries.IsZero() {
 		list := target.EnvConfig.ContainerRegistries
@@ -652,9 +551,8 @@ func DeployTargetContainerRegistries(target OpenResult) (ContainerRegistries, er
 	return EffectiveContainerRegistries(target.RepoPath, target.Environment)
 }
 
-// configuredContainerRegistries returns the list a project explicitly configures
-// for an environment, and nil when it configures none. Display and execution
-// both read the source order through here so they cannot drift apart.
+// configuredContainerRegistries returns the project's explicit list for an
+// environment, or nil; display and execution share it.
 func configuredContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return nil, nil
@@ -669,9 +567,7 @@ func configuredContainerRegistries(projectRoot, environment string) (ContainerRe
 	return projectConfig.ContainerRegistriesForEnvironment(environment), nil
 }
 
-// EffectiveContainerRegistries applies the default seed when nothing is
-// configured. Build and deploy both resolve through here so marker invariants
-// are enforced at the point of use.
+// EffectiveContainerRegistries applies the default seed when nothing is configured.
 func EffectiveContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
 	list := DefaultContainerRegistries()
 	configured, err := configuredContainerRegistries(projectRoot, environment)

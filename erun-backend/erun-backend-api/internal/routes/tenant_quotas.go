@@ -10,22 +10,12 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TenantQuotaAdminSetter sets a tenant's caps (env count plus the
-// per-environment CPU/memory/storage namespace ceiling the quota guardrail
-// enforces on env registration and provisioning) and audits who set them.
-// Setting a tenant quota is operations-only with no "act on your own tenant"
-// default, so it is always a cross-tenant write — see
-// service.TenantQuotaAdminService.
+// TenantQuotaAdminSetter sets and audits a tenant's caps; it is always a cross-tenant, operations-only write.
 type TenantQuotaAdminSetter interface {
 	SetForTenant(ctx context.Context, targetTenantID string, quota model.TenantQuota) (model.TenantQuota, error)
 }
 
-// TenantQuotaReader reads a tenant's quota row (RLS-scoped for a tenant-scoped
-// caller; scopedContextForTenant-substitutable for an operations caller
-// naming another tenant), defaulted when the tenant has no row yet — the same
-// read admission itself uses. Tenant-self-service by default, unlike
-// TenantQuotaAdminSetter's SetForTenant: a quota nobody can see is a support
-// ticket (#605, #1113).
+// TenantQuotaReader reads a tenant's quota row, defaulted when absent — the same read admission uses.
 type TenantQuotaReader interface {
 	Get(ctx context.Context) (model.TenantQuota, error)
 }
@@ -35,14 +25,8 @@ type TenantQuotaRoutes struct {
 	reader TenantQuotaReader
 }
 
-// setTenantQuotaRequest carries every cap explicitly: a PUT always fully
-// replaces the row, never merges. maxEnvironments may be 0 (a real "no
-// environments" cap, matching its pre-existing validation); the six resource
-// caps must be positive — 0 has no sane operational meaning for a namespace
-// ResourceQuota or a tenant-wide budget and almost always means the caller
-// omitted the field rather than intending to allow nothing. maxTotal* is the
-// aggregate tenant-wide ceiling (#1113), distinct from the per-environment
-// ceiling above.
+// setTenantQuotaRequest fully replaces the row. maxEnvironments may be 0, but resource caps must be
+// positive: 0 almost always means an omitted field.
 type setTenantQuotaRequest struct {
 	MaxEnvironments       int `json:"maxEnvironments"`
 	MaxCPUMillicores      int `json:"maxCpuMillicores"`
@@ -53,25 +37,13 @@ type setTenantQuotaRequest struct {
 	MaxTotalStorageGB     int `json:"maxTotalStorageGb"`
 }
 
-// RegisterTenantQuotaRoute registers both the operations-only write
-// (PUT .../quota) and the read (GET /v1/quota, defaulting to the caller's own
-// tenant, cross-tenant for an operations caller through the same
-// resolveTargetTenant convention environments/users/invites use) — admin and
-// reader are separate interfaces because they carry different authorization,
-// but both are usually backed by the same repository.TenantQuotaRepository.
+// RegisterTenantQuotaRoute registers the operations-only PUT and the tenant-self-service GET /v1/quota.
 func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, admin TenantQuotaAdminSetter, reader TenantQuotaReader) {
 	routes := TenantQuotaRoutes{admin: admin, reader: reader}
 	register(http.MethodPut, "/v1/tenants/{tenant_id}/quota", http.HandlerFunc(routes.setQuota))
 	register(http.MethodGet, "/v1/quota", http.HandlerFunc(routes.getQuota))
 }
 
-// getQuota returns the caller's own tenant's quota row by default — every cap
-// admission itself reads, so an Operator can see exactly what they are
-// working within (env count, the per-environment resource ceiling, and the
-// aggregate tenant-wide budget) without an operations-scoped token. An
-// operations caller may pass ?tenantId= to read another tenant's row instead —
-// the read half of the same operations-only write below, so a quota can be
-// seen before it is set.
 func (r TenantQuotaRoutes) getQuota(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -91,8 +63,6 @@ func (r TenantQuotaRoutes) getQuota(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, quota)
 }
 
-// Operations-only: setting another tenant's quota is a cross-tenant write that
-// only the operations role's RLS policy permits.
 func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {

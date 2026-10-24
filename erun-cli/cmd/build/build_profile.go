@@ -3,14 +3,15 @@ package build
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/spf13/cobra"
 )
 
 // buildProfileCommandName is the timing-record command prefix `erun build`
-// writes under ~/.erun/timing/ (timingRecordFileName in erun-common/timing.go).
+// writes under ~/.erun/timing/ (core.TimingRecordFileName).
 const buildProfileCommandName = "build"
 
 func newBuildProfileCmd() *cobra.Command {
@@ -34,7 +35,7 @@ func newBuildProfileCmd() *cobra.Command {
 			if len(args) > 0 {
 				id = args[0]
 			}
-			return runBuildProfileCommand(shared.CommandContext(cmd), id, limit)
+			return runBuildProfileCommand(clicmd.CommandContext(cmd), id, limit)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of recent builds to list (newest-first); 0 lists all retained records")
@@ -43,26 +44,26 @@ func newBuildProfileCmd() *cobra.Command {
 
 func runBuildProfileCommand(ctx core.Context, id string, limit int) error {
 	if id == "" {
-		summaries, err := common.ListTimingRecords(buildProfileCommandName, limit)
+		summaries, err := build.ListTimingRecords(buildProfileCommandName, limit)
 		if err != nil {
 			return err
 		}
-		if ctx.Output == core.OutputJSON {
+		if ctx.Output == model.OutputJSON {
 			return ctx.WriteResult(summaries)
 		}
 		return writeBuildProfileListText(ctx, summaries)
 	}
-	record, err := common.LoadTimingRecord(buildProfileCommandName, id)
+	record, err := build.LoadTimingRecord(buildProfileCommandName, id)
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(record)
 	}
 	return writeBuildProfileDetailText(ctx, record)
 }
 
-func writeBuildProfileListText(ctx core.Context, summaries []common.TimingRecordSummary) error {
+func writeBuildProfileListText(ctx core.Context, summaries []model.TimingRecordSummary) error {
 	if len(summaries) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "No recorded builds found in ~/.erun/timing.")
 		return err
@@ -83,8 +84,8 @@ func writeBuildProfileListText(ctx core.Context, summaries []common.TimingRecord
 	return err
 }
 
-func writeBuildProfileDetailText(ctx core.Context, record core.TimingRecord) error {
-	for _, row := range common.RenderTimingRecordRows(record) {
+func writeBuildProfileDetailText(ctx core.Context, record model.TimingRecord) error {
+	for _, row := range build.RenderTimingRecordRows(record) {
 		if _, err := fmt.Fprintln(ctx.Stdout, row); err != nil {
 			return err
 		}

@@ -12,14 +12,11 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// This is the whole capability contract driven end to end: the real handler,
-// the real database-backed authorizer under RLS, and the real shared client
-// every erun transport uses. A capability set that agrees with enforcement in
-// a unit test but not over HTTP would still teach a client to expect the wrong
-// thing, so the agreement is re-proved against actual responses.
+// Re-proves over real HTTP, RLS, and the shared client that capabilities agree with enforcement.
 func capabilityAPIDatabase(t *testing.T) (*sql.DB, string, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -48,8 +45,7 @@ func capabilityAPIDatabase(t *testing.T) (*sql.DB, string, string) {
 	return db, tenantID, userID
 }
 
-// grantReadOnlyRole gives the user the same pattern-based read role the identity
-// bootstrap creates, and nothing else.
+// grantReadOnlyRole grants the identity bootstrap's read role and nothing else.
 func grantReadOnlyRole(t *testing.T, db *sql.DB, tenantID, userID string) {
 	t.Helper()
 	var roleID string
@@ -68,8 +64,7 @@ func grantReadOnlyRole(t *testing.T, db *sql.DB, tenantID, userID string) {
 
 func capabilityAPIServer(t *testing.T, db *sql.DB, tenantID, userID string) *httptest.Server {
 	t.Helper()
-	// Only the OIDC verifier and the identity lookup are stubbed. Authorization,
-	// the capability answer, the route catalog, and RLS are all the real ones.
+	// Only OIDC verification and identity lookup are stubbed.
 	handler, err := NewHandler(HandlerOptions{
 		TokenVerifier: TokenVerifierFunc(func(context.Context, string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "capability-e2e"}, nil
@@ -89,9 +84,6 @@ func capabilityAPIServer(t *testing.T, db *sql.DB, tenantID, userID string) *htt
 	return server
 }
 
-// TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits drives the contract the
-// way a client does: read the capability set over HTTP with the shared client,
-// then call the API and confirm it agrees.
 func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 	db, tenantID, userID := capabilityAPIDatabase(t)
 	grantReadOnlyRole(t, db, tenantID, userID)
@@ -107,7 +99,6 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 		t.Fatal("expected a read-only role to permit at least the reads")
 	}
 
-	// Everything the set claims is readable really is.
 	for _, capability := range whoami.Capabilities {
 		if capability.Method != http.MethodGet {
 			t.Errorf("a read-only role must not report the write surface %s %s", capability.Method, capability.Path)
@@ -119,12 +110,11 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 		}
 	}
 
-	// And a write the set omits really is refused — authorization runs before
-	// the handler, so this never reaches the create path.
+	// Authorization runs before the handler, so this never reaches the create path.
 	if whoami.Capabilities.Allows(http.MethodPost, "/v1/reviews") {
 		t.Fatal("expected the write surface to be omitted for a read-only role")
 	}
-	_, err = client.CreateReview(context.Background(), platformclient.PlatformCreateReviewParams{
+	_, err = client.CreateReview(context.Background(), model.PlatformCreateReviewParams{
 		Name: "capability probe", TargetBranch: "main", SourceBranch: "feature/capability-probe",
 	})
 	if !errors.Is(err, platformclient.ErrPlatformForbidden) {
@@ -132,16 +122,12 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 	}
 }
 
-// TestACapabilitySetIsEmptyForAUserWithNoRoles pins what a caller with no roles
-// at all actually gets.
 func TestACapabilitySetIsEmptyForAUserWithNoRoles(t *testing.T) {
 	db, tenantID, userID := capabilityAPIDatabase(t)
 	server := capabilityAPIServer(t, db, tenantID, userID)
 	client := platformclient.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
 
-	// Whoami itself is authorized like every other route, so a user with no
-	// roles at all cannot read it. That refusal is the honest answer, and it is
-	// distinguishable from an empty capability set.
+	// Whoami is itself authorized, so a role-less user is refused rather than given an empty set.
 	_, err := client.Whoami(context.Background())
 	if !errors.Is(err, platformclient.ErrPlatformForbidden) {
 		t.Fatalf("expected a role-less caller to be refused, got %v", err)

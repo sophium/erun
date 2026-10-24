@@ -2,21 +2,8 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import { captureInvokes } from '../../../pages/index.js';
 
-// #969, second half: an in-pod agent that prints "(c to copy)" emits OSC 52 to
-// ask the terminal to put the text on the clipboard. With no handler registered
-// xterm swallowed the sequence, so the text never left the pod — and the pod is
-// the side with no browser to open the URL with.
-//
-// The write direction is honoured; the read direction (`OSC 52 ; c ; ?`) is
-// deliberately never answered, because the host clipboard holds whatever the
-// operator last copied and handing that to a pod-side process is a trust
-// decision the copy affordance does not need.
-//
-// Harness limitation: the sequence is injected as session output rather than
-// produced by a real agent in a real runtime pod (the headless harness has no
-// cluster). Everything downstream of the bytes arriving — parse, bound, decode,
-// host-clipboard write — is the production path. The payload-level guards are
-// unit-covered in frontend/src/app/clipboard.test.ts.
+// OSC 52 writes reach the host clipboard; reads are never answered, since
+// handing the host clipboard to a pod process is a trust decision.
 
 const BEL = '\x07';
 
@@ -46,9 +33,7 @@ test.describe('OSC 52 clipboard writes from a session (#969)', () => {
 
     const invokes = captureInvokes(page);
     await app.terminalPane.emitOutput(sessionId, `\x1b]52;c;?${BEL}`);
-    // A write emitted after the read drains the same parse queue, so once its
-    // effect is visible every byte of the read has been parsed too — the
-    // negative below is bounded by a real event, not a guessed delay.
+    // The write drains the same parse queue, so once visible the read was parsed.
     await app.terminalPane.emitOutput(sessionId, osc52('c', 'drain-marker'));
     await expect.poll(() => app.terminalPane.hostClipboard()).toBe('drain-marker');
 
@@ -67,8 +52,7 @@ test.describe('OSC 52 clipboard writes from a session (#969)', () => {
     await app.terminalPane.setHostClipboard('clipboard-before-oversized');
 
     await app.terminalPane.emitOutput(sessionId, osc52('c', 'x'.repeat(128 * 1024)));
-    // The drain marker proves the oversized sequence was parsed and dropped
-    // rather than merely still in flight.
+    // The drain marker proves the oversized sequence was parsed and dropped.
     await app.terminalPane.emitOutput(sessionId, osc52('c', 'drain-marker'));
 
     await expect.poll(() => app.terminalPane.hostClipboard()).toBe('drain-marker');

@@ -6,23 +6,9 @@ import (
 	"time"
 )
 
-// TestADeliberatelyClosedSessionStillReportsItsExit is the reproduction for the
-// silence the marked close introduced. CloseSession marks the session closed
-// under a.mu before its PTY is touched, which is what keeps a session the
-// operator just closed out of the stale-shell detector — the process is already
-// reaped the moment the close lands, so an unmarked session is offered to the
-// detector as "shell exited unexpectedly". That mark is not a claim that there
-// is nothing to report, though: the close is still an exit, and the terminal-exit
-// event, the registry deletion, and the ready release are what the frontend drops
-// the tab on and what a gated action runner is blocked on.
-//
-// The interleaving is the point. The close lands from inside handleSessionOutput
-// — reached through the emitter hook, which is where a re-entrant UI action or
-// another emitter listener can close a session — so the reader comes back around
-// to currentSessionFor and finds the mark rather than a read error. A reader
-// parked in Read instead takes the read-error arm and finalizes there, which is
-// why a test that starts no reader, or one that closes from outside the reader,
-// never reaches the state this covers.
+// The closed mark keeps the session out of the stale-shell detector but must not
+// suppress the exit event. Closing from inside handleSessionOutput makes the reader
+// find the mark rather than a read error.
 func TestADeliberatelyClosedSessionStillReportsItsExit(t *testing.T) {
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
@@ -54,9 +40,7 @@ func TestADeliberatelyClosedSessionStillReportsItsExit(t *testing.T) {
 	})
 
 	app.spawnStreamSession(managed)
-	// The reader is the only finalizer and it returns once it has finished, so
-	// this is the deterministic join on it rather than a wall-clock budget spent
-	// guessing how long a goroutine needs.
+	// The reader is the only finalizer, so this joins on it deterministically.
 	app.sessionWG.Wait()
 
 	if got := len(emits.events(terminalExitEvent)); got != 1 {
@@ -76,11 +60,7 @@ func TestADeliberatelyClosedSessionStillReportsItsExit(t *testing.T) {
 	}
 }
 
-// TestASessionClosedBeforeItsFirstReadStillReportsItsExit is the neighbouring
-// state of the same defect: the mark can also land before the reader's first
-// currentSessionFor, so the reader's very first iteration is the one that finds
-// it. Closing a directly-registered session and only then starting its reader is
-// that ordering, held still instead of raced.
+// The mark lands before the reader's first currentSessionFor.
 func TestASessionClosedBeforeItsFirstReadStillReportsItsExit(t *testing.T) {
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
@@ -116,12 +96,7 @@ func TestASessionClosedBeforeItsFirstReadStillReportsItsExit(t *testing.T) {
 	}
 }
 
-// TestAnExitingSessionStillReportsItsExitExactlyOnce is the control for both
-// cases above: the ordinary read-error arm, with nothing closed and no mark
-// involved. The process ends, the reader sees the error, and the exit is
-// finalized once — so a red above is about the deliberate-close mark, not about
-// the exit path generally, and a duplication introduced by finalizing the mark
-// would show up here as a second event.
+// Control: the ordinary read-error arm finalizes exactly once.
 func TestAnExitingSessionStillReportsItsExitExactlyOnce(t *testing.T) {
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
@@ -141,7 +116,6 @@ func TestAnExitingSessionStillReportsItsExitExactlyOnce(t *testing.T) {
 	app.SetEmitter(emits.fn())
 
 	app.spawnStreamSession(managed)
-	// The process ends on its own: no close path runs, no mark is set.
 	if err := session.Close(); err != nil {
 		t.Fatalf("stub Close: %v", err)
 	}

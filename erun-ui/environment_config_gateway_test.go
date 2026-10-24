@@ -5,14 +5,9 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestEnvironmentConfigGatewayChoiceReachesTheLaunch pins the desktop half of
-// the reported flow. An environment's gateway choice must survive a save, the
-// AI tab must be offered the models the environment will actually launch from,
-// and the launch signature the AI tab reopens on must move when the choice
-// does — so a save that takes an environment off the gateway reopens its AI
-// tabs on the new launch.
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{OpenRouter: &configpkg.OpenRouterConfig{
@@ -20,7 +15,7 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 			DefaultModel: "vendor/model-x",
 			Models:       []configpkg.OpenRouterModel{{ID: "vendor/model-x"}},
 		}},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "cluster-local"},
 		},

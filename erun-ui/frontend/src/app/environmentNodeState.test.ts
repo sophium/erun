@@ -20,8 +20,6 @@ test('a stopped node is the one state that always shows on the row', () => {
   assert.equal(indicator.state, 'stopped');
 });
 
-// The row's blank was the defect: an environment whose own state cannot be
-// determined must still say the one thing that is known about it.
 test('a stopped node explains an otherwise blank row', () => {
   const indicator = environmentNodeIndicator({
     node: node({ status: 'stopped' }),
@@ -31,8 +29,7 @@ test('a stopped node explains an otherwise blank row', () => {
   assert.match(indicator.condition, /^Cloud node erun-001-eu-west-2 is stopped/);
 });
 
-// Naming the node, not the environment: the label is read out of context, and a
-// stopped node is not a stopped environment.
+// The label is read out of context, so it must name the node.
 test("the indicator's label names the node and the way out of the state", () => {
   const indicator = environmentNodeIndicator({
     node: node({ status: 'stopped' }),
@@ -51,8 +48,6 @@ test('an environment with no node reports nothing about a node', () => {
   assert.notEqual(indicator.state, 'stopped');
 });
 
-// Both shapes of "we do not know" — never observed, and a known-good reading
-// gone stale — must read as unknown, never as stopped.
 test('an unobserved node reads as unknown, not stopped', () => {
   const indicator = environmentNodeIndicator({
     node: node({ status: '' }),
@@ -72,8 +67,6 @@ test('a stale node reading reads as unknown, not stopped', () => {
   assert.match(indicator.condition, /unknown/);
 });
 
-// An undetermined node is worth saying only where nothing else is being said —
-// a row already reporting a condition must not gain a second, weaker claim.
 test('an undetermined node stays quiet on a row that already reports something', () => {
   const indicator = environmentNodeIndicator({
     node: node({ status: 'unknown' }),
@@ -82,8 +75,6 @@ test('an undetermined node stays quiet on a row that already reports something',
   assert.equal(indicator.visible, false);
 });
 
-// A running node is the ordinary case; the hover card names it, the row does
-// not, and it must never be read as the environment being healthy.
 test('a running node adds no row indicator', () => {
   const indicator = environmentNodeIndicator({
     node: node({ status: 'running' }),
@@ -109,8 +100,6 @@ test('the node label falls back to the node name when no label was resolved', ()
   assert.equal(environmentNodeLabel(undefined), '');
 });
 
-// The shared vocabulary both this indicator and the titlebar's power control
-// read. An unrecognised status is not a status this build may describe.
 test('the node-state vocabulary maps every known status and refuses to guess', () => {
   assert.equal(cloudNodeState('running'), 'running');
   assert.equal(cloudNodeState(' RUNNING '), 'running');

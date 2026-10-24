@@ -18,39 +18,7 @@ const (
 	CloudTokenStatusUnknown       = "unknown"
 )
 
-type CloudProviderConfig struct {
-	Alias         string `json:"alias" yaml:"alias"`
-	Provider      string `json:"provider" yaml:"provider"`
-	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
-	AccountID     string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
-	Profile       string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	SSORegion     string `json:"ssoRegion,omitempty" yaml:"ssoregion,omitempty"`
-	SSOStartURL   string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
-	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" yaml:"oidcissuerurl,omitempty"`
-
-	// Cloudflare is set only when Provider == CloudProviderCloudflare; the
-	// scoped API token is never stored inline, only a reference to the secret
-	// store.
-	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
-
-	// ERun is set only when Provider == CloudProviderERun; the refresh token is
-	// never stored inline, only a reference to the secret store.
-	ERun *ERunProviderConfig `json:"erun,omitempty" yaml:"erun,omitempty"`
-}
-
-// CloudflareProviderConfig is the Cloudflare-specific identity for a cloud
-// alias. The raw scoped API token never lands in erun-config.yaml; only
-// TokenRef, an opaque handle the secret store resolves, is persisted.
-type CloudflareProviderConfig struct {
-	AccountID string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
-	TokenName string `json:"tokenName,omitempty" yaml:"tokenname,omitempty"`
-	TokenRef  string `json:"tokenRef,omitempty" yaml:"tokenref,omitempty"`
-}
-
-// ParseCloudProviderAlias is the inverse of CloudProviderAlias. The doctor's
-// root-config repair flow uses it to reseed setup from a dangling alias when
-// the CloudProviderConfig was lost from erun-config but a tenant or
-// cloud-context still names it; ok=false means the alias cannot be auto-repaired.
+// ParseCloudProviderAlias is the inverse of CloudProviderAlias; ok=false means it cannot be parsed.
 func ParseCloudProviderAlias(alias string) (username, accountID, provider string, ok bool) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
@@ -74,8 +42,7 @@ func ParseCloudProviderAlias(alias string) (username, accountID, provider string
 	return username, accountID, provider, true
 }
 
-// CloudProviderTypeFromAlias defaults to AWS for any legacy or unparseable
-// alias so pre-existing single-alias configs keep resolving to the AWS slot.
+// CloudProviderTypeFromAlias defaults to AWS for legacy or unparseable aliases.
 func CloudProviderTypeFromAlias(alias string) string {
 	if _, _, provider, ok := ParseCloudProviderAlias(alias); ok {
 		return provider

@@ -7,27 +7,17 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// job_commands.go is the shared planning/execution layer `erun jobs
-// list`/`show` and `erun jobs start`/`finish` (CLI) and their MCP tools both
-// drive, mirroring review_commands.go: resolve the erun platform alias,
-// build a PlatformClient, trace the resolved HTTP call so --dry-run (CLI) and
-// a preview path (MCP) never touch the network, then perform it for real.
-//
-// These are ordinary platform commands, not the best-effort recording path in
-// job_report.go: a human or an agent asked for this specific call, so a
-// missing alias or an unreachable plane is a hard, propagated error instead
-// of a trace.
+// These are explicit platform commands, unlike job_report.go's best-effort
+// recording: a missing alias or unreachable plane is a hard error.
 
-// The job status vocabulary the platform stores. PLANNED and RUNNING are the
-// open states; every other value closes the job.
+// The job status vocabulary; PLANNED and RUNNING are open, the rest close the job.
 const (
-	// JobStatusPlanned is work recorded before it starts: a triage or plan
-	// item parked against its issue, moved to RUNNING when coding begins. It
-	// is not swept to ABANDONED, because there is no actor yet to go quiet.
+	// JobStatusPlanned is never swept to ABANDONED: there is no actor yet to go quiet.
 	JobStatusPlanned    = "PLANNED"
 	JobStatusRunning    = "RUNNING"
 	JobStatusSucceeded  = "SUCCEEDED"
@@ -36,8 +26,7 @@ const (
 	JobStatusSuperseded = "SUPERSEDED"
 )
 
-// The job type vocabulary -- a closed set so the queue can group without a
-// free-text bucket that never converges.
+// The job type vocabulary is closed so the queue groups without a free-text bucket.
 const (
 	JobTypeFix         = "fix"
 	JobTypeReview      = "review"
@@ -50,16 +39,13 @@ const (
 	JobTypeMaintenance = "maintenance"
 )
 
-// jobTypes is the closed vocabulary in the order the API documents it.
 var jobTypes = []string{
 	JobTypeFix, JobTypeReview, JobTypeGate, JobTypeRelease, JobTypeDeploy,
 	JobTypeInvestigate, JobTypePlan, JobTypeTriage, JobTypeMaintenance,
 }
 
-// NormalizeJobType resolves a caller-supplied job type to the spelling the
-// platform stores, accepting any casing. An unknown value is refused here
-// rather than stored: the dashboard groups by this field, so a value outside
-// the vocabulary is a row it cannot render.
+// NormalizeJobType resolves a job type case-insensitively and refuses unknown
+// values, which the dashboard cannot render.
 func NormalizeJobType(jobType string) (string, error) {
 	trimmed := strings.TrimSpace(jobType)
 	if trimmed == "" {
@@ -74,9 +60,7 @@ func NormalizeJobType(jobType string) (string, error) {
 	return "", fmt.Errorf("unsupported job type %q: expected one of %s", trimmed, strings.Join(jobTypes, ", "))
 }
 
-// NormalizeJobStatus resolves a caller-supplied status to the spelling the
-// platform stores. The empty value means "no status filter", which is only
-// meaningful for a read -- a write states the status it wants.
+// NormalizeJobStatus resolves a status; empty means no filter, valid only for reads.
 func NormalizeJobStatus(status string) (string, error) {
 	trimmed := strings.TrimSpace(status)
 	switch normalized := strings.ToUpper(trimmed); normalized {
@@ -90,10 +74,7 @@ func NormalizeJobStatus(status string) (string, error) {
 	}
 }
 
-// JobScopeHeldError reports that another open job already holds the scope this
-// claim asked for. It carries the holder so a caller can print who has it,
-// what they are doing in prose, and since when -- the payload that makes the
-// refusal actionable rather than a bare conflict.
+// JobScopeHeldError reports the open job that already holds the requested scope.
 type JobScopeHeldError struct {
 	Held platformclient.PlatformJobScopeHeld
 }
@@ -108,19 +89,8 @@ func (e *JobScopeHeldError) Error() string {
 
 func (e *JobScopeHeldError) Unwrap() error { return platformclient.ErrPlatformConflict }
 
-// JobListParams narrows `erun jobs list`. Every field is optional.
-type JobListParams struct {
-	Status        string
-	EnvironmentID string
-	IssueRef      string
-	Scope         string
-	ActorID       string
-}
-
-// RunJobList lists the caller's tenant's jobs, the live queue first. It is
-// the operator's view of what is being worked on right now and what recently
-// finished.
-func RunJobList(ctx core.Context, store config.CloudReadStore, alias string, params JobListParams, deps cloud.CloudDependencies) ([]platformclient.PlatformJob, error) {
+// RunJobList lists the caller's tenant's jobs, live queue first.
+func RunJobList(ctx core.Context, store config.CloudReadStore, alias string, params model.JobListParams, deps cloud.CloudDependencies) ([]model.PlatformJob, error) {
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
 		return nil, err
@@ -138,43 +108,23 @@ func RunJobList(ctx core.Context, store config.CloudReadStore, alias string, par
 	return client.ListJobs(context.Background(), filter)
 }
 
-// JobClaimParams is the `erun jobs start` input. Environment is a local
-// environment name, resolved to the platform's own id; empty is host-side
-// work that never enters an environment, which is a real case rather than a
-// gap.
-type JobClaimParams struct {
-	Environment string
-	JobType     string
-	IssueRef    string
-	Summary     string
-	// Status is optional. Empty is RUNNING, which is what every caller before
-	// PLANNED existed meant; PLANNED records work that has not begun.
-	Status     string
-	ActorKind  string
-	ActorID    string
-	Scope      string
-	LocalJobID string
-}
-
-// RunJobClaim records a job starting. With Scope set it is a claim on that
-// scope; a 409 becomes a *JobScopeHeldError naming the holder, so a caller
-// can pick up something else instead of duplicating the work.
-func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, params JobClaimParams, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
+// RunJobClaim records a job starting; a 409 on Scope becomes a *JobScopeHeldError.
+func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, params model.JobClaimParams, deps cloud.CloudDependencies) (model.PlatformJob, error) {
 	params, err := normalizeJobClaim(params)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	environmentID, err := resolveJobReportEnvironment(client, params.Environment)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobClaimTraceDetails(params)...)
 	if ctx.DryRun {
-		return platformclient.PlatformJob{}, nil
+		return model.PlatformJob{}, nil
 	}
 	created, err := client.ClaimJob(context.Background(), platformclient.PlatformClaimJobParams{
 		EnvironmentID: environmentID,
@@ -189,34 +139,31 @@ func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, pa
 	})
 	if err != nil {
 		if held, ok := platformclient.PlatformJobScopeHeldDetails(err); ok {
-			return platformclient.PlatformJob{}, &JobScopeHeldError{Held: held}
+			return model.PlatformJob{}, &JobScopeHeldError{Held: held}
 		}
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	return created, nil
 }
 
-// normalizeJobClaim validates a claim up front and returns it with every
-// field trimmed and its vocabularies resolved, so the request the platform
-// receives is the one this layer already checked.
-func normalizeJobClaim(params JobClaimParams) (JobClaimParams, error) {
+func normalizeJobClaim(params model.JobClaimParams) (model.JobClaimParams, error) {
 	jobType, err := NormalizeJobType(params.JobType)
 	if err != nil {
-		return JobClaimParams{}, err
+		return model.JobClaimParams{}, err
 	}
 	actorKind, err := normalizeActorKind(params.ActorKind)
 	if err != nil {
-		return JobClaimParams{}, err
+		return model.JobClaimParams{}, err
 	}
 	if strings.TrimSpace(params.Summary) == "" {
-		return JobClaimParams{}, fmt.Errorf("summary is required: say what the work is, in prose, not the command that performs it")
+		return model.JobClaimParams{}, fmt.Errorf("summary is required: say what the work is, in prose, not the command that performs it")
 	}
 	if strings.TrimSpace(params.ActorID) == "" {
-		return JobClaimParams{}, fmt.Errorf("actor id is required: it is who a refused claimant is told to ask")
+		return model.JobClaimParams{}, fmt.Errorf("actor id is required: it is who a refused claimant is told to ask")
 	}
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
-		return JobClaimParams{}, err
+		return model.JobClaimParams{}, err
 	}
 	params.JobType = jobType
 	params.Status = status
@@ -230,7 +177,7 @@ func normalizeJobClaim(params JobClaimParams) (JobClaimParams, error) {
 	return params, nil
 }
 
-func jobClaimTraceDetails(params JobClaimParams) []string {
+func jobClaimTraceDetails(params model.JobClaimParams) []string {
 	details := []string{"jobType=" + params.JobType, "actorId=" + params.ActorID}
 	if params.Status != "" {
 		details = append(details, "status="+params.Status)
@@ -247,36 +194,23 @@ func jobClaimTraceDetails(params JobClaimParams) []string {
 	return details
 }
 
-// JobUpdateParams moves an existing job forward. An empty field leaves what
-// the job already has.
-type JobUpdateParams struct {
-	JobID      string
-	Status     string
-	Summary    string
-	LocalJobID string
-}
-
-// RunJobUpdate reports a job's progress or its outcome.
-func RunJobUpdate(ctx core.Context, store config.CloudReadStore, alias string, params JobUpdateParams, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
+func RunJobUpdate(ctx core.Context, store config.CloudReadStore, alias string, params model.JobUpdateParams, deps cloud.CloudDependencies) (model.PlatformJob, error) {
 	if strings.TrimSpace(params.JobID) == "" {
-		return platformclient.PlatformJob{}, fmt.Errorf("job id is required")
+		return model.PlatformJob{}, fmt.Errorf("job id is required")
 	}
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
-	// RUNNING is accepted here and means exactly one thing: the planned job
-	// this names has begun. The platform refuses it for any job that is
-	// already running (a no-op) or already finished, so the transition table
-	// stays in one place rather than being restated as a local guess about a
-	// status this layer cannot read.
+	// RUNNING means a planned job has begun; the platform owns the transition
+	// table and refuses it otherwise.
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID, jobUpdateTraceDetails(params)...)
 	if ctx.DryRun {
-		return platformclient.PlatformJob{}, nil
+		return model.PlatformJob{}, nil
 	}
 	return client.UpdateJob(context.Background(), params.JobID, platformclient.PlatformUpdateJobParams{
 		Status:     status,
@@ -285,24 +219,22 @@ func RunJobUpdate(ctx core.Context, store config.CloudReadStore, alias string, p
 	})
 }
 
-// RunJobShow fetches one job by id.
-func RunJobShow(ctx core.Context, store config.CloudReadStore, alias, jobID string, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
+func RunJobShow(ctx core.Context, store config.CloudReadStore, alias, jobID string, deps cloud.CloudDependencies) (model.PlatformJob, error) {
 	if strings.TrimSpace(jobID) == "" {
-		return platformclient.PlatformJob{}, fmt.Errorf("job id is required")
+		return model.PlatformJob{}, fmt.Errorf("job id is required")
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformJob{}, err
+		return model.PlatformJob{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/jobs/"+jobID)
 	if ctx.DryRun {
-		return platformclient.PlatformJob{}, nil
+		return model.PlatformJob{}, nil
 	}
 	return client.GetJob(context.Background(), jobID)
 }
 
-// normalizeActorKind resolves who is holding a job. The vocabulary is closed
-// for the same reason job_type is: the queue renders it.
+// normalizeActorKind's vocabulary is closed because the queue renders it.
 func normalizeActorKind(actorKind string) (string, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(actorKind)); normalized {
 	case "agent", "orchestrator", "human":
@@ -330,7 +262,7 @@ func jobFilterTraceDetails(filter platformclient.PlatformJobFilter) []string {
 	return details
 }
 
-func jobUpdateTraceDetails(params JobUpdateParams) []string {
+func jobUpdateTraceDetails(params model.JobUpdateParams) []string {
 	var details []string
 	if strings.TrimSpace(params.Status) != "" {
 		details = append(details, "status="+params.Status)

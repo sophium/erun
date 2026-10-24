@@ -18,9 +18,7 @@ func NewRoleRepository(txs *TxManager) *RoleRepository {
 	return &RoleRepository{txs: txs}
 }
 
-// RolePermissionInput is a caller-supplied permission grant for role creation.
-// Exactly one of the exact pair (APIMethod/APIPath) or the pattern pair
-// (APIMethodPattern/APIPathPattern) must be set, mirroring
+// RolePermissionInput sets exactly one of the exact or pattern pair, mirroring
 // role_permissions_exact_or_pattern_check.
 type RolePermissionInput struct {
 	APIMethod        string
@@ -38,8 +36,6 @@ func (p RolePermissionInput) validate() error {
 	exact := p.APIMethod != "" || p.APIPath != ""
 	pattern := p.APIMethodPattern != "" || p.APIPathPattern != ""
 	if exact == pattern {
-		// Both an exact and a pattern field set, or neither: exactly one form
-		// is required, matching role_permissions_exact_or_pattern_check.
 		return ErrInvalidInput
 	}
 	if exact {
@@ -68,15 +64,9 @@ func (p RolePermissionInput) validatePattern() error {
 	return nil
 }
 
-// List returns the caller's tenant's roles, each with its permissions.
-// Ensures TenantUser/TenantAdmin exist (and carry every route routeroles
-// currently classifies for them) before reading, so a tenant that bootstrapped
-// before these roles shipped — or before a later route reclassification —
-// still sees them here without a migration backfill. Both SELECTs filter
-// explicitly by the security context's TenantID: erun_operations' RLS policy
-// is unconditional, so an OPERATIONS caller would otherwise see every
-// tenant's roles and permissions even though this method already reads the
-// security context (to bootstrap the narrower roles) and looks scoped.
+// List returns the caller's tenant's roles with permissions, first ensuring the
+// narrower predefined roles exist. Queries filter tenant_id explicitly because
+// erun_operations' RLS policy is unconditional.
 func (r *RoleRepository) List(ctx context.Context) ([]model.Role, error) {
 	var roles []model.Role
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -136,9 +126,7 @@ func (r *RoleRepository) ForUser(ctx context.Context, userID string) ([]model.Ro
 	return roles, err
 }
 
-// Create makes a new tenant-owned role with the given permissions. At least
-// one permission is required — a role with no permissions could never be
-// granted meaningfully.
+// Create makes a tenant-owned role; at least one permission is required.
 func (r *RoleRepository) Create(ctx context.Context, name string, permissions []RolePermissionInput) (model.Role, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(permissions) == 0 {
@@ -196,23 +184,9 @@ func insertRolePermission(ctx context.Context, tx bun.Tx, roleID string, permiss
 	return rolePermission, nil
 }
 
-// Grant assigns a role to a user. For a tenant-scoped caller a role_id or
-// user_id from another tenant is invisible under RLS, so the insert's foreign
-// keys report it as not found rather than forbidden.
-//
-// tenantID is normally empty, letting the tenant_id column default to the
-// caller's own tenant, as every other tenant-owned insert here does. An
-// operations caller acting on another tenant passes it explicitly: the default
-// would fill in the operations tenant, and user_roles' composite foreign keys
-// on (tenant_id, user_id) and (tenant_id, role_id) then find nothing, so the
-// grant comes back as not found however valid the ids are. Same reason
-// grantPredefinedRoles takes the enrolling tenant's id explicitly rather than
-// trusting the transaction's scoping.
-//
-// That cross-tenant grant is what recovers a tenant whose only grant-capable
-// user cannot authenticate. Role management is itself role-gated, so without it
-// the one identity able to sign in can never be given the role that would let
-// it administer the tenant.
+// Grant assigns a role to a user. An empty tenantID uses the caller's tenant;
+// an operations caller passes another tenant explicitly because the column
+// default would fill in the operations tenant and the composite FKs would fail.
 func (r *RoleRepository) Grant(ctx context.Context, userID string, roleID string, tenantID string) (model.UserRole, error) {
 	userID = strings.TrimSpace(userID)
 	roleID = strings.TrimSpace(roleID)
@@ -246,22 +220,9 @@ func (r *RoleRepository) Grant(ctx context.Context, userID string, roleID string
 	return grant, nil
 }
 
-// Revoke removes a role assignment, refusing when doing so would leave the
-// tenant with no user able to grant roles — the one failure this feature must
-// make impossible rather than merely recoverable. The check runs inside the
-// same transaction as the delete and rolls the delete back on refusal.
-//
-// tenantID mirrors Grant's: empty means the caller's own tenant, and an
-// operations caller names another explicitly. Both statements filter on the
-// resolved tenant rather than leaning on RLS, because an operations session
-// bypasses RLS and neither would otherwise be scoped at all: the delete would
-// remove the matching (user_id, role_id) row in whatever tenant it happens to
-// live in, and — worse — the guard would count every tenant's users, so it
-// would let the last grant-capable role in a tenant go as long as some *other*
-// tenant, anywhere on the platform, still had one. The invariant this function
-// exists to hold would silently not hold for exactly the caller who can reach
-// across tenants. For a tenant-scoped caller the filter is what RLS already
-// enforces, so it changes nothing there.
+// Revoke removes a role assignment, refusing (in the same transaction) when the
+// tenant would be left with no grant-capable user. Both statements filter on
+// the resolved tenant because an operations session bypasses RLS.
 func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID string, tenantID string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		targetTenantID, err := resolveRoleTenant(ctx, tenantID)
@@ -295,10 +256,8 @@ func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID strin
 	})
 }
 
-// resolveRoleTenant turns an optional explicit tenant into the one this
-// operation acts on. The route has already authorized the override
-// (resolveTargetTenant refuses a non-operations caller), so an empty value
-// here means "the caller's own tenant" and nothing else.
+// resolveRoleTenant returns tenantID, or the caller's tenant when empty. The
+// route has already authorized an override.
 func resolveRoleTenant(ctx context.Context, tenantID string) (string, error) {
 	if tenantID = strings.TrimSpace(tenantID); tenantID != "" {
 		return tenantID, nil
@@ -310,22 +269,15 @@ func resolveRoleTenant(ctx context.Context, tenantID string) (string, error) {
 	return securityContext.TenantID, nil
 }
 
-// grantRoleMethod and grantRolePath are the canonical route that lets an
-// operator recover from a bad role assignment: as long as one user can reach
-// it, the tenant can always grant its way back to a working state.
+// The grant route: while one user can reach it, a tenant can recover its roles.
 const (
 	grantRoleMethod = "POST"
 	grantRolePath   = "/v1/users/{user_id}/roles"
 )
 
-// tenantHasGrantCapableUser reports whether any user in the named tenant
-// currently holds a permission that would authorize granting a role to a user.
-// It reuses the same rule matcher Authorize enforces with, so this invariant and
-// request enforcement cannot disagree about what "grant-capable" means.
-//
-// tenantID is passed explicitly rather than left to RLS: under an operations
-// session the unfiltered query saw every tenant's grants, which turned the
-// lockout guard into a no-op for the one caller able to revoke across tenants.
+// tenantHasGrantCapableUser reports whether any user in tenantID can reach the
+// grant route, using Authorize's matcher. tenantID is explicit because
+// operations sessions bypass RLS.
 func tenantHasGrantCapableUser(ctx context.Context, tx bun.Tx, tenantID string) (bool, error) {
 	var rules []permissionRule
 	if err := tx.NewRaw(`

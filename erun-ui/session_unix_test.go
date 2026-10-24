@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -12,6 +13,15 @@ import (
 	"testing"
 	"time"
 )
+
+func unixSessionProcess(t *testing.T, session terminalSession) *os.Process {
+	t.Helper()
+	unixSession, ok := session.(*unixTerminalSession)
+	if !ok {
+		t.Fatalf("session is %T, not a unix terminal session", session)
+	}
+	return unixSession.cmd.Process
+}
 
 func startSleepingSession(t *testing.T) terminalSession {
 	t.Helper()
@@ -28,19 +38,11 @@ func startSleepingSession(t *testing.T) terminalSession {
 	return session
 }
 
-// TestAliveIsFalseForAKilledAndReapedProcess reproduces the stale-liveness
-// defect. Close() kills the session's process and reaps it through Wait, and
-// once Wait has run Go's Process.Signal answers os.ErrProcessDone rather than
-// ESRCH for a process that is demonstrably gone. A probe that recognizes only
-// ESRCH therefore reports a dead process as alive, which is what every caller
-// gating cleanup on Alive() — a "did the kill land" check, the stale-shell
-// detector — reads.
+// After Wait, Process.Signal returns os.ErrProcessDone rather than ESRCH.
 func TestAliveIsFalseForAKilledAndReapedProcess(t *testing.T) {
 	session := startSleepingSession(t)
 	pid := session.Pid()
 
-	// Control: the same probe on the same session answers true while the process
-	// really is running, so a false answer below is the reaping and not the probe.
 	if !session.Alive() {
 		t.Fatalf("a running process must read alive")
 	}
@@ -49,14 +51,12 @@ func TestAliveIsFalseForAKilledAndReapedProcess(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Assert the process is gone independently of Alive(), so a red below is
-	// about the liveness probe and not about a kill that never landed.
 	if err := syscall.Kill(pid, syscall.Signal(0)); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("expected pid %d to be gone after Close, kill(pid,0) = %v", pid, err)
 	}
 
 	if session.Alive() {
-		probe := session.(*unixTerminalSession).cmd.Process.Signal(syscall.Signal(0))
+		probe := unixSessionProcess(t, session).Signal(syscall.Signal(0))
 		t.Fatalf(
 			"Alive() must be false for a killed-and-reaped process (pid %d); Process.Signal(0) = %v, errors.Is(err, syscall.ESRCH) = %v",
 			pid, probe, errors.Is(probe, syscall.ESRCH),
@@ -64,18 +64,12 @@ func TestAliveIsFalseForAKilledAndReapedProcess(t *testing.T) {
 	}
 }
 
-// TestAliveIsTrueForAProcessThatIsNotYetReaped is the other half of the probe's
-// contract, and a control: signal 0 answers nil while the pid entry still
-// exists, so a process this session killed but has not waited on still reads
-// alive. The fix must narrow the answer for a reaped process only — collapsing
-// the probe to "did signal 0 fail" would report a kill that has not been
-// collected yet as an exit.
 func TestAliveIsTrueForAProcessThatIsNotYetReaped(t *testing.T) {
 	session := startSleepingSession(t)
 	pid := session.Pid()
 
-	// Kill the direct child without waiting on it, leaving it as a zombie.
-	if err := session.(*unixTerminalSession).cmd.Process.Kill(); err != nil {
+	// Kill without waiting, leaving a zombie.
+	if err := unixSessionProcess(t, session).Kill(); err != nil {
 		t.Fatalf("kill pid %d: %v", pid, err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -92,8 +86,6 @@ func TestAliveIsTrueForAProcessThatIsNotYetReaped(t *testing.T) {
 	}
 }
 
-// processIsZombie reports whether the pid names a process that has exited but
-// has not been reaped, so the pid entry still exists.
 func processIsZombie(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -105,10 +97,6 @@ func processIsZombie(pid int) bool {
 	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
-// TestCloseReapsWholeProcessGroup pins the orphan fix: Close() must reap the
-// session's whole process group, so the kubectl exec grandchild that `erun open`
-// spawns cannot outlive it holding a remote exec stream open. Only the session's
-// own group is signalled, leaving other tabs and app instances untouched.
 func TestCloseReapsWholeProcessGroup(t *testing.T) {
 	session, err := startTerminalSession(startTerminalSessionParams{
 		Executable: "/bin/sh",
@@ -138,12 +126,7 @@ func TestCloseReapsWholeProcessGroup(t *testing.T) {
 	t.Fatalf("grandchild %d survived Close(); the kubectl exec orphan leak is back", childPid)
 }
 
-// processIsRunning reports whether the pid names a process that is still
-// executing. A signal-0 probe cannot answer that on its own: the grandchild is
-// reparented on kill, and where the new parent never reaps (a container whose
-// PID 1 is an application, not an init) the pid lingers as a zombie that
-// signal-0 still accepts. Reading the process state distinguishes "killed but
-// unreaped" from "still running", which is what the test is asserting.
+// A zombie still accepts signal 0 where PID 1 never reaps, so read the process state.
 func processIsRunning(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -184,10 +167,6 @@ func readChildPid(t *testing.T, session terminalSession) int {
 	return 0
 }
 
-// TestCloseIsIdempotentAfterTheProcessExits pins the teardown contract: closing
-// a session whose PTY the streaming goroutine already closed must succeed. It is
-// the desired end state, and reporting it as a failure made "close environment"
-// abort its unwind, leaving the sidebar rendering a torn-down env as open.
 func TestCloseIsIdempotentAfterTheProcessExits(t *testing.T) {
 	session, err := startTerminalSession(startTerminalSessionParams{
 		Executable: "/bin/sh",

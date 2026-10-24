@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// A write the kernel accepts is not proof the quota is in force: a cpu.max
-// that does not read back the mirrored value is reported rather than
-// announced. /dev/null accepts the write and reads back empty.
+// /dev/null accepts the write and reads back empty.
 func TestDindEntrypointReportsACapThatDoesNotReadBack(t *testing.T) {
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")

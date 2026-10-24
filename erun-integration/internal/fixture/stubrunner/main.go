@@ -1,19 +1,9 @@
-// Command erun-stub-runner faithfully forwards argv to a sibling POSIX-shell
-// stub script on Windows.
-//
-// A .bat launcher can't do this: cmd.exe's %* forwards a command-line string
-// that sh then re-parses with POSIX rules, mangling complex args (notably the
-// multi-line `sh -lc '<script>'` erun passes to kubectl). Go's exec, by
-// contrast, hands this .exe its argv faithfully via CommandLineToArgvW. This
-// program then passes that argv to sh through a NUL-delimited file
-// (ERUN_STUB_ARGV_FILE) — never a command line — so the stub script sees each
-// argument exactly, byte for byte.
-//
-// The stub script beside this executable is its own path minus the .exe suffix;
-// a writeStub-injected preamble rebuilds "$@" from the argv file.
+// Command erun-stub-runner forwards argv byte-exact to the sibling sh stub on
+// Windows via a NUL-delimited file (ERUN_STUB_ARGV_FILE); a .bat would mangle it.
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,28 +12,31 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run returns the exit code so the deferred argv-file removal always runs.
+func run() int {
 	script := strings.TrimSuffix(os.Args[0], ".exe")
 
 	argvFile, err := os.CreateTemp("", "erun-stub-argv-*")
 	if err != nil {
-		os.Exit(97)
+		return 97
 	}
 	defer func() { _ = os.Remove(argvFile.Name()) }()
 	for _, arg := range os.Args[1:] {
 		if _, err := argvFile.WriteString(arg); err != nil {
-			os.Exit(97)
+			return 97
 		}
 		if _, err := argvFile.Write([]byte{0}); err != nil {
-			os.Exit(97)
+			return 97
 		}
 	}
 	if err := argvFile.Close(); err != nil {
-		os.Exit(97)
+		return 97
 	}
 
-	// The scenario PATH holds no shell, so the scenario routes an absolute one
-	// through ERUN_STUB_SH; a bare "sh" is only a fallback for a caller that
-	// built the environment itself.
+	// The scenario PATH has no shell; ERUN_STUB_SH supplies an absolute one.
 	shell := os.Getenv("ERUN_STUB_SH")
 	if strings.TrimSpace(shell) == "" {
 		shell = "sh"
@@ -54,9 +47,11 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			os.Exit(exit.ExitCode())
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
 		}
-		os.Exit(98)
+		return 98
 	}
+	return 0
 }

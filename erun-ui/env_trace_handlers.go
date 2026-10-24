@@ -8,17 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// envTraceTailBytes bounds how much of the per-env trace log one console
-// refresh transfers — enough scrollback to diagnose, small enough to poll.
 const envTraceTailBytes = 64 * 1024
 
-// uiEnvTrace is the Diagnostics console's "erun trace" read model: the tail
-// of the env's always-on trace log, or an honest reason there is nothing to
-// show.
+// uiEnvTrace is the tail of the env's trace log, or the reason there is none.
 type uiEnvTrace struct {
 	Available bool   `json:"available"`
 	Content   string `json:"content,omitempty"`
@@ -27,17 +25,14 @@ type uiEnvTrace struct {
 	Notice    string `json:"notice,omitempty"`
 }
 
-// LoadEnvTrace reads the selected env's trace log for the Diagnostics
-// console. A remote env is merged from two vantage points: the host log
-// records operator-driven commands run from this machine, the in-pod log
-// records agent-driven MCP actions. Reading diagnostics must never mutate
-// the env or hold it awake.
+// LoadEnvTrace merges the host log (operator commands) with the in-pod log
+// (agent MCP actions). It must never mutate the env or hold it awake.
 func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvTrace{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -64,11 +59,9 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	return trace, nil
 }
 
-// A missing file is the normal "nothing ran yet" state, not an error; only
-// real read failures return an issue string, so a failed host read never
-// blanks the pod vantage point.
+// A missing file is normal; only real read failures return an issue.
 func hostEnvTraceTail(result config.OpenResult) (string, string) {
-	path, err := eruncommon.EnvTraceLogPath(result.Tenant, result.Environment)
+	path, err := core.EnvTraceLogPath(result.Tenant, result.Environment)
 	if err != nil {
 		return "", err.Error()
 	}
@@ -82,8 +75,7 @@ func hostEnvTraceTail(result config.OpenResult) (string, string) {
 	return content, ""
 }
 
-// Unreachable or failed pod reads degrade to a notice instead of blanking
-// the pane, so the host side still renders.
+// Pod read failures degrade to a notice so the host side still renders.
 func (a *App) podEnvTraceTail(result config.OpenResult) (string, string) {
 	mcpPort := config.MCPPortForResult(result)
 	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
@@ -101,10 +93,8 @@ func (a *App) podEnvTraceTail(result config.OpenResult) (string, string) {
 	return out, ""
 }
 
-// RFC3339 UTC stamps make lexicographic order chronological, so comparing
-// stamps as strings interleaves the host and pod tails in time order; an
-// unstamped continuation line inherits its predecessor's stamp to stay
-// attached.
+// RFC3339 UTC stamps sort lexicographically; unstamped continuation lines
+// inherit their predecessor's stamp.
 func mergeStampedTraces(host, pod string) string {
 	hostLines := splitTraceLines(host)
 	podLines := splitTraceLines(pod)

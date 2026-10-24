@@ -7,23 +7,17 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
-// TestExecAgentIsCallableWithOnlyAgentAndPrompt is the end-to-end regression
-// for the bug where exec_agent's handler demanded a tenant/environment its own
-// JSON schema could not carry (additionalProperties: false, no tenant/
-// environment property): every call failed, one way or another, no matter
-// what the caller sent. This drives a real MCP session over HTTP -- the same
-// path a client actually uses, including the SDK's own schema validation --
-// rather than calling the Go handler directly, since a direct call bypasses
-// exactly the validation layer that rejected the extra properties.
+// Drives a real MCP session so the SDK's schema validation runs, which a direct handler
+// call would bypass.
 func TestExecAgentIsCallableWithOnlyAgentAndPrompt(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
-	// Preview mode never execs the supervisor (see job_target_test.go's same
-	// stub), so a placeholder name is enough to satisfy ResolveErunExecutable
-	// without a real erun binary on PATH.
+	// Preview never execs the supervisor, so a placeholder name suffices.
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{

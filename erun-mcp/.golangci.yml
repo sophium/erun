@@ -3,10 +3,8 @@ version: "2"
 run:
   timeout: 3m
   tests: true
-# The default uniq-by-line:true keys findings by file+line only, ignoring
-# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
-# silently drops all but one finding on a function that trips more than one
-# of them. Report everything found.
+# uniq-by-line:true keeps one finding per file+line, so funlen/gocyclo/cyclop
+# on the same func line would hide each other.
 issues:
   uniq-by-line: false
   max-issues-per-linter: 0
@@ -21,7 +19,54 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
+    - depguard
   settings:
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
+    depguard:
+      rules:
+        tools:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/*/*.go", "!**/erun-mcp/tools/shared/**"]
+          allow:
+            - github.com/sophium/erun/erun-mcp/tools/shared/
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: an erun-mcp tool package may import tools/shared/*, never the server package or another tool group
+        shared:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/shared/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-mcp/tools/shared/
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: tools/shared sits below every tool group and imports none of them
     funlen:
       lines: 100
       statements: 50

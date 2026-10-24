@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func execWritePushTestStore(t *testing.T) erunUIStore {
 	t.Helper()
 	projectRoot := t.TempDir()
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -33,9 +33,9 @@ func TestExecCommitCallsMCPWithTheClaimedBranchAndMessage(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(_ context.Context, endpoint, _, branch, message string) (gitx.CommitWorkingTreeResult, error) {
+		execCommit: func(_ context.Context, endpoint, _, branch, message string) (model.CommitWorkingTreeResult, error) {
 			gotEndpoint, gotBranch, gotMessage = endpoint, branch, message
-			return gitx.CommitWorkingTreeResult{Branch: branch, Commit: "abc123", Files: []string{"a.txt"}}, nil
+			return model.CommitWorkingTreeResult{Branch: branch, Commit: "abc123", Files: []string{"a.txt"}}, nil
 		},
 	})
 
@@ -61,9 +61,9 @@ func TestExecCommitRequiresAMessage(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(context.Context, string, string, string, string) (gitx.CommitWorkingTreeResult, error) {
+		execCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
 			t.Fatal("execCommit must not be called without a message")
-			return gitx.CommitWorkingTreeResult{}, nil
+			return model.CommitWorkingTreeResult{}, nil
 		},
 	})
 
@@ -79,9 +79,9 @@ func TestExecCommitReturnsUnreachableWhenPortClosed(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return false },
 		canReachMCPEndpoint: func(int) bool { return false },
-		execCommit: func(context.Context, string, string, string, string) (gitx.CommitWorkingTreeResult, error) {
+		execCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
 			calls++
-			return gitx.CommitWorkingTreeResult{}, nil
+			return model.CommitWorkingTreeResult{}, nil
 		},
 	})
 
@@ -100,9 +100,9 @@ func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execPush: func(_ context.Context, _, _, branch, remote string) (gitx.PushWorkingTreeBranchResult, error) {
+		execPush: func(_ context.Context, _, _, branch, remote string) (model.PushWorkingTreeBranchResult, error) {
 			gotBranch, gotRemote = branch, remote
-			return gitx.PushWorkingTreeBranchResult{Branch: branch, Remote: "origin", Commit: "abc123"}, nil
+			return model.PushWorkingTreeBranchResult{Branch: branch, Remote: "origin", Commit: "abc123"}, nil
 		},
 	})
 

@@ -3,10 +3,7 @@ version: "2"
 run:
   timeout: 3m
   tests: true
-# The default uniq-by-line:true keys findings by file+line only, ignoring
-# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
-# silently drops all but one finding on a function that trips more than one
-# of them. Report everything found.
+# uniq-by-line would drop all but one of funlen/gocyclo/cyclop on the same func line.
 issues:
   uniq-by-line: false
   max-issues-per-linter: 0
@@ -21,14 +18,37 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
     - depguard
   settings:
-    # The package layers of #2741 (AGENTS.md "Package layers"): every package
-    # may import only the layers below it. Each rule denies the whole module
-    # and allows what lies beneath, so a new package is held to the table the
-    # moment its directory exists. An infra package names exactly the infra
-    # packages it uses: a new edge between two external systems is a decision
-    # recorded here, not something an import can add on its own.
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
+    # Each rule allows only the layers beneath the package.
     depguard:
       rules:
         base-model:
@@ -54,6 +74,16 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: base/config may import only base/core and base/model
+        base-seam:
+          list-mode: lax
+          files: ["**/erun-common/base/seam/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+            - github.com/sophium/erun/erun-common/base/core
+            - github.com/sophium/erun/erun-common/base/config
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/seam may import only base/config, base/core and base/model
         infra-mcptools:
           list-mode: lax
           files: ["**/erun-common/infra/mcptools/*.go"]
@@ -127,10 +157,11 @@ linters:
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/activity$
+            - github.com/sophium/erun/erun-common/infra/kube$
             - github.com/sophium/erun/erun-common/infra/platformclient$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: infra/cloud may import base/* and infra/activity, infra/platformclient
+              desc: infra/cloud may import base/* and infra/activity, infra/kube, infra/platformclient
         infra-mcp:
           list-mode: lax
           files: ["**/erun-common/infra/mcp/*.go"]
@@ -140,16 +171,87 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: infra/mcp may import base/* and infra/kube
+        infra-remoteinit:
+          list-mode: lax
+          files: ["**/erun-common/infra/remoteinit/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/remoteinit may import base/* and no other infra package
+        infra-codesign:
+          list-mode: lax
+          files: ["**/erun-common/infra/codesign/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/codesign may import base/* and no other infra package
         command:
           list-mode: lax
           files: ["**/erun-common/command/**/*.go", "!$test"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
-            - github.com/sophium/erun/erun-common$
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: a command package may import base/*, infra/* and the root package, never another command package
+              desc: a command package may import base/*, infra/*, primitive/* and orchestration/*, never another command package
+        primitive-shared:
+          list-mode: lax
+          files: ["**/erun-common/primitive/shared/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: primitive/shared/* sits below every primitive and may import base/*, infra/* and other primitive/shared/* only
+        primitives:
+          list-mode: lax
+          files: ["**/erun-common/primitive/*/*.go", "!**/erun-common/primitive/shared/**"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: a primitive may import base/*, infra/* and primitive/shared/*, never another primitive; composing primitives is orchestration's job
+        orchestration:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/build/*.go", "**/erun-common/orchestration/clusterread/*.go", "**/erun-common/orchestration/deploy/*.go", "**/erun-common/orchestration/diagnosis/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: an orchestration package composes primitives and may import base/*, infra/* and primitive/*, never another orchestration package
+        orchestration-release:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/release/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/build$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: orchestration/release may import base/*, infra/*, primitive/* and orchestration/build
+        orchestration-execute:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/execute/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/build$
+            - github.com/sophium/erun/erun-common/orchestration/deploy$
+            - github.com/sophium/erun/erun-common/orchestration/release$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: orchestration/execute may import base/*, infra/*, primitive/* and orchestration/{build,deploy,release}
     funlen:
       lines: 100
       statements: 50

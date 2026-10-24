@@ -11,40 +11,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The forward tree outlives the environments it describes. A state file is
-// reclaimed when its environment is deleted, but the log beside it was not,
-// and a record naming a tenant or environment the config store does not know
-// is one nothing will ever open, restart, or rotate again: the per-log cap
-// bounds a log that is still being written, and says nothing about the ones
-// nobody will write to again. Those are the files that keep the tree growing
-// across reports of it, including whole tenant directories whose environments
-// were deleted months earlier.
-//
-// Reclaiming on deletion alone would only cover environments deleted after it
-// landed; the residue this exists for is already on disk. So the sweep
-// compares the tree against the config store — the only authority on which
-// environments exist — and removes the records the store does not know.
-//
-// It runs where the forward store is already touched, beside the rotation that
-// bounds a live log (`erun open`'s forward setup). Never on a timer, and never
-// from a command that has nothing to do with forwards: a bound enforced only
-// by something unrelated to what it bounds is a bound that quietly stops being
-// enforced.
+// Records whose environment the config store no longer knows are never opened or rotated
+// again, so the sweep removes them. It runs only from forward setup, beside log rotation.
 
-// portForwardRoot is the directory holding every forward record, one subtree
-// per kind. It is the parent of PortForwardStatePath's own directory, resolved
-// through the same config root so a sweep and a write cannot disagree about
-// where the tree is.
+// portForwardRoot resolves through the same config root as PortForwardStatePath.
 func portForwardRoot() (string, error) {
 	return config.ResolveConfigFilePath(filepath.Join(config.ConfigRoot, "portforward"))
 }
 
-// ReclaimOrphanedPortForwardRecords removes every forward record under the
-// forward tree whose environment the config store no longer knows. It is
-// best-effort by construction: an environment whose configured set cannot be
-// read is left entirely alone, so "the config could not be listed" can never
-// be mistaken for "no environment exists" and take a live forward's log with
-// it.
+// ReclaimOrphanedPortForwardRecords removes forward records for environments the config store
+// no longer knows. An unreadable config leaves the tree untouched.
 func ReclaimOrphanedPortForwardRecords(ctx core.Context) error {
 	configured, known, err := configuredEnvironmentNames()
 	if err != nil {
@@ -58,15 +34,11 @@ func ReclaimOrphanedPortForwardRecords(ctx core.Context) error {
 	if err != nil {
 		return err
 	}
-	// The tree os.UserConfigDir named is walked too: records an earlier release
-	// left there for environments since deleted are never opened again, so
-	// migration never reaches them either.
+	// Also sweep the legacy os.UserConfigDir tree, which migration never reaches for deleted environments.
 	roots := []string{root}
 	if legacyRoot, ok := legacyPortForwardRoot(); ok {
 		roots = append(roots, legacyRoot)
 	}
-	// RemovePortForwardRecord clears every location of a record, so one found
-	// in both trees is removed, and traced, once.
 	reclaimed := map[string]bool{}
 	for _, root := range roots {
 		for _, kind := range PortForwardStateKinds {
@@ -79,11 +51,14 @@ func ReclaimOrphanedPortForwardRecords(ctx core.Context) error {
 	return nil
 }
 
+func readDirIfPresent(dir string) ([]os.DirEntry, bool) {
+	entries, err := os.ReadDir(dir)
+	return entries, err == nil
+}
+
 func reclaimOrphanedRecordsInKind(ctx core.Context, kindDir, kind string, configured map[string]map[string]bool, reclaimed map[string]bool) error {
-	tenantEntries, err := os.ReadDir(kindDir)
-	if err != nil {
-		// Nothing recorded for this kind yet, which is the ordinary state of a
-		// machine that never opened a forward of it.
+	tenantEntries, ok := readDirIfPresent(kindDir)
+	if !ok {
 		return nil
 	}
 	for _, tenantEntry := range tenantEntries {
@@ -116,11 +91,8 @@ func reclaimOrphanedRecordsInKind(ctx core.Context, kindDir, kind string, config
 	return nil
 }
 
-// portForwardRecordNames lists the environments a tenant's directory holds
-// records for, taken from the file names rather than from the records
-// themselves: the files that most need reclaiming are the ones whose state
-// file is already gone and only a log is left, so enumerating state files
-// alone would miss exactly the residue this sweep exists for.
+// portForwardRecordNames reads file names, not records: the residue is often a log
+// whose state file is already gone.
 func portForwardRecordNames(tenantDir string) ([]string, error) {
 	entries, err := os.ReadDir(tenantDir)
 	if err != nil {
@@ -153,24 +125,12 @@ func portForwardRecordNames(tenantDir string) ([]string, error) {
 	return names, nil
 }
 
-// configuredEnvironmentNames is the set of tenant -> environment names the
-// config store knows. known=false means the store could not be read well
-// enough to answer at all, and the caller must leave the tree as it is: "I
-// could not read the config" must never read as "no environment is
-// configured", because that answer removes every forward log on the host.
-//
-// What separates the two is whether the store was ever initialized. A store
-// that reads cleanly and lists no tenants is a real answer — nothing is
-// configured, so nothing under the tree is a live environment's record — but a
-// store that was never initialized here is not that answer: it is the shape of
-// two halves of erun resolving different config homes, where the tree in front
-// of the sweep belongs to a root this process cannot see. Listing a missing
-// directory yields no tenants without reporting anything, so the two cases are
-// only distinguishable by asking the question the store answers differently —
-// whether the machine-level config it is initialized around is there.
+// configuredEnvironmentNames returns the configured tenant -> environment names. known=false
+// means the store is uninitialized or unreadable, and the caller must not treat that as
+// "nothing configured", which would remove every forward log.
 func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
 	store := config.ConfigStore{}
-	if _, _, err := store.LoadERunConfig(); err != nil {
+	if !machineConfigLoads(store) {
 		return nil, false, nil
 	}
 	tenants, err := store.ListTenantConfigs()
@@ -201,9 +161,7 @@ func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
 	return configured, true, nil
 }
 
-// removeDirIfEmpty removes a directory the sweep has emptied. Only an empty
-// one: os.Remove refuses a populated directory, and the tenant directory left
-// behind by a tenant deleted long ago is the same residue in a smaller shape.
+// removeDirIfEmpty relies on os.Remove refusing a populated directory.
 func removeDirIfEmpty(ctx core.Context, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) > 0 {
@@ -214,4 +172,9 @@ func removeDirIfEmpty(ctx core.Context, dir string) {
 		return
 	}
 	_ = os.Remove(dir)
+}
+
+func machineConfigLoads(store config.ConfigStore) bool {
+	_, _, err := store.LoadERunConfig()
+	return err == nil
 }

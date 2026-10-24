@@ -46,22 +46,15 @@ export function toggleSidebar(
   callbacks: LayoutCallbacks,
 ): void {
   const nextHidden = !getState().layout.sidebarHidden;
-  // Recorded as an explicit override, not a plain setSidebarHidden: this is
-  // the operator overruling whatever the automatic viewport collapse decided,
-  // so it must stick across later resizes until they toggle again.
+  // An override, so it sticks across later viewport auto-collapses.
   dispatch(setSidebarUserOverride(nextHidden ? 'hidden' : 'shown'));
   callbacks.applyLayoutVars();
   callbacks.flushTerminalResize();
   callbacks.focusTerminalSoon();
 }
 
-// reconcileSidebarForViewport re-derives the sidebar's collapsed state on
-// every layout pass (mount, window resize, any panel toggle) so a window that
-// was resized rather than dragged still gets the same auto-collapse a narrow
-// launch would. It never touches sidebarWidth itself — that stays reclamped
-// only where it's rendered (applyTerminalLayoutVars) and where it's dragged
-// (below), so a window that narrows and widens again restores the operator's
-// chosen width instead of forgetting it.
+// reconcileSidebarForViewport never touches sidebarWidth, so narrowing and
+// widening again restores the operator's width.
 export function reconcileSidebarForViewport(
   dispatch: AppDispatch,
   getState: () => RootState,

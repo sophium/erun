@@ -6,9 +6,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Context is the per-tenant system of record for a managed cloud cluster,
-// mirroring eruncommon.CloudContextConfig. The k3s admin token is a server
-// secret, deliberately excluded from this read model.
+// Context is a tenant's managed cloud cluster. The k3s admin token is a secret
+// and deliberately excluded.
 type Context struct {
 	bun.BaseModel      `bun:"table:contexts,alias:c"`
 	ContextID          string `json:"contextId" bun:"context_id,pk,scanonly"`
@@ -23,14 +22,10 @@ type Context struct {
 	DiskType           string `json:"diskType,omitempty" bun:"disk_type,nullzero"`
 	DiskSizeGB         int    `json:"diskSizeGb,omitempty" bun:"disk_size_gb,nullzero"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
-	// MaxEnvironments is this context's placement capacity (#1112): how many
-	// environments its cluster may host. Part of the per-instance placement
-	// inventory (cluster + credentials + capacity) alongside PublicIP/
-	// KubernetesContext and the credential custodied in context_credentials.
-	MaxEnvironments int `json:"maxEnvironments" bun:"max_environments"`
-	// Status is the provisioning lifecycle: provisioning | running | failed.
-	Status         string    `json:"status" bun:"status,scanonly"`
-	ProvisionError string    `json:"provisionError,omitempty" bun:"provision_error,nullzero,scanonly"`
-	CreatedAt      time.Time `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt      time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
+	// MaxEnvironments is how many environments this context's cluster may host.
+	MaxEnvironments int       `json:"maxEnvironments" bun:"max_environments"`
+	Status          string    `json:"status" bun:"status,scanonly"`
+	ProvisionError  string    `json:"provisionError,omitempty" bun:"provision_error,nullzero,scanonly"`
+	CreatedAt       time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt       time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

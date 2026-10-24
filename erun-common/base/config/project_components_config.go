@@ -7,15 +7,9 @@ import (
 	"strings"
 )
 
-// ResolveProjectComponent selects a components: entry for a caller that must
-// know exactly which root it resolved (build, push) rather than falling back
-// to a whole-project walk. An empty requested name auto-selects the lone
-// entry when exactly one is declared; an explicit unknown name, or an empty
-// requested name with more than one entry declared, fails naming the choices
-// rather than silently resolving one. A project declaring no components: map
-// returns ("", zero-value, false, nil) so every existing single-service
-// .erun/config.yaml keeps resolving through the unchanged project-global
-// paths: block.
+// ResolveProjectComponent selects a components: entry for build/push. An empty
+// name picks the lone entry; ambiguity or an unknown name fails listing the
+// choices. No components: map returns ok=false so paths: applies.
 func ResolveProjectComponent(projectRoot, requested string) (string, ProjectPathsConfig, bool, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return "", ProjectPathsConfig{}, false, nil
@@ -48,12 +42,8 @@ func ResolveProjectComponent(projectRoot, requested string) (string, ProjectPath
 	return "", ProjectPathsConfig{}, false, fmt.Errorf("ambiguous component selection: .erun/config.yaml declares %d components (%s); pass --component <name>", len(config.Components), componentNamesOrNone(config.Components))
 }
 
-// DeclaredComponentPaths looks up a specific components: entry by name, with
-// no selection logic — a plain map lookup for callers that already have a
-// component name (from --components or the environments.<env>.k8s.deployments
-// plan) and fall back to their existing whole-project discovery when the name
-// is not declared, so a project with no components: map (or one that names
-// only a subset) keeps resolving exactly as before this schema existed.
+// DeclaredComponentPaths looks up a components: entry by name; callers fall back
+// to whole-project discovery when it is absent.
 func DeclaredComponentPaths(projectRoot, componentName string) (ProjectPathsConfig, bool, error) {
 	componentName = strings.TrimSpace(componentName)
 	if strings.TrimSpace(projectRoot) == "" || componentName == "" {

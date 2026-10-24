@@ -3,11 +3,7 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Both hover cards were restyled onto a shared type scale (HoverCardRow).
-// A restyle that drops or truncates a field is a worse regression than the
-// inconsistent type treatments it replaced, so this spec pins every field
-// both cards rendered before the change, populated with real (not
-// placeholder) values so a dropped field can't hide behind an empty string.
+// Pins every field both hover cards render, with real values, so a restyle can't silently drop one.
 
 async function stubWorkingIssue(page: Page): Promise<void> {
   await page.route('**/__erun_invoke', async (route: Route, request) => {
@@ -74,27 +70,20 @@ test('the env hover card still renders every field: version, branch+issue, activ
   await app.reboot();
 
   const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-  // Every field check lives inside the one retryable block, re-hovering (and
-  // re-emitting the stale reading) on each attempt: under a loaded worker the
-  // real env-usage sweep can re-render the row between assertions and drop
-  // the card (erun-ui/playwright/AGENTS.md, "a sidebar hover card lives only
-  // while the pointer rests on the row that raised it"), and a plain
-  // un-retried assertion after the card reopens does not survive that.
+  // The usage sweep can re-render the row and drop the card, so every check re-hovers and re-emits
+  // within one retry.
   await expect(async () => {
     await emitStaleEnvUsage(page);
     await page.mouse.move(0, 0);
     await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(card).toBeVisible({ timeout: 1_000 });
 
-    // Header: tenant/env title plus the Local badge.
     await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
     await expect(card.getByText('Local', { exact: true })).toBeVisible({ timeout: 1_000 });
 
-    // Version row.
     await expect(card.getByText('Version', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('1.0.0', { timeout: 1_000 });
 
-    // Working-on row: branch, issue number, and issue title all present.
     await expect(card.getByText('Working on', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('feature/1694-hover-card-type-scale', { timeout: 1_000 });
     await expect(card).toContainText('#1694', { timeout: 1_000 });
@@ -102,13 +91,9 @@ test('the env hover card still renders every field: version, branch+issue, activ
       timeout: 1_000,
     });
 
-    // Activity row.
     await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('Idle', { timeout: 1_000 });
 
-    // Usage rows: separate CPU and Memory figures with their own strips, the
-    // staleness flag, and the reading's age. The labels are `dt`s of their own
-    // now, so they are asserted separately from the figures.
     await expect(card.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('12.0%', { timeout: 1_000 });
@@ -156,34 +141,25 @@ test('the orchestrator hover card still renders every field: status, doing, link
   });
   await app.reboot();
 
-  // Every field check lives inside the one retryable block, re-hovering on
-  // each attempt: the card's open state belongs to the hovered row's own
-  // React state, so a re-render can drop it while the pointer still rests
-  // there, and a plain un-retried assertion after it reopens does not
-  // survive that (erun-ui/playwright/AGENTS.md's hover-card bullet) --
-  // mirrors the env card test above.
+  // Every check retries with re-hover; see the env card test above.
   await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
     await expect(card).toBeVisible({ timeout: 1_000 });
 
-    // Header: orchestrator name plus the Transient badge.
     await expect(card).toContainText(SEED_ORCHESTRATOR, { timeout: 1_000 });
     await expect(card.getByText('Transient', { exact: true })).toBeVisible({ timeout: 1_000 });
 
-    // Status row.
     await expect(card.getByText('Status', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('Running', { timeout: 1_000 });
 
-    // Doing row: both the working turn and the background shell are named.
     await expect(card.getByText('Doing', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('Working, for', { timeout: 1_000 });
     await expect(card).toContainText('Shell running for', { timeout: 1_000 });
     await expect(card).toContainText('yarn build', { timeout: 1_000 });
 
-    // Environments row: linked env's name and status line.
     await expect(card.getByText('Environments', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
 
-    // Nudges row (rendered only while running).
+    // Nudges render only while running.
     await expect(card.getByText('Nudges', { exact: true })).toBeVisible({ timeout: 1_000 });
   });
 });

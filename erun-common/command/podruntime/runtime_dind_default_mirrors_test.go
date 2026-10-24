@@ -9,13 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// DefaultRuntimeDindCPU is written down in two places that cannot read each
-// other: this package's own rule and the erun-devops chart's fallback for
-// runtime.dind.resources.limits.cpu (which an operator's own values file
-// overrides, but which is what a deploy that sets nothing gets). The chart
-// template says so in its own comment -- "keep the two in sync". This reads
-// the real file rather than a copy: an edit to either that leaves the other
-// behind fails here.
+// DefaultRuntimeDindCPU must match the erun-devops chart's fallback; this reads the real chart.
 const (
 	chartServicePath  = "erun-devops/k8s/erun-devops/templates/service.yaml"
 	dindCPUFallbackRe = `(?m)^\{\{-\s*\$dindCPU\s*:=\s*default\s+"([^"]+)"\s*\$dindLimits\.cpu\s*-\}\}`

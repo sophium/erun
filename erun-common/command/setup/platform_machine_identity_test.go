@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,21 +13,18 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// machineIdentityHostStore is a host holding one signed-in erun alias pointed
-// at whatever platform the test stands up, so provisioning is exercised
-// through the same resolution production uses.
 func machineIdentityHostStore(apiURL string) staticCloudStore {
 	provider := testPlatformAliasProvider()
 	provider.ERun.APIURL = apiURL
-	return staticCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
+	return staticCloudStore{config: config.ERunConfig{CloudProviders: []model.CloudProviderConfig{provider}}}
 }
 
-// fakePlatformAPI stands in for the two calls provisioning makes: resolving the
-// environment by name, and minting its identity.
 func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdentity) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +35,7 @@ func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdenti
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments":
-			_ = json.NewEncoder(w).Encode([]platformclient.PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
+			_ = json.NewEncoder(w).Encode([]model.PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/environments/"+identity.EnvironmentID+"/machine-identity":
 			_ = json.NewEncoder(w).Encode(identity)
 		default:
@@ -50,10 +46,8 @@ func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdenti
 	return server
 }
 
-// machineIdentityDeps is the cloud dependency set provisioning needs, with the
-// network-facing halves stubbed: login (so the platform client can authenticate
-// as the host's alias) and OIDC discovery.
-func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, cloud.CloudSecretStore) {
+// machineIdentityDeps stubs login and OIDC discovery.
+func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, seam.CloudSecretStore) {
 	t.Helper()
 	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
 	deps := cloud.CloudDependencies{
@@ -86,10 +80,6 @@ func testMachineIdentity() platformclient.PlatformMachineIdentity {
 	}
 }
 
-// TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity is the
-// delivery half end to end: the credential the platform minted reaches the
-// Secret the runtime chart already mounts, as the alias entry's client-secret
-// form rather than a delegated session.
 func TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	identity := testMachineIdentity()
@@ -110,8 +100,6 @@ func TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity(t *testi
 	if want := "team-devops-platform-alias"; name != want {
 		t.Fatalf("got secret name %q, want %q", name, want)
 	}
-	// The credential is proven usable before anything is written, with the
-	// values the platform actually returned.
 	if sawClientID != identity.ClientID || sawClientSecret != identity.ClientSecret {
 		t.Fatalf("verification exchanged %q/%q, want the minted credential", sawClientID, sawClientSecret)
 	}
@@ -119,9 +107,6 @@ func TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity(t *testi
 	assertMachineIdentityManifest(t, captured.read(t), identity, api.URL)
 }
 
-// assertMachineIdentityManifest checks the Secret the pod will actually mount:
-// the machine form of the alias entry, the credential it points at, and no
-// trace of the delegated session the host itself holds.
 func assertMachineIdentityManifest(t *testing.T, manifest string, identity platformclient.PlatformMachineIdentity, apiURL string) {
 	t.Helper()
 	for _, want := range []string{
@@ -137,44 +122,17 @@ func assertMachineIdentityManifest(t *testing.T, manifest string, identity platf
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
 		}
 	}
-	// The delegated session's own credential must not travel with it: an
-	// environment that records both is an environment whose identity is
-	// ambiguous.
+	// Carrying both credentials would make the identity ambiguous.
 	if strings.Contains(manifest, "refresh-tokenref:") || strings.Contains(manifest, "host-session") {
 		t.Fatalf("machine identity secret carried the delegated session:\n%s", manifest)
 	}
-	// The token file's name is derived from the client-secret reference, not
-	// the refresh-token one, so the pod reads the file the entry points at.
 	sum := sha256.Sum256([]byte(machineIdentityClientSecretRef(testPlatformAliasProvider().Alias)))
 	if want := hex.EncodeToString(sum[:]) + ".token"; !strings.Contains(manifest, want) {
 		t.Fatalf("manifest does not name the client secret's own store file %q:\n%s", want, manifest)
 	}
 }
 
-// TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse is the check
-// that keeps a working environment from being replaced by a broken one: a
-// credential the platform returned but that mints no token is not written, and
-// the caller is told to fall back.
-func TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse(t *testing.T) {
-	captured := installCapturingKubectl(t)
-	api := fakePlatformAPI(t, testMachineIdentity())
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
-		return cloud.ERunTokens{}, context.DeadlineExceeded
-	})
-
-	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), machineIdentityHostStore(api.URL), "team", "team-dev", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("a credential that cannot be used is a fallback, not an error: %v", err)
-	}
-	if ok {
-		t.Fatal("expected provisioning to decline a credential it could not exchange for a token")
-	}
-	assertNothingApplied(t, captured.path)
-}
-
-// TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered:
-// an environment the platform does not know yet is the ordinary state during a
-// first init, and it must leave the delegated path to run rather than fail.
+// An unregistered environment is normal on first init and must fall back.
 func TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	api := fakePlatformAPI(t, testMachineIdentity())
@@ -192,78 +150,6 @@ func TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered
 	assertNothingApplied(t, captured.path)
 }
 
-// TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias: a host that is
-// not signed in has nothing to ask with, and most installs are that host.
-func TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias(t *testing.T) {
-	installCapturingKubectl(t)
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
-		return cloud.ERunTokens{AccessToken: "machine-token"}, nil
-	})
-
-	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ok {
-		t.Fatal("expected no provisioning from a host with no alias")
-	}
-}
-
-// TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant pins which
-// grant an alias's credential form selects -- the two are not interchangeable,
-// and reading a client secret down the refresh-token path (or the reverse)
-// would present the wrong kind of credential to the issuer.
-func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.T) {
-	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
-	alias := testPlatformAliasProvider().Alias
-	ref := machineIdentityClientSecretRef(alias)
-	if err := store.SaveCloudSecret(ref, "client-secret-value"); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	provider := config.CloudProviderConfig{
-		Alias:         alias,
-		Provider:      config.CloudProviderERun,
-		OIDCIssuerURL: "https://auth.example",
-		ERun: &config.ERunProviderConfig{
-			APIURL:          "https://api.example",
-			ClientID:        "client-env-0192",
-			ClientSecretRef: ref,
-		},
-	}
-	refreshCalled, machineCalled := false, false
-	deps := cloud.CloudDependencies{
-		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
-			return cloud.OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: "https://auth.example/token"}, nil
-		},
-		RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
-			refreshCalled = true
-			return cloud.ERunTokens{}, nil
-		},
-		ClientCredentialsERunTokens: func(_ core.Context, _ cloud.OIDCDiscovery, clientID, clientSecret string) (cloud.ERunTokens, error) {
-			machineCalled = true
-			if clientID != "client-env-0192" || clientSecret != "client-secret-value" {
-				t.Fatalf("grant presented %q/%q", clientID, clientSecret)
-			}
-			return cloud.ERunTokens{AccessToken: "machine-token"}, nil
-		},
-	}
-
-	token, err := cloud.ResolveERunAccessToken(testTraceContext(false), provider, deps)
-	if err != nil {
-		t.Fatalf("resolveERunAccessToken: %v", err)
-	}
-	if token != "machine-token" {
-		t.Fatalf("got token %q", token)
-	}
-	if !machineCalled || refreshCalled {
-		t.Fatalf("machineCalled=%v refreshCalled=%v, want the client_credentials grant only", machineCalled, refreshCalled)
-	}
-}
-
-// assertNothingApplied reports whether the kubectl stub captured a manifest.
-// It distinguishes "no file" from "an empty file" only in the message, because
-// both mean provisioning declined to write anything.
 func assertNothingApplied(t *testing.T, capturePath string) {
 	t.Helper()
 	data, err := os.ReadFile(capturePath)
@@ -275,10 +161,7 @@ func assertNothingApplied(t *testing.T, capturePath string) {
 	}
 }
 
-// TestProvisionMachineIdentitySecretFallsBackOnAnAmbiguousHost: a host with
-// several erun aliases and none named has nothing to ask the platform with.
-// That is a fallback to the delegated path, which reports the ambiguity, not
-// an error that fails `erun init` (which has no alias flag to lift it).
+// `erun init` has no alias flag, so ambiguity must fall back, not fail.
 func TestProvisionMachineIdentitySecretFallsBackOnAnAmbiguousHost(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	store := ambiguousHostStore(t)

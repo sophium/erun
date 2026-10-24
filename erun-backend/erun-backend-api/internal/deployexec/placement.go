@@ -1,7 +1,3 @@
-// placement.go carries a lifecycle Job's target cluster (#1112): the
-// deploy/stop/delete Job runs in the platform's own cluster as always, but
-// its `erun` command authenticates against whichever cluster the
-// environment was placed on, via a kubeconfig this package seeds.
 package deployexec
 
 import (
@@ -17,32 +13,15 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
 )
 
-// PlacementCredentialResolver resolves a context's live k3s admin token
-// immediately before a deploy/stop/delete Job needs it (#1112) — satisfied by
-// repository.ContextCredentialRepository.Get. Callers (service.
-// EnvironmentProvisioner, provision.EnvLifecycle) resolve it fresh on every
-// run, including a resumed one, so it is never part of a checkpointed DBOS
-// workflow input and a rotated token reaches the very next Job with no
-// separate sync step.
-//
-// The owning tenant is an explicit argument rather than something the
-// implementation reads off a security context: erun_operations' RLS policy is
-// unconditional, so a caller that only names a context id would be handed
-// whichever tenant's context that id happened to name.
+// PlacementCredentialResolver resolves a context's admin token fresh before each
+// Job, so it never enters a checkpointed workflow input. The tenant is explicit
+// because erun_operations' RLS policy is unconditional.
 type PlacementCredentialResolver interface {
 	Get(ctx context.Context, tenantID, contextID string) (string, error)
 }
 
-// ResolvePlacementToken fetches the admin token for a remote placement and
-// fails clearly when one is expected but cannot be resolved — a context this
-// tenant registered but whose credential this server instance cannot reach
-// (resolver nil, e.g. no cipher configured) must not silently deploy without
-// authenticating, which would surface only as an opaque kubectl failure deep
-// inside the Job.
-//
-// An empty tenantID alongside a non-empty contextID is refused rather than
-// passed down: the credential belongs to the tenant that owns the context, so
-// a caller that cannot name that tenant has nothing to fetch with.
+// ResolvePlacementToken fetches a remote placement's admin token, failing rather
+// than deploying unauthenticated; an empty tenantID is refused.
 func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialResolver, tenantID, contextID string) (string, error) {
 	if contextID == "" {
 		return "", nil
@@ -56,32 +35,16 @@ func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialReso
 	return resolver.Get(ctx, tenantID, contextID)
 }
 
-// PlacementParams names the cluster a lifecycle Job's `erun` command targets.
-// The zero value keeps the Job targeting its own cluster via its
-// ServiceAccount token, unchanged from before multi-cluster placement
-// existed (#1112).
+// PlacementParams names the cluster a lifecycle Job targets; the zero value is its own cluster.
 type PlacementParams struct {
-	// TenantID is the tenant that owns ContextID. It is never interpolated
-	// into a script: it is the owner the admin-token credential is fetched
-	// for, so a placement resolved for one tenant cannot release a context
-	// credential that belongs to another.
+	// TenantID owns ContextID, so one tenant's placement cannot release another's credential.
 	TenantID string
-	// ContextID is the context row's id, used only to name the Secret that
-	// custodies its admin token (PlacementSecretName) — never interpolated
-	// into a script.
+	// ContextID only names the Secret; never interpolated into a script.
 	ContextID string
-	// KubernetesContext is the kubeconfig context name and the value the
-	// seeded env config's kubernetescontext: reads back. Validated as a
-	// DNS-1123 label at context creation (routes.decodeCreateContextInput),
-	// but still passed through shellJoin here rather than trusted blind.
+	// KubernetesContext is validated upstream but still passed through shellJoin.
 	KubernetesContext string
-	// ServerURL is the target cluster's API server, https://<publicIP>:6443.
-	ServerURL string
-	// AdminToken is the target cluster's k3s admin token, resolved fresh from
-	// ContextCredentialRepository immediately before a Job runs
-	// (EnvironmentProvisioner.Provision / EnvLifecycle.Stop/Delete) — never
-	// part of a checkpointed workflow input, never written into the Job spec.
-	// ensurePlacementSecret is the only place that reads it.
+	ServerURL         string
+	// AdminToken is resolved fresh per Job and never written into the Job spec or workflow input.
 	AdminToken string
 }
 
@@ -89,8 +52,6 @@ func (p PlacementParams) remote() bool {
 	return strings.TrimSpace(p.ContextID) != ""
 }
 
-// kubernetesContextOrInCluster names the context bootstrapEnvironmentScript's
-// seeded env config records erun's `kubernetescontext:` as.
 func (p PlacementParams) kubernetesContextOrInCluster() string {
 	if p.remote() {
 		return p.KubernetesContext
@@ -98,26 +59,16 @@ func (p PlacementParams) kubernetesContextOrInCluster() string {
 	return "in-cluster"
 }
 
-// placementAdminTokenKey is the Secret data key holding a remote context's
-// k3s admin token.
 const placementAdminTokenKey = "token"
 
-// placementAdminTokenEnvVar is the fixed name a placed Job's generated
-// kubeconfig reads the token back from at runtime — never the literal token
-// value, which lives only in the Secret this env var is sourced from.
+// The kubeconfig references this env var, never the literal token.
 const placementAdminTokenEnvVar = "ERUN_PLACEMENT_ADMIN_TOKEN"
 
-// PlacementSecretName is deterministic in the context id, so a repeat
-// deploy/stop/delete reuses (and refreshes) the same Secret instead of
-// accumulating one per attempt, and a rotated token reaches the very next Job
-// with no separate sync step.
+// PlacementSecretName is deterministic so repeat Jobs refresh one Secret.
 func PlacementSecretName(contextID string) string {
 	return "erun-ctx-cred-" + jobexec.SanitizeName(contextID)
 }
 
-// placementEnvVars returns the container Env sourcing the admin token from
-// its Secret, or nil when the Job targets its own cluster — the credential
-// never appears in the Job spec itself, only a Secret reference.
 func placementEnvVars(placement PlacementParams) []corev1.EnvVar {
 	if !placement.remote() {
 		return nil
@@ -133,11 +84,8 @@ func placementEnvVars(placement PlacementParams) []corev1.EnvVar {
 	}}
 }
 
-// ensurePlacementSecret upserts the Secret a placed Job's container reads its
-// target cluster's admin token from. Called fresh before every deploy/stop/
-// delete Job that targets a remote context (Launcher.Run/RunStop/RunDelete),
-// so a rotated token reaches the very next Job. A no-op when the Job targets
-// its own cluster.
+// ensurePlacementSecret upserts the admin-token Secret before every remote Job,
+// so a rotated token reaches the next one.
 func ensurePlacementSecret(ctx context.Context, kube kubernetes.Interface, namespace string, placement PlacementParams) error {
 	if !placement.remote() {
 		return nil

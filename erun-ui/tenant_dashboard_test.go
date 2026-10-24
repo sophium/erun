@@ -9,12 +9,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// tenantDashboardAPI serves the dashboard's reads, refusing every path in
-// forbidden and reporting the capability set whoami should answer with.
-// capabilities nil means the platform reports none at all.
+// nil capabilities means the platform reports none.
 func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]bool, requests *[]string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -28,10 +27,6 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 	}))
 }
 
-// tenantDashboardAPIFixtures is tenantDashboardAPIResponse's fixture body for
-// every path except /v1/whoami (handled separately, since its body carries
-// the caller-supplied capabilities), keyed by path rather than a switch — a
-// switch here once tripped golangci-lint's cyclomatic-complexity cap.
 var tenantDashboardAPIFixtures = map[string]string{
 	"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 	"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
@@ -43,14 +38,9 @@ var tenantDashboardAPIFixtures = map[string]string{
 	"/v1/contexts":                `[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`,
 	"/v1/environments":            `[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`,
 	"/v1/invite-requests":         `[]`,
-	// A restricted panel is answered with the grant that would lift it, so a
-	// real platform's role list is part of these fixtures too.
-	"/v1/roles": `[{"roleId":"role-audit","name":"Auditor","permissions":[{"apiMethod":"GET","apiPath":"/v1/audit-events"}]},{"roleId":"role-reviewer","name":"Reviewer","permissions":[{"apiMethodPattern":"^GET$","apiPathPattern":"^/v1/reviews/[^/]+$"}]}]`,
+	"/v1/roles":                   `[{"roleId":"role-audit","name":"Auditor","permissions":[{"apiMethod":"GET","apiPath":"/v1/audit-events"}]},{"roleId":"role-reviewer","name":"Reviewer","permissions":[{"apiMethodPattern":"^GET$","apiPathPattern":"^/v1/reviews/[^/]+$"}]}]`,
 }
 
-// tenantDashboardAPIResponse is tenantDashboardAPI's fixture body for every
-// path its forbidden/default handling did not already short-circuit — split
-// out to keep tenantDashboardAPI itself under the module's complexity cap.
 func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabilities string) {
 	if req.URL.Path == "/v1/whoami" {
 		_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","roles":["Auditor"],"issuer":"https://sts.aws.example","subject":"subject-1","capabilities":` + capabilities + `}`))
@@ -64,21 +54,14 @@ func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabi
 	_, _ = w.Write([]byte(body))
 }
 
-// testERunPlatformAliasApp builds an App with one signed-in erun-type cloud
-// alias whose ERun.APIURL is apiURL, backed by a real (temp-dir) secret store
-// so CloudProviderBearerToken runs its real refresh_token grant path — the
-// same path erun platform`/`erun cloud login` drives — down to a crafted
-// access token carrying issuer/subject claims a test can assert on.
+// testERunPlatformAliasApp uses a real temp-dir secret store so the real
+// refresh_token grant path mints the token.
 func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
 	t.Helper()
-	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]config.TenantConfig{"frs": {Name: "frs"}})
+	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]model.TenantConfig{"frs": {Name: "frs"}})
 }
 
-// testERunPlatformAliasAppWithTenants is testERunPlatformAliasApp with an
-// explicit tenants map, for tests exercising a tenant-level config override
-// (e.g. TenantConfig.APIURL) that the default single-tenant fixture cannot
-// carry.
-func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]config.TenantConfig) *App {
+func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]model.TenantConfig) *App {
 	t.Helper()
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
@@ -86,11 +69,11 @@ func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants ma
 		t.Fatalf("seed refresh token: %v", err)
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    testERunAlias,
 		Provider: config.CloudProviderERun,
 		Username: "erun",
-		ERun:     &config.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}
 	return NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig, tenants: tenants},
@@ -112,22 +95,18 @@ const (
 	testERunSubject = "user-subject-1"
 )
 
-// testAWSAliasApp builds an App whose only configured cloud alias is an AWS
-// one — the exact shape the operator's own machine had: a tenant's primary
-// cloud alias is AWS-typed, and no erun platform alias is configured at all.
-// Used to prove the platform read no longer reaches for it.
 func testAWSAliasApp(t *testing.T) *App {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team",
 	}}}
 	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -158,9 +137,6 @@ func panelFor(t *testing.T, dashboard uiTenantDashboard, tab string) uiTenantDas
 	return uiTenantDashboardPanel{}
 }
 
-// TestTenantDashboardPanelsResolveIndependently is the operator-visible half of
-// the bug: one forbidden read used to abort the whole load, so every panel went
-// blank — including the ones the caller may read.
 func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/reviews": true}, &requests)
@@ -185,9 +161,6 @@ func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardSkipsReadsTheCallerMayNotMake is the "never
-// enabled-then-403" half: a panel whose capability is absent is reported as
-// restricted and its API read is never attempted.
 func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/audit-events"}]`
@@ -219,9 +192,7 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller pins the
-// difference between an empty capability set and an absent one: empty is an
-// answer, and every panel is restricted rather than silently blank.
+// An empty capability set is an answer: every panel is restricted.
 func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "[]", nil, &requests)
@@ -239,9 +210,6 @@ func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T
 	}
 }
 
-// TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown keeps an
-// unknown capability set from reading as an empty one: a platform that cannot
-// report capabilities must not leave every panel hidden.
 func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)
@@ -266,9 +234,6 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 	}
 }
 
-// TestTenantDashboardResolvesReviewAuthorUsernames is the "u2 in the UI" bug
-// fixed for #1378: a review's raw authorUserId is enriched with the tenant
-// user directory's display name whenever the caller can read /v1/users.
 func TestTenantDashboardResolvesReviewAuthorUsernames(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -298,10 +263,6 @@ func TestTenantDashboardResolvesReviewAuthorUsernames(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardExplainsARefusedIdentityRead is what a caller with no
-// permissions at all sees. The identity read is authorized like every other
-// route, so it is refused outright — and the dashboard has to say what that
-// means rather than repeat the status line.
 func TestTenantDashboardExplainsARefusedIdentityRead(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/whoami": true}, &requests)
@@ -320,10 +281,6 @@ func TestTenantDashboardExplainsARefusedIdentityRead(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardUsersPanelListsTheTenantRoster is the readable half: a
-// caller who may read GET /v1/users gets the tenant's whole roster on the
-// Users tab. A tenant with three users renders three rows, not the caller's
-// one row from whoami.
 func TestTenantDashboardUsersPanelListsTheTenantRoster(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -351,8 +308,6 @@ func TestTenantDashboardUsersPanelListsTheTenantRoster(t *testing.T) {
 	}
 }
 
-// assertTenantDashboardRoster pins the Users tab's rows, and the roles the
-// roster read did and did not answer for.
 func assertTenantDashboardRoster(t *testing.T, dashboard uiTenantDashboard) {
 	t.Helper()
 	if len(dashboard.Users) != 3 {
@@ -363,9 +318,7 @@ func assertTenantDashboardRoster(t *testing.T, dashboard uiTenantDashboard) {
 			t.Fatalf("expected roster row %d to be %q, got %+v", i, want, dashboard.Users[i])
 		}
 	}
-	// GET /v1/users reports no roles, so a row it did not answer for must stay
-	// unset rather than read as "none assigned"; the caller's own row carries
-	// the roles whoami answered with.
+	// The roster has no roles; only the caller's row carries whoami's.
 	if len(dashboard.Users[0].Roles) != 1 || dashboard.Users[0].Roles[0] != "Auditor" {
 		t.Fatalf("expected the caller's own row to carry whoami's roles, got %+v", dashboard.Users[0])
 	}
@@ -374,10 +327,6 @@ func assertTenantDashboardRoster(t *testing.T, dashboard uiTenantDashboard) {
 	}
 }
 
-// TestTenantDashboardNamesAnUnreadableRoster is the other half: a caller who
-// may not read GET /v1/users gets that read named on the Users panel, never a
-// table reduced to their own row — a one-row table under a Username/Roles
-// header states a false count for the tenant.
 func TestTenantDashboardNamesAnUnreadableRoster(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/audit-events"}]`
@@ -397,9 +346,6 @@ func TestTenantDashboardNamesAnUnreadableRoster(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardReportsAFailedRosterRead covers the roster read that is
-// permitted but refused: the panel carries that failure rather than falling
-// back to a single row.
 func TestTenantDashboardReportsAFailedRosterRead(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/users": true}, &requests)

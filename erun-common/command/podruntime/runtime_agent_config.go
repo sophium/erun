@@ -19,13 +19,10 @@ func describeRuntimeAgentConfig(boot runtimeBoot) string {
 	return "configure Codex (" + boot.path(".codex") + ") and Claude Code (" + boot.path(".claude") + "): instructions, skills from " + boot.skillsRoot + ", agents from " + boot.agentsRoot + ", the erun MCP server at " + boot.mcpURL()
 }
 
-// configureRuntimeAgents reconciles both assistants' configuration with the
-// image's baked skills and agents and the container's environment. It runs once
-// per container boot: nothing it reads changes while the container lives.
+// configureRuntimeAgents runs once per container boot.
 func configureRuntimeAgents(ctx core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	removeLegacyRuntimeConfigureScripts(boot)
-	// Each part stands alone: a skill that cannot be copied must not leave the
-	// assistants without their MCP server or settings.
+	// Each part stands alone: one failure must not leave the others unconfigured.
 	var errs []error
 	if err := EnsureGlobalAgentInstructions(boot.home); err != nil {
 		errs = append(errs, fmt.Errorf("agent instructions: %w", err))
@@ -42,9 +39,8 @@ func configureRuntimeAgents(ctx core.Context, boot runtimeBoot, _ *runtimeSuperv
 	return errors.Join(errs...)
 }
 
-// RuntimeAgentAssetTargets are the discovery directories the runtime pod installs
-// into: skills for both assistants, reusable agents for Claude Code only (Codex
-// has no equivalent).
+// RuntimeAgentAssetTargets are skill directories for both assistants and an agents
+// directory for Claude Code only.
 type RuntimeAgentAssetTargets struct {
 	SkillDirs []string
 	AgentDirs []string
@@ -63,8 +59,7 @@ func installRuntimeAgentAssets(ctx core.Context, boot runtimeBoot, targets Runti
 	return err
 }
 
-// RuntimeAgentAssetsInstall is what one install of the baked skills and agents
-// did, per discovery directory, in install order.
+// RuntimeAgentAssetsInstall is the per-directory outcome of one install, in order.
 type RuntimeAgentAssetsInstall struct {
 	Targets []RuntimeAgentAssetsTarget `json:"targets"`
 }
@@ -76,13 +71,11 @@ type RuntimeAgentAssetsTarget struct {
 	AgentAssetsInstallResult
 }
 
-// InstallRuntimeAgentAssets installs or refreshes the skills under skillsRoot and
-// the agents under agentsRoot into every target directory. A source root that
-// does not exist has nothing to install. Under ctx.DryRun it only traces.
+// InstallRuntimeAgentAssets installs or refreshes baked skills and agents into every target.
 func InstallRuntimeAgentAssets(ctx core.Context, skillsRoot, agentsRoot string, targets RuntimeAgentAssetTargets) (RuntimeAgentAssetsInstall, error) {
 	result := RuntimeAgentAssetsInstall{Targets: []RuntimeAgentAssetsTarget{}}
 	install := func(kind, source string, dests []string, apply func(string, string) (AgentAssetsInstallResult, error)) error {
-		if info, err := os.Stat(source); err != nil || !info.IsDir() {
+		if !isDirectory(source) {
 			return nil
 		}
 		for _, dest := range dests {
@@ -104,8 +97,7 @@ func InstallRuntimeAgentAssets(ctx core.Context, skillsRoot, agentsRoot string, 
 	return result, install("agents", agentsRoot, targets.AgentDirs, InstallOrRefreshAgents)
 }
 
-// removeLegacyRuntimeConfigureScripts deletes the configure scripts older images
-// wrote to the home volume; they call helpers this image no longer has.
+// removeLegacyRuntimeConfigureScripts deletes scripts that call helpers this image lacks.
 func removeLegacyRuntimeConfigureScripts(boot runtimeBoot) {
 	for _, name := range []string{"configure-codex-mcp.sh", "configure-claude-code.sh"} {
 		_ = os.Remove(boot.path(".erun", name))
@@ -114,11 +106,8 @@ func removeLegacyRuntimeConfigureScripts(boot runtimeBoot) {
 
 const runtimeCodexMCPSection = "[mcp_servers.erun]"
 
-// rewriteRuntimeCodexConfig gives Codex full access without approval prompts
-// (the pod is the sandbox) and the erun MCP server, keeping everything else in
-// config.toml. The policy keys go before the first table, where TOML requires
-// top-level keys; erun's own MCP table is replaced, never duplicated, so a
-// reboot rewrites the file to the same bytes.
+// rewriteRuntimeCodexConfig must place policy keys before the first TOML table and replace
+// erun's MCP table so a reboot writes identical bytes. The pod is the sandbox.
 func rewriteRuntimeCodexConfig(path, mcpURL string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -147,8 +136,6 @@ func rewriteRuntimeCodexConfig(path, mcpURL string) error {
 	return config.WriteFileAtomic(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
 }
 
-// withoutRuntimeCodexSettings drops the lines erun owns -- the two policy keys
-// and its own MCP table -- keeping everything else in order.
 func withoutRuntimeCodexSettings(content string) []string {
 	var kept []string
 	skipping := false

@@ -2,24 +2,9 @@ import type { Request, Route } from '@playwright/test';
 
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
-// The diff panel's review-status chip and the single action derived from it
-// the chip must never render "No review" (or any other
-// confirmed answer) before DiffReviewStatus has actually resolved, and the
-// action must reuse the exact write paths the Reviews tab and merge queue
-// already use (openCreateReviewDialog, submitAdvanceMergeQueue,
-// openReviewDetail) rather than a parallel one. Starting a review itself is
-// covered by diff-panel-start-review.spec.ts; these specs cover the chip and
-// the actions that follow a review already existing.
-//
-// Every chip label and action below is the answer to a DiffReviewStatus round
-// trip, and the assertions that read them carry no timeout of their own: a
-// locator assertion has no way to name the clock, so `toBeVisible` and
-// `toHaveCount` resolve to expect's 10s default rather than the budget these
-// tests declare. A read that is merely slow therefore reds the step with the
-// own clock almost entirely unspent -- the class `fixtures/erunApp.ts`'s
-// `withTestBudget` exists for, and what the held-read case at the end of this
-// file reproduces. `withTestBudget()` points each read at the budget its test
-// declared; a read that never converges still fails, now at that deadline.
+// The chip must never show a confirmed answer before DiffReviewStatus resolves,
+// and its action must reuse the Reviews tab's write paths. Reads carry
+// withTestBudget() because locator assertions default to expect's 10s.
 
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -85,8 +70,6 @@ async function openDiffPanel(
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
-  // Converge on the panel having opened, then on the diff it fetches: both are
-  // separate renders after the toggle, and expect's own budget is a fixed 10s.
   await app.reviewPanel.waitForOpen();
   await app.page.getByText('package main').waitFor({ state: 'visible' });
 }
@@ -122,8 +105,6 @@ test.describe('diff panel — review-status chip', () => {
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
 
-    // Held open deliberately: the honest "not yet known" state, not a value
-    // that looks like a confirmed answer.
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'Checking status…')).toBeVisible(
       withTestBudget(),
     );
@@ -131,8 +112,7 @@ test.describe('diff panel — review-status chip', () => {
       0,
       withTestBudget(),
     );
-    // The fixed "Start a review" action stays available throughout -- the
-    // dialog itself resolves whether this caller may create a review.
+    // The dialog itself resolves whether this caller may create a review.
     await expect(app.reviewPanel.reviewActionButton(envKey, 'Start a review')).toBeVisible(
       withTestBudget(),
     );
@@ -151,14 +131,8 @@ test.describe('diff panel — review-status chip', () => {
     );
   });
 
-  // The chip's read is keyed on the environment and its branch, not on the
-  // render that happens to display it. loadDiffReviewStatus has no in-flight
-  // guard, so a dependency that changes identity on every render turns this
-  // background read into a loop -- each read dispatches, which re-renders, which
-  // reads again. The chip's own text cannot show that (it settles on the
-  // platform's latest answer either way) and the loop is silent while the
-  // platform is reachable, so the read count is the only observable: a settled
-  // panel reads once, and a refresh of the diff does not re-read at all.
+  // loadDiffReviewStatus has no in-flight guard, so an unstable dependency would
+  // loop silently; the read count is the only observable.
   test('reads the platform once for a settled panel, and a diff refresh does not re-read', async ({
     app,
     page,
@@ -185,15 +159,11 @@ test.describe('diff panel — review-status chip', () => {
     });
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
-    // The chip has resolved, so the panel is settled: any read from here is one
-    // the operator did not ask for.
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'No review')).toBeVisible(
       withTestBudget(),
     );
 
-    // A refresh is a real dispatch of its own -- it re-renders the panel and
-    // reloads the diff, which is exactly the churn a re-read would ride on. It
-    // must not reach the status read: the environment and branch are unchanged.
+    // The env and branch are unchanged, so a refresh must not re-read status.
     await app.reviewPanel.refreshDiff();
     await expect
       .poll(() => statusReads, { message: 'one read per environment and branch' })
@@ -230,8 +200,7 @@ test.describe('diff panel — review-status chip', () => {
           });
           return;
         }
-        // The chip re-reads after Advance queue settles, and must show the
-        // platform's own new answer -- never an optimistic client guess.
+        // Never an optimistic client guess.
         await fulfillJSON(route, {
           state: 'merging',
           reviewId: 'review-1',
@@ -261,11 +230,7 @@ test.describe('diff panel — review-status chip', () => {
     await app.reviewPanel.reviewActionButton(envKey, 'Advance queue').click();
     await app.reviewPanel.reviewActionButton(envKey, 'Confirm').click();
 
-    // Polled, not read synchronously: `advanceInput` is written by the route
-    // handler, which runs when the request is intercepted — a click resolves
-    // once the event is dispatched, so a bare read here only ever passes
-    // because the handler usually wins that race. It loses one under the
-    // gate's parallelism, and the assertion reds on a call that did happen.
+    // Polled: the route handler may record the call after the click resolves.
     await expect
       .poll(() => advanceInput)
       .toMatchObject({ tenant: seededEnv.tenant, targetBranch: 'main' });
@@ -322,8 +287,6 @@ test.describe('diff panel — review-status chip', () => {
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'Blocked · 2 threads')).toBeVisible(
       withTestBudget(),
     );
-    // No "Advance queue" affordance while blocked -- the disabled state names
-    // the count and links to the discussion instead of an inert button.
     await expect(app.reviewPanel.reviewActionButton(envKey, 'Advance queue')).toHaveCount(
       0,
       withTestBudget(),
@@ -382,8 +345,6 @@ test.describe('diff panel — review-status chip', () => {
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'Open · building')).toBeVisible(
       withTestBudget(),
     );
-    // No permission to advance the queue in this state, so the action is
-    // "View review", not a disabled/inert control.
     await expect(app.reviewPanel.reviewActionButton(envKey, 'View review')).toBeVisible(
       withTestBudget(),
     );
@@ -393,20 +354,8 @@ test.describe('diff panel — review-status chip', () => {
     expect(reviewDetailInput).toMatchObject({ tenant: seededEnv.tenant, reviewId: 'review-1' });
   });
 
-  // The chip is the answer to a DiffReviewStatus round trip, and the assertion
-  // that reads it carries no timeout of its own: `toBeVisible` has no way to
-  // name one, so it resolves to expect's 10s default while this test declares
-  // 60s. A read that is merely slow therefore reds the step with the test's own
-  // clock unspent, which is how a loaded machine turns into a failing branch
-  // nobody touched.
-  //
-  // The read is held past that 10s default -- the smallest delay that
-  // discriminates -- so the suite pays seconds here rather than the tens a
-  // genuinely loaded machine would. The gate is released a fixed window after
-  // the assertion below begins, not after the request was made, so the answer
-  // it waits for provably cannot arrive early however long the panel took to
-  // open; pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused, post-fix it passes at the read's real arrival.
+  // The read is held past expect's 10s default, released relative to the
+  // assertion start so it cannot arrive early.
   test('a status read that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -438,9 +387,6 @@ test.describe('diff panel — review-status chip', () => {
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
 
-    // Deliberate stimulus, not a wait for the app: the hold *is* the contention
-    // this case exists to reproduce, so it is sized on the clock it has to
-    // disagree with.
     setTimeout(releaseStatusRead, 12_000);
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'No review')).toBeVisible(
       withTestBudget(),

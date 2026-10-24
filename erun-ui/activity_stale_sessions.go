@@ -6,17 +6,10 @@ import (
 	"time"
 )
 
-// staleShellDebounce keeps a freshly-started PTY session out of the
-// stale-detector's reach for the first interval. Some shells fork their
-// children before the parent exits, and we don't want a transient
-// not-running window to surface a false-positive in the activity drawer.
+// staleShellDebounce skips fresh sessions, since some shells fork children before the parent exits.
 const staleShellDebounce = 4 * activityPollerInterval
 
-// runStaleShellDetector reconciles open PTY sessions with the OS so
-// shells that died without closing their pty (signalled externally,
-// kernel OOM, kubectl exec lost) become visible in the activity queue
-// with a kill option. Healthy shells stay invisible — the queue is for
-// items that need user attention.
+// runStaleShellDetector surfaces shells that died without closing their PTY.
 func (a *App) runStaleShellDetector(stop <-chan struct{}) {
 	ticker := time.NewTicker(activityPollerInterval)
 	defer ticker.Stop()
@@ -54,9 +47,7 @@ type staleSessionSnapshot struct {
 	pid       int
 }
 
-// Snapshots stale sessions under a brief App-mutex hold so the surrounding
-// reconciler stays unlocked and can't deadlock kubectl/helm subprocesses
-// against terminal startup.
+// The App mutex is held only briefly so the reconciler cannot deadlock against terminal startup.
 func (a *App) collectStaleSessionSnapshots() []staleSessionSnapshot {
 	now := time.Now()
 	a.mu.Lock()
@@ -73,10 +64,7 @@ func (a *App) collectStaleSessionSnapshots() []staleSessionSnapshot {
 		if pid <= 0 {
 			continue
 		}
-		// Ask the session (which holds the process handle) rather than probing by
-		// PID: os.FindProcess/OpenProcess is denied by the EDR on locked-down
-		// Windows, which made a live shell look dead and surfaced a false "shell
-		// exited unexpectedly". See terminalSession.Alive.
+		// Ask the session, not the PID: EDR on locked-down Windows denies process probes.
 		if managed.session.Alive() {
 			continue
 		}
@@ -130,17 +118,8 @@ func (a *App) removeRecoveredStaleShellActivities(stillStale map[string]struct{}
 	}
 }
 
-// KillSession backs the activity drawer's Kill button: it terminates a stale
-// session and dismisses its queue entry.
-//
-// The session is marked closed under a.mu before its PTY is touched, the same
-// discipline every other deliberate teardown follows. Kill is the operator
-// ending this session on purpose, and the process is generally already reaped
-// by the time the button lands: without the mark the detector's next pass finds
-// the session still registered, asks the probe, reads "not alive", and surfaces
-// the entry the button just dismissed. The reader still finalizes the exit,
-// because a marked close reports its exit rather than going quiet
-// (finalizeDeliberateClose).
+// KillSession terminates a stale session and dismisses its entry. It marks the
+// session closed first so the detector does not re-surface the reaped process.
 func (a *App) KillSession(serial int) bool {
 	if serial <= 0 {
 		return false
@@ -186,6 +165,8 @@ func staleShellCommandFromKind(kind sessionKind) string {
 		return "local"
 	case sessionKindCommand:
 		return "command"
+	case sessionKindContributeERun, sessionKindContributeAI, sessionKindOrchestrator:
+		fallthrough
 	default:
 		return string(kind)
 	}

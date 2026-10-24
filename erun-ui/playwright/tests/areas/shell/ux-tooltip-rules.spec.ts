@@ -1,12 +1,7 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Enforces the AGENTS.md tooltip rule — native `title` is only for
-// non-essential truncation hints — on controls that previously used it
-// for meaningful product info. Only the negative invariant is asserted
-// (the buttons set no `title`): hover-driven Tooltip visibility depends
-// on backend state the harness cannot stage, and re-reaching for `title=`
-// is the likeliest mechanical regression.
+// Native `title` is only for non-essential truncation hints; these controls must not set it.
 
 test.describe('UX tooltip rules', () => {
   test('sidebar env rows carry aria-label and no title attribute', async ({ app }) => {
@@ -31,7 +26,7 @@ test.describe('UX tooltip rules', () => {
   });
 
   test('activity drawer clear-all button uses tooltip primitive', async ({ app, page }) => {
-    // Two running entries — the clear-all button only surfaces with >1.
+    // Clear-all only surfaces with more than one entry.
     await page.evaluate(() => {
       const runtime = (
         window as unknown as { runtime: { EventsEmit: (n: string, ...a: unknown[]) => void } }
@@ -69,8 +64,6 @@ test.describe('UX tooltip rules', () => {
     const clearAll = app.activityDrawer
       .locator()
       .getByRole('button', { name: /Force dismiss all/ });
-    // waitFor (not expect) converges the staged entries' own render against
-    // the enclosing test's budget rather than expect's fixed one.
     await clearAll.waitFor({ state: 'visible' });
     await expect(clearAll).toBeVisible();
     await expect(clearAll).not.toHaveAttribute('title', /.*/);
@@ -79,7 +72,6 @@ test.describe('UX tooltip rules', () => {
   });
 
   test('activity card dismiss button uses tooltip primitive', async ({ app, page }) => {
-    // Seed one finished entry so the dismiss button surfaces in Recent.
     await page.evaluate(() => {
       const ts = new Date().toISOString();
       (

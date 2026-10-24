@@ -4,8 +4,7 @@ import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import type { GlobalConfigDialog } from '../../../pages/GlobalConfigDialog.js';
 
-// stubERunConfig answers the config read, so a spec can stage the machine's own
-// gateway defaults without touching the developer's real user settings.
+// Stages gateway defaults without touching the developer's real user settings.
 function stubERunConfig(page: Page, config: Record<string, unknown>): void {
   void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -22,11 +21,7 @@ function stubERunConfig(page: Page, config: Record<string, unknown>): void {
   });
 }
 
-// stubGatewayModels answers the gateway model-list read with a fixed catalog, so
-// the picker can be exercised without a live gateway. It stands in for the
-// backend method, so it returns that method's own result shape — the parsed
-// {id, displayName, context} — not the gateway's wire shape, which the Go side
-// parses and covers in its own tests.
+// Returns the backend method's parsed shape, not the gateway's wire shape.
 function stubGatewayModels(page: Page, models: Record<string, unknown>[]): void {
   void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -41,21 +36,13 @@ function stubGatewayModels(page: Page, models: Record<string, unknown>[]): void 
   });
 }
 
-// stubGatewayCredential answers the credential reads and writes with a small
-// stateful fake of the erun-level store.
-//
-// Stateful because the panel saves through the same backend methods this stub
-// answers, and the assertion after a save is about the flow: a stub that kept
-// returning its first answer would be asserting on itself rather than on
-// whether saving, re-reading, and reporting actually agree.
+// Stateful so a save, re-read, and report are actually checked against each other.
 function stubGatewayCredential(
   page: Page,
   host: { hint?: string; endpoint?: string; reusable?: boolean } | null,
   saved: { hint?: string } | null,
 ): void {
-  // reusable models the backend's own decision: a key is only reported as this
-  // gateway's when the host's settings already point at it. `reusable: false` is
-  // the mismatch — a key is present, for somewhere else.
+  // `reusable: false` means a key is present, but for another gateway.
   const hostUsable = host !== null && host.reusable !== false;
   let source = saved === null ? (hostUsable ? 'host' : undefined) : 'saved';
   let hint = saved?.hint ?? (hostUsable ? host?.hint : undefined);
@@ -90,32 +77,16 @@ function stubGatewayCredential(
   });
 }
 
-// clearCatalog empties the catalog editor with the settings dialog already open.
-//
-// Specs call it BEFORE staging their own rows, not only after. The catalog is
-// shared root config, so a row an earlier spec left behind is otherwise read as
-// this spec's own — and because every spec here uses the same model id, that
-// shows up as a wrong value rather than as a stray row, which reads like a
-// persistence bug. Staging from a known-empty catalog makes each spec
-// independent of whatever ran before it in its worker.
+// Called before staging too: the catalog is shared root config, and a leftover
+// row with the same model id would read as a persistence bug.
 async function clearCatalog(dialog: GlobalConfigDialog): Promise<void> {
-  // A saved key outlives the dialog, so it goes first: a later spec's panel would
-  // otherwise report a key this one saved.
+  // A saved key outlives the dialog, so it is cleared first.
   if (await dialog.openRouterClearKeyButton().isVisible()) {
     await dialog.openRouterClearKeyButton().click();
   }
   await dialog.setOpenRouterBaseURL('');
-  // Remove from the end until none remain. This is driven by a poll rather than a
-  // count read once: the loop's exit condition IS "no rows left", so it cannot
-  // stop on a count that raced the render and leave one behind.
-  //
-  // The loop removes one row per attempt, so its budget has to scale with the
-  // catalog rather than sit at a cap of its own. Left bare, `expect.poll`
-  // resolves to expect's 10s default (playwright.config.ts) -- independent of
-  // the budget the calling test declared -- and its default intervals spend ~1s
-  // of that between attempts after the third, so a catalog of roughly a dozen
-  // rows exhausts it on a quiet host. A tight interval keeps that budget for
-  // the removals themselves.
+  // One row per attempt, so the budget must scale with the catalog rather than
+  // expect's 10s default; a tight interval keeps it for the removals.
   await expect
     .poll(
       async () => {
@@ -130,31 +101,20 @@ async function clearCatalog(dialog: GlobalConfigDialog): Promise<void> {
     .toBe(0);
 }
 
-// restoreCatalog leaves the suite's global config as it found it. These specs
-// mutate shared root config rather than an environment, and the worker's backend
-// is shared with every other spec, so leaving a gateway configured would swap
-// every later spec's selectable models for the catalog's.
+// A leftover gateway would change every later spec's selectable models.
 async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
   await clearCatalog(dialog);
   await dialog.save();
   await dialog.waitForClosed();
 }
 
-// The erun-level gateway catalog is edited in ERun settings and consumed by
-// every environment's AI tab, so the observable contract is: the fields render,
-// the credential is reported rather than typed at, a model id the launch would
-// drop is refused at entry, and what is saved comes back on reopen.
 test.describe('erun-level gateway catalog', () => {
   test('renders the gateway fields for an unconfigured install', async ({ app }) => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    // The gateway is chosen, so the URL field only appears for a self-hosted
-    // address; an unconfigured install shows the selector at Not configured.
     await expect(app.globalConfigDialog.openRouterGatewayTrigger()).toContainText('Not configured');
     await expect(app.globalConfigDialog.openRouterBaseURLInput()).toBeHidden();
-    // A key for a gateway that does not exist is a field that changes nothing,
-    // so neither the credential panel nor any rows are offered yet.
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toHaveCount(0);
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
 
@@ -163,9 +123,6 @@ test.describe('erun-level gateway catalog', () => {
   });
 
   test('reports the key this machine’s Claude Code already uses', async ({ app, page }) => {
-    // The credential is one erun-level value, and this machine already has one:
-    // an operator who runs Claude Code against a gateway should be told their key
-    // will be used, not asked to paste it in again. Only a suffix is ever shown.
     stubGatewayCredential(page, { hint: '…a1b2' }, null);
 
     await app.sidebar.openSettings();
@@ -177,8 +134,6 @@ test.describe('erun-level gateway catalog', () => {
       'host',
     );
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toContainText('…a1b2');
-    // Nothing is saved, so offering to switch back to the machine's key would
-    // offer the state it is already in.
     await expect(app.globalConfigDialog.openRouterClearKeyButton()).toHaveCount(0);
 
     await restoreCatalog(app.globalConfigDialog);
@@ -188,10 +143,7 @@ test.describe('erun-level gateway catalog', () => {
     app,
     page,
   }) => {
-    // The operator can see their own Claude Code key, so a panel reading "no key
-    // found" would contradict it. What they need to know is that the key is not
-    // sent here — a credential is only ever sent to the gateway it was issued
-    // for — and which endpoint it does belong to.
+    // A key is only sent to the gateway it was issued for.
     stubGatewayCredential(
       page,
       { endpoint: 'https://gateway.example.com/anthropic', reusable: false },
@@ -209,11 +161,9 @@ test.describe('erun-level gateway catalog', () => {
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toContainText(
       'No key for this gateway',
     );
-    // The other endpoint is named, so the operator can tell which key is which.
     await expect(app.globalConfigDialog.locator()).toContainText(
       'https://gateway.example.com/anthropic',
     );
-    // Nothing is saved, so there is no "switch back" to offer.
     await expect(app.globalConfigDialog.openRouterClearKeyButton()).toHaveCount(0);
 
     await restoreCatalog(app.globalConfigDialog);
@@ -235,34 +185,25 @@ test.describe('erun-level gateway catalog', () => {
     );
 
     await app.globalConfigDialog.openRouterSetKeyButton().click();
-    // A password field: a gateway key typed into a dialog should not be readable
-    // over a shoulder or in a screenshot.
     await expect(app.globalConfigDialog.openRouterTokenInput()).toHaveAttribute('type', 'password');
     await app.globalConfigDialog.openRouterTokenInput().fill('sk-or-v1-secret-wxyz');
     await app.globalConfigDialog.openRouterSaveKeyButton().click();
 
-    // Saving re-reads the status rather than assuming: the panel reports what the
-    // backend now holds, and shows only its suffix.
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toHaveAttribute(
       'data-gateway-credential-source',
       'saved',
     );
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toContainText('…wxyz');
-    // The whole token is nowhere in the document, including the input it was
-    // typed into: the panel is closed by then, and a value left rendered would
-    // be readable in a screenshot.
     expect(await app.page.content()).not.toContain('sk-or-v1-secret-wxyz');
 
-    // Only now is switching back to the machine's key a change worth offering.
     await expect(app.globalConfigDialog.openRouterClearKeyButton()).toBeVisible();
 
     await restoreCatalog(app.globalConfigDialog);
   });
 
   test('opens pre-filled from this machine’s own gateway', async ({ app, page }) => {
-    // A catalog that is not yet configured starts from what this machine's
-    // Claude Code already runs, so an endpoint and model configured once are not
-    // typed again. Nothing is stored by opening it — the operator still saves.
+    // An unconfigured catalog pre-fills from this machine's Claude Code settings
+    // without storing anything.
     stubERunConfig(page, {
       defaultTenant: SEED_TENANT,
       openRouterDefaults: {
@@ -282,7 +223,6 @@ test.describe('erun-level gateway catalog', () => {
     );
     await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1048576');
 
-    // Cancelling leaves nothing stored, which is the contract for a pre-fill.
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
   });
@@ -301,8 +241,6 @@ test.describe('erun-level gateway catalog', () => {
         .getByText('A model id may contain only letters, digits, and . _ : / -'),
     ).toBeVisible();
 
-    // A well-formed id clears the rejection, so the rule is the token shape and
-    // not merely "newly typed text".
     await app.globalConfigDialog.openRouterModelIdInput(0).fill('deepseek/deepseek-v4.1-flash');
     await expect(
       app.globalConfigDialog
@@ -317,10 +255,7 @@ test.describe('erun-level gateway catalog', () => {
     app,
     page,
   }) => {
-    // The gateway publishes what it serves, so the id is chosen rather than
-    // typed — and the window comes with the pick, because retyping a figure the
-    // gateway already reported is exactly the kind of entry this avoids. The
-    // second entry carries no display name, so both label shapes are exercised.
+    // The second entry has no display name, so both label shapes are exercised.
     stubGatewayModels(page, [
       { id: 'deepseek/deepseek-v4.1-flash', displayName: 'DeepSeek V4.1 Flash', context: 1048576 },
       { id: 'openai/gpt-6-astra', context: 1050000 },
@@ -331,14 +266,11 @@ test.describe('erun-level gateway catalog', () => {
     await clearCatalog(app.globalConfigDialog);
     await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
     await app.globalConfigDialog.openRouterAddModelButton().click();
-    // Before the list is loaded the row accepts a typed id.
     await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toBeVisible();
 
     await app.globalConfigDialog.loadGatewayModels();
 
-    // The choice is searched rather than scrolled, which is the whole point:
-    // a gateway can serve hundreds of models. Searching by the display name
-    // finds the entry that launches with a different id.
+    // Searching by display name finds an entry whose id differs.
     await app.globalConfigDialog.openRouterModelChoicesButton(0).click();
     await app.globalConfigDialog.openRouterModelSearchInput().fill('GPT-6');
     await expect(app.page.getByRole('option', { name: 'openai/gpt-6-astra' })).toBeVisible();
@@ -360,10 +292,7 @@ test.describe('erun-level gateway catalog', () => {
     await app.globalConfigDialog.waitForOpen();
     await clearCatalog(app.globalConfigDialog);
 
-    // Asserted after clearing, not assumed: this spec reads row 0 on reopen, so
-    // a row that survived the clear would be the one read. Both rows carry the
-    // same model id, so the id assertion would still pass and only the context
-    // would look wrong — exactly the confusing shape a leak produces.
+    // Both rows share a model id, so a leaked row would only show as a wrong context.
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
 
     await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
@@ -371,9 +300,7 @@ test.describe('erun-level gateway catalog', () => {
       id: 'deepseek/deepseek-v4.1-flash',
       context: 1048576,
     });
-    // The row must hold both figures before the save: asserting only after the
-    // reopen cannot tell a staging failure from a persistence one, and a save
-    // that silently dropped the window would look like a persistence bug.
+    // Checked before the save to tell a staging failure from a persistence one.
     await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toHaveValue(
       'deepseek/deepseek-v4.1-flash',
     );
@@ -395,11 +322,8 @@ test.describe('erun-level gateway catalog', () => {
   });
 
   test('keeps a declared reasoning-echo model out of the default choices', async ({ app }) => {
-    // Declaring the listing is how an operator records that the provider
-    // demands the model's own reasoning back, which no erun AI lane can supply.
-    // Two things must survive: the declaration itself, and the listing then not
-    // being offered as the default an environment renders as ANTHROPIC_MODEL
-    // and an exec agent job starts on.
+    // A reasoning-echo listing must persist and never be offered as the default
+    // model, since no erun AI lane can supply the reasoning back.
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
     await clearCatalog(app.globalConfigDialog);
@@ -410,14 +334,10 @@ test.describe('erun-level gateway catalog', () => {
       id: 'deepseek/deepseek-v4.1-flash',
       context: 1048576,
     });
-    // Undeclared by default, so the control is reporting state rather than
-    // always reading as on.
     await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).not.toBeChecked();
     await app.globalConfigDialog.openRouterReasoningEchoCheckbox(0).check();
     await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).toBeChecked();
 
-    // The default list is the model an environment starts on, so a declared
-    // listing must not appear in it however the row is otherwise filled in.
     await app.globalConfigDialog.openRouterDefaultModelTrigger().click();
     await expect(
       app.page.getByRole('option', { name: 'deepseek/deepseek-v4.1-flash' }),
@@ -429,31 +349,14 @@ test.describe('erun-level gateway catalog', () => {
 
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
-    // The declaration survives the save. The editor writes the whole catalog
-    // back, so a conversion that dropped this field would delete it here and
-    // quietly return the row to the selectable set on the operator's first edit.
+    // The editor writes the whole catalog back, so a dropped field would be lost here.
     await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).toBeChecked();
 
     await restoreCatalog(app.globalConfigDialog);
   });
 
-  // The clear loop removes one row per attempt, and bare `expect.poll` runs on
-  // expect's 10s default rather than on the budget its test declared -- while
-  // spending ~1s of it between attempts on its default intervals. A catalog of
-  // this size therefore exhausts that cap on a quiet machine, with no load
-  // required to arrange it.
-  //
-  // What it costs is not only this test. The clear throws before
-  // restoreCatalog's save, so the dialog is left open and the catalog the save
-  // was going to clear stays in the shared root config: the next spec to read
-  // the catalog without clearing first -- the first test in this file, which
-  // asserts an unconfigured install -- reads this one's gateway instead. That is
-  // the cascade, and the reopen below is what pins the other end of it: the
-  // restore has to land in the shared config, not only in this page.
-  //
-  // Pre-fix this reds inside the clear at expect's 10s default with 50s of its
-  // own 60s unspent; with the loop pointed at the budget the test declared it
-  // clears, and the fresh dialog reads the empty catalog it left.
+  // A failed clear skips restoreCatalog's save and leaks this gateway into the
+  // next spec, so the reopen checks the restore landed in shared config.
   test('a catalog larger than a fixed step cap is cleared, not abandoned half-way', async ({
     app,
   }) => {

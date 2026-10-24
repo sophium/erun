@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// createTestOrchestrator persists a single orchestrator linking the laptop
-// local-agent env, returning its id. Local-agent avoids the workspace-sync
-// wiring a remote-agent link would otherwise pull in.
+// createTestOrchestrator links a local-agent env to avoid workspace-sync wiring.
 func createTestOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
 	info, err := app.CreateOrchestrator("laptop agent", []orchestratorEnvInput{
@@ -22,10 +20,6 @@ func createTestOrchestrator(t *testing.T, app *App) string {
 	return info.ID
 }
 
-// TestRevealOrchestratorGuidanceResolvesBothLayers locks the mapping from
-// layer name to file: "role" opens this orchestrator's own CLAUDE.<id>.md,
-// "shared" opens the one CLAUDE.md every orchestrator obeys. Both live in the
-// shared orchestrators root, never a per-orchestrator subfolder.
 func TestRevealOrchestratorGuidanceResolvesBothLayers(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -52,10 +46,6 @@ func TestRevealOrchestratorGuidanceResolvesBothLayers(t *testing.T) {
 	}
 }
 
-// TestRevealOrchestratorGuidanceSeedsAbsentRoleFile covers the acceptance
-// criterion from #1231: revealing an orchestrator's role layer before it has
-// ever launched must seed the file rather than fail or open nothing, so the
-// button never reveals a missing file.
 func TestRevealOrchestratorGuidanceSeedsAbsentRoleFile(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -82,9 +72,6 @@ func TestRevealOrchestratorGuidanceSeedsAbsentRoleFile(t *testing.T) {
 	}
 }
 
-// TestRevealOrchestratorGuidanceRejectsUnknownID protects the exact-Join
-// contract: a hand-edited config.yaml id, or any id with no persisted
-// definition, must be rejected rather than silently resolving a path.
 func TestRevealOrchestratorGuidanceRejectsUnknownID(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -94,8 +81,6 @@ func TestRevealOrchestratorGuidanceRejectsUnknownID(t *testing.T) {
 	}
 }
 
-// TestRevealOrchestratorGuidanceRejectsUnknownLayer covers the third input:
-// an unrecognized layer name must fail loudly rather than default to one file.
 func TestRevealOrchestratorGuidanceRejectsUnknownLayer(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -106,10 +91,6 @@ func TestRevealOrchestratorGuidanceRejectsUnknownLayer(t *testing.T) {
 	}
 }
 
-// TestOrchestratorGuidancePathsResolvesWithoutSeeding covers the read-only
-// half the dialog uses to label each entry with its resolved path: it must not
-// create the workspace or the role file as a side effect of merely displaying
-// where they would live.
 func TestOrchestratorGuidancePathsResolvesWithoutSeeding(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())

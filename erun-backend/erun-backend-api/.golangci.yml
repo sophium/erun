@@ -3,10 +3,7 @@ version: "2"
 run:
   timeout: 3m
   tests: true
-# The default uniq-by-line:true keys findings by file+line only, ignoring
-# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
-# silently drops all but one finding on a function that trips more than one
-# of them. Report everything found.
+# uniq-by-line would drop all but one funlen/gocyclo/cyclop finding anchored on the same func line.
 issues:
   uniq-by-line: false
   max-issues-per-linter: 0
@@ -21,12 +18,36 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
     - depguard
   settings:
-    # The API reaches erun-common only through its lowest layers (#2741,
-    # erun-common/AGENTS.md "Package layers"): base/* and the infra packages
-    # named here. Anything above them -- the command packages and the root
-    # package -- would rebuild the API on every change to a CLI command.
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
     depguard:
       rules:
         erun-common-layers:

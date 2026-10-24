@@ -15,8 +15,6 @@ export interface LayoutVarElements {
   terminalPane: HTMLElement | null;
 }
 
-// Publishes the runtime CSS variables the shell reads for its resizable panels,
-// clamping each stored width/height to the space currently available.
 export function applyTerminalLayoutVars(elements: LayoutVarElements): void {
   const root = document.documentElement;
   const layout = store.getState().layout;

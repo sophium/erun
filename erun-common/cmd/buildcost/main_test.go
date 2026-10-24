@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// TestDeclaringFileFindsTheFunctionWhereverItLives pins what makes an edit
-// measurable before and after a package move: it is named by a declaration,
-// found in whichever erun-common file declares it -- or, failing that, in
-// another module's -- and never in a test.
 func TestDeclaringFileFindsTheFunctionWhereverItLives(t *testing.T) {
 	repo := t.TempDir()
 	write := func(rel, content string) {

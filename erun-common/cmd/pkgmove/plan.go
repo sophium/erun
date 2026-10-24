@@ -7,13 +7,11 @@ import (
 	"strings"
 )
 
-// edge is one package depending on another, with the references behind it.
 type edge struct {
 	from, to string
 	refs     map[string]int
 }
 
-// graph is the import graph a mapping would produce inside the module.
 type graph struct {
 	edges map[[2]string]*edge
 	nodes map[string]bool
@@ -42,8 +40,7 @@ func (w *world) graph(d decisions) graph {
 	return g
 }
 
-// cycles returns the strongly connected components of more than one package,
-// largest first: every one of them is an import cycle Go would refuse.
+// cycles returns the import cycles, largest first.
 func (g graph) cycles() [][]string {
 	adj := map[string][]string{}
 	for k := range g.edges {
@@ -105,8 +102,7 @@ func (t *tarjan) visit(n string) {
 	t.sccs = append(t.sccs, c)
 }
 
-// report prints the graph, every cycle with the references that hold its
-// edges, and any name collisions. It returns whether the mapping is sound.
+// report prints the graph, cycles and collisions, and returns whether the mapping is sound.
 func (g graph) report(out io.Writer, d decisions, limit int) bool {
 	keys := make([][2]string, 0, len(g.edges))
 	for k := range g.edges {
@@ -179,9 +175,8 @@ func (g graph) add(from, to, ref string) {
 	e.refs[ref]++
 }
 
-// reportExportedFields lists every struct field a mapping exports: an exported
-// field is seen by encoding/json and yaml where an unexported one never was,
-// so each one is a change to check, not just a rename.
+// reportExportedFields lists newly exported fields, which encoding/json and
+// yaml now see.
 func (g graph) reportExportedFields(out io.Writer, d decisions) {
 	for _, line := range d.exportedFields {
 		_, _ = fmt.Fprintln(out, "exported field:", line)

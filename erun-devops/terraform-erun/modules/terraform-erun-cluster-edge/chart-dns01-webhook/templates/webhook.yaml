@@ -62,8 +62,7 @@ spec:
           env:
             - name: GROUP_NAME
               value: {{ .Values.groupName | quote }}
-            # Passed to the solver via the Issuer config, but defaulted here so a
-            # misconfigured Issuer surfaces clearly rather than silently.
+            # A default only; the Issuer config normally supplies the broker URL.
             - name: ERUN_DNS01_BROKER_URL
               value: {{ .Values.brokerURL | quote }}
           ports:

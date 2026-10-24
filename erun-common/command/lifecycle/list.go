@@ -3,66 +3,29 @@ package lifecycle
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 type ListResult struct {
-	ConfigDirectory  string                      `json:"configDirectory,omitempty"`
-	Defaults         ListDefaultsResult          `json:"defaults"`
-	CurrentDirectory ListCurrentDirectoryResult  `json:"currentDirectory"`
-	CloudProviders   []cloud.CloudProviderStatus `json:"cloudProviders,omitempty"`
-	Tenants          []ListTenantResult          `json:"tenants,omitempty"`
-	Orchestrators    []ListOrchestratorResult    `json:"orchestrators,omitempty"`
-	// OrphanedSSHAliases are the host's own ~/.ssh/config Host blocks naming an
-	// erun environment alias no configured environment claims. Nothing else in
-	// erun looks at these: `sshd init` writes blocks and env deletion removes
-	// the one it wrote, so a block left by a rename, a deleted environment or a
-	// turned-off sshd survives indefinitely and can start resolving into
-	// whichever environment inherits its local port.
-	OrphanedSSHAliases []eruncommon.SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
-}
-
-// ListOrchestratorResult is the read-model view of one persisted
-// OrchestratorConfig for `erun list`.
-type ListOrchestratorResult struct {
-	ID           string                      `json:"id"`
-	Name         string                      `json:"name"`
-	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
-	// Alias is the erun platform alias this orchestrator declares as its own,
-	// empty when it declares none. Reported so the value is readable from the
-	// terminal, and not only from the dialog that writes it: a field an
-	// operator can set and cannot read back is the gap the operator-settable
-	// registry exists to catch.
-	Alias string `json:"alias,omitempty"`
-	// UseGateway, Model and Effort are the launch settings as recorded, not as
-	// resolved: an empty Model or Effort reads as the default, which is what the
-	// operator declared.
-	UseGateway bool   `json:"useGateway,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Effort     string `json:"effort,omitempty"`
-	// Directories are the orchestrator's own: paths it works in that belong to
-	// no environment at all. Reported so an orchestrator pointed only at
-	// directories does not read as having no scope.
-	Directories []string `json:"directories,omitempty"`
-}
-
-// ListOrchestratorEnvResult is the read-model view of one
-// OrchestratorEnvConfig link, including its (possibly undeclared) Role.
-type ListOrchestratorEnvResult struct {
-	Tenant      string                        `json:"tenant"`
-	Environment string                        `json:"environment"`
-	Directory   string                        `json:"directory,omitempty"`
-	Role        configpkg.OrchestratorEnvRole `json:"role,omitempty"`
-}
-
-type ListDefaultsResult struct {
-	Tenant      string `json:"tenant,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	ConfigDirectory  string                         `json:"configDirectory,omitempty"`
+	Defaults         model.ListDefaultsResult       `json:"defaults"`
+	CurrentDirectory ListCurrentDirectoryResult     `json:"currentDirectory"`
+	CloudProviders   []model.CloudProviderStatus    `json:"cloudProviders,omitempty"`
+	Tenants          []ListTenantResult             `json:"tenants,omitempty"`
+	Orchestrators    []model.ListOrchestratorResult `json:"orchestrators,omitempty"`
+	// OrphanedSSHAliases are ~/.ssh/config erun Host blocks no configured environment claims;
+	// they can resolve into whichever environment inherits their local port.
+	OrphanedSSHAliases []model.SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
 }
 
 type ListCurrentDirectoryResult struct {
@@ -74,30 +37,30 @@ type ListCurrentDirectoryResult struct {
 }
 
 type ListEffectiveTargetResult struct {
-	Tenant             string                          `json:"tenant"`
-	Environment        string                          `json:"environment"`
-	Type               configpkg.EnvironmentType       `json:"type,omitempty"`
-	KubernetesContext  string                          `json:"kubernetesContext"`
-	CloudProviderAlias string                          `json:"cloudProviderAlias,omitempty"`
-	RepoPath           string                          `json:"repoPath"`
-	LocalRepoPath      string                          `json:"localRepoPath,omitempty"`
-	APIURL             string                          `json:"apiUrl,omitempty"`
-	LocalPorts         configpkg.EnvironmentLocalPorts `json:"localPorts,omitempty"`
-	SSH                eruncommon.ListSSHResult        `json:"ssh,omitempty"`
+	Tenant             string                      `json:"tenant"`
+	Environment        string                      `json:"environment"`
+	Type               configpkg.EnvironmentType   `json:"type,omitempty"`
+	KubernetesContext  string                      `json:"kubernetesContext"`
+	CloudProviderAlias string                      `json:"cloudProviderAlias,omitempty"`
+	RepoPath           string                      `json:"repoPath"`
+	LocalRepoPath      string                      `json:"localRepoPath,omitempty"`
+	APIURL             string                      `json:"apiUrl,omitempty"`
+	LocalPorts         model.EnvironmentLocalPorts `json:"localPorts,omitempty"`
+	SSH                model.ListSSHResult         `json:"ssh,omitempty"`
 }
 
 type ListTenantResult struct {
-	Name                      string                             `json:"name"`
-	DefaultEnvironment        string                             `json:"defaultEnvironment,omitempty"`
-	APIURL                    string                             `json:"apiUrl,omitempty"`
-	CloudProviderAliases      []string                           `json:"cloudProviderAliases,omitempty"`
-	PrimaryCloudProviderAlias string                             `json:"primaryCloudProviderAlias,omitempty"`
-	IsDefault                 bool                               `json:"isDefault,omitempty"`
-	IsEffective               bool                               `json:"isEffective,omitempty"`
-	Environments              []eruncommon.ListEnvironmentResult `json:"environments,omitempty"`
+	Name                      string                  `json:"name"`
+	DefaultEnvironment        string                  `json:"defaultEnvironment,omitempty"`
+	APIURL                    string                  `json:"apiUrl,omitempty"`
+	CloudProviderAliases      []string                `json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string                  `json:"primaryCloudProviderAlias,omitempty"`
+	IsDefault                 bool                    `json:"isDefault,omitempty"`
+	IsEffective               bool                    `json:"isEffective,omitempty"`
+	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
-func ResolveListResult(store eruncommon.ListStore, findProjectRoot eruncommon.ProjectFinderFunc, params eruncommon.OpenParams) (ListResult, error) {
+func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
 	if store == nil {
 		return ListResult{}, fmt.Errorf("store is required")
 	}
@@ -115,7 +78,7 @@ func ResolveListResult(store eruncommon.ListStore, findProjectRoot eruncommon.Pr
 		return ListResult{}, err
 	}
 
-	effectiveResult, effectiveErr := eruncommon.ResolveOpen(store, params)
+	effectiveResult, effectiveErr := open.ResolveOpen(store, params)
 	configDir, configDirErr := configpkg.ERunConfigDir()
 	if configDirErr != nil {
 		return ListResult{}, configDirErr
@@ -152,22 +115,19 @@ func ResolveListResult(store eruncommon.ListStore, findProjectRoot eruncommon.Pr
 	return result, nil
 }
 
-// listOrphanedSSHAliases reports the host's stale erun ssh aliases against the
-// environments just resolved. A config that cannot be read is silence, not a
-// failure: the aliases say something about a file the operator may never have
-// had, and nothing about the environments this command exists to print.
-func listOrphanedSSHAliases(tenants []ListTenantResult) []eruncommon.SSHOrphanedAlias {
+// An unreadable ssh config is not a failure of this command.
+func listOrphanedSSHAliases(tenants []ListTenantResult) []model.SSHOrphanedAlias {
 	entries, err := configpkg.ReadDefaultSSHHostEntries()
 	if err != nil {
 		return nil
 	}
-	environments := make([]eruncommon.SSHEnvironmentAlias, 0, 4)
+	environments := make([]SSHEnvironmentAlias, 0, 4)
 	for _, tenant := range tenants {
 		for _, env := range tenant.Environments {
 			if !env.SSH.Enabled {
 				continue
 			}
-			environments = append(environments, eruncommon.SSHEnvironmentAlias{
+			environments = append(environments, SSHEnvironmentAlias{
 				Tenant:      tenant.Name,
 				Environment: env.Name,
 				Alias:       env.SSH.HostAlias,
@@ -175,13 +135,13 @@ func listOrphanedSSHAliases(tenants []ListTenantResult) []eruncommon.SSHOrphaned
 			})
 		}
 	}
-	return eruncommon.FindOrphanedSSHAliases(entries, environments)
+	return FindOrphanedSSHAliases(entries, environments)
 }
 
-func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []configpkg.TenantConfig) ListResult {
+func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []model.TenantConfig) ListResult {
 	return ListResult{
 		ConfigDirectory: strings.TrimSpace(configDir),
-		Defaults:        ListDefaultsResult{Tenant: defaultTenant, Environment: defaultEnvironment},
+		Defaults:        model.ListDefaultsResult{Tenant: defaultTenant, Environment: defaultEnvironment},
 		CurrentDirectory: ListCurrentDirectoryResult{
 			Path:             currentRepoPath,
 			Repo:             currentRepoName,
@@ -204,14 +164,14 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective co
 		CloudProviderAlias: strings.TrimSpace(effective.EnvConfig.CloudProviderAlias),
 		RepoPath:           effective.RepoPath,
 		LocalRepoPath:      strings.TrimSpace(effective.EnvConfig.LocalRepoPath),
-		APIURL:             eruncommon.APIURLForListEnvironment(effective.TenantConfig, configpkg.LocalPortsForResult(effective)),
+		APIURL:             APIURLForListEnvironment(effective.TenantConfig, configpkg.LocalPortsForResult(effective)),
 		LocalPorts:         configpkg.LocalPortsForResult(effective),
-		SSH:                eruncommon.NewListSSHResult(effective),
+		SSH:                NewListSSHResult(effective),
 	}
 	return current
 }
 
-func listTenantResult(store eruncommon.ListStore, tenant configpkg.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]configpkg.EnvironmentLocalPorts) (ListTenantResult, error) {
+func listTenantResult(store seam.ListStore, tenant model.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) (ListTenantResult, error) {
 	envs, err := store.ListEnvConfigs(tenant.Name)
 	if err != nil {
 		return ListTenantResult{}, err
@@ -224,15 +184,15 @@ func listTenantResult(store eruncommon.ListStore, tenant configpkg.TenantConfig,
 		PrimaryCloudProviderAlias: strings.TrimSpace(tenant.PrimaryCloudProviderAlias),
 		IsDefault:                 tenant.Name == defaultTenant,
 		IsEffective:               effectiveErr == nil && tenant.Name == effective.Tenant,
-		Environments:              make([]eruncommon.ListEnvironmentResult, 0, len(envs)),
+		Environments:              make([]ListEnvironmentResult, 0, len(envs)),
 	}
 	for _, env := range envs {
-		result.Environments = append(result.Environments, eruncommon.NewListEnvironmentResult(store, tenant, env, effective, effectiveErr, portAllocations))
+		result.Environments = append(result.Environments, NewListEnvironmentResult(store, tenant, env, effective, effectiveErr, portAllocations))
 	}
 	return result, nil
 }
 
-func configuredTenantForRepo(repoName string, tenants []configpkg.TenantConfig) string {
+func configuredTenantForRepo(repoName string, tenants []model.TenantConfig) string {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
 		return ""
@@ -245,7 +205,7 @@ func configuredTenantForRepo(repoName string, tenants []configpkg.TenantConfig) 
 	return ""
 }
 
-func detectCurrentRepo(findProjectRoot eruncommon.ProjectFinderFunc) (string, string, error) {
+func detectCurrentRepo(findProjectRoot seam.ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -262,7 +222,7 @@ func detectCurrentRepo(findProjectRoot eruncommon.ProjectFinderFunc) (string, st
 	return "", "", err
 }
 
-func loadListDefaultTenant(store eruncommon.ListStore) (string, error) {
+func loadListDefaultTenant(store seam.ListStore) (string, error) {
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
 		return "", err
@@ -270,7 +230,7 @@ func loadListDefaultTenant(store eruncommon.ListStore) (string, error) {
 	return strings.TrimSpace(config.DefaultTenant), nil
 }
 
-func loadListOrchestrators(store eruncommon.ListStore) ([]ListOrchestratorResult, error) {
+func loadListOrchestrators(store seam.ListStore) ([]model.ListOrchestratorResult, error) {
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil
@@ -278,11 +238,11 @@ func loadListOrchestrators(store eruncommon.ListStore) ([]ListOrchestratorResult
 	if err != nil {
 		return nil, err
 	}
-	results := make([]ListOrchestratorResult, 0, len(config.Orchestrators))
+	results := make([]model.ListOrchestratorResult, 0, len(config.Orchestrators))
 	for _, orchestrator := range config.Orchestrators {
-		envs := make([]ListOrchestratorEnvResult, 0, len(orchestrator.Environments))
+		envs := make([]model.ListOrchestratorEnvResult, 0, len(orchestrator.Environments))
 		for _, env := range orchestrator.Environments {
-			envs = append(envs, ListOrchestratorEnvResult(env))
+			envs = append(envs, model.ListOrchestratorEnvResult(env))
 		}
 		directories := make([]string, 0, len(orchestrator.Directories))
 		for _, dir := range orchestrator.Directories {
@@ -290,7 +250,7 @@ func loadListOrchestrators(store eruncommon.ListStore) ([]ListOrchestratorResult
 				directories = append(directories, path)
 			}
 		}
-		results = append(results, ListOrchestratorResult{
+		results = append(results, model.ListOrchestratorResult{
 			ID:           orchestrator.ID,
 			Name:         orchestrator.Name,
 			Environments: envs,
@@ -304,14 +264,194 @@ func loadListOrchestrators(store eruncommon.ListStore) ([]ListOrchestratorResult
 	return results, nil
 }
 
-func loadListDefaultEnvironment(store eruncommon.ListStore, tenant string) (string, error) {
+func loadListDefaultEnvironment(store seam.ListStore, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
-		return "", eruncommon.ErrDefaultEnvironmentNotConfigured
+		return "", opentarget.ErrDefaultEnvironmentNotConfigured
 	}
 	config, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(config.DefaultEnvironment), nil
+}
+
+type ListEnvironmentResult struct {
+	Name                string                        `json:"name"`
+	Type                configpkg.EnvironmentType     `json:"type,omitempty"`
+	APIURL              string                        `json:"apiUrl,omitempty"`
+	KubernetesContext   string                        `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias  string                        `json:"cloudProviderAlias,omitempty"`
+	RepoPath            string                        `json:"repoPath,omitempty"`
+	LocalRepoPath       string                        `json:"localRepoPath,omitempty"`
+	ContainerRegistries configpkg.ContainerRegistries `json:"containerRegistries,omitempty"`
+	RuntimeVersion      string                        `json:"runtimeVersion,omitempty"`
+	// RuntimeVersionLine is nil when RuntimeVersion is empty.
+	RuntimeVersionLine *model.RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
+	// ErunVersion is nil when it cannot be read from config alone.
+	ErunVersion *model.ErunVersion `json:"erunVersion,omitempty"`
+	// RuntimeImageLineMismatch is set only when recorded and observed images name different lines.
+	RuntimeImageLineMismatch *model.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	RuntimePod               model.RuntimePodResources             `json:"runtimePod,omitempty"`
+	// Sizing is nil unless this host is the environment's own runtime container, which writes the history.
+	Sizing       *model.RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	ManagedCloud bool                               `json:"managedCloud,omitempty"`
+	// Hosted is nil unless the environment is marked as hosted.
+	Hosted             *configpkg.HostedEnvironment      `json:"hosted,omitempty"`
+	DisableBuildScript bool                              `json:"disableBuildScript,omitempty"`
+	PlatformAccount    bool                              `json:"platformAccount,omitempty"`
+	AITool             string                            `json:"aiTool,omitempty"`
+	Claude             configpkg.EnvironmentClaudeConfig `json:"claude,omitempty"`
+	Idle               configpkg.EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Deploy             configpkg.EnvironmentDeployConfig `json:"deploy,omitempty"`
+	IsActive           bool                              `json:"isActive,omitempty"`
+	LocalPorts         model.EnvironmentLocalPorts       `json:"localPorts,omitempty"`
+	IsDefault          bool                              `json:"isDefault,omitempty"`
+	IsEffective        bool                              `json:"isEffective,omitempty"`
+	SSH                model.ListSSHResult               `json:"ssh,omitempty"`
+	AutoStart          *bool                             `json:"autoStart,omitempty"`
+}
+
+func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) ListEnvironmentResult {
+	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
+	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
+	return ListEnvironmentResult{
+		Name:                     env.Name,
+		Type:                     env.ResolvedType(),
+		APIURL:                   APIURLForListEnvironment(tenant, localPorts),
+		KubernetesContext:        strings.TrimSpace(env.KubernetesContext),
+		CloudProviderAlias:       strings.TrimSpace(env.CloudProviderAlias),
+		RepoPath:                 env.EffectiveLocalRepoPath(),
+		LocalRepoPath:            strings.TrimSpace(env.LocalRepoPath),
+		ContainerRegistries:      configpkg.EffectiveEnvironmentContainerRegistries(env),
+		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
+		RuntimeVersionLine:       runtimeVersionLine,
+		ErunVersion:              deploy.ResolveErunVersion(env, runtimeVersionLine),
+		RuntimeImageLineMismatch: listRuntimeImageLineMismatch(env),
+		RuntimePod:               env.RuntimePod,
+		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
+		ManagedCloud:             env.ManagedCloud,
+		Hosted:                   listHostedEnvironment(env),
+		DisableBuildScript:       env.DisableBuildScript,
+		PlatformAccount:          env.PlatformAccount,
+		AITool:                   strings.TrimSpace(env.AITool),
+		Claude:                   env.Claude,
+		Idle:                     env.Idle,
+		Deploy:                   env.Deploy,
+		IsActive:                 listEnvironmentIsActive(store, env),
+		LocalPorts:               localPorts,
+		IsDefault:                env.Name == tenant.DefaultEnvironment,
+		IsEffective:              effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
+		SSH:                      NewListSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
+		AutoStart:                copyAutoStartPtr(env.AutoStart),
+	}
+}
+
+func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment {
+	marker, ok := configpkg.HostedEnvironmentFromConfig(env)
+	if !ok {
+		return nil
+	}
+	return &marker
+}
+
+// A never-deployed environment has no line, not an "undetermined" one.
+func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *model.RuntimeVersionLine {
+	if strings.TrimSpace(env.RuntimeVersion) == "" {
+		return nil
+	}
+	line := deploy.ResolveRuntimeVersionLine(tenant, env)
+	return &line
+}
+
+func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *model.RuntimeImageLineMismatchResult {
+	recordedLine, observedLine, mismatched := env.RuntimeImageLineMismatch()
+	if !mismatched {
+		return nil
+	}
+	return &model.RuntimeImageLineMismatchResult{RecordedLine: recordedLine, ObservedLine: observedLine}
+}
+
+// EnvironmentRuntimeSizing returns the standing recommendation; sizing is advisory, so read failures are nil.
+func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *model.RuntimeSizingRecommendation {
+	history, err := deploy.LoadRuntimeUsageHistory(tenant, env.Name)
+	if err != nil {
+		return nil
+	}
+	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
+	if !ok {
+		return nil
+	}
+	return &recommendation
+}
+
+func copyAutoStartPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func APIURLForListEnvironment(tenant model.TenantConfig, localPorts model.EnvironmentLocalPorts) string {
+	if apiURL := strings.TrimSpace(tenant.APIURL); apiURL != "" {
+		return apiURL
+	}
+	port := localPorts.API
+	if port <= 0 {
+		port = configpkg.APIServicePort
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+// Injected ERUN_*_PORT values override config when this process is the environment's own runtime pod.
+func listEnvironmentLocalPorts(tenant string, env configpkg.EnvConfig, portAllocations map[string]model.EnvironmentLocalPorts) model.EnvironmentLocalPorts {
+	localPorts := portAllocations[configpkg.EnvironmentPortKey(tenant, env.Name)]
+	if env.SSHD.LocalPort > 0 {
+		localPorts.SSH = env.SSHD.LocalPort
+	}
+	return configpkg.OverlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
+}
+
+func listEnvironmentOpenResult(tenant model.TenantConfig, env configpkg.EnvConfig, localPorts model.EnvironmentLocalPorts) configpkg.OpenResult {
+	return configpkg.OpenResult{
+		Tenant:      tenant.Name,
+		Environment: env.Name,
+		TenantConfig: model.TenantConfig{
+			Name: tenant.Name,
+		},
+		EnvConfig:  env,
+		LocalPorts: localPorts,
+		RepoPath:   env.EffectiveLocalRepoPath(),
+	}
+}
+
+func listEnvironmentIsActive(store configpkg.CloudReadStore, env configpkg.EnvConfig) bool {
+	if !env.RemoteWorktree() {
+		return false
+	}
+	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	if err != nil || !ok {
+		return false
+	}
+	return strings.TrimSpace(status.Status) == cloud.CloudContextStatusRunning
+}
+
+func NewListSSHResult(result configpkg.OpenResult) model.ListSSHResult {
+	if !result.EnvConfig.SSHD.Enabled {
+		return model.ListSSHResult{}
+	}
+
+	info := open.SSHConnectionInfoForResult(result)
+	sync := result.EnvConfig.SSHD.WorkspaceSync
+	return model.ListSSHResult{
+		Enabled:                true,
+		HostAlias:              info.HostAlias,
+		User:                   info.User,
+		LocalPort:              info.Port,
+		WorkspacePath:          info.WorkspacePath,
+		PublicKeyPath:          strings.TrimSpace(result.EnvConfig.SSHD.PublicKeyPath),
+		WorkspaceSyncEnabled:   sync.Enabled,
+		WorkspaceSyncLocalPath: strings.TrimSpace(sync.LocalPath),
+	}
 }

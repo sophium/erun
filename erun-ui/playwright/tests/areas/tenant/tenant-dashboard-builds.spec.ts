@@ -8,12 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// erun#1954: a build no longer has to belong to a review -- an ordinary
-// `erun build` self-reports itself against the environment it ran in
-// instead. This exercises the Builds tab's rendering of that unattached
-// shape over a stubbed RPC, the same pattern tenant-dashboard-refresh.spec.ts
-// uses for the review-linked shape; the Go side that merges GET /v1/builds
-// into the panel is covered by erun-ui/tenant_dashboard_test.go.
+// A build need not belong to a review: `erun build` self-reports against its
+// environment.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -116,10 +112,6 @@ test.describe('tenant dashboard — builds with no review (#1954)', () => {
   });
 });
 
-// The operator ask this covers: "go to builds, select builds and see exactly
-// what consumes cpu or if there has been IO bottlenecks". These cover the
-// per-build profile dialog opened from each build row's own "View profile"
-// button.
 test.describe('tenant dashboard — build profile (#2274)', () => {
   test('a build with a full profile shows per-step duration, CPU, throttling, I/O, and peak memory', async ({
     app,
@@ -261,9 +253,7 @@ test.describe('tenant dashboard — build profile (#2274)', () => {
 
       await app.buildProfileDialog.waitForOpen();
       await expect(app.buildProfileDialog.notAvailableNotice()).toBeVisible();
-      // Every cgroup-derived cell (CPU, throttling, I/O, peak memory) reads
-      // "Not available" for a step with no cgroup reading -- never a zero,
-      // which would misread as "this step used no CPU".
+      // A missing cgroup reading shows "Not available", never a misleading zero.
       await expect(app.buildProfileDialog.stepRows().getByText('Not available')).toHaveCount(4);
     } finally {
       removeEnvironment(SEED_TENANT, environment);

@@ -1,54 +1,13 @@
-// A switch that settles must leave the landed session's screen in the pane.
+// A settled switch must leave the landed session's screen (marker and log tail)
+// in the pane, activated from its snapshot.
 //
-// The cases below drive the sequence a reader makes at speed -- switch away from
-// a session holding a large retained log, then click straight back to it -- and
-// read the pane back out through a real serializer on a real xterm. The landed
-// session's screen (its marker *and* the tail of the log behind it) has to be
-// there, and the activation that put it there has to name the snapshot path:
-// a pane that comes back blank, stale, or re-fed from the log is the defect
-// this pins, and it is the shape a reported gate failure took.
+// Waits are on observables (xterm's empty-write barrier and the switch queue's
+// state), never on durations: a pane is blank between reset and paint. `split`
+// defers content writes a macrotask, as a browser splits xterm's parse chain;
+// `typed` sets `_didUserInput`, letting the barrier drain synchronously; `gap`
+// names the interleaving of the pair's second click.
 //
-// Every wait below is on an observable, never on a duration. A pane is blank
-// between a switch's reset and the macrotask its activation's writes are parsed
-// on, so a case that reads it on a fixed deadline is asserting on the venue:
-// a slow enough event loop puts that deadline inside the window and reds the
-// file for a switch that is working (the shape a gate failure took -- the
-// landed pane read back as ""). The two observables used instead are xterm's
-// own write barrier -- an empty write's completion callback runs only once
-// every chunk queued ahead of it has parsed, the same barrier
-// TerminalSwitchQueue settles a switch behind -- and the switch queue's own
-// account of the pane: which session it is recorded as holding, and whether a
-// switch is still due. A wait ends as soon as the observable holds; its
-// deadline only decides how long a case waits for a pane that never arrives,
-// which still fails the case.
-//
-// The seam the other drivers in this suite do not model: a real browser splits
-// xterm's parse chain. `WriteBuffer._innerWrite` breaks on a 12ms budget and
-// resumes on a later macrotask, so an activation's writes can still be unparsed
-// when the next dispatch arrives. jsdom parses far inside that budget and never
-// expresses it, so `split` defers each content write by one macrotask and every
-// case runs both ways. `typed` covers the other side of the same coin: a real
-// keystroke sets xterm's `_didUserInput`, which lets the empty-write barrier
-// drain synchronously inside the dispatch that armed it.
-//
-// `gap` is the interleaving the pair's second click lands in, named rather than
-// timed: 0 is the two dispatches with nothing waited between them, so the
-// switch to `local` is still due and the pair coalesces onto one switch; 1
-// waits for that switch to be performed; 8 for its paint to have landed. Each
-// is an observable the switch queue reports, and all three end on the same
-// deterministic landing wait, so the dimension varies the interleaving without
-// varying how long the case is willing to wait for the switch to work.
-//
-// The last case runs the reported pair on a venue whose activation paint lands
-// later than the fixed deadline this file used to read on: it is the
-// reproduction of the gate failure, and it is deterministic rather than
-// load-dependent because the lateness is constructed instead of raced for.
-//
-// What this file does NOT reach: the dispatch a switch actually answers to here
-// is a `setSessionId` from the store, so it cannot exercise a session that is
-// respawned or re-selected by the app mid-switch. If the blank came from the
-// store being pointed at a session with no screen to render, this file cannot
-// see it -- it would need the app's own click path, i.e. Playwright.
+// Not covered: sessions the app respawns or re-selects mid-switch (Playwright).
 //
 // @vitest-environment jsdom
 import assert from 'node:assert/strict';
@@ -72,23 +31,14 @@ const BULK_CHUNKS = 60;
 let LOCAL = 300;
 let EXTRA = 301;
 
-// How long a case waits for a pane that never reaches the state it is about to
-// assert. The wait itself ends on the observable, so this is only what turns
-// "never" into a failure rather than a hang -- it is not a guess at how long
-// the switch takes, and it is deliberately far above any real paint.
+// Only turns "never" into a failure rather than a hang; not a paint estimate.
 const PANE_WAIT_TIMEOUT_MS = 10_000;
 
-// The reproduction's stand-in for a venue slow enough to hold an activation's
-// paint past the 120ms the reported case read on. Above that deadline and well
-// inside the wait above, so it is the difference between the two that the case
-// demonstrates.
+// Beyond a fixed 120ms read deadline, well inside PANE_WAIT_TIMEOUT_MS.
 const HELD_PAINT_MS = 300;
 
 type OutputHandler = (payload: TerminalOutputPayload) => void;
 
-// One turn of the event loop, so a timer the switch path scheduled -- or a
-// held content write -- gets to run. Not a duration: nothing here asserts how
-// long a turn takes.
 const nextEventLoopTurn = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -99,22 +49,13 @@ interface Driver {
   pane: () => string;
   emit: (sessionId: number, text: string) => void;
   keystroke: () => void;
-  // The session the pane is recorded as holding, null when it holds nothing.
   renderedSessionId: () => number | null;
-  // The session a switch is still due to land on, null when none is pending.
   pendingSwitch: () => number | null;
-  // Content writes the split seam (or the reproduction's held paint) is still
-  // holding before handing to xterm: until this is 0 the pane cannot have
-  // caught up with them.
+  // Content writes still held by a venue seam.
   pendingDeferredWrites: () => number;
-  // Waits for an observable of the switch path, bounded -- see the waitUntil
-  // this driver is built on.
   waitUntil: (condition: () => boolean) => Promise<boolean>;
   waitForLandedPane: (sessionId: number) => Promise<string>;
-  // Waits for the pane to have taken everything it has been handed: no content
-  // write held by a venue seam, no switch still due, and xterm's queue drained
-  // behind them. Does not read the pane back -- a serialize of a retained log
-  // this size is not free, and most callers only need the state.
+  // Does not read the pane back: serializing a large retained log is costly.
   settlePane: () => Promise<void>;
   holdContentWritesFor: (ms: number) => void;
   activation: () => { writes: number; source: string };
@@ -173,10 +114,7 @@ function mount(split: boolean): Driver {
     document.body.appendChild(node);
     return node;
   };
-  // The pane's own root, held here so the activation attributes this driver
-  // reads are the ones its own switch published. Reaching for the first
-  // `.terminal` in the document instead reads whichever case mounted first,
-  // whose last activation says nothing about this one.
+  // Own root, so activation attributes come from this driver's switch.
   const root = el('div', 'terminal') as HTMLDivElement;
   const unmount = controller.mount({
     terminalRoot: root,
@@ -191,12 +129,7 @@ function mount(split: boolean): Driver {
   const queue = (controller as unknown as SwitchQueueView).switchQueue;
   let pendingDeferredWrites = 0;
   let holdContentWritesMs = 0;
-  // The venue seams. `split` defers every content write by one macrotask, the
-  // way a browser splits xterm's parse chain; `holdContentWritesFor` defers
-  // them by a duration instead, which is the reproduction's stand-in for a
-  // venue whose paint lands after a fixed deadline. Both count against
-  // pendingDeferredWrites, so a wait for the landing ends on the paint and not
-  // on the seam.
+  // Venue seams; both count toward pendingDeferredWrites.
   const handToXterm = terminal.write.bind(terminal);
   terminal.write = (data: string, cb?: () => void): void => {
     const isContent = typeof data === 'string' && data.length > 0;
@@ -211,20 +144,14 @@ function mount(split: boolean): Driver {
       handToXterm(data, cb);
     }, delay);
   };
-  // An empty write's completion callback fires only once every chunk queued
-  // ahead of it has parsed: xterm's own "the pane has caught up" signal.
   const settled = (): Promise<void> =>
     new Promise((resolve) => {
       terminal.write('', () => {
         resolve();
       });
     });
-  // Waits for the condition the case is about to assert, on the two observables
-  // that order it: an event-loop turn, so a switch's own timer can run, and a
-  // write barrier, so everything already handed to xterm has parsed. A barrier
-  // can resolve before a switch that was still due has issued anything, so a
-  // condition that holds is confirmed across a second drained turn rather than
-  // trusted from the first.
+  // A barrier can resolve before a due switch writes anything, so a holding
+  // condition is confirmed across a second drained turn.
   const waitUntil = async (condition: () => boolean): Promise<boolean> => {
     const deadline = Date.now() + PANE_WAIT_TIMEOUT_MS;
     for (;;) {
@@ -288,9 +215,7 @@ function mount(split: boolean): Driver {
       writes: Number(root.dataset.terminalActivationWrites ?? '-1'),
       source: root.dataset.terminalActivationSource ?? 'none',
     }),
-    // xterm syncs its viewport on an animation frame after a write, so the pane
-    // is disposed only once that frame has run; disposing first leaves the
-    // callback reading a renderer that no longer exists.
+    // xterm syncs its viewport on an animation frame after a write; dispose after it.
     unmount: async () => {
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
@@ -308,16 +233,11 @@ interface PairOptions {
   split: boolean;
   typed: boolean;
   gap: number;
-  // When set, the measured pair runs on a venue whose activation paint is held
-  // this long -- see HELD_PAINT_MS.
   holdPaintMs?: number;
   where: string;
 }
 
-// One measured click pair: land on `extra` with its retained log painted,
-// click `local`, then click straight back to `extra`. Returns the reasons the
-// pair failed, empty when the landed pane holds `extra`'s screen and the
-// activation that put it there restored a snapshot.
+// Returns the pair's failure reasons, empty on success.
 async function measurePair(options: PairOptions): Promise<string[]> {
   LOCAL += 10;
   EXTRA += 10;
@@ -328,13 +248,10 @@ async function measurePair(options: PairOptions): Promise<string[]> {
   const where = options.where;
   try {
     store.dispatch(setSessionId(extra));
-    // The switch onto the pane has landed before anything is fed to it.
     await driver.waitForLandedPane(extra);
     driver.controller.resetTerminal();
     driver.emit(extra, `${EXTRA_MARKER}\r\n`.repeat(4));
     await driver.settlePane();
-    // `local`'s output arrives while another tab is on screen: not rendered,
-    // only buffered, and replayed by the switch that lands on it below.
     driver.emit(local, `${LOCAL_MARKER}\r\n`.repeat(6));
     driver.emit(
       extra,
@@ -342,7 +259,6 @@ async function measurePair(options: PairOptions): Promise<string[]> {
     );
     if (options.typed) driver.keystroke();
     await driver.settlePane();
-    // Land on extra (the drain), then the measured pair back to extra.
     store.dispatch(setSessionId(extra));
     await driver.settlePane();
     const staged = driver.pane();
@@ -355,9 +271,7 @@ async function measurePair(options: PairOptions): Promise<string[]> {
     }
     if (options.typed) driver.keystroke();
     store.dispatch(setSessionId(local));
-    // The interleaving the second click lands in: 0 leaves the switch to
-    // `local` still due, so the pair coalesces onto one switch; 1 waits for
-    // that switch to be performed; 8 waits for its paint to have landed.
+    // 0: switch to `local` still due (coalesces); 1: performed; 8: painted.
     if (options.gap > 0) {
       await driver.waitUntil(() => driver.pendingSwitch() === null);
     }
@@ -401,12 +315,8 @@ for (const split of [false, true]) {
   }
 }
 
-// The reported gate failure, reproduced rather than raced for. The case is the
-// one the gate red on -- split=false, typed=true, gap=1 -- run on a venue whose
-// activation paint lands HELD_PAINT_MS after it is issued, which is what a
-// loaded event loop did to it: the pane is read inside the reset->paint window
-// and serializes to "". Reading on a fixed deadline reds here; waiting on the
-// landing does not, which is the whole point of the waits above.
+// Reproduces the gate failure (split=false, typed=true, gap=1) with a held paint
+// instead of a loaded event loop.
 test('a pair whose paint lands late still lands on the extra screen', async () => {
   failures.push(
     ...(await measurePair({

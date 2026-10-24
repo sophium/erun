@@ -42,10 +42,6 @@ func TestCreateContextRejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
-// TestCreateContextRejectsInvalidName: the name becomes both a Kubernetes
-// label value and a kubeconfig context name a placed Job's `erun` command
-// composes via shellJoin argv (#1112), so it must be a DNS-1123 label like
-// an environment name — not free text.
 func TestCreateContextRejectsInvalidName(t *testing.T) {
 	cases := map[string]string{
 		"uppercase":           `{"name":"Primary","cloudProviderAlias":"aws-acme","region":"eu-west-2"}`,
@@ -67,10 +63,6 @@ func TestCreateContextRejectsInvalidName(t *testing.T) {
 	}
 }
 
-// TestCreateContextThreadsMaxEnvironments: an explicit maxEnvironments
-// reaches the repository create call unchanged; omitted defaults via
-// repository.DefaultContextMaxEnvironments (asserted in the repository's own
-// test), not this route.
 func TestCreateContextThreadsMaxEnvironments(t *testing.T) {
 	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary"}}
 	rec := postCreateContext(t, contexts, `{
@@ -87,8 +79,6 @@ func TestCreateContextThreadsMaxEnvironments(t *testing.T) {
 	}
 }
 
-// TestCreateContextRejectsNegativeMaxEnvironments guards the one value a
-// capacity ceiling cannot sensibly take.
 func TestCreateContextRejectsNegativeMaxEnvironments(t *testing.T) {
 	contexts := &stubContextRepository{}
 	rec := postCreateContext(t, contexts, `{
@@ -131,7 +121,6 @@ func TestCreateContextPreviewReturnsPlanWithoutPersisting(t *testing.T) {
 	if len(response.Plan) == 0 {
 		t.Fatalf("preview must return a non-empty bootstrap plan")
 	}
-	// The preview plan is a faithful bootstrap dry-run, so it must carry the real provisioning commands.
 	if !planContains(response.Plan, "ec2 run-instances") {
 		t.Fatalf("plan missing the EC2 run-instances step: %v", response.Plan)
 	}
@@ -176,7 +165,6 @@ func (s *stubContextProvisioner) Start(in provision.ProvisionInput) error {
 	return nil
 }
 
-// TestCreateContextStartsProvisioningWhenWired: a configured provisioner flips create from an inline plan to an async provisioning workflow (202 Accepted).
 func TestCreateContextStartsProvisioningWhenWired(t *testing.T) {
 	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary", Provider: "aws", Status: "provisioning"}}
 	prov := &stubContextProvisioner{}

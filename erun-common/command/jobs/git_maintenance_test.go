@@ -7,11 +7,8 @@ import (
 	"testing"
 )
 
-// TestGitChildrenOfThisSuiteDetachNoMaintenance pushes to a local bare remote
-// the way the release-claim and job-worktree tests do and reads git's own
-// trace: neither the pushing side nor the remote's receive-pack may start
-// `git maintenance run --auto` or `git gc --auto`, which would otherwise keep
-// writing into a temp dir the test is about to remove.
+// Neither side of a push may start maintenance or gc, which would keep writing
+// into a temp dir the test is removing.
 func TestGitChildrenOfThisSuiteDetachNoMaintenance(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, repo)

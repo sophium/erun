@@ -31,61 +31,33 @@ type HandlerOptions struct {
 	IdentityCache    *IdentityResolutionCache
 	AuditLogger      AuditLogger
 	Authorizer       Authorizer
-	// Capabilities answers GET /v1/whoami's capability set. Unset defaults to
-	// the configured Authorizer when it can resolve one — the database-backed
-	// authorizer does — so the capability answer and enforcement come from one
-	// place. An Authorizer that cannot leaves whoami without a capability set
-	// rather than claiming an empty one.
+	// Capabilities answers whoami's capability set; unset defaults to the Authorizer when it
+	// can resolve one, so the answer and enforcement share one source.
 	Capabilities routes.WhoamiCapabilityResolver
 	DB           *sql.DB
 	DBDialect    repository.Dialect
-	// With both set (and DB), context creation runs the real provisioning
-	// bootstrap; without them it only registers the context row.
+	// With both set (and DB), context creation runs the real provisioning bootstrap.
 	DBOSContext dbos.DBOSContext
 	Cipher      *secrets.Cipher
-	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for
-	// verification; empty means real AWS.
+	// AWSEndpoint points provisioning at a local emulator; empty means real AWS.
 	AWSEndpoint string
-	// MCPSigner mints per-env MCP bearer tokens for the console. Nil when no
-	// backend MCP signing key is configured; the mcp-token endpoint then reports
-	// 501 rather than minting an unverifiable token. It also signs and verifies
-	// the per-env DNS-01 broker tokens (same key, distinct audience).
+	// MCPSigner mints per-env MCP and DNS-01 broker tokens; nil makes mcp-token answer 501.
 	MCPSigner *mcptoken.Signer
-	// DNS01Broker serves the authenticated DNS-01 present/cleanup endpoints. Nil
-	// when the PowerDNS write path is not configured; the endpoints are then not
-	// registered (a cluster with no brokered DNS-01 solver never calls them).
+	// DNS01Broker serves DNS-01 present/cleanup; nil leaves those endpoints unregistered.
 	DNS01Broker *dns01broker.Broker
-	// EnvironmentHostnameWriter backs PUT/DELETE
-	// /v1/environments/{environment_id}/hostname: the same
-	// PowerDNS write path DNS01Broker uses, reused so a tenant with no direct
-	// PowerDNS access to the platform cluster can still point its own
-	// environment's wildcard hostname at an IP. Nil when unconfigured; the
-	// route then reports 501 rather than claiming a write it cannot perform.
+	// EnvironmentHostnameWriter backs the environment hostname route; nil answers 501.
 	EnvironmentHostnameWriter routes.EnvironmentHostnameWriter
-	// EnvironmentHostnameServicesZone is the zone the hostname route resolves
-	// a caller's environment name into, matching DNS01Broker's own zone.
+	// EnvironmentHostnameServicesZone matches DNS01Broker's zone.
 	EnvironmentHostnameServicesZone string
-	// KubeClient runs the server-side env-deploy Jobs. Nil (the default outside a
-	// cluster) leaves env provisioning off: POST /v1/environments only registers
-	// the row. Set together with EnvDeploy and DBOSContext to enable live deploys.
+	// KubeClient runs env-deploy Jobs; live deploys need it with EnvDeploy and DBOSContext.
 	KubeClient kubernetes.Interface
-	// EnvDeploy is the per-instance placement for env-deploy Jobs (image registry,
-	// platform namespace, cluster-admin deployer ServiceAccount). Env provisioning
-	// stays off until all three are set.
+	// EnvDeploy is the per-instance placement for env-deploy Jobs.
 	EnvDeploy provision.EnvDeployConfig
-	// Platform is this instance's own self-describing config, served
-	// unauthenticated at GET /v1/platform so a client can discover it before it
-	// has a token. Unset fields render as empty strings, never as an error.
+	// Platform is served unauthenticated at GET /v1/platform.
 	Platform routes.PlatformInfo
-	// BootstrapTenantName is this instance's own declared tenant identity
-	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols
-	// instead of a generic placeholder. Empty falls back to that placeholder.
+	// BootstrapTenantName (ERUN_TENANT) names the tenant empty-database bootstrap enrols.
 	BootstrapTenantName string
-	// IdentityAdmin drives Zitadel's Management API for identity
-	// administration (issue #1209): the org-owner PAT the erun-zitadel chart
-	// already provisions, read from a mounted file. Nil when unconfigured —
-	// the /v1/identity/* routes are then not registered at all, rather than
-	// present and always failing.
+	// IdentityAdmin drives Zitadel's Management API; nil leaves /v1/identity/* unregistered.
 	IdentityAdmin *zitadel.Client
 }
 
@@ -102,44 +74,23 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	registerHealthRoute(mux)
-	// A client needs this instance's own config (issuer, client ids, ...) before
-	// it has a token to authenticate with, so it is registered unauthenticated,
-	// directly on the mux, next to the health check.
+	// Clients need this before they have a token.
 	routes.RegisterPlatformRoute(mux, options.Platform)
-	// The DNS-01 broker authenticates its own per-env M2M token (not a user OIDC
-	// token), so it is registered directly on the mux rather than behind the
-	// user-auth/authorize/audit middleware the protected routes use.
+	// The broker authenticates its own per-env M2M token, not a user OIDC token.
 	if options.DNS01Broker != nil {
 		options.DNS01Broker.Register(mux)
 	}
-	// The hosted registry's token service authenticates its own HTTP Basic
-	// credential (the tenant's erun-api bearer token as the password, not a
-	// standard Authorization: Bearer header), so like the DNS-01 broker it is
-	// registered directly on the mux, outside registerProtectedRoutes' catalog.
-	// It reuses the MCP signing key (distinct audience per mint, same key — see
-	// mcptoken.Signer.SignRegistry) and the same tenant resolver the primary
-	// auth path uses, so a registry token can only ever be minted for the
-	// tenant the caller's own token resolves to.
+	// The registry token service authenticates HTTP Basic (the erun-api token as password),
+	// and resolves the tenant the same way primary auth does.
 	if resolvers := resolveIdentityResolvers(options); options.MCPSigner != nil && options.TokenVerifier != nil && resolvers.tenant != nil {
 		registrytoken.NewHandler(options.TokenVerifier, resolvers.tenant, options.MCPSigner).Register(mux)
 	}
-	// Accepting an invite (#1483) has no bearer token to authenticate with —
-	// the token in the request body is the credential — so it is registered
-	// directly on the mux like the platform route above. It needs the same
-	// Zitadel client identity administration does, so it shares that
-	// optional-dependency gate: unconfigured leaves the route unregistered
-	// entirely rather than present and always failing.
+	// The request body token is the credential; needs Zitadel like identity administration.
 	if txManager != nil && options.IdentityAdmin != nil {
 		inviteService := service.NewInviteService(repository.NewInviteRepository(txManager), options.IdentityAdmin, repository.NewUserRepository(txManager))
 		routes.RegisterInviteAcceptRoute(mux, inviteService)
 	}
-	// Requesting an invitation also has no bearer token resolvable to a
-	// tenant — the requester is authenticated at their own IdP but enrolled
-	// nowhere, which the normal protected registrar's tenant/user resolution
-	// would reject — so like invite acceptance it registers directly on the
-	// mux. Unlike accept, it does verify a real bearer token (just not to a
-	// tenant/user), so it only needs the token verifier and a database, not
-	// Zitadel identity admin.
+	// The requester is authenticated but enrolled nowhere, which the protected registrar would reject.
 	if txManager != nil {
 		routes.RegisterInviteRequestPublicRoutes(
 			mux,
@@ -152,9 +103,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	return mux, nil
 }
 
-// registerProtectedRoutes registers every authenticated route and returns the
-// catalog of their canonical (method, path) pairs — the candidate set the
-// capability answer is resolved over.
+// registerProtectedRoutes returns the catalog capabilities are resolved over.
 func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *routeCatalog {
 	catalog := &routeCatalog{}
 	register := protectedRouteRegistrar(mux, auth, catalog)
@@ -164,14 +113,11 @@ func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options H
 		users = repository.NewUserRepository(txManager)
 		tenants = registerDatabaseRoutes(register, options, txManager, authorizer)
 	}
-	// Whoami registers last, and reads the catalog per request, so its own route
-	// and every route above it are in the capability answer.
+	// Whoami registers last so the catalog includes every route.
 	routes.RegisterWhoamiRoute(register, users, tenants, resolveCapabilities(options, authorizer), catalog.sorted)
 	return catalog
 }
 
-// resolveAuthorizer reports the endpoint authorizer, defaulting to the
-// database-backed one.
 func resolveAuthorizer(options HandlerOptions) Authorizer {
 	if options.Authorizer != nil {
 		return options.Authorizer
@@ -182,9 +128,7 @@ func resolveAuthorizer(options HandlerOptions) Authorizer {
 	return repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
 }
 
-// resolveCapabilities reports what answers whoami's capability set. It prefers
-// the authorizer that enforces access, because a second implementation would
-// be a second place for the answer to be wrong.
+// resolveCapabilities prefers the enforcing authorizer so there is one source of truth.
 func resolveCapabilities(options HandlerOptions, authorizer Authorizer) routes.WhoamiCapabilityResolver {
 	if options.Capabilities != nil {
 		return options.Capabilities
@@ -196,8 +140,6 @@ func resolveCapabilities(options HandlerOptions, authorizer Authorizer) routes.W
 	return resolver
 }
 
-// identityResolvers is the auth resolver set. Whichever ones the caller did not
-// inject default to the database-backed identity repository.
 type identityResolvers struct {
 	identity IdentityResolver
 	tenant   TenantResolver
@@ -223,20 +165,13 @@ func (r identityResolvers) complete() bool {
 	return r.tenant != nil && r.user != nil && r.org != nil
 }
 
-// defaultTo fills the unset resolvers from the identity repository. A caller who
-// injected no tenant or user resolver gets the combined identity resolver,
-// because empty-database bootstrap must resolve or create tenant, issuer, and
-// user atomically.
+// defaultTo uses the combined identity resolver when none are injected, because
+// empty-database bootstrap must create tenant, issuer, and user atomically.
 func (r *identityResolvers) defaultTo(identities *repository.IdentityRepository) {
 	if r.identity == nil && r.tenant == nil && r.user == nil {
 		r.identity = identities
 	}
-	// Fill the plain tenant resolver even when the combined identity resolver
-	// above is the one auth will use. tenantAndUser prefers identities whenever
-	// it is set, so this cannot move the atomic-bootstrap path — but a consumer
-	// that needs only a tenant is gated on this field, and leaving it nil is why
-	// the hosted registry token service never registered in any deployment that
-	// injects no resolvers of its own.
+	// Consumers needing only a tenant gate on r.tenant; tenantAndUser still prefers identities.
 	if r.tenant == nil {
 		r.tenant = identities
 	}
@@ -248,8 +183,6 @@ func (r *identityResolvers) defaultTo(identities *repository.IdentityRepository)
 	}
 }
 
-// newAuthMiddlewareFor assembles the authentication middleware, defaulting every
-// database-backed dependency the caller did not inject.
 func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) (*AuthMiddleware, error) {
 	resolvers := resolveIdentityResolvers(options)
 	audit := options.AuditLogger
@@ -268,9 +201,6 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 	})
 }
 
-// databaseRepositories bundles every repository registerDatabaseRoutes wires,
-// so registration reads as what each route needs rather than as 12 repeated
-// repository.NewXRepository(txManager) calls (#1302).
 type databaseRepositories struct {
 	reviews                *repository.ReviewRepository
 	reviewReviewers        *repository.ReviewReviewerRepository
@@ -313,20 +243,12 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 	}
 }
 
-// registerDatabaseRoutes registers every route backed by persistence, which is
-// all of them except the health check and the DNS-01 broker. authorizer is
-// threaded through only for the routes that need a per-caller entitlement
-// check beyond the route-level TenantUser/TenantAdmin gate already enforced
-// by the outer middleware -- today just the MCP token mint route's erun:admin
-// check (erun#1891). It returns the tenant repository so whoami can read the
-// caller's own tenant name off the identical repository tenant list uses.
+// registerDatabaseRoutes returns the tenant repository for whoami. authorizer serves
+// per-caller checks beyond the route gate (the MCP token mint's erun:admin).
 func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *repository.TenantRepository {
 	repos := newDatabaseRepositories(txManager)
-	// contextCredentials resolves a placed environment's live admin token
-	// (#1112). nil without a cipher (the same precondition context
-	// bootstrapping itself already requires), which leaves every context
-	// reference refused at deploy time rather than silently unauthenticated —
-	// see deployexec.ResolvePlacementToken.
+	// Nil without a cipher, which makes deploy refuse context references rather than run
+	// unauthenticated.
 	var contextCredentials *repository.ContextCredentialRepository
 	if options.Cipher != nil {
 		contextCredentials = repository.NewContextCredentialRepository(txManager, options.Cipher)
@@ -335,11 +257,8 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	if contextCredentials != nil {
 		placementCredentials = contextCredentials
 	}
-	// releaseService owns only the release queue's idempotency: recording a
-	// trigger exactly once per (tenant, commit). Running `erun release` is the
-	// environment's own job, not this control plane's — see AGENTS.md "Merge
-	// Queue" — so releaseRoutes has to exist before reviewService, which
-	// triggers it directly on a verified MERGED transition.
+	// Running releases is the environment's job (AGENTS.md "Merge Queue"); reviewService
+	// triggers the release queue on a verified MERGED transition.
 	releaseService := service.NewReleaseService(repos.releases)
 	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService)
 	registerWorkflowRoutes(register, repos, releaseRoutes)
@@ -348,29 +267,19 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	registerCredentialRoutes(register, options, txManager, repos, contextCredentials)
 	registerTenantAdminRoutes(register, options, txManager, repos)
 	registerIdentityAdminRoutes(register, options, txManager)
-	// Built once and shared: the same service provisions an environment's
-	// identity and is the revoker its delete tears down, so that the two halves
-	// of one identity's lifecycle cannot be wired to different collaborators.
+	// Shared so provisioning and revocation use the same collaborators.
 	machineIdentities := newMachineIdentityService(options, txManager, repos)
 	registerMachineIdentityRoutes(register, machineIdentities)
 	registerEnvironmentRoutes(register, options, repos, placementCredentials, machineIdentities)
 	return repos.tenants
 }
 
-// newMachineIdentityService wires one environment identity's whole lifecycle:
-// provisioning it, and revoking it when the environment is deleted.
 func newMachineIdentityService(options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) *service.MachineIdentityService {
-	// The interface check is explicit rather than `options.IdentityAdmin !=
-	// nil` at the call site: a typed nil *zitadel.Client stored in the
-	// interface is not nil, and would reach the service as a configured admin.
+	// A typed nil *zitadel.Client in the interface is not nil.
 	var machineIdentityAdmin service.MachineIdentityAdmin
 	if options.IdentityAdmin != nil {
 		machineIdentityAdmin = options.IdentityAdmin
 	}
-	// User and role repositories are constructed here rather than added to
-	// databaseRepositories: that bundle exists so registerDatabaseRoutes does
-	// not repeat one constructor twelve times, and identity administration
-	// already constructs its own alongside this.
 	return service.NewMachineIdentityService(
 		repos.environments,
 		repository.NewUserRepository(txManager),
@@ -380,36 +289,21 @@ func newMachineIdentityService(options HandlerOptions, txManager *repository.TxM
 	)
 }
 
-// registerMachineIdentityRoutes wires provisioning an environment's own
-// platform identity. It is registered unconditionally: an unconfigured
-// identity provider is answered with an actionable 501 at the route, not by
-// leaving the route absent, so a caller can tell a deployment gap from a typo.
+// Registered unconditionally: an unconfigured provider answers an actionable 501.
 func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, identities *service.MachineIdentityService) {
 	routes.RegisterMachineIdentityRoutes(register, identities)
 }
 
-// registerWorkflowRoutes wires the routes describing a change in flight:
-// reviews and their comments, the builds reported against them, the agent
-// sessions, and the jobs that record what an agent is working on before the
-// work starts. releaseRoutes
-// is threaded in rather than re-registered because reviewService triggers a
-// release directly on a verified MERGED transition.
+// releaseRoutes is passed in because reviewService triggers releases on MERGED.
 func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories, releaseRoutes routes.ReleaseRoutes) {
 	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents, gitverify.NewRemoteVerifier(), releaseRoutes)
 	routes.RegisterTenantIssuerRoutes(register, repos.tenantIssuers)
 	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
 	routes.RegisterBuildRoutes(register, repos.builds, repos.environments, service.NewBuildService(repos.builds, reviewService))
 	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
-	// The pipeline view spans both halves above -- the jobs recording planned
-	// and in-flight work, and the reviews moving through the queue -- which is
-	// why it is registered here rather than with either of them alone. It
-	// reads both and writes neither.
 	routes.RegisterPipelineRoutes(register, service.NewPipelineService(repos.jobs, repos.reviews))
 }
 
-// registerEnvironmentRoutes wires the environment lifecycle: what a placement
-// is, what it may consume, and the delete state machine that survives a
-// control-plane restart.
 func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, repos databaseRepositories, placementCredentials deployexec.PlacementCredentialResolver, identities *service.MachineIdentityService) {
 	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials, identities)
 	environmentAdmin := service.NewEnvironmentAdminService(repos.environments, repos.auditEvents)
@@ -422,7 +316,6 @@ func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options 
 	newJobAbandonReconciler(options, jobService)
 }
 
-// registerEventRoutes wires the three append-only tenant-wide event reads.
 func registerEventRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories) {
 	routes.RegisterEnvironmentEventRoutes(register, repos.environmentEvents, repos.environments)
 	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
@@ -435,19 +328,9 @@ func registerTokenRoutes(register routes.ProtectedRouteRegistrar, options Handle
 	routes.RegisterEnvironmentHostnameRoutes(register, repos.environments, repos.tenants, options.EnvironmentHostnameWriter, options.EnvironmentHostnameServicesZone)
 }
 
-// registerCredentialRoutes wires the Cipher-gated surface.
 func registerCredentialRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories, contextCredentials *repository.ContextCredentialRepository) {
-	// aliases is nil without a cipher, the same precondition every other
-	// Cipher-gated dependency on this page requires -- but unlike those (which
-	// simply leave a caller with a narrower feature set), the console's own
-	// ProvisionPanel is the *only* operator surface for registering BYO-cloud
-	// credentials, so a route left unregistered here 404s with no diagnosis
-	// at all: "alias request failed (404)" gives an operator nothing to act
-	// on, exactly the "advice that cannot work" dead end root AGENTS.md's
-	// "Smooth, Seamless, No Dead Ends" section calls a defect. The route is
-	// therefore always registered; setAlias itself reports the missing
-	// configuration with a named, actionable 501 (the same pattern
-	// mintMCPToken uses for a nil signer) instead of the mux's bare 404.
+	// The alias route is always registered even without a cipher: it is the console's only
+	// BYO-credential surface, and setAlias answers an actionable 501 instead of a bare 404.
 	var (
 		aliases            routes.CloudProviderAliasWriter
 		contextProvisioner routes.ContextProvisioner
@@ -470,9 +353,6 @@ func registerCredentialRoutes(register routes.ProtectedRouteRegistrar, options H
 	routes.RegisterContextRoutes(register, repos.contexts, contextProvisioner)
 }
 
-// registerTenantAdminRoutes wires the tenant-administration surface: the
-// tenant registry itself, its quotas and rate limits, user/role management,
-// and the invite requests an operator decides.
 func registerTenantAdminRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) {
 	tenantService := service.NewTenantService(repos.tenants, repos.environments, options.BootstrapTenantName)
 	routes.RegisterTenantRoutes(register, repos.tenants, tenantService)
@@ -483,21 +363,12 @@ func registerTenantAdminRoutes(register routes.ProtectedRouteRegistrar, options 
 	routes.RegisterProvisionRoute(register, repos.tenants, repos.environments, repos.tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
 	routes.RegisterRoleRoutes(register, repository.NewRoleRepository(txManager))
-	// Deciding an invite request needs no Zitadel identity administration —
-	// unlike accepting an invite, the requester already has a usable external
-	// identity, so approval only enrols it (UserRepository.Create) and mints
-	// an invite (InviteRepository.Create), neither of which calls Zitadel —
-	// so this registers unconditionally rather than sharing
-	// registerIdentityAdminRoutes' IdentityAdmin gate below.
+	// Deciding an invite request never calls Zitadel, so it needs no IdentityAdmin gate.
 	inviteRequests := repository.NewInviteRequestRepository(txManager)
 	inviteRequestService := service.NewInviteRequestService(inviteRequests, repos.tenants, repository.NewUserRepository(txManager), repository.NewInviteRepository(txManager))
 	routes.RegisterInviteRequestRoutes(register, inviteRequests, repos.tenants, inviteRequestService)
 }
 
-// registerIdentityAdminRoutes wires /v1/identity/* (issue #1209) when a
-// Zitadel Management API client is configured; nil leaves the routes
-// unregistered entirely, matching every other optional dependency's
-// convention in this file.
 func registerIdentityAdminRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
 	if options.IdentityAdmin == nil {
 		return
@@ -505,19 +376,12 @@ func registerIdentityAdminRoutes(register routes.ProtectedRouteRegistrar, option
 	userRepo := repository.NewUserRepository(txManager)
 	identityService := service.NewIdentityService(options.IdentityAdmin, userRepo)
 	routes.RegisterIdentityRoutes(register, options.IdentityAdmin, identityService, userRepo)
-	// Invite creation (#1483) is only meaningful when this platform enrolls
-	// users through the shared Zitadel org identity administration already
-	// depends on — a platform with no IdentityAdmin has no accept path an
-	// invite could ever complete, so it shares that same optional-dependency
-	// gate rather than registering a dead end.
+	// Without IdentityAdmin no invite could be accepted, so creation shares that gate.
 	routes.RegisterInviteRoutes(register, repository.NewInviteRepository(txManager))
 }
 
-// newEnvironmentProvisioner wires live env provisioning, which needs durable
-// workflows, an in-cluster client, and the full deploy placement. Anything
-// missing leaves it nil, so env creation only registers the row. Without a
-// startup log naming which precondition failed, an operator sees only a 501
-// at call time with no way to tell which of the five is unmet.
+// newEnvironmentProvisioner is nil unless every precondition is met; the startup log
+// names the missing ones.
 func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentProvisioner {
 	deploy := options.EnvDeploy
 	if reasons := missingEnvProvisionerConfig(options, deploy); len(reasons) > 0 {
@@ -528,14 +392,8 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, newRuntimeImageChecker(options))
 }
 
-// newRuntimeImageChecker wires the one published-image probe every Job that
-// runs a tenant's erun toolchain shares (deploy, stop, delete, the
-// release-queue runner) — each used to make its own image decision, and only
-// deploy fell back. It runs with the deploy Job's own pull credential, read
-// from the platform namespace, so a private registry namespace answers it
-// decisively instead of identically for absent and forbidden. Nil without an
-// in-cluster client to read the credential Secret with, which leaves every
-// caller on its fail-open default (the tenant's own image, unconditionally).
+// newRuntimeImageChecker probes with the deploy Job's pull credential so a private
+// registry distinguishes absent from forbidden. Nil without a KubeClient (fail open).
 func newRuntimeImageChecker(options HandlerOptions) provision.RuntimeImageChecker {
 	if options.KubeClient == nil {
 		return nil
@@ -544,9 +402,6 @@ func newRuntimeImageChecker(options HandlerOptions) provision.RuntimeImageChecke
 	return provision.NewGHCRImageChecker(credentials)
 }
 
-// missingEnvProvisionerConfig names every unmet precondition for live env
-// provisioning, so the startup log can point at exactly what is missing
-// rather than leaving an operator to infer it from a 501 at call time.
 func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDeployConfig) []string {
 	var reasons []string
 	if options.DBOSContext == nil {
@@ -567,12 +422,8 @@ func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDep
 	return reasons
 }
 
-// newEnvLifecycleExecutor builds the shared stop/delete executor both
-// newEnvironmentLifecycle (stop) and newEnvironmentDeleter (delete) wrap, so
-// the two never drift onto different image or credential resolution. Needs an
-// in-cluster client and the full deploy placement; nil (a concrete, not yet
-// interface-wrapped nil — callers must check before returning it as an
-// interface) when either is missing.
+// newEnvLifecycleExecutor returns a concrete nil when unconfigured; callers must check
+// before wrapping it in an interface.
 func newEnvLifecycleExecutor(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) *provision.EnvLifecycle {
 	deploy := options.EnvDeploy
 	if options.KubeClient == nil ||
@@ -582,14 +433,8 @@ func newEnvLifecycleExecutor(options HandlerOptions, environments *repository.En
 	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options), credentials, identities)
 }
 
-// newEnvironmentLifecycle wires live stop, which needs an in-cluster client
-// and the full deploy placement but no durable workflow. Anything missing
-// leaves it nil, so stop reports the executor as unconfigured rather than
-// acting on partial config.
 func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) routes.EnvironmentLifecycle {
-	// The revoker is threaded through the shared executor rather than left out
-	// here so that stop and delete are built from identical collaborators; only
-	// Delete consults it, since a stopped environment is paused, not gone.
+	// Only Delete consults the revoker; stop and delete share collaborators.
 	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials, identities)
 	if lifecycle == nil {
 		return nil
@@ -597,12 +442,7 @@ func newEnvironmentLifecycle(options HandlerOptions, environments *repository.En
 	return lifecycle
 }
 
-// newEnvironmentDeleter wires live delete (#1140): the same stop/delete
-// executor newEnvironmentLifecycle wraps, but run inside a durable DBOS
-// workflow so a control-plane restart resumes an in-flight delete rather than
-// leaving the environment stranded in `deleting`. nil under the same
-// preconditions as newEnvironmentLifecycle, plus a configured DBOSContext —
-// without one there is nowhere durable to run the workflow.
+// newEnvironmentDeleter runs delete in a DBOS workflow so a restart resumes it.
 func newEnvironmentDeleter(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) routes.EnvironmentDeleter {
 	if options.DBOSContext == nil {
 		return nil
@@ -614,12 +454,7 @@ func newEnvironmentDeleter(options HandlerOptions, environments *repository.Envi
 	return provision.NewEnvDeleter(options.DBOSContext, lifecycle)
 }
 
-// newEnvironmentDeleteReconciler schedules the periodic re-attempt of every
-// environment mid-teardown, so a namespace that finishes terminating
-// — or a solver that starts answering again — converges the row without an
-// operator noticing and re-issuing the delete. Registered only when delete
-// itself is wired: with no live executor there is nothing for a reconciled
-// attempt to run.
+// newEnvironmentDeleteReconciler re-attempts stuck teardowns so they converge unattended.
 func newEnvironmentDeleteReconciler(options HandlerOptions, environments *repository.EnvironmentRepository, tenants *repository.TenantRepository, contexts *repository.ContextRepository, deleter routes.EnvironmentDeleter) {
 	if deleter == nil {
 		return
@@ -627,12 +462,7 @@ func newEnvironmentDeleteReconciler(options HandlerOptions, environments *reposi
 	provision.NewEnvDeleteReconciler(options.DBOSContext, environments, tenants, contexts, deleter, provision.DefaultDeleteReconcileSchedule)
 }
 
-// newJobAbandonReconciler schedules the periodic sweep of RUNNING jobs whose
-// actor stopped updating them, so a scope held by a process that is gone is
-// released without an operator noticing and asking for it. Without a DBOS
-// context there is no scheduler to run it against, and the sweep stays an
-// operation a caller performs explicitly rather than something that quietly
-// does not happen.
+// newJobAbandonReconciler releases RUNNING jobs whose actor went away; needs DBOS.
 func newJobAbandonReconciler(options HandlerOptions, jobs service.JobAbandonSweeper) {
 	if options.DBOSContext == nil {
 		return
@@ -647,11 +477,7 @@ func registerHealthRoute(mux *http.ServeMux) {
 }
 
 func registerProtectedRoute(mux *http.ServeMux, auth *AuthMiddleware, method string, apiPath string, handler http.Handler) {
-	// Every authenticated route is registered through here, so binding the
-	// path-id guard at this one seam covers all of them — present and future —
-	// rather than leaving each handler to remember it. It sits inside the auth
-	// wrapper: an unauthorized caller must see 401 whatever shape of id it
-	// sent, so parsing is not observable before authentication.
+	// The path-id guard sits inside auth so id parsing is not observable before authentication.
 	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(routes.WithUUIDPathIDs(apiPath, handler))))
 }
 

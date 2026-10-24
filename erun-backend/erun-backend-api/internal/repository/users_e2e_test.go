@@ -16,10 +16,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// UserRepository.Create's role-assignment default is exercised against a real
-// migrated PostgreSQL because it depends on the same RLS-scoped roles/
-// role_permissions/user_roles tables PermissionAuthorizer enforces against —
-// a fake that agrees with itself would not catch the two paths disagreeing.
 func usersDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -37,12 +33,6 @@ func usersDatabase(t *testing.T) (*sql.DB, string) {
 	return db, tenantID
 }
 
-// TestUserRepositoryFirstUserGetsPredefinedRoles proves the one case that must
-// keep full control: a tenant's first enrolled user gets TenantAdmin, since
-// granting a role is itself permission-gated and a non-grant-capable first
-// user could never be granted anything. TenantAdmin (not ReadAll/WriteAll)
-// is deliberate: this is a COMPANY tenant, and the platform-operator reach
-// only ever belongs to the OPERATIONS tenant's own first user.
 func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -71,12 +61,6 @@ func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryLaterUserGetsTenantUserByDefault is the regression this
-// change fixes twice over: every enrolled user used to get ReadAll+WriteAll
-// unconditionally, and then briefly nothing at all. A second (non-first)
-// user enrolled with no explicit roles must hold exactly TenantUser: able to
-// read and drive reviews, refused an administrative write such as creating
-// an environment.
 func TestUserRepositoryLaterUserGetsTenantUserByDefault(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -110,9 +94,6 @@ func TestUserRepositoryLaterUserGetsTenantUserByDefault(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryExplicitRoleIDsAreGranted proves an enroller can hand a
-// new (non-first) user exactly the access named in the request, instead of
-// either the old all-or-nothing default or the new all-nothing default.
 func TestUserRepositoryExplicitRoleIDsAreGranted(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -148,9 +129,6 @@ func TestUserRepositoryExplicitRoleIDsAreGranted(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryCreateRejectsUnknownRoleID proves a role id naming
-// nothing in this tenant (typo, or another tenant's role) is refused rather
-// than silently enrolling with no roles at all.
 func TestUserRepositoryCreateRejectsUnknownRoleID(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -169,9 +147,6 @@ func TestUserRepositoryCreateRejectsUnknownRoleID(t *testing.T) {
 	}
 }
 
-// seedTenantIssuer registers issuer for tenantID so a user_external_ids row
-// can foreign-key it — the same registration bootstrap already performs, done
-// by hand here since these tests seed enrollment directly.
 func seedTenantIssuer(t *testing.T, db *sql.DB, tenantID, issuer string) {
 	t.Helper()
 	_, err := db.Exec(`INSERT INTO issuers (issuer) VALUES ($1) ON CONFLICT (issuer) DO NOTHING`, issuer)
@@ -180,10 +155,6 @@ func seedTenantIssuer(t *testing.T, db *sql.DB, tenantID, issuer string) {
 	mustNoErr(t, err, "seed tenant_issuers")
 }
 
-// TestUserRepositoryCreateReportsUsernameConflictDistinctly proves a plain
-// username collision (no external identity involved) surfaces as
-// ErrUsernameConflict, not the bare ErrConflict a caller could not tell apart
-// from any other uniqueness violation.
 func TestUserRepositoryCreateReportsUsernameConflictDistinctly(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -199,11 +170,6 @@ func TestUserRepositoryCreateReportsUsernameConflictDistinctly(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryCreateTreatsReEnrollmentAsNoOp is the regression this fix
-// addresses: re-enrolling an identity already linked in the tenant, even
-// under a *different* requested username, reports the existing user back
-// (alreadyEnrolled=true) instead of the wrong-cause username-collision 409
-// that sent an operator hunting for a username that did not exist.
 func TestUserRepositoryCreateTreatsReEnrollmentAsNoOp(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -242,8 +208,6 @@ func TestUserRepositoryCreateTreatsReEnrollmentAsNoOp(t *testing.T) {
 	}
 }
 
-// seedTenant registers a second tenant beyond usersDatabase's own, so a test
-// can act as one tenant while targeting another.
 func seedTenant(t *testing.T, db *sql.DB, tenantType, namePrefix string) string {
 	t.Helper()
 	var tenantID string
@@ -256,14 +220,6 @@ func seedTenant(t *testing.T, db *sql.DB, tenantType, namePrefix string) string 
 	return tenantID
 }
 
-// TestUserRepositoryOperationsCallerEnrollsIntoTargetTenant is the
-// authorization boundary POST /v1/users' resolveTargetTenant exists for,
-// proven end to end rather than against a stub: an operations-scoped
-// caller's transaction runs as erun_operations (TxManager's
-// setPostgresSecurityContext), which schema/rls/users.sql's
-// users_operations_access policy lets write any tenant_id, so the enrolled
-// user must actually land in the requested target tenant, not the caller's
-// own operations tenant.
 func TestUserRepositoryOperationsCallerEnrollsIntoTargetTenant(t *testing.T) {
 	db, targetTenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -290,14 +246,7 @@ func TestUserRepositoryOperationsCallerEnrollsIntoTargetTenant(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryNonOperationsCallerCannotOverrideTenant proves the
-// authorization boundary holds even below the route's resolveTargetTenant
-// gate: a non-operations caller's transaction runs as erun_tenant, whose
-// users_tenant_isolation policy (schema/rls/users.sql) has WITH CHECK
-// (tenant_id = erun_current_tenant_id()), so an insert explicitly naming a
-// different tenant_id is refused by PostgreSQL itself — not merely by the
-// route's own check — if this method is ever reached with an override from
-// a non-operations caller.
+// erun_tenant's WITH CHECK refuses the override even below the route's gate.
 func TestUserRepositoryNonOperationsCallerCannotOverrideTenant(t *testing.T) {
 	db, callerTenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -336,16 +285,10 @@ func containsAll(haystack []string, wanted ...string) bool {
 	return true
 }
 
-// TestUserRepositoryCreateRefusesEnrollmentUnderADeadIssuerMapping is the
-// enrollment half of the reachability refusal: linking an identity to a
-// tenant whose mapping no token can resolve through produces a user who can
-// never sign in — a success today, discovered only as a failed sign-in later.
-// The refusal must abort the whole enrollment, leaving no orphan users row.
 func TestUserRepositoryCreateRefusesEnrollmentUnderADeadIssuerMapping(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	const issuer = "https://auth.enroll-refusal-e2e.example"
-	// An org-scoped issuer whose mapping for this tenant carries no org value:
-	// resolution matches the org by equality, so nothing ever matches here.
+	// Org-scoped issuer with no org value on this tenant's mapping: never matches.
 	_, err := db.Exec(
 		`INSERT INTO issuers (issuer, org_field_key) VALUES ($1, $2) ON CONFLICT (issuer) DO NOTHING`,
 		issuer, "urn:zitadel:iam:user:resourceowner:id",
@@ -374,9 +317,6 @@ func TestUserRepositoryCreateRefusesEnrollmentUnderADeadIssuerMapping(t *testing
 	}
 }
 
-// TestUserRepositoryCreateAcceptsEnrollmentUnderAResolvableMapping is the
-// positive control: the refusal above must not have made ordinary enrollment
-// conditional on anything an operator has to supply.
 func TestUserRepositoryCreateAcceptsEnrollmentUnderAResolvableMapping(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	const issuer = "https://idp.enroll-accept-e2e.example"

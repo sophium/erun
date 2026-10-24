@@ -5,107 +5,60 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// EnvironmentService is one Service in an environment's namespace as the
-// expose picker sees it: the Service an Ingress would route to, the ports it
-// offers, and the exposure it already has. It is the answer to "what is this
-// environment running", which until now nothing could report -- the only
-// listing was of exposures, so choosing something to expose meant already
-// knowing its name.
-type EnvironmentService struct {
-	Name  string                           `json:"name"`
-	Type  string                           `json:"type,omitempty"`
-	Ports []eruncommon.ObservedServicePort `json:"ports,omitempty"`
-	// Exposure is set when an erun-expose Ingress already fronts this Service,
-	// so a caller can offer "open" rather than "expose" for it.
-	Exposure *ServiceExposure `json:"exposure,omitempty"`
-}
-
-// ServiceExposure is the public face an EnvironmentService already has.
-// Label is the logical name in the hostname, which is not necessarily the
-// Service's own name.
-type ServiceExposure struct {
-	Label    string `json:"label"`
-	Hostname string `json:"hostname"`
-	Scheme   string `json:"scheme"`
-}
-
-// EnvironmentServiceList is the shared result of a services read: the
-// environment it describes and the Services its namespace runs, each carrying
-// the exposure erun-expose already gave it. It mirrors ObserveResult's shape
-// so the CLI's --output json and the MCP tool return one contract rather than
-// two renderings of the same read.
-type EnvironmentServiceList struct {
-	Tenant      string               `json:"tenant"`
-	Environment string               `json:"environment"`
-	Namespace   string               `json:"namespace"`
-	Services    []EnvironmentService `json:"services"`
-}
-
-// ErrListEnvironmentServicesForbidden reports that the caller's Kubernetes
-// credentials cannot list the namespace's Services, so a caller can render a
-// permission-restricted state rather than an empty environment.
+// ErrListEnvironmentServicesForbidden reports that the caller cannot list the namespace's Services.
 var ErrListEnvironmentServicesForbidden = errors.New("list environment services: forbidden")
 
-// RunListEnvironmentServices is the CLI's and MCP's entry point to the same
-// read the desktop's Ports tab picker makes: it traces the two `kubectl get`s
-// before running them, so `--dry-run` reports exactly the calls a real run
-// would make, in the same order. Traced and returned up front rather than
-// discovered during execution because ListEnvironmentServices itself holds no
-// Context -- it is the desktop's call, and the desktop has no trace to emit.
-func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) (EnvironmentServiceList, error) {
-	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
-	ctx.TraceCommand("", "kubectl", eruncommon.ObserveGetArgs(req, "service")...)
-	ctx.TraceCommand("", "kubectl", eruncommon.ObserveGetArgs(req, "ingress")...)
+// RunListEnvironmentServices traces both `kubectl get`s up front because
+// ListEnvironmentServices, the desktop's call, has no Context to trace with.
+func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) (model.EnvironmentServiceList, error) {
+	result := model.EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
+	ctx.TraceCommand("", "kubectl", clusterread.ObserveGetArgs(req, "service")...)
+	ctx.TraceCommand("", "kubectl", clusterread.ObserveGetArgs(req, "ingress")...)
 	ctx.Trace("services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention")
 	if ctx.DryRun {
 		return result, nil
 	}
 	services, err := ListEnvironmentServices(req)
 	if err != nil {
-		return EnvironmentServiceList{}, err
+		return model.EnvironmentServiceList{}, err
 	}
 	result.Services = services
 	return result, nil
 }
 
-// ListEnvironmentServices reports the environment's Services and, for each,
-// the exposure erun-expose already gave it. Both reads are plain `kubectl
-// get`s, so this is safe to grant to a caller that must never be handed
-// `erun exec raw`.
-func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService, error) {
-	services, err := eruncommon.FetchObservedServices(eruncommon.ObserveGetArgs(req, "service"))
+// ListEnvironmentServices runs only plain `kubectl get`s, so it is safe for
+// callers that must never get `erun exec raw`.
+func ListEnvironmentServices(req config.ShellLaunchParams) ([]model.EnvironmentService, error) {
+	services, err := clusterread.FetchObservedServices(clusterread.ObserveGetArgs(req, "service"))
 	if err != nil {
-		if eruncommon.IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
+		if clusterread.IsForbiddenKubectlError(err) {
+			return nil, fmt.Errorf("%w: %w", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
 	}
-	ingresses, err := eruncommon.FetchObservedIngresses(eruncommon.ObserveGetArgs(req, "ingress"))
+	ingresses, err := clusterread.FetchObservedIngresses(clusterread.ObserveGetArgs(req, "ingress"))
 	if err != nil {
-		if eruncommon.IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
+		if clusterread.IsForbiddenKubectlError(err) {
+			return nil, fmt.Errorf("%w: %w", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
 	}
 	return mergeServicesWithExposures(services, ingresses), nil
 }
 
-// mergeServicesWithExposures attaches each erun-expose Ingress to the Service
-// it actually routes to, read from the Ingress backend rather than re-derived
-// from the naming convention that produced it -- the convention is what a
-// repo-native chart breaks, and re-deriving it here would reproduce that bug
-// in the list. Split out as a pure function so the matching is testable
-// without a cluster.
-func mergeServicesWithExposures(services []eruncommon.ObservedService, ingresses []eruncommon.ObservedIngress) []EnvironmentService {
+// mergeServicesWithExposures reads the backend from the Ingress rather than
+// re-deriving it from the naming convention a repo-native chart breaks.
+func mergeServicesWithExposures(services []model.ObservedService, ingresses []model.ObservedIngress) []model.EnvironmentService {
 	exposures := exposuresByBackendService(ingresses)
-	out := make([]EnvironmentService, 0, len(services))
+	out := make([]model.EnvironmentService, 0, len(services))
 	for _, service := range services {
-		entry := EnvironmentService{Name: service.Name, Type: service.Type, Ports: service.Ports}
+		entry := model.EnvironmentService{Name: service.Name, Type: service.Type, Ports: service.Ports}
 		if exposure, ok := exposures[service.Name]; ok {
 			entry.Exposure = &exposure
 		}
@@ -114,11 +67,11 @@ func mergeServicesWithExposures(services []eruncommon.ObservedService, ingresses
 	return out
 }
 
-func exposuresByBackendService(ingresses []eruncommon.ObservedIngress) map[string]ServiceExposure {
-	tlsSecretByHost := eruncommon.TlsSecretsByHost(ingresses)
-	byService := make(map[string]ServiceExposure, len(ingresses))
+func exposuresByBackendService(ingresses []model.ObservedIngress) map[string]model.ServiceExposure {
+	tlsSecretByHost := clusterread.TlsSecretsByHost(ingresses)
+	byService := make(map[string]model.ServiceExposure, len(ingresses))
 	for _, ing := range ingresses {
-		label, ok := strings.CutPrefix(ing.Name, eruncommon.ExposeIngressNamePrefix)
+		label, ok := strings.CutPrefix(ing.Name, clusterread.ExposeIngressNamePrefix)
 		if !ok || label == "" || len(ing.Hosts) == 0 {
 			continue
 		}
@@ -131,7 +84,7 @@ func exposuresByBackendService(ingresses []eruncommon.ObservedIngress) map[strin
 			if _, seen := byService[backend.Service]; seen {
 				continue
 			}
-			byService[backend.Service] = ServiceExposure{Label: label, Hostname: host, Scheme: scheme}
+			byService[backend.Service] = model.ServiceExposure{Label: label, Hostname: host, Scheme: scheme}
 		}
 	}
 	return byService

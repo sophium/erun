@@ -6,18 +6,10 @@ import (
 	"strings"
 )
 
-// ErrTenantNotGiven is the desktop's own tenant-input validation failure: a
-// Wails-exported handler that operates on a tenant received an empty one.
-// Every caller of requireTenant receives tenant from state the frontend
-// already resolved before the call fired — the dashboard's own tenant, a
-// dialog's tenant prop — so hitting this means that state was not resolved
-// yet, not that the operator typed nothing; there is no field for them to
-// fill in, only a surface to reopen.
+// ErrTenantNotGiven means frontend state was not resolved yet, not that the operator typed nothing.
 var ErrTenantNotGiven = errors.New("no tenant given")
 
-// requireTenant trims tenant and, if empty, reports which desktop operation
-// needed one and the one recovery actually available: reopening the tab or
-// dialog re-resolves the tenant from app state.
+// requireTenant's error tells the operator to reopen the surface, which re-resolves the tenant.
 func requireTenant(operation, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {

@@ -14,8 +14,7 @@ import {
   visibleTenantDashboardTabs,
 } from './tenantDashboardPanels';
 
-// The dashboard's tab strip is the surface that used to render "you may not look
-// at this" and "there is nothing here" identically. These pin the difference.
+// "May not look at this" and "nothing here" must render differently.
 
 function dashboard(panels: UITenantDashboardPanel[]): UITenantDashboard {
   return {
@@ -54,8 +53,7 @@ test('a panel that failed still renders its tab, so the failure is visible', () 
 });
 
 test('a dashboard that reported no panels keeps every tab', () => {
-  // An unknown permission is not a denied one: before the load answers, nothing
-  // may be hidden.
+  // Unknown permission is not denied.
   assert.equal(visibleTenantDashboardTabs(null).length, 9);
   assert.equal(
     visibleTenantDashboardTabs({
@@ -115,11 +113,6 @@ test('reviewAuthorInitials derives up to two letters from a display name', () =>
   assert.equal(reviewAuthorInitials(''), '?');
 });
 
-// The dashboard's heading names the local tenant it was opened from; every
-// panel below renders whichever platform tenant the credential reaches. This
-// is the one value that says whether those are the same tenant, so it has to
-// survive on the caller's own row and read as "not reported" (absent) rather
-// than as a name when the platform names none.
 test('the platform tenant name is read off the caller row and trimmed', () => {
   assert.equal(tenantDashboardPlatformTenantName(undefined), '');
   assert.equal(tenantDashboardPlatformTenantName(dashboard([])), '');

@@ -12,16 +12,8 @@ import { ErunTracePane } from './DebugPanel.ErunTrace';
 import { CopyReportButton, ReportIssueButton } from './DebugPanel.Report';
 import { UITracePane } from './DebugPanel.UITrace';
 
-// DebugPanel is the Diagnostics console: it shows whatever evidence the
-// current DiagnosticsContext resolves to (an orchestrator's own state, the
-// selected environment's, or the desktop app's own log when neither is
-// active) rather than being hardwired to an environment selection — an
-// orchestrator session used to leave this panel reading "environment: none
-// selected" with no trace at all (#1241). Two copyable surfaces plus a report
-// button meant to be filed straight into the tracker: the primary pane is
-// always-on evidence for the active context, the UI trace exists because the
-// packaged WebView has no Redux DevTools and stays available in every
-// context.
+// The Diagnostics console follows the DiagnosticsContext (orchestrator, env or
+// app), so an orchestrator session still has a trace.
 
 const debugSplitterClassName =
   'relative cursor-row-resize bg-[oklch(0.06_0_0)] before:absolute before:left-0 before:right-0 before:top-1 before:h-px before:bg-transparent before:transition-colors hover:before:bg-[oklch(0.36_0_0)] [.is-resizing-debug_&]:before:bg-[oklch(0.46_0_0)]';

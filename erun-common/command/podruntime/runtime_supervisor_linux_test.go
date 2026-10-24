@@ -16,14 +16,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The entrypoint's init duties are process-wide -- it becomes a child subreaper
-// and reaps every zombie child it did not start -- so each case runs it in its
-// own copy of the test binary, never in the test process, whose other tests'
-// os/exec children it would otherwise reap.
+// Init duties are process-wide, so each case runs in its own copy of the test binary.
 const runtimeEntrypointHelperEnv = "ERUN_TEST_RUNTIME_ENTRYPOINT_ARGS"
 
-// TestRuntimeEntrypointHelperProcess is not a test: it is the entrypoint run by
-// the cases below in a child process.
+// TestRuntimeEntrypointHelperProcess is the child-process entrypoint, not a test.
 func TestRuntimeEntrypointHelperProcess(t *testing.T) {
 	raw := os.Getenv(runtimeEntrypointHelperEnv)
 	if raw == "" {
@@ -55,7 +51,6 @@ func runtimeEntrypointHelper(t *testing.T, args ...string) *exec.Cmd {
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"ERUN_OUTPUTS_DIR="+filepath.Join(home, "outputs"),
-		// The boot must never trim the developer's own go build cache.
 		"ERUN_GO_BUILD_CACHE_MAX_BYTES=0",
 		"ERUN_MCP_ENABLED=false",
 		"ERUN_SSHD_ENABLED=false",
@@ -90,10 +85,7 @@ func TestRuntimeEntrypointReportsACommandKilledByASignal(t *testing.T) {
 	}
 }
 
-// The reproduction of what tini was there for: a daemonised process's finished
-// children reparent to the init, and an init that never reaps them fills the
-// process table with zombies. The command leaves an orphan that exits, then fails
-// with 3 if any zombie is still parented to the entrypoint a second later.
+// The command leaves an exiting orphan, then fails with 3 if a zombie remains.
 func TestRuntimeEntrypointReapsOrphanedZombies(t *testing.T) {
 	script := `(sleep 0.1 &); sleep 1
 for stat in /proc/[0-9]*/stat; do
@@ -107,8 +99,6 @@ exit 0`
 	}
 }
 
-// A termination signal sent to the init reaches the container's command, which
-// decides how to stop and whose code the container exits with.
 func TestRuntimeEntrypointForwardsTerminationToTheCommand(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "ready")
 	cmd := runtimeEntrypointHelper(t, "sh", "-c", `trap 'exit 42' TERM; touch `+ready+`; while :; do sleep 0.1; done`)
@@ -124,8 +114,6 @@ func TestRuntimeEntrypointForwardsTerminationToTheCommand(t *testing.T) {
 	}
 }
 
-// The devops boot serves until the container is stopped, then exits the way an
-// init reports a signal: 128 + its number.
 func TestRuntimeEntrypointDevopsBootStopsOnSIGTERM(t *testing.T) {
 	cmd := runtimeEntrypointHelper(t, "devops")
 	if err := cmd.Start(); err != nil {
@@ -153,14 +141,9 @@ func waitForRuntimeFile(t *testing.T, path string) {
 	t.Fatalf("timed out waiting for %s", path)
 }
 
-// runtimeSourceHelperEnv carries the repository a helper process clones while it
-// is the init, as JSON {url, ref, repo}.
 const runtimeSourceHelperEnv = "ERUN_TEST_RUNTIME_SOURCE"
 
-// TestRuntimeSourceHelperProcess is not a test: it runs the runtime source step
-// with the init's reaper armed and sweeping in a tight loop besides SIGCHLD, so
-// any boot child the supervisor does not own is reaped before os/exec can wait
-// for it. It exits 0 when the clone landed on the requested ref.
+// TestRuntimeSourceHelperProcess is a child-process helper, not a test.
 func TestRuntimeSourceHelperProcess(t *testing.T) {
 	raw := os.Getenv(runtimeSourceHelperEnv)
 	if raw == "" {
@@ -198,8 +181,6 @@ func TestRuntimeSourceHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-// The clone the boot runs while it is the init must report its own exit status
-// and land on the deployed ref, however eagerly the init reaps orphans.
 func TestRuntimeSourceIsCheckedOutWhileTheInitReaps(t *testing.T) {
 	git, err := exec.LookPath("git")
 	if err != nil {
@@ -224,11 +205,6 @@ func TestRuntimeSourceIsCheckedOutWhileTheInitReaps(t *testing.T) {
 	}
 }
 
-// A stop signal that reaches the init before the container's command is running
-// (during the preamble, or between its start and its registration) must still
-// reach that command; dropping it leaves the container ignoring SIGTERM until
-// the kubelet kills it. handleSignal with no foreground is exactly the state the
-// preamble is in.
 func TestRuntimeForegroundReceivesASignalThatArrivedBeforeItStarted(t *testing.T) {
 	supervisor := newRuntimeSupervisor(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)})
 	supervisor.handleSignal(syscall.SIGTERM)

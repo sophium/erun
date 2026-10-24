@@ -4,100 +4,21 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"path"
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
-
-type DiffResult struct {
-	WorkingDirectory string         `json:"workingDirectory,omitempty"`
-	RawDiff          string         `json:"rawDiff"`
-	Summary          DiffSummary    `json:"summary"`
-	Files            []DiffFile     `json:"files,omitempty"`
-	Tree             []DiffTreeNode `json:"tree,omitempty"`
-	ReviewBase       DiffReviewBase `json:"reviewBase,omitempty"`
-	ReviewCommits    []DiffCommit   `json:"reviewCommits,omitempty"`
-	Scope            string         `json:"scope,omitempty"`
-	SelectedCommit   string         `json:"selectedCommit,omitempty"`
-	IncludesWorktree bool           `json:"includesWorktree,omitempty"`
-}
-
-type DiffSummary struct {
-	FileCount int `json:"fileCount"`
-	Additions int `json:"additions"`
-	Deletions int `json:"deletions"`
-}
-
-type DiffFile struct {
-	Path      string     `json:"path"`
-	OldPath   string     `json:"oldPath,omitempty"`
-	NewPath   string     `json:"newPath,omitempty"`
-	Status    string     `json:"status"`
-	Additions int        `json:"additions"`
-	Deletions int        `json:"deletions"`
-	Binary    bool       `json:"binary,omitempty"`
-	Hunks     []DiffHunk `json:"hunks,omitempty"`
-}
-
-type DiffHunk struct {
-	Header   string     `json:"header"`
-	OldStart int        `json:"oldStart"`
-	OldLines int        `json:"oldLines"`
-	NewStart int        `json:"newStart"`
-	NewLines int        `json:"newLines"`
-	Lines    []DiffLine `json:"lines,omitempty"`
-}
-
-type DiffLine struct {
-	Kind    string `json:"kind"`
-	Content string `json:"content"`
-	OldLine int    `json:"oldLine,omitempty"`
-	NewLine int    `json:"newLine,omitempty"`
-}
-
-type DiffTreeNode struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	ParentPath string `json:"parentPath,omitempty"`
-	Type       string `json:"type"`
-	Depth      int    `json:"depth"`
-	Status     string `json:"status,omitempty"`
-	Additions  int    `json:"additions,omitempty"`
-	Deletions  int    `json:"deletions,omitempty"`
-}
-
-type DiffReviewBase struct {
-	Branch      string `json:"branch,omitempty"`
-	Commit      string `json:"commit,omitempty"`
-	ShortCommit string `json:"shortCommit,omitempty"`
-}
-
-type DiffCommit struct {
-	Hash      string `json:"hash"`
-	ShortHash string `json:"shortHash"`
-	Subject   string `json:"subject"`
-	Author    string `json:"author"`
-	Date      string `json:"date"`
-}
-
-type DiffOptions struct {
-	Scope          string `json:"scope,omitempty"`
-	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target selects which repo to diff: "env" (default) the environment's
-	// runtime working directory, "erun" the contribute-mode erun clone.
-	Target string `json:"target,omitempty"`
-}
 
 const (
 	DiffTargetEnv  = "env"
 	DiffTargetERun = "erun"
 )
 
-// NormalizeDiffTarget canonicalizes the diff target; empty resolves to the
-// historical "env" default.
+// NormalizeDiffTarget canonicalizes the diff target, defaulting to "env".
 func NormalizeDiffTarget(target string) string {
 	switch strings.TrimSpace(target) {
 	case DiffTargetERun:
@@ -107,31 +28,20 @@ func NormalizeDiffTarget(target string) string {
 	}
 }
 
-// ResolveDiffTargetRoot returns the working directory the diff tool should
-// operate on for the given target.
+// ResolveDiffTargetRoot returns the working directory to diff for target.
 func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	switch NormalizeDiffTarget(target) {
 	case DiffTargetERun:
-		return eruncommon.ContributeClonePath(homeDir)
+		return core.ContributeClonePath(homeDir)
 	default:
 		return strings.TrimSpace(envRoot), nil
 	}
 }
 
-type diffTreeBuildNode struct {
-	Name      string
-	Path      string
-	Type      string
-	Status    string
-	Additions int
-	Deletions int
-	Children  []diffTreeBuildNode
-}
-
-func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffResult, error) {
+func ResolveGitDiff(projectRoot string, runGit seam.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
-		return DiffResult{}, fmt.Errorf("project root is required")
+		return model.DiffResult{}, fmt.Errorf("project root is required")
 	}
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
@@ -140,10 +50,10 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffR
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, currentScopeGitDiffArgs(gitDiffHeadFound(projectRoot, runGit))...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return model.DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	result := ParseGitDiff(stdout.String())
@@ -152,10 +62,10 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffR
 	return result, nil
 }
 
-func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit gitx.GitCommandRunnerFunc) (DiffResult, error) {
+func ResolveGitDiffWithOptions(projectRoot string, options model.DiffOptions, runGit seam.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
-		return DiffResult{}, fmt.Errorf("project root is required")
+		return model.DiffResult{}, fmt.Errorf("project root is required")
 	}
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
@@ -164,31 +74,31 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit g
 	scope := normalizeDiffScope(options.Scope)
 	selectedCommit := strings.TrimSpace(options.SelectedCommit)
 	if err := rejectOptionShapedSelectedCommit(scope, selectedCommit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	base, baseFound, err := resolveGitDiffReviewBase(projectRoot, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	commits, err := resolveGitDiffReviewCommits(projectRoot, base, baseFound, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	selectedCommit, err = resolveDiffSelectedCommit(projectRoot, scope, selectedCommit, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	stdout := new(bytes.Buffer)
 	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit, gitDiffHeadFound(projectRoot, runGit))
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, diffArgs...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return model.DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	result := ParseGitDiff(stdout.String())
@@ -210,11 +120,7 @@ func normalizeDiffScope(scope string) string {
 	}
 }
 
-// rejectOptionShapedSelectedCommit refuses a selectedCommit that git would
-// parse as an option rather than a revision, before any git command runs with
-// it. exec_diff is a read-scoped MCP tool, so a caller-supplied revision must
-// never be able to steer git's own flags. Only the "commit" scope ever passes
-// selectedCommit into argv, so other scopes have nothing to validate.
+// exec_diff is read-scoped, so a caller-supplied revision must never parse as a git option.
 func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
 	if scope != "commit" || selectedCommit == "" {
 		return nil
@@ -225,11 +131,8 @@ func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
 	return nil
 }
 
-// resolveDiffSelectedCommit resolves a "commit" scope's selectedCommit to a
-// commit sha via git itself, so only a value git already agreed is a commit
-// reaches the diff argv. Other scopes pass selectedCommit through unresolved
-// since it never reaches argv for them.
-func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit gitx.GitCommandRunnerFunc) (string, error) {
+// Resolving through git ensures only a real commit sha reaches the diff argv.
+func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit seam.GitCommandRunnerFunc) (string, error) {
 	if scope != "commit" || selectedCommit == "" {
 		return selectedCommit, nil
 	}
@@ -255,27 +158,14 @@ func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit 
 		}
 		return args
 	default:
-		// "current" is the panel's "Current local changes" layer: staged and
-		// unstaged edits not yet committed, distinct from the "all"/"commit"
-		// layers that reach further back into history. A bare `git diff` only
-		// compares the worktree against the index, so a staged-but-uncommitted
-		// change was invisible here even though it is exactly the kind of
-		// local change this scope exists to show.
+		// Include staged changes: a bare `git diff` hides them.
 		return currentScopeGitDiffArgs(headFound)
 	}
 }
 
-// gitEmptyTreeHash is git's well-known SHA-1 hash for the empty tree object --
-// identical in every repository, since it depends only on being empty, not on
-// any repo-specific content or history.
 const gitEmptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// currentScopeGitDiffArgs is the "current"/plain-default git invocation:
-// worktree plus index against HEAD, so staged changes show up alongside
-// unstaged ones. A repo with no commits yet has no HEAD to diff against, so
-// this diffs against the empty tree instead -- otherwise a freshly staged
-// file would compare equal to itself (worktree == index) and vanish exactly
-// like the bug this scope exists to fix.
+// Without a HEAD, diff against the empty tree so freshly staged files still show.
 func currentScopeGitDiffArgs(headFound bool) []string {
 	args := []string{"diff", "--no-color", "--no-ext-diff"}
 	if headFound {
@@ -284,15 +174,13 @@ func currentScopeGitDiffArgs(headFound bool) []string {
 	return append(args, gitEmptyTreeHash)
 }
 
-// gitDiffHeadFound reports whether HEAD resolves to a commit, so callers can
-// fall back to the index-only diff form for a repo with no commits yet.
-func gitDiffHeadFound(projectRoot string, runGit gitx.GitCommandRunnerFunc) bool {
+func gitDiffHeadFound(projectRoot string, runGit seam.GitCommandRunnerFunc) bool {
 	_, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", "--quiet", "HEAD")
 	return err == nil
 }
 
-func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffReviewBase, bool, error) {
-	var selected DiffReviewBase
+func resolveGitDiffReviewBase(projectRoot string, runGit seam.GitCommandRunnerFunc) (model.DiffReviewBase, bool, error) {
+	var selected model.DiffReviewBase
 	selectedDistance := -1
 	for _, branch := range []string{"origin/HEAD", "origin/main", "origin/develop", "main", "develop"} {
 		commit, err := gitOutput(projectRoot, runGit, "merge-base", "HEAD", branch)
@@ -311,16 +199,16 @@ func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFu
 		displayBranch := resolveGitDiffReviewBaseBranch(projectRoot, branch, runGit)
 		if selectedDistance < 0 || parsedDistance < selectedDistance {
 			selectedDistance = parsedDistance
-			selected = DiffReviewBase{Branch: displayBranch, Commit: commit, ShortCommit: shortCommit}
+			selected = model.DiffReviewBase{Branch: displayBranch, Commit: commit, ShortCommit: shortCommit}
 		}
 	}
 	if selected.Commit != "" {
 		return selected, true, nil
 	}
-	return DiffReviewBase{}, false, nil
+	return model.DiffReviewBase{}, false, nil
 }
 
-func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) string {
+func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit seam.GitCommandRunnerFunc) string {
 	if branch != "origin/HEAD" {
 		return branch
 	}
@@ -331,7 +219,7 @@ func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitC
 	return resolved
 }
 
-func resolveGitDiffReviewCommits(projectRoot string, base DiffReviewBase, baseFound bool, runGit gitx.GitCommandRunnerFunc) ([]DiffCommit, error) {
+func resolveGitDiffReviewCommits(projectRoot string, base model.DiffReviewBase, baseFound bool, runGit seam.GitCommandRunnerFunc) ([]model.DiffCommit, error) {
 	if !baseFound {
 		return nil, nil
 	}
@@ -342,28 +230,28 @@ func resolveGitDiffReviewCommits(projectRoot string, base DiffReviewBase, baseFo
 	return parseGitDiffReviewCommits(output), nil
 }
 
-func gitOutput(projectRoot string, runGit gitx.GitCommandRunnerFunc, args ...string) (string, error) {
+func gitOutput(projectRoot string, runGit seam.GitCommandRunnerFunc, args ...string) (string, error) {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, args...); err != nil {
-		return "", fmt.Errorf("%w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return "", fmt.Errorf("%w%s", err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func parseGitDiffReviewCommits(output string) []DiffCommit {
+func parseGitDiffReviewCommits(output string) []model.DiffCommit {
 	output = strings.TrimSuffix(output, "\x1e")
 	if output == "" {
 		return nil
 	}
 	records := strings.Split(output, "\x1e")
-	commits := make([]DiffCommit, 0, len(records))
+	commits := make([]model.DiffCommit, 0, len(records))
 	for _, record := range records {
 		fields := strings.SplitN(strings.TrimSpace(record), "\x1f", 5)
 		if len(fields) != 5 {
 			continue
 		}
-		commits = append(commits, DiffCommit{
+		commits = append(commits, model.DiffCommit{
 			Hash:      fields[0],
 			ShortHash: fields[1],
 			Author:    fields[2],
@@ -374,11 +262,11 @@ func parseGitDiffReviewCommits(output string) []DiffCommit {
 	return commits
 }
 
-func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit gitx.GitCommandRunnerFunc) error {
+func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit seam.GitCommandRunnerFunc) error {
 	untrackedOutput := new(bytes.Buffer)
 	untrackedStderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, untrackedOutput, untrackedStderr, "ls-files", "--others", "--exclude-standard", "-z"); err != nil {
-		return fmt.Errorf("git ls-files: %w%s", err, eruncommon.FormatGitCommandStderr(untrackedStderr.String()))
+		return fmt.Errorf("git ls-files: %w%s", err, core.FormatGitCommandStderr(untrackedStderr.String()))
 	}
 	for _, file := range splitNULTerminated(untrackedOutput.String()) {
 		file = strings.TrimSpace(file)
@@ -389,7 +277,7 @@ func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit gi
 		fileStderr := new(bytes.Buffer)
 		err := runGit(projectRoot, fileDiff, fileStderr, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file)
 		if err != nil && fileDiff.Len() == 0 {
-			return fmt.Errorf("git diff untracked %s: %w%s", file, err, eruncommon.FormatGitCommandStderr(fileStderr.String()))
+			return fmt.Errorf("git diff untracked %s: %w%s", file, err, core.FormatGitCommandStderr(fileStderr.String()))
 		}
 		appendRawDiff(rawDiff, fileDiff.String())
 	}
@@ -417,337 +305,7 @@ func appendRawDiff(rawDiff *bytes.Buffer, diff string) {
 	}
 }
 
-func ParseGitDiff(raw string) DiffResult {
-	result := DiffResult{
-		RawDiff: raw,
-		Files:   parseGitDiffFiles(raw),
-	}
-	for _, file := range result.Files {
-		result.Summary.FileCount++
-		result.Summary.Additions += file.Additions
-		result.Summary.Deletions += file.Deletions
-	}
-	result.Tree = BuildDiffTree(result.Files)
-	result.Files = reorderFilesByTree(result.Files, result.Tree)
-	return result
-}
-
-// reorderFilesByTree aligns Files to the tree's file-leaf order so the
-// desktop's two panels agree: its changed-files list is driven by Tree and its
-// diff panel by Files, which otherwise diverge for untracked files (parsing
-// appends them last, out of tree order).
-func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
-	if len(files) <= 1 {
-		return files
-	}
-	indexesByPath := make(map[string][]int, len(files))
-	for index, file := range files {
-		indexesByPath[file.Path] = append(indexesByPath[file.Path], index)
-	}
-	ordered := make([]DiffFile, 0, len(files))
-	used := make([]bool, len(files))
-	for _, node := range tree {
-		if node.Type != "file" {
-			continue
-		}
-		for _, index := range indexesByPath[node.Path] {
-			if used[index] {
-				continue
-			}
-			ordered = append(ordered, files[index])
-			used[index] = true
-			break
-		}
-	}
-	for index, file := range files {
-		if !used[index] {
-			ordered = append(ordered, file)
-		}
-	}
-	return ordered
-}
-
-func parseGitDiffFiles(raw string) []DiffFile {
-	lines := strings.Split(raw, "\n")
-	parser := diffFileParser{}
-
-	for index, line := range lines {
-		if index == len(lines)-1 && line == "" {
-			continue
-		}
-		parser.parseLine(line)
-	}
-	parser.flush()
-	return parser.files
-}
-
-type diffFileParser struct {
-	files       []DiffFile
-	current     *DiffFile
-	currentHunk *DiffHunk
-	oldLine     int
-	newLine     int
-}
-
-func (p *diffFileParser) parseLine(line string) {
-	if strings.HasPrefix(line, "diff --git ") {
-		p.startFile(line)
-		return
-	}
-	if p.current == nil {
-		return
-	}
-	if p.parseFileMetadata(line) {
-		return
-	}
-	if strings.HasPrefix(line, "@@ ") {
-		p.startHunk(line)
-		return
-	}
-	if p.currentHunk != nil {
-		p.appendHunkLine(line)
-	}
-}
-
-func (p *diffFileParser) startFile(line string) {
-	p.flush()
-	oldPath, newPath := parseDiffGitHeader(line)
-	p.current = &DiffFile{Path: firstNonEmptyDiffPath(newPath, oldPath), OldPath: oldPath, NewPath: newPath, Status: "modified"}
-}
-
-func (p *diffFileParser) flush() {
-	if p.current == nil {
-		return
-	}
-	normalizeDiffFile(p.current)
-	p.files = append(p.files, *p.current)
-	p.current = nil
-	p.currentHunk = nil
-}
-
-func (p *diffFileParser) parseFileMetadata(line string) bool {
-	switch {
-	case strings.HasPrefix(line, "new file mode "):
-		p.current.Status = "added"
-	case strings.HasPrefix(line, "deleted file mode "):
-		p.current.Status = "deleted"
-	case strings.HasPrefix(line, "rename from "):
-		p.current.Status = "renamed"
-		p.current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "rename from "))
-	case strings.HasPrefix(line, "rename to "):
-		p.current.Status = "renamed"
-		p.current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "rename to "))
-		p.current.Path = p.current.NewPath
-	case strings.HasPrefix(line, "copy from "):
-		p.current.Status = "copied"
-		p.current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "copy from "))
-	case strings.HasPrefix(line, "copy to "):
-		p.current.Status = "copied"
-		p.current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "copy to "))
-		p.current.Path = p.current.NewPath
-	case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
-		p.current.Binary = true
-		p.currentHunk = nil
-	default:
-		return false
-	}
-	return true
-}
-
-func (p *diffFileParser) startHunk(line string) {
-	hunk := parseDiffHunkHeader(line)
-	p.current.Hunks = append(p.current.Hunks, hunk)
-	p.currentHunk = &p.current.Hunks[len(p.current.Hunks)-1]
-	p.oldLine = p.currentHunk.OldStart
-	p.newLine = p.currentHunk.NewStart
-}
-
-func (p *diffFileParser) appendHunkLine(line string) {
-	switch {
-	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ "):
-		p.appendAddedLine(line)
-	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- "):
-		p.appendDeletedLine(line)
-	case strings.HasPrefix(line, "\\"):
-		p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "meta", Content: line})
-	default:
-		p.appendContextLine(line)
-	}
-}
-
-func (p *diffFileParser) appendAddedLine(line string) {
-	p.current.Additions++
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "add", Content: strings.TrimPrefix(line, "+"), NewLine: p.newLine})
-	p.newLine++
-}
-
-func (p *diffFileParser) appendDeletedLine(line string) {
-	p.current.Deletions++
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "delete", Content: strings.TrimPrefix(line, "-"), OldLine: p.oldLine})
-	p.oldLine++
-}
-
-func (p *diffFileParser) appendContextLine(line string) {
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "context", Content: strings.TrimPrefix(line, " "), OldLine: p.oldLine, NewLine: p.newLine})
-	p.oldLine++
-	p.newLine++
-}
-
-func parseDiffGitHeader(line string) (string, string) {
-	value := strings.TrimSpace(strings.TrimPrefix(line, "diff --git "))
-	parts := strings.SplitN(value, " b/", 2)
-	if len(parts) != 2 {
-		return "", ""
-	}
-	oldPath := strings.TrimPrefix(strings.TrimSpace(parts[0]), "a/")
-	newPath := strings.TrimSpace(parts[1])
-	return oldPath, newPath
-}
-
-func parseDiffHunkHeader(line string) DiffHunk {
-	hunk := DiffHunk{Header: line}
-	end := strings.Index(line[3:], " @@")
-	if end < 0 {
-		return hunk
-	}
-	ranges := strings.Fields(line[3 : 3+end])
-	if len(ranges) >= 2 {
-		hunk.OldStart, hunk.OldLines = parseDiffRange(ranges[0], "-")
-		hunk.NewStart, hunk.NewLines = parseDiffRange(ranges[1], "+")
-	}
-	return hunk
-}
-
-func parseDiffRange(value, prefix string) (int, int) {
-	value = strings.TrimPrefix(strings.TrimSpace(value), prefix)
-	parts := strings.SplitN(value, ",", 2)
-	start, _ := strconv.Atoi(parts[0])
-	lineCount := 1
-	if len(parts) == 2 {
-		lineCount, _ = strconv.Atoi(parts[1])
-	}
-	return start, lineCount
-}
-
-func normalizeDiffFile(file *DiffFile) {
-	if file == nil {
-		return
-	}
-	file.OldPath = strings.TrimPrefix(strings.TrimSpace(file.OldPath), "a/")
-	file.NewPath = strings.TrimPrefix(strings.TrimSpace(file.NewPath), "b/")
-	switch file.Status {
-	case "added":
-		file.Path = firstNonEmptyDiffPath(file.NewPath, file.Path)
-	case "deleted":
-		file.Path = firstNonEmptyDiffPath(file.OldPath, file.Path)
-	default:
-		file.Path = firstNonEmptyDiffPath(file.NewPath, file.OldPath, file.Path)
-	}
-	file.Path = cleanDiffPath(file.Path)
-	file.OldPath = cleanDiffPath(file.OldPath)
-	file.NewPath = cleanDiffPath(file.NewPath)
-}
-
-func firstNonEmptyDiffPath(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func cleanDiffPath(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"`)
-	value = strings.TrimPrefix(value, "a/")
-	value = strings.TrimPrefix(value, "b/")
-	cleaned := path.Clean(value)
-	if cleaned == "." {
-		return ""
-	}
-	return cleaned
-}
-
-func BuildDiffTree(files []DiffFile) []DiffTreeNode {
-	root := make([]diffTreeBuildNode, 0)
-	for _, file := range files {
-		parts := strings.Split(cleanDiffPath(file.Path), "/")
-		if len(parts) == 0 || parts[0] == "" {
-			continue
-		}
-		root = appendDiffTreeNode(root, parts, file, "")
-	}
-	flat := make([]DiffTreeNode, 0, len(files))
-	for _, node := range root {
-		flat = appendFlattenedDiffTreeNode(flat, node, "", 0)
-	}
-	return flat
-}
-
-func appendDiffTreeNode(nodes []diffTreeBuildNode, parts []string, file DiffFile, parent string) []diffTreeBuildNode {
-	name := parts[0]
-	nodePath := name
-	if parent != "" {
-		nodePath = parent + "/" + name
-	}
-	for i := range nodes {
-		if nodes[i].Name != name {
-			continue
-		}
-		if len(parts) == 1 {
-			nodes[i] = diffFileTreeNode(file, nodePath)
-			return nodes
-		}
-		nodes[i].Children = appendDiffTreeNode(nodes[i].Children, parts[1:], file, nodePath)
-		nodes[i].Additions += file.Additions
-		nodes[i].Deletions += file.Deletions
-		return nodes
-	}
-
-	if len(parts) == 1 {
-		return append(nodes, diffFileTreeNode(file, nodePath))
-	}
-	node := diffTreeBuildNode{
-		Name:      name,
-		Path:      nodePath,
-		Type:      "directory",
-		Additions: file.Additions,
-		Deletions: file.Deletions,
-		Children:  appendDiffTreeNode(nil, parts[1:], file, nodePath),
-	}
-	return append(nodes, node)
-}
-
-func diffFileTreeNode(file DiffFile, nodePath string) diffTreeBuildNode {
-	return diffTreeBuildNode{
-		Name:      path.Base(nodePath),
-		Path:      file.Path,
-		Type:      "file",
-		Status:    file.Status,
-		Additions: file.Additions,
-		Deletions: file.Deletions,
-	}
-}
-
-func appendFlattenedDiffTreeNode(flat []DiffTreeNode, node diffTreeBuildNode, parent string, depth int) []DiffTreeNode {
-	flat = append(flat, DiffTreeNode{
-		Name:       node.Name,
-		Path:       node.Path,
-		ParentPath: parent,
-		Type:       node.Type,
-		Depth:      depth,
-		Status:     node.Status,
-		Additions:  node.Additions,
-		Deletions:  node.Deletions,
-	})
-	for _, child := range node.Children {
-		flat = appendFlattenedDiffTreeNode(flat, child, node.Path, depth+1)
-	}
-	return flat
-}
-
-func WriteRawDiff(stdout io.Writer, result DiffResult) error {
+func WriteRawDiff(stdout io.Writer, result model.DiffResult) error {
 	if result.RawDiff == "" {
 		return nil
 	}

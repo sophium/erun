@@ -1,17 +1,6 @@
-// Package registrytoken serves the hosted container registry's v2 bearer
-// token endpoint. A docker/OCI client pushing or pulling against the
-// registry gets challenged with `WWW-Authenticate: Bearer realm=...,
-// service=...,scope=...`; it then presents HTTP Basic credentials to realm —
-// username is a fixed, documented sentinel, and the password is the tenant's
-// own erun-api bearer token — and gets back a short-lived, scope-limited JWT
-// it presents to the registry as a normal bearer token.
-//
-// This is the security boundary of the hosted-registry feature: the tenant is
-// resolved only from the verified token's issuer, never from anything
-// client-supplied (the username, or the requested scope's repository name),
-// and the requested scope is clamped to that tenant's own namespace before
-// anything is signed. See
-// https://distribution.github.io/distribution/spec/auth/token/.
+// Package registrytoken serves the hosted registry's v2 bearer token endpoint.
+// The tenant comes only from the verified token's issuer, and the requested
+// scope is clamped to that tenant's namespace before signing.
 package registrytoken
 
 import (
@@ -27,24 +16,17 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TokenVerifier verifies the tenant's own erun-api bearer token, presented as
-// the HTTP Basic password. Satisfied by *backendapi.BearerTokenVerifier — the
-// exact same verifier (and configured audience) the platform API itself
-// authenticates with, so a registry-token request is held to the same bar as
-// any other authenticated API call.
+// TokenVerifier verifies the erun-api bearer token presented as the Basic password.
 type TokenVerifier interface {
 	VerifyBearerToken(ctx context.Context, token string) (security.Claims, error)
 }
 
-// TenantResolver maps verified claims to the tenant they authenticate as.
-// Satisfied by *repository.IdentityRepository. It never creates a tenant or
-// user as a side effect of minting a registry token.
+// TenantResolver maps verified claims to a tenant; it never creates one.
 type TenantResolver interface {
 	ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error)
 }
 
-// Signer mints the short-lived registry access token. Satisfied by
-// *mcptoken.Signer.
+// Signer mints the short-lived registry access token.
 type Signer interface {
 	SignRegistry(subject, service string, access []mcptoken.RegistryAccessScope, now time.Time) (string, error)
 }
@@ -67,8 +49,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 type tokenResponse struct {
 	Token string `json:"token"`
-	// AccessToken duplicates Token: some clients read one field name, some the
-	// other, per the registry token spec's own note that implementations vary.
+	// AccessToken duplicates Token: clients vary in which field they read.
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
 	IssuedAt    string `json:"issued_at"`
@@ -109,15 +90,10 @@ func (h *Handler) serveToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// registryTokenTTLSeconds mirrors mcptoken's registryTokenTTL; it is
-// duplicated here (rather than imported) because it is response metadata for
-// the client's own refresh timing, not something this handler enforces —
-// mcptoken.Signer alone owns the token's real `exp`.
+// registryTokenTTLSeconds is advisory response metadata; mcptoken.Signer owns the real exp.
 const registryTokenTTLSeconds = 5 * 60
 
-// authenticate verifies the HTTP Basic password as the tenant's own erun-api
-// bearer token. The username is a documented sentinel and is never inspected:
-// trusting it would let a client claim any tenant merely by naming it.
+// authenticate never inspects the username: trusting it would let a client claim any tenant.
 func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (security.Claims, bool) {
 	_, password, ok := r.BasicAuth()
 	password = strings.TrimSpace(password)
@@ -138,9 +114,7 @@ func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (security
 	return claims, true
 }
 
-// resolveTenant maps the verified claims to a tenant, strictly from the
-// token's own issuer — never from the request's username or scope, both of
-// which are client-supplied and therefore untrusted for this decision.
+// resolveTenant uses only the token's issuer, never the client-supplied username or scope.
 func (h *Handler) resolveTenant(w http.ResponseWriter, r *http.Request, claims security.Claims) (model.Tenant, bool) {
 	tenant, err := h.tenants.ResolveTenantByIssuer(r.Context(), claims)
 	if err != nil || strings.TrimSpace(tenant.Name) == "" {
@@ -162,5 +136,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		return
+	}
 }

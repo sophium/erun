@@ -5,14 +5,8 @@ import * as path from 'node:path';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { expectFramesAllDistinct } from '../../../fixtures/visualFrames.js';
 
-// The distinctness guard the visual bundles rely on is only worth having if it
-// can actually fail. A guard that always passes would be the same
-// silent-success defect it exists to catch -- a bundle that reads as complete
-// while documenting a state the run never captured -- so both directions are
-// driven against real files here rather than trusted by inspection.
-//
-// It lives in the manage area because that is where the guard's first call
-// sites are (manage-ports-exposures.spec.ts's Ports frames).
+// A guard that always passes would hide the very defect it exists to catch,
+// so both directions are driven against real files.
 test.describe('visual frame distinctness guard', () => {
   let dir: string;
 
@@ -46,8 +40,7 @@ test.describe('visual frame distinctness guard', () => {
     await writeFile(third, Buffer.from('settled render'));
 
     const digests = await expectFramesAllDistinct([first, second, third]);
-    // Also proves the guard read every frame it was handed, rather than
-    // passing vacuously over an empty set.
+    // Proves the guard read every frame rather than passing over an empty set.
     expect(digests).toHaveLength(3);
   });
 });

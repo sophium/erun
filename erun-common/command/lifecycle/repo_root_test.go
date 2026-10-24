@@ -7,11 +7,7 @@ import (
 	"testing"
 )
 
-// erunRepoRoot returns the repository root: the nearest directory above the
-// calling test's file that holds both erun-common and erun-devops. It walks up
-// rather than counting levels, so a test reads its sibling modules the same
-// way from whichever package of erun-common it is in, and from any working
-// directory.
+// erunRepoRoot walks up to the nearest directory holding both erun-common and erun-devops.
 func erunRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(1)

@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-// stubGatewayRouting answers the cluster read from a table keyed by
-// "<tenant>/<env>", holding the base URL each running pod uses.
+// stubGatewayRouting answers the cluster read from a "<tenant>/<env>" table.
 func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[string]bool) *[]string {
 	t.Helper()
 	var mu sync.Mutex
@@ -33,9 +33,6 @@ func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[st
 	return &asked
 }
 
-// TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway is the
-// operator's report: switching the gateway off in ERun settings left every pod
-// on it, and nothing in the desktop said a redeploy was what applies it.
 func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T) {
 	const gateway = "https://openrouter.ai/api"
 	no := false
@@ -45,10 +42,9 @@ func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T
 		"erun/code1": "",      // already off
 	}, map[string]bool{"erun/code2": true})
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		// Switched off the way the ERun settings dialog does it: the base URL is
-		// cleared and the catalog's models stay.
+		// Switched off the way the settings dialog does: base URL cleared, models kept.
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
 			"erun/ux":    {Name: "ux", KubernetesContext: "erun", Claude: config.EnvironmentClaudeConfig{UseGateway: &no}},
@@ -82,7 +78,7 @@ func TestLoadGatewayRoutingDriftNamesPodsNotYetOnASwitchedOnGateway(t *testing.T
 	stubGatewayRouting(t, map[string]string{"erun/build": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{BaseURL: gateway}},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs:    map[string]config.EnvConfig{"erun/build": {Name: "build", KubernetesContext: "erun-build"}},
 	}})
 
@@ -100,7 +96,7 @@ func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 	stubGatewayRouting(t, map[string]string{"erun/build": gateway, "erun/ux": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		config:  &config.ERunConfig{},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
 			"erun/ux":    {Name: "ux", KubernetesContext: "erun"},

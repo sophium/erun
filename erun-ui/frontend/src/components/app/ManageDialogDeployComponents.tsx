@@ -21,10 +21,6 @@ import { CheckboxField } from '@/components/app/ManageDialog.fields';
 
 type ManageDialog = AppState['manageDialog'];
 
-// deployComponentsCopy computes the checklist's labels. The experience is the
-// same for every env type: the checklist only shows once a version is picked
-// (see the gate below), so it is always scoped to that version — the wording
-// never branches on whether the env deploys published or working-tree charts.
 function deployComponentsCopy(deployVersion: string): {
   heading: string;
   helper: string;
@@ -38,26 +34,19 @@ function deployComponentsCopy(deployVersion: string): {
   };
 }
 
-// Toggling changes only the one-shot selection the next Deploy uses; it becomes
-// this env's saved default only when the operator clicks "Set as default".
+// Toggling changes only the next Deploy; "Set as default" saves it.
 export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
   const selectionSet = new Set(deployComponentSelection);
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
-  // The checklist follows the version chosen in the picker above — never the
-  // env's current version — and is gated on a pick for every env type: the panel
-  // is strictly sequential (pick a version, then choose which charts roll out),
-  // exactly like Deploy. A local-agent env's create-new-version flow also reads
-  // the selection, so to customize it the operator picks a version to unlock the
-  // checklist (build then mints its own version and ignores the picked one).
+  // Follows the picked version, never the env's current one, and is gated on a pick for every env type.
   const deployVersion = dialog.version.trim();
   const versionPicked = deployVersion !== '';
   const gated = !versionPicked;
   const { heading, helper, loadingText } = deployComponentsCopy(deployVersion);
   return (
-    // No border of its own: it nests in the version-picker popover (RuntimeTab),
-    // whose wrapper draws the divider so this reads as the chosen version's charts.
+    // No border: the version-picker popover's wrapper draws the divider.
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-2">
         <div
@@ -115,11 +104,7 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
               ))}
             </div>
           )}
-          {/* Under the list, where the last uncheck happened: the checklist has
-              promised exactly the checked charts, so it must say what an empty
-              one means before Deploy is pressed rather than after it rolls.
-              Panel id, so it never collides with the row's twin below the
-              popover during the panel's close animation. */}
+          {/* Panel id avoids colliding with the row's twin during the close animation. */}
           <DeployComponentsEmptyNotice
             dialog={dialog}
             id={DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID}
@@ -130,9 +115,7 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   );
 }
 
-// DeployComponentsEmptyNotice states that nothing is checked and names the action
-// that clears it, so a Deploy greyed out on an empty checklist is a stated
-// condition rather than a button that stopped working.
+// DeployComponentsEmptyNotice explains why Deploy is disabled on an empty checklist.
 export function DeployComponentsEmptyNotice({
   dialog,
   id = DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,

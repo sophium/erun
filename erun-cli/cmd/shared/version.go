@@ -1,10 +1,11 @@
 package shared
 
 import (
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// These variables are replaced at build time via -ldflags to embed release metadata.
+// Set at build time via -ldflags.
 var (
 	buildVersion = "dev"
 	buildCommit  = ""
@@ -12,7 +13,7 @@ var (
 )
 
 func CurrentBuildInfo() model.BuildInfo {
-	return model.NormalizeBuildInfo(model.BuildInfo{
+	return core.NormalizeBuildInfo(model.BuildInfo{
 		Version: buildVersion,
 		Commit:  buildCommit,
 		Date:    buildDate,

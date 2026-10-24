@@ -8,14 +8,8 @@ import (
 	"strings"
 )
 
-// PlatformProcessZombie answers whether pid names a process that has exited and
-// is only waiting to be reaped, from ps's STAT column — the source those
-// platforms have, since the /proc table that answers it on Linux does not
-// exist there.
-//
-// The second return is false when ps could not be run or printed nothing for
-// that pid, which is not a claim that the process is running: the caller falls
-// back to its own probe rather than trusting a default answer.
+// PlatformProcessZombie reports whether pid is a zombie, from ps's STAT column.
+// The second return is false when that cannot be determined.
 func PlatformProcessZombie(pid int) (bool, bool) {
 	if pid <= 0 {
 		return false, false

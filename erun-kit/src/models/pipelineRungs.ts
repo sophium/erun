@@ -1,21 +1,11 @@
 import type { StatusBadgeTone } from '../components/StatusBadge.helpers';
 
-// The pipeline view's rung vocabulary, shared by the two surfaces that render
-// it: the console's Pipeline section and the desktop's Pipeline tab. Both read
-// the same platform read (GET /v1/pipeline) and must label the rungs the same
-// way -- two surfaces that name one rung differently are worse than one
-// surface, because an operator comparing them cannot tell whether they are
-// looking at the same work. The vocabulary is the platform's, so it lives
-// here once rather than in either app.
+// Rung vocabulary shared by the console and desktop pipeline views, which must agree.
 
-// A rung is whatever the platform labelled the work with, including outcomes
-// this client has never heard of: the platform being ahead of the client is
-// not a licence to describe work the client cannot see.
+// Unknown rungs are kept as the platform spelled them, never renamed.
 export type PipelineRung = string;
 
-// PIPELINE_LADDER is the six rungs a piece of work climbs on its way from an
-// idea to a merged change, lowest first. Every other value is an outcome
-// (FAILED, ABANDONED, CLOSED, SUPERSEDED, SUCCEEDED), reported as itself.
+// PIPELINE_LADDER is the six rungs towards merged, lowest first; other values are outcomes.
 export const PIPELINE_LADDER = [
   'PLANNED',
   'IN_PROGRESS',
@@ -25,10 +15,6 @@ export const PIPELINE_LADDER = [
   'MERGED',
 ] as const;
 
-// RUNG_LABELS is the operator-facing name for each rung. A rung absent from
-// this map renders under its own spelling rather than being renamed: a client
-// that invented a friendlier name for a value it does not know would be
-// describing work it cannot see.
 export const RUNG_LABELS: Record<string, string> = {
   PLANNED: 'Planned',
   IN_PROGRESS: 'In progress',
@@ -47,12 +33,7 @@ export function rungLabel(rung: PipelineRung): string {
   return RUNG_LABELS[rung] ?? rung;
 }
 
-// RUNG_TONES separates the ladder from its outcomes: the steps on the way to
-// merged are in-progress or success, and the ways work stops -- FAILED,
-// ABANDONED, CLOSED, SUPERSEDED -- never render as a step, because reading
-// "abandoned" as "still moving" is the mistake this view exists to prevent.
-// WCAG 1.4.1: a tone never carries the state alone, every badge still shows
-// the rung word as its label.
+// Outcomes never share a ladder tone. A tone never carries state alone (WCAG 1.4.1).
 const RUNG_TONES: Record<string, StatusBadgeTone> = {
   PLANNED: 'muted',
   IN_PROGRESS: 'in-progress',
@@ -67,10 +48,7 @@ const RUNG_TONES: Record<string, StatusBadgeTone> = {
   CLOSED: 'muted',
 };
 
-// OUTCOME_TONE is what a rung neither the ladder nor the outcome list names
-// is toned. It states the one thing that is certainly true -- this is not a
-// step the client can place on the ladder -- rather than colouring it as
-// progress or as a failure.
+// OUTCOME_TONE is for rungs neither the ladder nor the outcome list names.
 const OUTCOME_TONE: StatusBadgeTone = 'muted';
 
 export function rungTone(rung: PipelineRung): StatusBadgeTone {

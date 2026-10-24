@@ -1,6 +1,4 @@
--- Shared timestamp trigger function. Used by every per-table
--- <table>_set_timestamps trigger. Do not inline this logic into
--- per-table triggers.
+-- Shared by every <table>_set_timestamps trigger; do not inline per table.
 CREATE FUNCTION erun_set_timestamps()
 RETURNS TRIGGER
 LANGUAGE plpgsql

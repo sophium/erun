@@ -16,9 +16,7 @@ import type { SmtpConfig, SmtpStatus, UpdateSmtpSettingsInput } from '../app/api
 import type { SmtpSettingsState } from './controller';
 import { useSmtpSettingsController } from './controller';
 
-// The backend's `host` field carries "host:port" as one string (e.g.
-// "smtp.example.com:587"); the form splits it into two inputs for the
-// operator and rejoins them on submit.
+// The backend's `host` is one "host:port" string; the form edits the parts separately.
 function splitHostPort(hostPort: string): { host: string; port: string } {
   const separatorIndex = hostPort.lastIndexOf(':');
   if (separatorIndex <= 0 || separatorIndex === hostPort.length - 1) {
@@ -56,11 +54,7 @@ interface SmtpFormFields {
   setTls: (value: boolean) => void;
 }
 
-// useSmtpFormFields seeds one local field per config value the first time
-// this form instance renders. Like OrgSettingsPanel's equivalent hook, it
-// deliberately does not resync on every parent re-render — a failed save
-// keeps the operator's own edits on screen (see SmtpSettingsState's
-// 'error' case) instead of snapping back to the last-saved value.
+// Seeded once, not resynced, so a failed save keeps the operator's edits.
 function useSmtpFormFields(config: SmtpConfig): SmtpFormFields {
   const initial = splitHostPort(config.host);
   const [host, setHost] = React.useState(initial.host);
@@ -297,11 +291,7 @@ function SmtpSettingsBody({
   );
 }
 
-// SmtpSettingsPanel is the console's view of the platform's outbound-mail
-// configuration (issue #1168): every flow that reaches a person out of band
-// (signup verification, password reset, the enrollment invite in
-// UsersPanel) depends on it, and a freshly deployed platform starts with
-// none configured. Only rendered for an OPERATIONS tenant — see App.tsx.
+// Rendered only for an OPERATIONS tenant.
 export function SmtpSettingsPanel({ token }: { token: string }): React.ReactElement {
   const { state, save } = useSmtpSettingsController(token);
   return (

@@ -7,78 +7,36 @@ import (
 	"strings"
 )
 
-// PlatformConfig is the per-instance configuration for an erunpaas platform
-// deployment, declared under `platform:` in a project's `.erun/config.yaml`.
-//
-// The erun-core platform is a generic, installable product: any vendor can
-// deploy it under their own names, so the base domain, the delegated services
-// zone, the authoritative nameserver, and the platform environment are
-// configuration — never hardcoded literals. The values in any one project are
-// that deployment's; another vendor's deployment (e.g. on a different base
-// domain) supplies its own from the same artifacts.
-//
-// All fields are optional. An empty block (IsZero) means the project does not
-// run a platform deployment. Once any field is set the block is "in use" and
-// Validate enforces internal consistency so a malformed block fails fast
-// rather than producing inconsistent downstream artifacts.
+// PlatformConfig is a platform deployment's `platform:` block. Every vendor-specific
+// name is configuration; an empty block means no platform deployment.
 type PlatformConfig struct {
-	// BaseDomain is the registered domain this deployment serves, e.g.
-	// "erunpaas.com". Required whenever the block is in use; everything else
-	// derives from it.
+	// BaseDomain is the deployment's registered domain; everything else derives from it.
 	BaseDomain string `yaml:"basedomain,omitempty"`
-	// Env is the dedicated platform environment that owns the per-deployment
-	// global singletons (PowerDNS, the DNS-01 broker), e.g. "frs-prod".
+	// Env is the platform environment owning global singletons (PowerDNS, DNS-01 broker).
 	Env string `yaml:"env,omitempty"`
-	// ServicesZone is the child zone delegated to this deployment's PowerDNS,
-	// under which tenant services are exposed. Defaults to
-	// "services.<BaseDomain>".
+	// ServicesZone is the child zone delegated to PowerDNS; defaults to "services.<BaseDomain>".
 	ServicesZone string `yaml:"serviceszone,omitempty"`
-	// AuthoritativeIP is the public IP this deployment's authoritative
-	// nameserver answers on (the glue-record target for ServicesZone).
+	// AuthoritativeIP is the nameserver's public IP (the glue-record target).
 	AuthoritativeIP string `yaml:"authoritativeip,omitempty"`
-	// Nameservers are the NS hostnames the parent zone delegates ServicesZone
-	// to. Defaults to ["ns1.<BaseDomain>", "ns2.<BaseDomain>"].
+	// Nameservers default to ["ns1.<BaseDomain>", "ns2.<BaseDomain>"].
 	Nameservers []string `yaml:"nameservers,omitempty"`
-	// AuthHost is the hosted-IdP host, served from the Cloudflare-managed apex
-	// zone (not ServicesZone). Defaults to "auth.<BaseDomain>".
+	// AuthHost is the hosted-IdP host on the apex zone; defaults to "auth.<BaseDomain>".
 	AuthHost string `yaml:"authhost,omitempty"`
-	// ACMEEmail is the account email for this deployment's Let's Encrypt
-	// registration. LE rate limits are per registered domain, so each
-	// deployment uses its own account.
+	// ACMEEmail is per deployment because LE rate limits are per registered domain.
 	ACMEEmail string `yaml:"acmeemail,omitempty"`
-	// CAAIssuer, when set, is the CA domain the services zone authorizes via
-	// apex CAA records (issue + issuewild), e.g. "letsencrypt.org". Empty means
-	// no CAA (any CA may issue). Opt-in because the value must match the CA the
-	// cluster edge's ACME server actually uses — a mismatched CAA blocks issuance.
+	// CAAIssuer opts into CAA records; it must match the edge's ACME CA or issuance fails.
 	CAAIssuer string `yaml:"caaissuer,omitempty"`
-	// APIURL is this deployment's own API base URL, e.g.
-	// "https://api.frs-prod.services.erunpaas.com". Served unauthenticated at
-	// GET /v1/platform so a client can discover it. Optional: an empty value
-	// renders as an empty string in that response, never an error.
-	APIURL string `yaml:"apiurl,omitempty"`
-	// ConsoleURL is this deployment's hosted web console URL. Same discovery
-	// contract as APIURL.
+	// APIURL is served unauthenticated at GET /v1/platform for discovery; may be empty.
+	APIURL     string `yaml:"apiurl,omitempty"`
 	ConsoleURL string `yaml:"consoleurl,omitempty"`
-	// Brand is this deployment's display name, if the operator set one. Same
-	// discovery contract as APIURL.
-	Brand string `yaml:"brand,omitempty"`
-	// DocsURL is the documentation site this deployment's front door links to.
-	// Defaults to "https://docs.<BaseDomain>" so an instance points at its own
-	// docs rather than the vendor's. Same discovery contract as APIURL.
+	Brand      string `yaml:"brand,omitempty"`
+	// DocsURL defaults to "https://docs.<BaseDomain>".
 	DocsURL string `yaml:"docsurl,omitempty"`
-	// Tagline is the one-line pitch this deployment's landing page leads with.
-	// Empty keeps the client's bundled product default. Same discovery contract
-	// as APIURL.
 	Tagline string `yaml:"tagline,omitempty"`
-	// LogoURL is an absolute URL to this deployment's logo. It is a URL rather
-	// than a path the console serves because a brand asset does not live in the
-	// console image — one built image serves every instance. Empty keeps the
-	// client's generic mark. Same discovery contract as APIURL.
+	// LogoURL is absolute because one console image serves every instance.
 	LogoURL string `yaml:"logourl,omitempty"`
 }
 
-// IsZero reports whether no platform configuration is set, i.e. the project
-// does not run a platform deployment.
 func (c PlatformConfig) IsZero() bool {
 	if len(c.Nameservers) != 0 {
 		return false
@@ -95,8 +53,7 @@ func (c PlatformConfig) IsZero() bool {
 	return true
 }
 
-// Resolve returns a copy with defaults derived from BaseDomain. It never invents
-// a BaseDomain: an unset one is left empty for Validate to reject, not filled in.
+// Resolve fills defaults from BaseDomain; it never invents a BaseDomain.
 func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved := c
 	resolved.BaseDomain = strings.TrimSpace(c.BaseDomain)
@@ -109,9 +66,7 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved.APIURL = strings.TrimSpace(c.APIURL)
 	resolved.ConsoleURL = strings.TrimSpace(c.ConsoleURL)
 	resolved.Brand = strings.TrimSpace(c.Brand)
-	// A trailing slash survives into the client's own docs deep links
-	// (<docsUrl><path>), so it is normalized away here rather than left to every
-	// consumer to strip.
+	// A trailing slash would double up in docs deep links.
 	resolved.DocsURL = strings.TrimRight(strings.TrimSpace(c.DocsURL), "/")
 	resolved.Tagline = strings.TrimSpace(c.Tagline)
 	resolved.LogoURL = strings.TrimSpace(c.LogoURL)
@@ -133,8 +88,7 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	return resolved
 }
 
-// Validate enforces internal consistency of an in-use platform block and is a
-// no-op for an empty one, keeping the nothing-hardcoded invariant honest.
+// Validate checks an in-use block and is a no-op for an empty one.
 func (c PlatformConfig) Validate() error {
 	if c.IsZero() {
 		return nil
@@ -158,10 +112,8 @@ func (c PlatformConfig) Validate() error {
 	return nil
 }
 
-// validatePlatformAddresses checks every field that names somewhere reachable:
-// the two derived hosts, which must stay under the deployment's own base
-// domain, and the two browser-facing discovery URLs, which may point anywhere
-// but must be absolute.
+// validatePlatformAddresses keeps derived hosts under the base domain and
+// discovery URLs absolute.
 func validatePlatformAddresses(resolved PlatformConfig) error {
 	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
 		return err
@@ -175,11 +127,7 @@ func validatePlatformAddresses(resolved PlatformConfig) error {
 	return validatePlatformURL("logourl", resolved.LogoURL, "https://"+resolved.BaseDomain+"/logo.svg")
 }
 
-// validatePlatformURL keeps a browser-facing discovery URL an absolute http(s)
-// address. These values are handed to a client verbatim and rendered as a link
-// or an image, so a bare host or a relative path becomes a dead link the page
-// itself cannot explain — the rejection names the shape expected and an example
-// under this deployment's own domain, so the fix needs no doc lookup.
+// validatePlatformURL requires an absolute http(s) URL, since clients render it verbatim.
 func validatePlatformURL(field, value, example string) error {
 	if value == "" {
 		return nil
@@ -191,8 +139,8 @@ func validatePlatformURL(field, value, example string) error {
 	return nil
 }
 
-// validatePlatformHost keeps a derived host under the base domain, so the
-// nothing-hardcoded invariant holds and the value is safe to pass to helm --set-string.
+// validatePlatformHost keeps a derived host under the base domain, which also
+// makes it safe for helm --set-string.
 func validatePlatformHost(field, host, base string) error {
 	if !isDNSName(host) {
 		return fmt.Errorf("platform config: %s %q is not a valid domain name", field, host)
@@ -207,8 +155,7 @@ func isUnderDomain(host, base string) bool {
 	return host == base || strings.HasSuffix(host, "."+base)
 }
 
-// isDNSName is intentionally strict and lowercase-only so config values match
-// the charset the rest of erun normalizes hostnames to.
+// isDNSName is strict and lowercase-only to match erun's hostname normalization.
 func isDNSName(name string) bool {
 	if name == "" || len(name) > 253 || !strings.Contains(name, ".") {
 		return false

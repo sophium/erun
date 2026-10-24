@@ -24,9 +24,6 @@ func writeOrchestratorShellActivity(t *testing.T, id string, activity orchestrat
 	}
 }
 
-// The whole point of the report: a background shell can outlive the turn that
-// started it, so the desktop must be able to say "still running" from a report
-// alone, independent of whatever orchestratorActivity says about the turn.
 func TestOrchestratorShellActivityIsReadFromTheReportNotTheTerminal(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -51,12 +48,7 @@ func TestOrchestratorShellActivityIsReadFromTheReportNotTheTerminal(t *testing.T
 	}
 }
 
-// The defect this whole file exists to avoid resurrecting: a report from an
-// orchestrator that has genuinely turned idle in the ordinary way (its turn
-// ended, no shell survives it) must not keep spinning past a long safety
-// bound — hours, since a legitimate background build or poll loop can
-// reasonably run that long, and the operator seeing the real elapsed time is
-// the point — but it must still eventually age out if nothing ever clears it.
+// The report survives hours, since builds run that long, but still ages out.
 func TestOrchestratorShellActivitySurvivesALongRunButStillBounds(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -77,9 +69,7 @@ func TestOrchestratorShellActivitySurvivesALongRunButStillBounds(t *testing.T) {
 	}
 }
 
-// A session the desktop can no longer see is the killed-mid-run case: nothing
-// will ever write its clear, so it ages out on the short bound instead of the
-// generous live one.
+// A dead session never writes its clear, so it ages out on the short bound.
 func TestOrchestratorShellActivityExpiresQuicklyForADeadSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -93,8 +83,6 @@ func TestOrchestratorShellActivityExpiresQuicklyForADeadSession(t *testing.T) {
 	}
 }
 
-// Unreadable input answers "not running": the report may keep the indicator
-// spinning, never invent a spin.
 func TestOrchestratorShellActivityTreatsUnreadableInputAsNotRunning(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -115,12 +103,6 @@ func TestOrchestratorShellActivityTreatsUnreadableInputAsNotRunning(t *testing.T
 	}
 }
 
-// The defect in #1274: an orchestrator id is reused across restarts, and a
-// report a since-replaced session left behind must not borrow the id's
-// current liveness. Requiring the report's own session id to match the one
-// the desktop currently has recorded as live is what stops that borrowing —
-// independent of, and in addition to, the SessionStart reset that clears the
-// report at the boundary itself.
 func TestOrchestratorShellActivityRejectsAReportFromAReplacedSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -140,10 +122,6 @@ func TestOrchestratorShellActivityRejectsAReportFromAReplacedSession(t *testing.
 	}
 }
 
-// A report with no session id (an older write, or a hook stdin that carried
-// none) and a desktop with no live-session record yet must not be rejected
-// just because there is nothing to compare — that would make every report
-// unusable before the live-session recorder has ever fired.
 func TestOrchestratorShellActivityHonoursAReportWithNoSessionIDToCompare(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -160,20 +138,16 @@ func TestOrchestratorShellActivityHonoursAReportWithNoSessionIDToCompare(t *test
 	}
 }
 
-// The start hook only fires for Bash and only writes when the call actually
-// backgrounded a shell (its own reasoning, not asserted here); the clear hook
-// only fires for TaskOutput/TaskStop. Both resolve their own orchestrator at
-// run time, the same way the busy report does, since the workspace settings
-// file is shared by every orchestrator.
+// The settings file is shared, so hooks resolve their orchestrator at run time.
 func TestOrchestratorShellActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 	blocks := orchestratorShellActivityHookBlocks()
 	if len(blocks) != 2 {
 		t.Fatalf("expected a start block and a clear block, got %d: %+v", len(blocks), blocks)
 	}
 	start := shellHookBlockCommand(t, blocks[0], "Bash")
-	clear := shellHookBlockCommand(t, blocks[1], "TaskOutput|TaskStop")
+	clearCommand := shellHookBlockCommand(t, blocks[1], "TaskOutput|TaskStop")
 
-	for _, command := range []string{start, clear} {
+	for _, command := range []string{start, clearCommand} {
 		if !strings.Contains(command, "process.env.ERUN_ORCHESTRATOR_ID") {
 			t.Fatalf("the hook must resolve its orchestrator at run time: %q", command)
 		}
@@ -210,8 +184,6 @@ func shellHookBlockCommand(t *testing.T, block any, wantMatcher string) string {
 	return command
 }
 
-// Installing our two blocks on an event must not delete what the operator
-// already bound to it, and must stay idempotent across restarts.
 func TestOrchestratorShellActivityHookMergePreservesOtherHooks(t *testing.T) {
 	theirs := map[string]any{
 		"matcher": "Write",
@@ -232,8 +204,6 @@ func TestOrchestratorShellActivityHookMergePreservesOtherHooks(t *testing.T) {
 	}
 }
 
-// Both PostToolUse hooks — the start matcher and the clear matcher — must be
-// installed, since the report needs both halves to ever clear itself promptly.
 func TestOrchestratorShellActivityHooksInstallOnPostToolUseOnly(t *testing.T) {
 	hooks, data := orchestratorSettingsHooks(t)
 
@@ -256,10 +226,6 @@ func eventCarriesShellActivityReport(blocks []any) bool {
 	return false
 }
 
-// SessionStart clears an inherited "running" shell report, the same way it
-// already clears the busy report: an orchestrator id is mutable and reusable,
-// so a report a previous run under this id left behind must not survive into
-// a new one that hasn't started any shell of its own yet.
 func TestOrchestratorShellActivityClearsAnInheritedRunningReportOnSessionStart(t *testing.T) {
 	hooks, data := orchestratorSettingsHooks(t)
 
@@ -268,24 +234,13 @@ func TestOrchestratorShellActivityClearsAnInheritedRunningReportOnSessionStart(t
 	}
 }
 
-// The start hook must capture the writing session's own id, not just the
-// task id and command, so a later read can tell a report apart from one a
-// since-replaced session left behind.
 func TestOrchestratorShellActivityStartHookCapturesTheSessionID(t *testing.T) {
 	if !strings.Contains(orchestratorShellActivityStartHookCommand(), "session_id") {
 		t.Fatalf("the start hook must record the writing session's id: %q", orchestratorShellActivityStartHookCommand())
 	}
 }
 
-// A transient orchestrator id (investigate-<nanos>, report-bug-
-// <nanos>) is minted once and never reused, so once its session ends nothing
-// will ever call readOrchestratorShellActivity for it again —
-// reconcileOrchestratorActivity only visits ids currently in a.orchestrators.
-// A "running: true" report such a session never got to clear would otherwise
-// sit on disk asserting that forever. This is also exactly the ungraceful
-// case: the session was killed rather than cleanly stopped, so no exit hook
-// ever ran for it either, and a.orchestrators never held this id in the first
-// place in this test — the sweep must not depend on either happening.
+// A transient id is never read again, and here no exit hook ran either.
 func TestReconcileOrphanedOrchestratorShellActivityReapsAnEphemeralIDNoOneWillEverAskAbout(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -308,8 +263,6 @@ func TestReconcileOrphanedOrchestratorShellActivityReapsAnEphemeralIDNoOneWillEv
 	}
 }
 
-// A record too young to be implausible must survive: the sweep must not race
-// ahead of a session that simply hasn't written its next report yet.
 func TestReconcileOrphanedOrchestratorShellActivityLeavesAFreshOrphanAlone(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -328,10 +281,7 @@ func TestReconcileOrphanedOrchestratorShellActivityLeavesAFreshOrphanAlone(t *te
 	}
 }
 
-// A session the desktop is still genuinely holding open gets the same
-// generous safety bound the read path already applies — the sweep must not
-// reap a legitimate long-running background shell out from under a live
-// orchestrator just because it also happens to be transient.
+// A live transient session keeps the long safety bound.
 func TestReconcileOrphanedOrchestratorShellActivityRespectsALiveSessionsSafetyBound(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

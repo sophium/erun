@@ -1,11 +1,8 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The positive click path fires a real contribute_clone MCP call inside the
-// env, which the headless harness cannot stage, so this spec only locks the
-// visibility gating (eligible = a non-"erun" tenant with a local-agent or
-// remote-agent env). The toggle/persist contract is covered by Go unit tests
-// on contributeStore and the SetContributeMode flow.
+// The click fires a real MCP call the harness cannot stage, so only the
+// visibility gating is covered here; toggle/persist is covered in Go.
 
 test.describe('titlebar contribute toggle', () => {
   test('stays hidden when no environment is selected', async ({ page }) => {

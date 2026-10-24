@@ -4,16 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewExposeCmd(store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var backendService string
 	var servicePort int
@@ -61,7 +62,7 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 		Args:         cobra.ExactArgs(3),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExposeCommand(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
+			return runExposeCommand(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
 				tenant: args[0], environment: args[1], service: args[2],
 				targetIP: targetIP, backendService: backendService, servicePort: servicePort, noTLS: noTLS, ingressClass: ingressClass, tlsSecret: tlsSecret,
 				skipIfUnconfigured: skipIfUnconfigured, servicesZone: servicesZone, platformNamespace: platformNamespace,
@@ -70,7 +71,7 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 			})
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&targetIP, "ip", "", "Ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)")
 	cmd.Flags().StringVar(&backendService, "backend-service", "", "In-namespace Service the Ingress routes to when it is not <tenant>-<service>, e.g. a repo-native chart that names its own Service; erun services lists the candidates")
 	cmd.Flags().IntVar(&servicePort, "port", 0, "Service port to route to (default 80)")
@@ -89,9 +90,6 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 	return cmd
 }
 
-// exposeCommandArgs bundles runExposeCommand's growing input set — TLS/DNS-01
-// cert provisioning added five related flags at once, past the point
-// a flat parameter list stays readable.
 type exposeCommandArgs struct {
 	tenant, environment, service                                                 string
 	targetIP                                                                     string
@@ -105,31 +103,26 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
+func findExposeProjectRoot(findProjectRoot seam.ProjectFinderFunc) (string, error) {
+	if findProjectRoot == nil {
+		findProjectRoot = config.FindProjectRoot
+	}
+	_, root, err := findProjectRoot()
+	return root, err
+}
+
+func runExposeCommand(ctx core.Context, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
-	// --services-zone/--platform-namespace supply what a project checkout would
-	// otherwise resolve, precisely so a caller with no checkout at all (the
-	// hosted deploy Job, which has no git repo to find) can still run
-	// expose. Skip the project lookup entirely in that case, rather than failing
-	// on it before RunExposeService even gets a chance to use the override.
+	// The zone/namespace overrides let a caller with no checkout (the hosted deploy Job) run expose.
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
-		if findProjectRoot == nil {
-			findProjectRoot = config.FindProjectRoot
+		root, err := findExposeProjectRoot(findProjectRoot)
+		// With --skip-if-unconfigured, no project resolves as "not configured" rather than failing.
+		if err != nil && !a.skipIfUnconfigured {
+			return err
 		}
-		_, root, err := findProjectRoot()
-		if err != nil {
-			// --skip-if-unconfigured exists to make expose a no-op when the
-			// target is not set up for exposure — no project at all is the
-			// strongest case of that, not a reason to fail before
-			// RunExposeService gets to decide. Fall through with an
-			// empty ProjectRoot: its platform-configured check on "" resolves
-			// to false, same as a project with no platform block.
-			if !a.skipIfUnconfigured {
-				return err
-			}
-		} else {
+		if err == nil {
 			projectRoot = root
 		}
 	}

@@ -225,28 +225,9 @@ function EnvironmentsTable({
               tone={registrationStatusTone(environment.status)}
               label={environment.status}
             />
-            {/* Both reasons arrive after the fact: the operator provisions or
-                deletes, the badge flips, and the text materialises beside it.
-                Without a live region nothing is announced, so a screen-reader
-                user learns the row failed only by re-reading the table — and
-                this text is the whole payload of a failed or blocked row, not
-                decoration.
-
-                The two take different roles, the split the console's
-                `deployFeedbackRole` already draws: `failed` is a fault, so it
-                is announced as it appears (alert); `deletion-blocked` is a
-                standing state the badge beside it already shows, so it does
-                not interrupt (status). Each guard names its own state, so the
-                role and the guard cannot disagree.
-
-                The role is the announcement; it is not the whole contract.
-                Destructive colour alone states the failure to nobody who
-                cannot see it (WCAG 1.4.1), so each line carries a glyph. And
-                the cell is a `DataCell`, whose `truncate` sets the nowrap the
-                reason would otherwise inherit: without a wrapping override a
-                long reason -- a URL, an ARN, a wrapped upstream error, the
-                part naming the way out -- is ellipsised out of the row, which
-                is the one part of it the operator needs. */}
+            {/* Reasons arrive asynchronously, so they need a live region: alert for
+                failed, status for deletion-blocked. Each carries a glyph (WCAG 1.4.1) and
+                overrides DataCell's nowrap so long reasons wrap. */}
             {environment.status === 'deletion-blocked' && environment.deleteError && (
               <p
                 className="mt-1 flex items-start gap-1.5 whitespace-normal text-xs leading-[1.35] text-destructive [overflow-wrap:anywhere]"
@@ -298,10 +279,7 @@ function EnvironmentsList({
   }
   const environments = data?.environments ?? [];
   if (environments.length === 0) {
-    // Only the caller who may register gets the form above, so this copy may
-    // name it only for them. EnvironmentSection renders a permission notice in
-    // its place otherwise, and the empty state points at that instead of at
-    // controls that are not on screen.
+    // Only a caller who may register gets the form, so only they see copy naming it.
     return (
       <EmptyState
         icon={<Server />}
@@ -317,14 +295,9 @@ function EnvironmentsList({
   return <EnvironmentsTable data={data} environments={environments} draft={draft} />;
 }
 
-// LocalEnvironmentsSection is the register-on-the-row affordance: the
-// desktop already knows this tenant's local environments (name, type,
-// kubernetes context — from this machine's config, TwoRegistriesNotice's
-// "local" registry), so putting one on the platform starts from those
-// values instead of a blank form. It never asserts a name match against the
-// platform's own environments list as "already registered" — no linkage
-// between the two registries exists yet, so a coincidental name match would
-// be a guess, not a fact.
+// LocalEnvironmentsSection prefills registration from this machine's local
+// environments. A name match is never treated as "already registered": the two
+// registries are not linked.
 function LocalEnvironmentsSection({
   data,
 }: {

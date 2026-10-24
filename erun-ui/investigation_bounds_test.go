@@ -11,29 +11,21 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// These lock the spawn decision by what it produces, not by what it logs: a
-// refused report leaves no session behind, the cap holds when events arrive at
-// once, and an investigation past its bound is actually stopped. Every fixture
-// below is a report shape observed in /tmp/erun-investigate on the environment
-// that ran out of agent quota.
+// Fixtures are report shapes observed on the environment that ran out of quota.
 
 const (
-	// The two reports that appeared in pairs milliseconds apart, one failure
-	// each time. Neither names a command, a status, or any output.
+	// No command, status, or output.
 	investigateThinDeployReport = "deploy blew up"
 	investigateThinHelmReport   = "deploy failed: helm timeout"
-	// A 7-byte report, the smallest on disk.
-	investigateThinProbeReport = "probe 1"
+	investigateThinProbeReport  = "probe 1"
 )
 
-// investigationHarness drives the bounds without waiting on wall-clock time:
-// the registry's clock and its lifetime timer are both injected, so "two hours
-// later" and "the bound elapsed" are assertions rather than sleeps.
+// investigationHarness injects the clock and lifetime timer, so no test sleeps.
 type investigationHarness struct {
 	app     *App
 	emits   *capturedEmits
@@ -44,8 +36,6 @@ type investigationHarness struct {
 
 func newInvestigationHarness(t *testing.T) *investigationHarness {
 	t.Helper()
-	// The job and lease an investigation registers live in the activity cache;
-	// isolate it so a test never writes into the developer's own tree.
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
@@ -80,8 +70,6 @@ func (h *investigationHarness) advance(d time.Duration) {
 	h.now = h.now.Add(d)
 }
 
-// reachLifetimeBound fires every armed lifetime timer, which is what a real
-// clock does after investigationLifetime.
 func (h *investigationHarness) reachLifetimeBound() {
 	h.mu.Lock()
 	pending := h.pending
@@ -96,8 +84,6 @@ type stubInvestigationTimer struct{}
 
 func (stubInvestigationTimer) Stop() bool { return true }
 
-// investigateWithTrackedProcess spawns an investigation whose session reports a
-// live pid, which is what the job record and its lease resolve their state from.
 func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) orchestratorInfo {
 	t.Helper()
 	h.app.deps.startTerminal = func(startTerminalSessionParams) (terminalSession, error) {
@@ -131,9 +117,6 @@ func assertNoSessions(t *testing.T, app *App, context string) {
 	}
 }
 
-// The floor on the input. Each of these is a report that reached an agent in the
-// environment that ran out of quota; none of them carries anything to
-// investigate, and the missing evidence is the bug worth fixing.
 func TestReportWithNoDiagnosticContentSpawnsNothing(t *testing.T) {
 	for _, report := range []string{
 		investigateThinDeployReport,
@@ -152,7 +135,6 @@ func TestReportWithNoDiagnosticContentSpawnsNothing(t *testing.T) {
 			}
 			assertNoSessions(t, harness.app, "thin report")
 
-			// The report is still recorded: it is the evidence of the reporting gap.
 			staged := stagedReports(t, harness.app.investigations.reportDir)
 			if len(staged) != 1 {
 				t.Fatalf("expected the refused report to be staged, got %d files", len(staged))
@@ -164,8 +146,6 @@ func TestReportWithNoDiagnosticContentSpawnsNothing(t *testing.T) {
 	}
 }
 
-// A report the desktop's failure card actually produces carries the command,
-// the target, the error, and the captured output, and must still get an agent.
 func TestReportWithDiagnosticContentStillSpawnsAnInvestigation(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	info, err := harness.app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
@@ -180,8 +160,6 @@ func TestReportWithDiagnosticContentStillSpawnsAnInvestigation(t *testing.T) {
 	}
 }
 
-// The pair of reports that arrive milliseconds apart is one failure event, so it
-// gets one investigation — whatever the second report says.
 func TestSecondReportOfOneFailureEventSpawnsNothing(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	if _, err := harness.app.InvestigateFailure(investigateReport("frs/dev", "UPGRADE FAILED: timed out"), "frs", "dev", 80, 24); err != nil {
@@ -201,8 +179,6 @@ func TestSecondReportOfOneFailureEventSpawnsNothing(t *testing.T) {
 	}
 }
 
-// The same failure reported again, past the event window, must reach the running
-// investigation rather than a second agent.
 func TestRepeatOfAFailureAlreadyUnderInvestigationSpawnsNothing(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")
@@ -219,8 +195,6 @@ func TestRepeatOfAFailureAlreadyUnderInvestigationSpawnsNothing(t *testing.T) {
 	}
 }
 
-// A failure that keeps repeating must not accumulate agents once its
-// investigation has ended: the cooldown spaces them, and releases on time.
 func TestRepeatOfAnEndedInvestigationWaitsOutTheCooldown(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")
@@ -249,9 +223,6 @@ func TestRepeatOfAnEndedInvestigationWaitsOutTheCooldown(t *testing.T) {
 	}
 }
 
-// Unrelated failures arriving at once must not outrun the cap. The events are
-// concurrent because that is how they arrived: three agents were spawned from
-// one event within 23 seconds.
 func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	const events = 6
@@ -280,7 +251,6 @@ func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 	if listed := harness.app.ListOrchestrators(); len(listed) != maxLiveInvestigations {
 		t.Fatalf("expected %d live sessions, got %+v", maxLiveInvestigations, listed)
 	}
-	// A refusal is not a permanent loss of capacity: ending one frees a slot.
 	live := harness.app.ListOrchestrators()
 	if err := harness.app.StopOrchestrator(live[0].ID); err != nil {
 		t.Fatalf("stop one investigation: %v", err)
@@ -290,9 +260,6 @@ func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 	}
 }
 
-// The lifetime bound. An investigation still running when it elapses is stopped,
-// the operator is told, and the lease it held on the environment is released —
-// the runaways sat at 21 hours and nearly seven days with none of that happening.
 func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	harness.investigateWithTrackedProcess(t, investigateHelmTimeoutReport, "frs", "dev")
@@ -317,14 +284,11 @@ func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	if !emittedNotificationContains(harness.emits, "was stopped after") {
 		t.Fatalf("the operator must be told the investigation was stopped, got %+v", harness.emits.events(appNotificationEvent))
 	}
-	// The slot the bound reclaimed is usable, which is the point of reclaiming it.
 	if _, err := harness.app.InvestigateFailure(investigateReport("frs/other", "ImagePullBackOff"), "frs", "other", 80, 24); err != nil {
 		t.Fatalf("the freed slot must admit a new investigation: %v", err)
 	}
 }
 
-// The population is discoverable where an operator and an agent already look:
-// as a job on the environment being investigated.
 func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	info := harness.investigateWithTrackedProcess(t, investigateHelmTimeoutReport, "frs", "dev")
@@ -346,7 +310,7 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	assertContainsAll(t, "job output", string(output), info.ID, "lifetime bound", "report:")
 }
 
-func soleEnvironmentJob(t *testing.T, tenant, environment string) eruncommon.EnvironmentJob {
+func soleEnvironmentJob(t *testing.T, tenant, environment string) jobstate.EnvironmentJob {
 	t.Helper()
 	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, time.Now())
 	if err != nil {
@@ -367,9 +331,6 @@ func assertContainsAll(t *testing.T, label, text string, wants ...string) {
 	}
 }
 
-// A signature identifies the failure, not the occurrence: a repeat differing
-// only in version, timing, and log detail is the same failure, and a different
-// error is a different one.
 func TestSignatureIdentifiesTheFailureRatherThanTheOccurrence(t *testing.T) {
 	first := "erun deploy failed\nTarget: frs/dev\nVersion: 1.0.179\nStarted: 2026-08-16T06:01:12Z\nElapsed: 4s\n\nError: UPGRADE FAILED: timed out waiting for the condition\n"
 	repeat := "erun deploy failed\nTarget: frs/dev\nVersion: 1.0.181\nStarted: 2026-08-16T11:44:02Z\nElapsed: 71s\n\nError: UPGRADE FAILED: timed out waiting for the condition\n"
@@ -386,8 +347,6 @@ func TestSignatureIdentifiesTheFailureRatherThanTheOccurrence(t *testing.T) {
 	}
 }
 
-// The staged reports are evidence, but a directory that only grows is how a
-// handful of real failures came to read as dozens.
 func TestStagedReportsArePrunedToTheRetentionBound(t *testing.T) {
 	dir := t.TempDir()
 	registry := newInvestigationRegistry(dir)

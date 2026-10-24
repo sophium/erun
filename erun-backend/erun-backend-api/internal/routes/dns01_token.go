@@ -7,16 +7,12 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 )
 
-// DNS01TokenRoutes mints a per-env DNS-01 broker token: the long-lived, backend-
-// signed credential the cluster's cert-manager DNS-01 webhook presents to the
-// broker so it can solve ACME challenges within the env's own subzone. Distinct
-// capability from the MCP token (different audience), so the two cannot be
-// replayed against each other.
+// DNS01TokenRoutes mints a per-env DNS-01 broker token for cert-manager's
+// webhook. Its audience differs from the MCP token so neither replays as the other.
 type DNS01TokenRoutes struct {
 	environments EnvironmentRepository
 	tenants      ConfigTenantRepository
-	// signer is nil when no backend MCP signing key is configured; the handler
-	// then reports 501 rather than minting an unverifiable token.
+	// nil signer makes the handler report 501.
 	signer *mcptoken.Signer
 }
 
@@ -36,8 +32,7 @@ func (r DNS01TokenRoutes) mintDNS01Token(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	ctx := req.Context()
-	// Both reads are row-level-security scoped to the caller's tenant, so the
-	// endpoint can only mint for the caller's own environment.
+	// RLS-scoped, so only the caller's own environment can be minted for.
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)

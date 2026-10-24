@@ -26,11 +26,7 @@ func IsReported(err error) bool {
 	return errors.As(err, &reported)
 }
 
-// exitCodeError carries the process exit code a failure should produce. Most
-// failures are just "it did not work" and exit 1; a few carry an outcome a
-// caller has to branch on — a bounded wait elapsing is not the same event as the
-// work failing — and collapsing those onto one code is what makes a shell caller
-// guess.
+// exitCodeError carries a non-default exit code for outcomes callers must branch on.
 type exitCodeError struct {
 	err  error
 	code int

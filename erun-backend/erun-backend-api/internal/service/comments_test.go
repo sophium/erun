@@ -35,8 +35,6 @@ func withTestSecurity(ctx context.Context) context.Context {
 	return security.WithContext(ctx, security.Context{TenantID: "tenant-1", ErunUserID: "user-1"})
 }
 
-// TestPrepareCreateRefusesAMalformedCommitID: the 40-lowercase-hex-character
-// grammar collaboration/comments.md documents as INVALID_COMMIT_ID.
 func TestPrepareCreateRefusesAMalformedCommitID(t *testing.T) {
 	svc := NewCommentService(&fakeCommentRepo{})
 	_, err := svc.PrepareCreate(withTestSecurity(context.Background()), model.Comment{CommitID: "not-a-commit"})
@@ -50,8 +48,6 @@ func TestPrepareCreateRefusesAMalformedCommitID(t *testing.T) {
 	}
 }
 
-// TestPrepareCreateAcceptsAWellFormedCommitID is the companion positive case:
-// the validation must not reject the exact grammar it documents.
 func TestPrepareCreateAcceptsAWellFormedCommitID(t *testing.T) {
 	svc := NewCommentService(&fakeCommentRepo{})
 	comment, err := svc.PrepareCreate(withTestSecurity(context.Background()), model.Comment{
@@ -65,8 +61,6 @@ func TestPrepareCreateAcceptsAWellFormedCommitID(t *testing.T) {
 	}
 }
 
-// TestUpdateStatusRefusesClosingAnAlreadyClosedThread: comments.md documents
-// ALREADY_CLOSED as a 409, distinct from every other UpdateStatus failure.
 func TestUpdateStatusRefusesClosingAnAlreadyClosedThread(t *testing.T) {
 	repo := &fakeCommentRepo{comments: map[string]model.Comment{
 		"c1": {CommentID: "c1", Status: model.CommentStatusClosed},
@@ -84,8 +78,6 @@ func TestUpdateStatusRefusesClosingAnAlreadyClosedThread(t *testing.T) {
 	}
 }
 
-// TestUpdateStatusAllowsReopeningAClosedThread: only closing an
-// already-closed thread is refused — reopening it is a normal transition.
 func TestUpdateStatusAllowsReopeningAClosedThread(t *testing.T) {
 	repo := &fakeCommentRepo{comments: map[string]model.Comment{
 		"c1": {CommentID: "c1", Status: model.CommentStatusClosed},

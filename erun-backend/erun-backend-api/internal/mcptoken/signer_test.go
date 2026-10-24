@@ -14,11 +14,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// TestSignerMintsPerEnvToken proves a minted token carries the claims the
-// deployed edge enforces (the fixed in-pod file:// issuer, the per-env
-// audience, the ERun-user sub, a bounded lifetime) and that its signature
-// verifies against the backend's public key — the key the deploy injects at
-// the issuer's path so the edge accepts it with no live IdP.
 func TestSignerMintsPerEnvToken(t *testing.T) {
 	privatePEM, publicPEM, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
@@ -48,9 +43,6 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 	}
 }
 
-// assertEnforcedClaims checks every claim the deployed edge enforces on a minted
-// token: the fixed in-pod file:// issuer, the per-env audience, the ERun-user
-// sub, and a bounded lifetime.
 func assertEnforcedClaims(t *testing.T, claims mcpauth.MCPTokenClaims, audience string, now time.Time) {
 	t.Helper()
 	if claims.Issuer != mcpauth.DesktopMCPIssuer() {

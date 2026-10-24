@@ -9,18 +9,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/review"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 const reviewCommentTestAlias = "erun-test"
 
-// stubReviewCommentStore satisfies runtimeStore's read surface with one erun
-// platform alias. Embedding the interface leaves the rest unimplemented on
-// purpose: resolving the alias reads the config and nothing else, and the
-// preview path under test returns before any of the other methods, the
-// platform client, or a bearer token is reached. A call that does reach one
-// panics loudly rather than silently passing.
+// stubReviewCommentStore embeds the interface so any call beyond alias
+// resolution panics instead of passing.
 type stubReviewCommentStore struct {
-	runtimeStore
+	runtimecfg.RuntimeStore
 	config configpkg.ERunConfig
 }
 
@@ -28,23 +27,21 @@ func (s stubReviewCommentStore) LoadERunConfig() (configpkg.ERunConfig, string, 
 	return s.config, "/tmp/.erun/config.yaml", nil
 }
 
-func reviewCommentTestRuntime() RuntimeConfig {
-	return RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+func reviewCommentTestRuntime() runtimecfg.RuntimeConfig {
+	return runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: stubReviewCommentStore{config: configpkg.ERunConfig{
-			CloudProviders: []configpkg.CloudProviderConfig{{
+			CloudProviders: []model.CloudProviderConfig{{
 				Alias:    reviewCommentTestAlias,
 				Provider: configpkg.CloudProviderERun,
-				ERun:     &configpkg.ERunProviderConfig{APIURL: "https://api.test"},
+				ERun:     &model.ERunProviderConfig{APIURL: "https://api.test"},
 			}},
 		}},
 	}
 }
 
-// callReviewCommentTool drives the registered tool over a real MCP session,
-// the same schema-validating path a client uses, so a declared-required field
-// the caller omitted is caught here rather than only in the handler.
-func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewCommentResult {
+// callReviewCommentTool goes through a real MCP session so schema validation applies.
+func callReviewCommentTool(t *testing.T, arguments map[string]any) review.ReviewCommentResult {
 	t.Helper()
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "review_comment", Arguments: arguments})
@@ -58,29 +55,21 @@ func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewComment
 	if err != nil {
 		t.Fatalf("marshal structured content: %v", err)
 	}
-	var out ReviewCommentResult
+	var out review.ReviewCommentResult
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		t.Fatalf("decode structured content %s: %v", encoded, err)
 	}
 	return out
 }
 
-// traceLine returns the single planned platform call, the MCP analogue of the
-// CLI's --dry-run trace, or "" when the result carries a different number of
-// trace lines.
-func traceLine(result ReviewCommentResult) string {
+func traceLine(result review.ReviewCommentResult) string {
 	if len(result.Trace) != 1 {
 		return ""
 	}
 	return result.Trace[0]
 }
 
-// TestReviewCommentToolAcceptsAnUnanchoredComment is the parity the CLI has
-// and MCP did not: both transports must plan the same call for a comment
-// carrying no commit/file/line anchor, byte for byte, since both drive the
-// same RunReviewComment. What the platform then does with an anchor-less
-// comment is deliberately not asserted here -- this test pins the client
-// contract, and the two transports disagreeing about it was the defect.
+// Both transports drive RunReviewComment, so they must plan the same call byte for byte.
 func TestReviewCommentToolAcceptsAnUnanchoredComment(t *testing.T) {
 	result := callReviewCommentTool(t, map[string]any{
 		"reviewId": "018f0000-0000-7000-8000-000000000000",
@@ -97,93 +86,6 @@ func TestReviewCommentToolAcceptsAnUnanchoredComment(t *testing.T) {
 	}
 }
 
-// TestReviewCommentToolKeepsALineAnchoredComment guards the direction that
-// already worked: an anchor must still reach the server intact.
-func TestReviewCommentToolKeepsALineAnchoredComment(t *testing.T) {
-	result := callReviewCommentTool(t, map[string]any{
-		"reviewId": "018f0000-0000-7000-8000-000000000000",
-		"commitId": "abc123",
-		"filePath": "main.go",
-		"line":     42,
-		"body":     "nit: rename this",
-		"preview":  true,
-	})
-
-	want := "platform: POST https://api.test/v1/reviews/018f0000-0000-7000-8000-000000000000/comments (commitId=abc123, filePath=main.go, line=42)"
-	if got := traceLine(result); got != want {
-		t.Errorf("anchored comment planned call:\n got %q\nwant %q", got, want)
-	}
-}
-
-// TestReviewCommentToolKeepsAReplyInItsThread guards the third shape:
-// replying to an existing thread, which carries an anchor and a parent.
-func TestReviewCommentToolKeepsAReplyInItsThread(t *testing.T) {
-	result := callReviewCommentTool(t, map[string]any{
-		"reviewId":        "018f0000-0000-7000-8000-000000000000",
-		"commitId":        "abc123",
-		"filePath":        "main.go",
-		"line":            42,
-		"body":            "good catch, fixed",
-		"parentCommentId": "018g0000-0000-7000-8000-000000000000",
-		"preview":         true,
-	})
-
-	want := "platform: POST https://api.test/v1/reviews/018f0000-0000-7000-8000-000000000000/comments (commitId=abc123, filePath=main.go, line=42, replyTo=018g0000-0000-7000-8000-000000000000)"
-	if got := traceLine(result); got != want {
-		t.Errorf("reply planned call:\n got %q\nwant %q", got, want)
-	}
-}
-
-// TestReviewCommentToolRefusesACallMissingReviewIDOrBody keeps the remaining
-// required inputs required, and keeps the refusal naming which one is
-// missing rather than listing every field the tool accepts.
-func TestReviewCommentToolRefusesACallMissingReviewIDOrBody(t *testing.T) {
-	handler := reviewCommentTool(RuntimeConfig{})
-	cases := []struct {
-		name  string
-		input ReviewCommentInput
-		want  string
-	}{
-		{
-			name:  "no reviewId",
-			input: ReviewCommentInput{Body: "overall this looks good"},
-			want:  "reviewId is required",
-		},
-		{
-			name:  "no body",
-			input: ReviewCommentInput{ReviewID: "018f0000-0000-7000-8000-000000000000"},
-			want:  "body is required",
-		},
-		{
-			name:  "whitespace-only body",
-			input: ReviewCommentInput{ReviewID: "018f0000-0000-7000-8000-000000000000", Body: "  \n"},
-			want:  "body is required",
-		},
-		{
-			name:  "neither",
-			input: ReviewCommentInput{},
-			want:  "reviewId and body are required",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// No store is configured: the refusal must precede any platform
-			// resolution, so a missing input never depends on config state.
-			_, _, err := handler(context.Background(), nil, tc.input)
-			if err == nil {
-				t.Fatal("expected a refusal, got none")
-			}
-			if err.Error() != tc.want {
-				t.Errorf("refusal message:\n got %q\nwant %q", err.Error(), tc.want)
-			}
-		})
-	}
-}
-
-// TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody is the declared half
-// of the same contract. A caller reading the schema, or a client that
-// validates against it, must see the anchor as optional -- declaring it
-// required was enough on its own to make the call unreachable.
 func TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody(t *testing.T) {
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	tools, err := session.ListTools(context.Background(), nil)

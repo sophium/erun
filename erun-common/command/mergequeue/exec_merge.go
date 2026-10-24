@@ -7,37 +7,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// MergeWorkingTreeBranchParams names the branch to bring into the working
-// tree's current branch. Comments anchor to commitId + filePath + line, so a
-// rewrite (rebase) would orphan every thread on a review; this always merges.
-type MergeWorkingTreeBranchParams struct {
-	// TargetBranch is the branch to merge in, resolved against Remote (e.g.
-	// TargetBranch "main" with the default Remote merges "origin/main").
-	TargetBranch string
-	// Remote is the git remote TargetBranch is fetched from. Empty defaults to
-	// "origin".
-	Remote string
-}
-
-// MergeWorkingTreeBranchResult is what actually landed.
-type MergeWorkingTreeBranchResult struct {
-	Branch       string `json:"branch"`
-	TargetBranch string `json:"targetBranch"`
-	Remote       string `json:"remote"`
-	Commit       string `json:"commit"`
-}
-
-// MergeConflictError reports a merge that left the working tree mid-conflict
-// — a distinct, named outcome rather than a generic failure, since the
-// worktree is left half-merged and the caller (an operator or an agent) must
-// resolve the conflicted files and commit, or run `git merge --abort`,
-// before doing anything else with it. A conflict confined to atlas.sum never
-// reaches this: resolveAtlasSumConflicts regenerates and stages it and the
-// merge completes, so only the files that could not be resolved that way are
-// reported here.
+// MergeConflictError reports a merge left mid-conflict for the caller to resolve or abort.
 type MergeConflictError struct {
 	TargetBranch    string
 	ConflictedFiles []string
@@ -50,16 +25,13 @@ func (e *MergeConflictError) Error() string {
 	)
 }
 
-// MergeWorkingTreeBranchDependencies lets tests replace the git plumbing
-// without a real remote, mirroring PushWorkingTreeBranchDependencies.
+// MergeWorkingTreeBranchDependencies lets tests replace the git plumbing.
 type MergeWorkingTreeBranchDependencies struct {
-	CurrentBranch   gitx.GitValueResolverFunc
-	CurrentCommit   gitx.GitValueResolverFunc
-	RunGit          gitx.GitCommandRunnerFunc
-	ConflictedFiles func(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error)
-	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
-	// for a human to resolve. See resolveAtlasSumConflicts.
-	RunAtlasHash AtlasMigrateHashRunnerFunc
+	CurrentBranch   seam.GitValueResolverFunc
+	CurrentCommit   seam.GitValueResolverFunc
+	RunGit          seam.GitCommandRunnerFunc
+	ConflictedFiles func(root string, runGit seam.GitCommandRunnerFunc) ([]string, error)
+	RunAtlasHash    AtlasMigrateHashRunnerFunc
 }
 
 func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDependencies) MergeWorkingTreeBranchDependencies {
@@ -81,19 +53,12 @@ func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDepe
 	return deps
 }
 
-// MergeWorkingTreeBranch fetches Remote/TargetBranch and merges it into the
-// working tree's current branch with an explicit merge commit — never a
-// rebase. A conflicted merge is reported as *MergeConflictError, distinct
-// from any other failure, and the worktree is left exactly as git left it
-// (mid-merge) for the caller to resolve or abort; nothing here cleans that up
-// automatically. The one conflict that is not reported is one confined to
-// atlas.sum: resolveAtlasSumConflicts regenerates and stages it from the
-// migration files already on disk, the merge commit is completed, and the
-// merge lands like a clean one.
-func MergeWorkingTreeBranch(ctx core.Context, root string, params MergeWorkingTreeBranchParams, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
+// MergeWorkingTreeBranch fetches and merges Remote/TargetBranch with a merge commit. A conflict
+// is left in place as *MergeConflictError, except one confined to atlas.sum, which is regenerated.
+func MergeWorkingTreeBranch(ctx core.Context, root string, params model.MergeWorkingTreeBranchParams, deps MergeWorkingTreeBranchDependencies) (model.MergeWorkingTreeBranchResult, error) {
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("target branch is required")
+		return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("target branch is required")
 	}
 	remote := strings.TrimSpace(params.Remote)
 	if remote == "" {
@@ -103,66 +68,60 @@ func MergeWorkingTreeBranch(ctx core.Context, root string, params MergeWorkingTr
 
 	current, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve current branch: %w", err)
+		return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve current branch: %w", err)
 	}
 
 	remoteRef := remote + "/" + target
 	ctx.TraceCommand(root, "git", "fetch", remote, target)
 	ctx.TraceCommand(root, "git", "merge", "--no-edit", remoteRef)
 	if ctx.DryRun {
-		return MergeWorkingTreeBranchResult{Branch: current, TargetBranch: target, Remote: remote}, nil
+		return model.MergeWorkingTreeBranchResult{Branch: current, TargetBranch: target, Remote: remote}, nil
 	}
 
 	return fetchAndMergeWorkingTree(ctx, root, target, remote, remoteRef, deps)
 }
 
-// fetchAndMergeWorkingTree runs the mutating half of MergeWorkingTreeBranch,
-// isolated so the validation and dry-run branching above it don't inflate
-// that function's complexity.
-func fetchAndMergeWorkingTree(ctx core.Context, root, target, remote, remoteRef string, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
+func fetchAndMergeWorkingTree(ctx core.Context, root, target, remote, remoteRef string, deps MergeWorkingTreeBranchDependencies) (model.MergeWorkingTreeBranchResult, error) {
 	var fetchStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &fetchStderr, "fetch", remote, target); err != nil {
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(fetchStderr.String()))
+		return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(fetchStderr.String()))
 	}
 
 	var mergeStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &mergeStderr, "merge", "--no-edit", remoteRef); err != nil {
 		conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
 		if conflictErr != nil || len(conflicted) == 0 {
-			return MergeWorkingTreeBranchResult{}, fmt.Errorf("git merge: %w: %s", err, strings.TrimSpace(mergeStderr.String()))
+			return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("git merge: %w: %s", err, strings.TrimSpace(mergeStderr.String()))
 		}
 		remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
 		if resolveErr != nil {
-			return MergeWorkingTreeBranchResult{}, fmt.Errorf("regenerate conflicted atlas.sum: %w", resolveErr)
+			return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("regenerate conflicted atlas.sum: %w", resolveErr)
 		}
 		if len(remaining) > 0 {
-			return MergeWorkingTreeBranchResult{}, &MergeConflictError{TargetBranch: target, ConflictedFiles: remaining}
+			return model.MergeWorkingTreeBranchResult{}, &MergeConflictError{TargetBranch: target, ConflictedFiles: remaining}
 		}
-		// Every conflict was an atlas.sum this regenerated and staged —
-		// finish the merge commit `git merge` left pending.
+		// Every conflict was a regenerated atlas.sum; finish the pending merge commit.
 		var commitStderr bytes.Buffer
 		if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "--no-edit"); err != nil {
-			return MergeWorkingTreeBranchResult{}, fmt.Errorf("git commit --no-edit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
+			return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("git commit --no-edit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
 		}
 	}
 
 	commit, err := deps.CurrentCommit(ctx, root)
 	if err != nil {
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve merged commit: %w", err)
+		return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve merged commit: %w", err)
 	}
 	landedBranch, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve merged branch: %w", err)
+		return model.MergeWorkingTreeBranchResult{}, fmt.Errorf("resolve merged branch: %w", err)
 	}
 
-	return MergeWorkingTreeBranchResult{Branch: landedBranch, TargetBranch: target, Remote: remote, Commit: commit}, nil
+	return model.MergeWorkingTreeBranchResult{Branch: landedBranch, TargetBranch: target, Remote: remote, Commit: commit}, nil
 }
 
-// gitMergeConflictedFiles lists the paths a failed merge left conflicted, so
-// MergeWorkingTreeBranch can tell a real conflict apart from any other merge
-// failure (a bad ref, a network error) by what git actually left behind
-// rather than by guessing from exit codes or stderr text.
-func gitMergeConflictedFiles(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error) {
+// gitMergeConflictedFiles distinguishes a real conflict from other merge failures by what
+// git left behind.
+func gitMergeConflictedFiles(root string, runGit seam.GitCommandRunnerFunc) ([]string, error) {
 	var stdout, stderr bytes.Buffer
 	if err := runGit(root, &stdout, &stderr, "diff", "--name-only", "--diff-filter=U"); err != nil {
 		return nil, fmt.Errorf("git diff --diff-filter=U: %w: %s", err, strings.TrimSpace(stderr.String()))

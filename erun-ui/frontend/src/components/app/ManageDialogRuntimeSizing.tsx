@@ -12,23 +12,11 @@ import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeSizingAction, UIRuntimeSizingRecommendation } from '@/uiRuntimeTypes';
 
-// The reader reports both "nothing to recommend yet" and "could not read the
-// recommendation" as available=false with Message set
-// (erun-ui/runtime_sizing.go), so the panel cannot tell them apart by shape.
-// The reader's own copy for the empty state is what separates a benign "no
-// recommendation yet" from a failed read, and only the latter is a failure:
-// the empty state keeps plain status text while a failed read renders like
-// every other Runtime-tab panel's.
+// The reader reports empty and failed both as available=false; only this copy tells them apart.
 const SIZING_EMPTY_STATE =
   'No standing sizing recommendation is available for this environment yet.';
 
-// RuntimeSizingField turns the environment's own standing sizing
-// recommendation into a one-click action (erun#1320): applying it is
-// `erun resize --apply-recommendation`, run inside the pod, so the operator
-// never retypes the numbers this panel already shows. A resize rolls the
-// pod, so it is refused while another worker holds the environment — that
-// refusal names the holder and requires a deliberate second click
-// ("Resize anyway") to override, never an implicit retry.
+// RuntimeSizingField applies the standing recommendation; a lease-held refusal needs an explicit "Resize anyway".
 export function RuntimeSizingField({
   selection,
   disabled,
@@ -47,10 +35,7 @@ export function RuntimeSizingField({
       .unwrap()
       .catch((error: unknown) => {
         const message = readError(error);
-        // Stable wording from RuntimeResizeOccupancyError.Error()
-        // (erun-common/runtime_resize.go) -- matched here only to decide
-        // whether the explicit override affordance renders, never to
-        // reinterpret or hide the error itself.
+        // Matches RuntimeResizeOccupancyError's wording only to decide whether to offer the override.
         setHeldByOther(message.includes('pass the override') ? message : null);
       });
   };
@@ -96,9 +81,6 @@ export function RuntimeSizingField({
   );
 }
 
-// Split out so the two failure presentations (a plain error, or the
-// lease-held refusal with its explicit override affordance) don't add to
-// RuntimeSizingField's own branching budget.
 function RuntimeSizingResizeOutcome({
   isError,
   error,
@@ -120,10 +102,7 @@ function RuntimeSizingResizeOutcome({
           role="alert"
         >
           <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
-          {/* `heldByOther` names the caller holding the sizing, and a holder
-              is an identifier that can be long and unbreakable; without the
-              wrap the flex row grows past the dialog instead of the name
-              breaking inside it. */}
+          {/* The holder name can be long and unbreakable. */}
           <span className="min-w-0">{heldByOther}</span>
         </p>
         <Button
@@ -145,15 +124,10 @@ function RuntimeSizingResizeOutcome({
   return null;
 }
 
-// A recommendation is worth acting on only when it is available, resolves to
-// a real change (not a no-op), and actually names at least one action.
 function runtimeSizingHasActions(data: UIRuntimeSizingRecommendation | undefined): boolean {
   return data?.available === true && data.noOp !== true && (data.actions?.length ?? 0) > 0;
 }
 
-// Owns the "what to show below the header" decision (loading, no
-// recommendation, no-op, or the action list) so RuntimeSizingField's own
-// complexity stays within budget.
 function RuntimeSizingRecommendationBody({
   loading,
   data,
@@ -211,14 +185,7 @@ function RuntimeSizingActions({
   );
 }
 
-// RuntimeSizingEvidence answers the question a bare verdict cannot: what was
-// measured, over what window, and why it leads to this recommendation. Shown
-// under the summary for every state a standing recommendation can resolve to
-// -- including "Already sized as recommended", which otherwise reads as a
-// dead end an operator cannot audit or argue with (see the "no dead ends"
-// rule in root AGENTS.md). Rendered inline rather than behind a
-// tooltip/popover since this is exactly the diagnostic detail the operator
-// came to this panel to see, not a supplemental aside.
+// RuntimeSizingEvidence shows what was measured and why, so no verdict is a dead end.
 function RuntimeSizingEvidence({
   verdicts,
   evidence,

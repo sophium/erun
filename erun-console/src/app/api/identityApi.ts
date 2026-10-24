@@ -1,21 +1,10 @@
-// RTK Query endpoints for /v1/identity/* (issue #1209): the console's
-// IdP-identity administration surface. The backend drives Zitadel's
-// Management API with an org-owner PAT that never reaches the browser — the
-// console only ever talks to erun-backend-api, same as every other write in
-// this app.
+// RTK Query endpoints for /v1/identity/*; the backend holds the IdP PAT, never the browser.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { type NoValue, platformApi } from './platformApi';
 
-// An identity in the platform's IdP. State mirrors Zitadel's own
-// USER_STATE_* values (e.g. USER_STATE_ACTIVE, USER_STATE_INACTIVE,
-// USER_STATE_INITIAL — the last one for an invite that hasn't been completed
-// yet), kept as a string for forward compatibility.
-//
-// This list is the IdP org's own membership, not erun's: enrolled is false
-// for a self-registered or otherwise unmapped account that exists in the
-// IdP but cannot use erun, and isMachine marks the platform's own service
-// identities (login-client, admin-sa) rather than a person.
+// An identity in the IdP org (not erun's membership). state mirrors Zitadel's
+// USER_STATE_* as a string; isMachine marks platform service identities.
 export interface IdentityUser {
   id: string;
   username: string;
@@ -26,10 +15,7 @@ export interface IdentityUser {
   isMachine: boolean;
   enrolled: boolean;
   erunUserId?: string;
-  // erunUsername is the enrolled erun user's own username (erun-backend-api's
-  // identity.go identityUserView) -- an independent string from `username`
-  // above (the IdP's own username), chosen at enrolment rather than mirrored
-  // from the IdP. Undefined whenever enrolled is false.
+  // Chosen at enrolment, independent of the IdP username; undefined unless enrolled.
   erunUsername?: string;
 }
 
@@ -63,10 +49,7 @@ function parseIdentityUserList(value: unknown): IdentityUser[] {
   return value.filter(isRecord).map(parseIdentityUser);
 }
 
-// orgId targets another Zitadel organization instead of the platform's own
-// — the identity boundary another tenant resolves by (erun-backend-api's
-// enrollIdentityUserRequest.OrgID). Omitting it keeps today's behavior: the
-// identity lands in the platform's own org.
+// orgId targets another Zitadel org; omitted, the identity lands in the platform's own.
 export interface EnrollIdentityUserInput {
   username: string;
   email: string;
@@ -75,24 +58,13 @@ export interface EnrollIdentityUserInput {
   orgId?: string;
 }
 
-// An enrolled erun user's minimal identity, distinct from IdentityUser (the
-// IdP side of the same enrollment).
 export interface ErunUserRef {
   userId: string;
   username: string;
 }
 
-// EnrollIdentityUserResult always carries idpUser once the IdP half of
-// enrollment succeeded. erunUser is absent and error is set when the
-// erun-side mapping failed after the IdP identity was created — see
-// service.IdentityService.Enroll on the backend for why that half-landed
-// state is reported rather than swallowed.
-//
-// mailDeliveryConfigured/temporaryPassword/warning report which of the two
-// enrollment paths the backend actually took: with mail configured, the IdP
-// emails the invite itself; without it, the backend mints temporaryPassword
-// once instead so the account is usable immediately rather than stuck
-// waiting on an email that can never arrive.
+// erunUser is absent and error set when the IdP identity was created but the erun
+// mapping failed. Without mail configured the backend returns a one-time temporaryPassword.
 export interface EnrollIdentityUserResult {
   idpUser: IdentityUser;
   erunUser?: ErunUserRef;
@@ -120,9 +92,7 @@ function parseEnrollResult(raw: unknown): EnrollIdentityUserResult {
   };
 }
 
-// The org settings an operator actually changes. verifiedDomains is
-// read-only here — verifying a domain is a DNS/HTTP challenge flow this
-// surface does not drive.
+// verifiedDomains is read-only; domain verification is not driven here.
 export interface OrgSettings {
   forceMfa: boolean;
   allowRegister: boolean;
@@ -152,8 +122,6 @@ function parseOrgSettings(raw: unknown): OrgSettings {
   };
 }
 
-// UpdateOrgSettingsInput carries only the fields the operator wants to
-// change; every other field is left at its current value server-side.
 export interface UpdateOrgSettingsInput {
   forceMfa?: boolean;
   allowRegister?: boolean;
@@ -164,9 +132,7 @@ export interface UpdateOrgSettingsInput {
   passwordRequiresSymbol?: boolean;
 }
 
-// The platform's outbound-mail configuration. Password is never part of the
-// read shape — Zitadel does not return it, and this contract only ever
-// writes it.
+// Password is write-only: Zitadel never returns it.
 export interface SmtpConfig {
   host: string;
   username: string;
@@ -176,9 +142,6 @@ export interface SmtpConfig {
   tls: boolean;
 }
 
-// The platform's honest answer to "can this instance send mail at all".
-// configured: false means no active config exists yet — the default for a
-// freshly deployed platform.
 export interface SmtpStatus {
   configured: boolean;
   config: SmtpConfig;
@@ -205,10 +168,7 @@ function parseSmtpStatus(raw: unknown): SmtpStatus {
   return { configured: asBoolean(raw.configured), config: parseSmtpConfig(raw.config) };
 }
 
-// UpdateSmtpSettingsInput is the declarative desired state the operator
-// submits. password is omitted on an update that only changes non-secret
-// fields — the backend leaves Zitadel's stored password untouched — and is
-// required only the first time a config is created.
+// password is omitted to keep the stored one; required only when first creating the config.
 export interface UpdateSmtpSettingsInput {
   host: string;
   username?: string;
@@ -219,11 +179,8 @@ export interface UpdateSmtpSettingsInput {
   tls: boolean;
 }
 
-// An invite is a server-side record (#1483), not a self-contained signed
-// token — revocable and listable up until it is accepted. token is the
-// invite link's credential: the console builds the actual accept URL from
-// it locally, since the backend has no reliable notion of its own public
-// console origin.
+// token is the invite credential; the console builds the accept URL locally because
+// the backend does not know its public console origin.
 export interface Invite {
   inviteId: string;
   tenantId: string;
@@ -251,17 +208,13 @@ function parseInviteList(value: unknown): Invite[] {
   return value.filter(isRecord).map(parseInvite);
 }
 
-// CreateInviteInput's tenantId targets a tenant other than the caller's own
-// — honored only for an operations-scoped caller, mirroring the backend's
-// own cross-tenant enrollment convention.
+// tenantId is honored only for an operations-scoped caller.
 export interface CreateInviteInput {
   email?: string;
   tenantId?: string;
 }
 
-// AcceptInviteInput is what an invitee themselves supplies. There is no
-// bearer token for this call — the invite token in the body is the
-// credential — so acceptInvite below passes no token to httpBaseQuery.
+// No bearer token: the invite token in the body is the credential.
 export interface AcceptInviteInput {
   token: string;
   username: string;
@@ -294,13 +247,8 @@ function parseAcceptInviteResult(raw: unknown): AcceptInviteResult {
 
 export const identityApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // orgId picks which Zitadel org's identities to list; tenantId picks
-    // which tenant's erun users they are cross-referenced against for
-    // Enrolled/erunUserId (erun-backend-api's identity.go listUsers) --
-    // independent knobs, both required to administer another tenant's
-    // Users view honestly rather than rendering its own org against the
-    // caller's own membership. Omitting both keeps today's behaviour: the
-    // caller's own org and tenant.
+    // orgId picks the IdP org; tenantId picks the tenant whose erun users are cross-referenced.
+    // Both are needed to administer another tenant.
     listIdentityUsers: builder.query<
       IdentityUser[],
       { token: string; orgId?: string; tenantId?: string }
@@ -324,10 +272,7 @@ export const identityApi = platformApi.injectEndpoints({
       providesTags: ['IdentityUsers'],
     }),
 
-    // createIdentityUser enrolls a new IdP identity and its erun user mapping
-    // as one action. Resolves (does not error) even when only the IdP half
-    // landed, so the caller can render the partial-success result.error
-    // rather than an opaque failure.
+    // Resolves even when only the IdP half landed, so the caller can render result.error.
     createIdentityUser: builder.mutation<
       EnrollIdentityUserResult,
       { token: string; input: EnrollIdentityUserInput }
@@ -343,10 +288,7 @@ export const identityApi = platformApi.injectEndpoints({
       invalidatesTags: ['IdentityUsers'],
     }),
 
-    // orgId reaches the same tenant's org the scoped list read used, so a
-    // scoped Deactivate/Reactivate acts on the target tenant's own credential
-    // rather than the one living in the caller's own org -- silently acting
-    // on the wrong account would be worse than the stale read this fixes.
+    // orgId must match the scoped list read so the target tenant's account is the one changed.
     setIdentityUserActive: builder.mutation<
       NoValue,
       { token: string; externalId: string; active: boolean; orgId?: string }
@@ -362,16 +304,12 @@ export const identityApi = platformApi.injectEndpoints({
       invalidatesTags: ['IdentityUsers'],
     }),
 
-    // getOrgSettings reads the platform IdP org's current login and password
-    // policy, and its verified domains.
     getOrgSettings: builder.query<OrgSettings, string>({
       query: (token) => ({ url: '/v1/identity/org-settings', token, label: 'get org settings' }),
       transformResponse: parseOrgSettings,
       providesTags: ['OrgSettings'],
     }),
 
-    // updateOrgSettings applies input and returns the org's full settings
-    // after the update.
     updateOrgSettings: builder.mutation<
       OrgSettings,
       { token: string; input: UpdateOrgSettingsInput }
@@ -387,16 +325,12 @@ export const identityApi = platformApi.injectEndpoints({
       invalidatesTags: ['OrgSettings'],
     }),
 
-    // getSmtpSettings reads the platform's active outbound-mail
-    // configuration — configured: false, not an error, when none exists yet.
     getSmtpSettings: builder.query<SmtpStatus, string>({
       query: (token) => ({ url: '/v1/identity/smtp-settings', token, label: 'get smtp settings' }),
       transformResponse: parseSmtpStatus,
       providesTags: ['SmtpSettings'],
     }),
 
-    // updateSmtpSettings converges the configuration to input and returns
-    // the resulting status, same shape as the GET above.
     updateSmtpSettings: builder.mutation<
       SmtpStatus,
       { token: string; input: UpdateSmtpSettingsInput }
@@ -414,14 +348,9 @@ export const identityApi = platformApi.injectEndpoints({
   }),
 });
 
-// A separate injectEndpoints call (rather than one giant endpoints object)
-// keeps each builder function under the module's max-lines-per-function
-// budget; both sets still share platformApi's one cache, tag namespace, and
-// reducer slot.
+// Split from identityApi to stay under the max-lines-per-function budget.
 export const inviteApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // listInvites returns the resolved tenant's outstanding (unconsumed)
-    // invites — the ones an operator can still hand out or revoke.
     listInvites: builder.query<Invite[], string>({
       query: (token) => ({ url: '/v1/invites', token, label: 'list invites' }),
       transformResponse: parseInviteList,
@@ -450,9 +379,7 @@ export const inviteApi = platformApi.injectEndpoints({
       invalidatesTags: ['Invites'],
     }),
 
-    // acceptInvite is the one endpoint in this module with no bearer token
-    // at all: the invitee has none yet, and the invite token in the body is
-    // the credential that authorizes this call.
+    // No bearer token: the invite token in the body is the credential.
     acceptInvite: builder.mutation<AcceptInviteResult, AcceptInviteInput>({
       query: (input) => ({
         url: '/v1/invites/accept',

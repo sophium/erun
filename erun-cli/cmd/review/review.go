@@ -5,26 +5,19 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
-// NewReviewCmd builds `erun review`, the CLI's client for the erun platform's
-// collaboration API (erun-backend-api's reviews/comments/builds/merge-queue
-// routes), authenticating with the `erun`-type cloud alias `erun cloud init
-// erun` / `erun cloud login` set up. It is the client the collaboration
-// surface has always been missing (#1199): before this, the only way to
-// start a review, comment on one, or advance the merge queue from a terminal
-// or an agent was a hand-written HTTP request.
+// NewReviewCmd builds `erun review`, the client for the platform's collaboration API.
 func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
-	cmd := shared.NewCommandGroup(
+	cmd := clicmd.NewCommandGroup(
 		"review",
 		"Review code changes on the erun platform",
 		newReviewListCmd(store, &alias, deps),
@@ -45,7 +38,7 @@ func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *co
 }
 
 func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params reviewpkg.ReviewListParams
+	var params model.ReviewListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List reviews on the erun platform",
@@ -64,7 +57,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			"  erun review list --target-branch main\n" +
 			"  erun review list --repository git@github.com:org/repo.git --status READY",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			reviews, err := reviewpkg.RunReviewList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -73,7 +66,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewList(ctx, reviews); err != nil {
 					return err
 				}
@@ -89,11 +82,11 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	cmd.Flags().StringVar(&params.ReviewerUserID, "reviewer-user-id", "", "Filter by reviewer user id")
 	cmd.Flags().BoolVar(&params.Mine, "mine", false, "Show only reviews you authored")
 	cmd.Flags().BoolVar(&params.WaitingOnMe, "waiting-on-me", false, "Show only reviews you are a reviewer on")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) error {
+func writeReviewList(ctx core.Context, reviews []model.PlatformReview) error {
 	if len(reviews) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no reviews")
 		return err
@@ -106,14 +99,9 @@ func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) 
 	return nil
 }
 
-// writeReviewLine renders one review. The repository is named on every line
-// because a review's source/target pair does not tell two repositories a
-// tenant serves apart, and a listing that renders them identically is how
-// another tenant's -- or another repository's -- queue read as this one's.
-// A review created before the platform recorded a repository says so rather
-// than printing nothing, which would read as an empty value rather than an
-// absent identity.
-func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) error {
+// writeReviewLine renders one review. The repository is always named so queues of
+// different repositories cannot read as the same one.
+func writeReviewLine(ctx core.Context, review model.PlatformReview) error {
 	repository := review.Repository
 	if strings.TrimSpace(repository) == "" {
 		repository = "(no repository recorded)"
@@ -124,14 +112,9 @@ func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) err
 	return err
 }
 
-// reviewIssueSuffix renders the review's issue link and its provenance, or an
-// empty string when it is linked to none.
-//
-// The provenance is not decoration: a reference parsed out of a branch name is
-// a guess that the branch was named honestly, and printing it the way a
-// declared one prints would tell an operator the author had recorded an issue
-// they never mentioned. Both are shown, told apart.
-func reviewIssueSuffix(review platformclient.PlatformReview) string {
+// reviewIssueSuffix renders the review's issue link with its provenance; an issue
+// parsed from a branch name is a guess and must not print like a declared one.
+func reviewIssueSuffix(review model.PlatformReview) string {
 	if strings.TrimSpace(review.IssueRef) == "" {
 		return ""
 	}
@@ -149,7 +132,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			detail, err := reviewpkg.RunReviewShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -158,7 +141,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review show planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewDetail(ctx, detail); err != nil {
 					return err
 				}
@@ -166,11 +149,11 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			return ctx.WriteResult(detail)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
+func writeReviewDetail(ctx core.Context, detail model.ReviewDetail) error {
 	if err := writeReviewLine(ctx, detail.Review); err != nil {
 		return err
 	}
@@ -185,10 +168,8 @@ func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
 	return nil
 }
 
-// writeReviewCommentLine renders one comment. A thread's status lives on its
-// root comment only (a reply's own status is never separately settable), so
-// only root lines carry status=.
-func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformComment) error {
+// writeReviewCommentLine renders one comment. Thread status lives on root comments only.
+func writeReviewCommentLine(ctx core.Context, comment model.PlatformComment) error {
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)
 		return err
@@ -198,7 +179,7 @@ func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformCom
 }
 
 func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateReviewParams
+	var params model.PlatformCreateReviewParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Open a review on the erun platform",
@@ -223,7 +204,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 			"  erun review create --name \"Add widget\" --issue sophium/erun#2212 --source-branch feature/add-widget --target-branch main\n" +
 			"  erun review create --name \"Add widget\" --repository https://github.com/org/repo.git --source-branch feature/add-widget --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewCreate(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -232,7 +213,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review creation planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -245,7 +226,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch this review proposes merging into")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch this review proposes merging (must already be pushed)")
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Issue this work belongs to (owner/repo#number, or a bare number joined to the recorded repository)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -267,12 +248,12 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			body, err := io.ReadAll(ctx.Stdin)
 			if err != nil {
 				return fmt.Errorf("read comment body from stdin: %w", err)
 			}
-			comment, err := reviewpkg.RunReviewComment(ctx, store, *alias, reviewpkg.ReviewCommentParams{
+			comment, err := reviewpkg.RunReviewComment(ctx, store, *alias, model.ReviewCommentParams{
 				ReviewID:        args[0],
 				CommitID:        commitID,
 				FilePath:        filePath,
@@ -287,7 +268,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review comment planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -299,7 +280,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 	cmd.Flags().StringVar(&filePath, "file", "", "File path the comment is anchored to")
 	cmd.Flags().IntVar(&line, "line", 0, "Line number the comment is anchored to")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "Comment id to reply to, making this a reply in that thread")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -315,7 +296,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 		SilenceUsage: true,
 		Example:      "  erun review resolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			comment, err := reviewpkg.RunReviewResolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
@@ -324,7 +305,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review resolve planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -332,7 +313,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 			return ctx.WriteResult(comment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -348,7 +329,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		Example:      "  erun review unresolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			comment, err := reviewpkg.RunReviewUnresolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
@@ -357,7 +338,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review unresolve planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -365,7 +346,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(comment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -376,7 +357,7 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewClose(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -385,7 +366,7 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review close planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -393,425 +374,6 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 			return ctx.WriteResult(review)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var (
-		commitID      string
-		version       string
-		failed        bool
-		failureDetail string
-	)
-	cmd := &cobra.Command{
-		Use:   "record-build REVIEW_ID",
-		Short: "Record a build against a review, moving it to READY or FAILED",
-		Long: "Record a build against a review. This is the only way an erun client transitions a review off " +
-			"OPEN: recording a successful build moves it to READY (and, if it was already the merge queue's " +
-			"head, on to MERGE); recording a failed one moves it to FAILED. There is no separate command to set " +
-			"a review's status directly to READY or FAILED — only a recorded build result does that.\n\n" +
-			"commit must be the full 40-character commit hash the build ran against (e.g. from `git rev-parse " +
-			"HEAD` after pushing), and version the version it minted — from the run's own `erun build --output " +
-			"json`, or from `erun build --dry-run --output json` when it failed before printing one — even for a " +
-			"failed build.\n\n" +
-			"A RECORDED build asserts the commit builds; it publishes nothing, so the version is metadata no " +
-			"platform path resolves. A `--release` produced version is accepted but not required: building the " +
-			"pushed branch with `erun build` and recording what it mints is the ordinary path, and the artifact " +
-			"that ships is cut after merge by the release the accepted review enqueues. A release here publishes " +
-			"a two-architecture `-pr.<sha>` image set per pull request that nothing consumes.\n\n" +
-			"The merge queue records its build the same way: the environment a review's merge queue promotes " +
-			"to MERGE runs a plain `erun build` (never --release) of the prospective merge commit `erun exec " +
-			"gate-merge` prepared and records it here with the version it minted. Only a successful build of " +
-			"the merge commit that landed can later be reported MERGED with `erun review report-merged`.\n\n" +
-			"A --failed whose --failure-detail names a known erun infrastructure failure (a registry or the " +
-			"network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright: a build has no " +
-			"INCONCLUSIVE result, so recording it FAILED would move the review out of the merge queue for a " +
-			"network blip rather than a real defect. Re-run the build once the signature clears and record " +
-			"that result instead.\n\n" +
-			"A real, immediate write. --dry-run traces the call without making it.",
-		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			build, err := reviewpkg.RunReviewRecordBuild(ctx, store, *alias, reviewpkg.ReviewRecordBuildParams{
-				ReviewID:      args[0],
-				CommitID:      commitID,
-				Version:       version,
-				Successful:    !failed,
-				FailureDetail: failureDetail,
-			}, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review record-build planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewBuildLine(ctx, build); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(build)
-		},
-	}
-	cmd.Flags().StringVar(&commitID, "commit", "", "Full commit hash the build ran against")
-	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --output json, or --dry-run --output json when it failed) (required)")
-	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
-	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var (
-		buildID   string
-		remoteURL string
-	)
-	cmd := &cobra.Command{
-		Use:   "report-merged REVIEW_ID",
-		Short: "Report a review MERGED, for a queue-driven merge or work that landed elsewhere",
-		Long: "Report a review MERGED. Which verification the platform applies depends on where the review is " +
-			"sitting, not on what this command claims.\n\n" +
-			"A review at MERGE is the merge queue's: this is for the environment the queue promoted to MERGE, " +
-			"once it has fetched the review's target and source, built the prospective squash merge, recorded " +
-			"that build with `erun review record-build`, and pushed the result — never before the push actually " +
-			"landed. --build-id must name that successful recorded build of the merge commit, and the platform " +
-			"fetches --remote-url to confirm the build's commit is really reachable from the target branch's tip " +
-			"and descends from, without being, the target tip this review was queued against. Any of those " +
-			"checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE.\n\n" +
-			"Any other review is one whose work landed without the queue — in practice a GitHub squash merge, " +
-			"where the branch's own commits are not ancestors of the target and no merge-commit build exists to name, " +
-			"or a branch that landed by merge commit or fast-forward, including one the target was fast-forwarded " +
-			"onto: that ancestry is confirmed directly. " +
-			"Omit --build-id: the platform confirms against the same remote that everything the review's source " +
-			"branch adds is already present in the target branch's history, and moves the review only if it is. " +
-			"A branch that did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED. This is " +
-			"what keeps a squash-landed review from sitting OPEN forever and inflating the open count.\n\n" +
-			"--remote-url must name the review's own repository, in any form git accepts: the platform " +
-			"canonicalizes it, so an SSH remote verifies against the HTTPS identity the review recorded, and " +
-			"a remote for a different repository is refused rather than used to verify. A review created " +
-			"before the platform recorded a repository adopts the one named here.\n\n" +
-			"A real, immediate write. --dry-run traces the call without making it.",
-		Example: "  erun review report-merged 018f... --build-id 018e... --remote-url https://github.com/org/repo.git\n" +
-			"  erun review report-merged 018f... --remote-url https://github.com/org/repo.git",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			review, err := reviewpkg.RunReviewReportMerged(ctx, store, *alias, args[0], buildID, remoteURL, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review report-merged planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewLine(ctx, review); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(review)
-		},
-	}
-	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful recorded build of the merge commit that landed (omit for work that landed without the queue)")
-	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge; any form git accepts, an SSH remote being read over its host's HTTPS without credentials")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "requeue REVIEW_ID",
-		Short: "Move a review stuck at MERGE back to READY",
-		Long: "Move a review stuck at MERGE back to READY, freeing its target branch's merge-queue slot so a " +
-			"different review can be promoted (only one review may be at MERGE per target branch).\n\n" +
-			"This is for a review whose queued build never finishes, or one left at MERGE by a batched " +
-			"`erun exec gate-merge` whose other members landed but were never promoted (erun#2241). The requeued " +
-			"review rejoins the queue at the tail, not the head — it is not promoted again immediately. Refuses, " +
-			"naming the review's actual status, when it is not at MERGE.\n\n" +
-			"A real, immediate write. --dry-run traces the call without making it.",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		Example:      "  erun review requeue 018f...",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			review, err := reviewpkg.RunReviewRequeue(ctx, store, *alias, args[0], deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review requeue planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewLine(ctx, review); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(review)
-		},
-	}
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func writeReviewBuildLine(ctx core.Context, build platformclient.PlatformBuild) error {
-	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] successful=%t commit=%s version=%s\n",
-		build.BuildID, build.Successful, build.CommitID, build.Version)
-	return err
-}
-
-func newReviewReviewersCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
-		"reviewers",
-		"Assign and remove reviewers on a review",
-		newReviewReviewersListCmd(store, alias, deps),
-		newReviewReviewersAddCmd(store, alias, deps),
-		newReviewReviewersRemoveCmd(store, alias, deps),
-	)
-}
-
-func writeReviewerLine(ctx core.Context, reviewer platformclient.PlatformReviewer) error {
-	_, err := fmt.Fprintf(ctx.Stdout, "  - %s\n", reviewer.UserID)
-	return err
-}
-
-func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "list REVIEW_ID",
-		Short:        "List a review's assigned reviewers",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		Example:      "  erun review reviewers list 018f...",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			reviewers, err := reviewpkg.RunReviewReviewersList(ctx, store, *alias, args[0], deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers list planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if len(reviewers) == 0 {
-					if _, err := fmt.Fprintln(ctx.Stdout, "no reviewers"); err != nil {
-						return err
-					}
-				}
-				for _, reviewer := range reviewers {
-					if err := writeReviewerLine(ctx, reviewer); err != nil {
-						return err
-					}
-				}
-			}
-			return ctx.WriteResult(reviewers)
-		},
-	}
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var userID string
-	cmd := &cobra.Command{
-		Use:   "add REVIEW_ID",
-		Short: "Assign a reviewer to a review",
-		Long: "Assign a reviewer to a review.\n\n" +
-			"--user-id must already be enrolled in your own tenant — checked before the network call, " +
-			"not only by the platform's own tenant-scoped refusal. A real, immediate write; assigning " +
-			"a reviewer gates no status transition (see `erun review queue`'s unresolved-thread gate " +
-			"for what actually blocks a merge).",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		Example:      "  erun review reviewers add 018f... --user-id 018g...",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			reviewer, err := reviewpkg.RunReviewReviewerAdd(ctx, store, *alias, args[0], userID, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers add planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewerLine(ctx, reviewer); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(reviewer)
-		},
-	}
-	cmd.Flags().StringVar(&userID, "user-id", "", "User id to assign as a reviewer (required)")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var userID string
-	cmd := &cobra.Command{
-		Use:          "remove REVIEW_ID",
-		Short:        "Remove a reviewer from a review",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		Example:      "  erun review reviewers remove 018f... --user-id 018g...",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			err := reviewpkg.RunReviewReviewerRemove(ctx, store, *alias, args[0], userID, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers remove planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "removed reviewer %s\n", userID); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(map[string]string{"reviewId": args[0], "userId": userID})
-		},
-	}
-	cmd.Flags().StringVar(&userID, "user-id", "", "User id to remove as a reviewer (required)")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewMergeQueueCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
-		"queue",
-		"Inspect and advance a target branch's merge queue",
-		newReviewMergeQueueListCmd(store, alias, deps),
-		newReviewMergeQueueAdvanceCmd(store, alias, deps),
-		newReviewMergeQueueOverrideAdvanceCmd(store, alias, deps),
-	)
-}
-
-func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List a repository's merge queue for a target branch, in queue order",
-		Long: "List the reviews waiting to merge into a target branch, in queue order.\n\n" +
-			"A queue belongs to a repository, not to a target branch alone: two repositories your " +
-			"tenant serves both have a main. --repository names it, defaulting to the current " +
-			"checkout's origin — the same repository the merge-queue environment would promote " +
-			"from. Every line names the review's own repository, so a queue that came back mixed " +
-			"is visible rather than read as one repository's.",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		Example: "  erun review queue list --target-branch main\n" +
-			"  erun review queue list --repository https://github.com/org/repo.git --target-branch main",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
-			reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, store, *alias, params, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue list planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewList(ctx, reviews); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(reviews)
-		},
-	}
-	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to list (defaults to the current checkout's origin)")
-	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch to list the merge queue for")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
-	cmd := &cobra.Command{
-		Use:   "advance",
-		Short: "Advance a repository's merge queue head to MERGE",
-		Long: "Advance the next review waiting to merge into a target branch to MERGE, which starts " +
-			"that review's merge-queue build.\n\n" +
-			"A queue belongs to a repository, not to a target branch alone: --repository names it, " +
-			"defaulting to the current checkout's origin, which is the repository this caller would " +
-			"build. Advancing without one promotes across every repository your tenant serves.\n\n" +
-			"A real, immediate mutation of shared control-plane state: it fails if the queue is " +
-			"empty or its head is not READY, and refuses with the unresolved comment thread count " +
-			"when the head still has open threads — resolve them first, or use " +
-			"`erun review queue override-advance`.",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		Example: "  erun review queue advance --target-branch main\n" +
-			"  erun review queue advance --repository https://github.com/org/repo.git --target-branch main",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
-			review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, store, *alias, params, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue advance planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewLine(ctx, review); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(review)
-		},
-	}
-	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
-	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
-	shared.AddDryRunFlag(cmd)
-	return cmd
-}
-
-func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
-	var reason string
-	cmd := &cobra.Command{
-		Use:   "override-advance",
-		Short: "Bypass the unresolved-thread gate and advance the merge queue anyway",
-		Long: "Bypass `erun review queue advance`'s unresolved-thread gate and advance a repository's " +
-			"merge queue head to MERGE anyway.\n\n" +
-			"--repository names the repository's queue, defaulting to the current checkout's origin, " +
-			"exactly as `erun review queue advance` does. --reason is required and is recorded in the " +
-			"platform's audit trail alongside the caller's identity — this is a deliberate, accountable " +
-			"escape hatch, not a routine way to advance the queue. A real, immediate mutation of shared " +
-			"control-plane state.",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		Example:      "  erun review queue override-advance --target-branch main --reason \"hotfix, reviewers unavailable\"",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
-			review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, params, reason, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue override-advance planned.")
-				return err
-			}
-			if ctx.Output != core.OutputJSON {
-				if err := writeReviewLine(ctx, review); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(review)
-		},
-	}
-	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
-	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
-	cmd.Flags().StringVar(&reason, "reason", "", "Why the unresolved-thread gate is being bypassed (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

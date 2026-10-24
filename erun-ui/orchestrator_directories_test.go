@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// A directory of its own is a complete orchestrator definition: no environment
-// is linked, nothing is registered anywhere, and the orchestrator just works in
-// that path. That is the configuration the directories field exists for, so it
-// must not be refused for "linking no environment".
 func TestCreateOrchestratorAcceptsDirectoriesWithoutEnvironments(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -26,16 +22,12 @@ func TestCreateOrchestratorAcceptsDirectoriesWithoutEnvironments(t *testing.T) {
 	if len(info.Directories) != 1 || info.Directories[0] != dir {
 		t.Fatalf("expected the picked directory %q, got %+v", dir, info.Directories)
 	}
-	// Persisted, and still there when the definition is listed back.
 	listed := app.ListOrchestrators()
 	if len(listed) != 1 || len(listed[0].Directories) != 1 || listed[0].Directories[0] != dir {
 		t.Fatalf("expected the directory to persist, got %+v", listed)
 	}
 }
 
-// A directory that is not there, or is not absolute, is a link that cannot work:
-// the orchestrator authors and builds in the path directly, so it is refused
-// while the operator is still looking at the dialog rather than at first use.
 func TestCreateOrchestratorRefusesAMissingOrRelativeDirectory(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -51,8 +43,6 @@ func TestCreateOrchestratorRefusesAMissingOrRelativeDirectory(t *testing.T) {
 	}
 }
 
-// An orchestrator with neither a linked environment nor a directory has nothing
-// to operate on, so it is still refused -- the rule widened, it did not go away.
 func TestOrchestratorScopeNeedsAnEnvironmentOrADirectory(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -65,9 +55,6 @@ func TestOrchestratorScopeNeedsAnEnvironmentOrADirectory(t *testing.T) {
 	}
 }
 
-// Adding the same directory twice is one directory: the dialog collapses it, and
-// the backend must agree, or a saved definition could hold a duplicate row the
-// form will not show.
 func TestCreateOrchestratorCollapsesDuplicateDirectories(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -82,8 +69,6 @@ func TestCreateOrchestratorCollapsesDuplicateDirectories(t *testing.T) {
 	}
 }
 
-// Update replaces the directory set rather than accumulating it, and leaves the
-// linked environments alone.
 func TestUpdateOrchestratorReplacesDirectories(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -106,9 +91,6 @@ func TestUpdateOrchestratorReplacesDirectories(t *testing.T) {
 	}
 }
 
-// The injected contract is what tells a session these paths are its own, so the
-// guidance has to name them. Pinned here because the text is the feature's only
-// reach into a running session.
 func TestOrchestratorClaudeMdTeachesItsOwnDirectories(t *testing.T) {
 	for _, want := range []string{"directories:", "no environment at all", "nothing else owns them"} {
 		if !strings.Contains(orchestratorClaudeMd, want) {
@@ -117,11 +99,6 @@ func TestOrchestratorClaudeMdTeachesItsOwnDirectories(t *testing.T) {
 	}
 }
 
-// The running path reads its scope from the session snapshot rather than from the
-// persisted config, so a directory that is saved is not automatically one that is
-// reported back. This is the case that was missed: the Edit form is populated from
-// what a running orchestrator reports, and a definition that reported none would be
-// saved back with none.
 func TestARunningOrchestratorStillReportsItsOwnDirectories(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -138,17 +115,12 @@ func TestARunningOrchestratorStillReportsItsOwnDirectories(t *testing.T) {
 	if len(started.Directories) != 1 || started.Directories[0] != dir {
 		t.Fatalf("a running orchestrator must report its own directories, got %+v", started.Directories)
 	}
-	// And through the list read model, which is what the sidebar and the dialog
-	// are populated from.
 	listed := app.ListOrchestrators()
 	if len(listed) != 1 || len(listed[0].Directories) != 1 || listed[0].Directories[0] != dir {
 		t.Fatalf("a running orchestrator's directories must survive into the list, got %+v", listed)
 	}
 }
 
-// The operator's case: the orchestrator is running when the directory is added.
-// The running path answers from the live session snapshot rather than from the
-// persisted config, so an update has to keep working there too.
 func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -171,10 +143,6 @@ func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
 	}
 }
 
-// The Edit form is populated from the list payload, so a directory that is saved
-// while the orchestrator runs has to appear there immediately: a definition whose
-// directory is on disk but missing from the payload reads as a save that did not
-// happen, and the operator re-adds it on every edit.
 func TestAJustSavedDirectoryIsReportedByARunningOrchestrator(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())

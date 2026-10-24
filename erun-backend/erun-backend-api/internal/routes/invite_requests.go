@@ -17,16 +17,13 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// InviteRequestStore is the read/decision-lookup dependency for the
-// protected invite-request routes. *repository.InviteRequestRepository
-// satisfies it.
+// InviteRequestStore reads invite requests for the protected routes.
 type InviteRequestStore interface {
 	Get(ctx context.Context, id string) (model.InviteRequest, error)
 	List(ctx context.Context, filter repository.InviteRequestFilter) ([]model.InviteRequest, error)
 }
 
 // InviteRequestApprover runs the approve/decline workflow.
-// *service.InviteRequestService satisfies it.
 type InviteRequestApprover interface {
 	ApproveJoin(ctx context.Context, request model.InviteRequest, decidedByUserID string) (model.InviteRequest, error)
 	ApproveCreateTenant(ctx context.Context, request model.InviteRequest, decidedByUserID string) (model.InviteRequest, error)
@@ -39,12 +36,8 @@ type inviteRequestRoutes struct {
 	decisions InviteRequestApprover
 }
 
-// RegisterInviteRequestRoutes registers the operator half of the request/
-// approve queue: listing pending requests and deciding them. A tenant admin
-// reaches these for a JOIN_TENANT request naming their own tenant; only an
-// operations caller reaches them for a CREATE_TENANT request, or a
-// JOIN_TENANT request naming a tenant other than their own — both enforced
-// in the handlers below, not by the route registration itself.
+// RegisterInviteRequestRoutes registers the request/approve queue. Authority
+// (own-tenant JOIN_TENANT, operations otherwise) is enforced in the handlers.
 func RegisterInviteRequestRoutes(register ProtectedRouteRegistrar, requests InviteRequestStore, tenants TenantRepository, decisions InviteRequestApprover) {
 	routes := inviteRequestRoutes{requests: requests, tenants: tenants, decisions: decisions}
 	register(http.MethodGet, "/v1/invite-requests", http.HandlerFunc(routes.list))
@@ -52,12 +45,8 @@ func RegisterInviteRequestRoutes(register ProtectedRouteRegistrar, requests Invi
 	register(http.MethodPost, "/v1/invite-requests/{invite_request_id}/decline", http.HandlerFunc(routes.decline))
 }
 
-// list returns every request an operations caller can see (both kinds,
-// optionally narrowed by ?kind=), or, for a non-operations caller, only
-// PENDING/decided JOIN_TENANT requests naming their own tenant — invite_requests
-// carries no tenant_id to filter by, so the caller's own tenant name is read
-// and applied explicitly, the same pattern TenantRepository.List already
-// uses for this root table.
+// list scopes a non-operations caller to JOIN_TENANT requests naming its own
+// tenant; invite_requests has no tenant_id for RLS to filter by.
 func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -86,12 +75,8 @@ func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, requests)
 }
 
-// approve decides a pending request in the caller's favor: enrolling the
-// requester (JOIN_TENANT) or registering the tenant and enrolling the
-// requester as its first user (CREATE_TENANT), then minting an invite either
-// way. Authority is checked here, before the service ever runs: a
-// JOIN_TENANT approval requires the caller's own tenant name to match the
-// request's; a CREATE_TENANT approval requires an operations tenant.
+// approve checks authority before the service runs: JOIN_TENANT needs the
+// caller's own tenant name, CREATE_TENANT an operations tenant.
 func (r inviteRequestRoutes) approve(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -132,10 +117,7 @@ type declineInviteRequestBody struct {
 	Reason string `json:"reason"`
 }
 
-// decline refuses a pending request with a reason, which reaches the
-// requester's own unauthenticated status read. A decline with no reason is a
-// dead end (root AGENTS.md § "Smooth, Seamless, No Dead Ends"), refused here
-// before the schema's own CHECK constraint ever has to.
+// decline requires a reason, since it reaches the requester's status read.
 func (r inviteRequestRoutes) decline(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -177,9 +159,7 @@ func (r inviteRequestRoutes) decline(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, declined)
 }
 
-// loadPendingRequest fetches the path's request and refuses (writing the
-// response itself) unless it is still PENDING — a request already decided
-// cannot be decided again.
+// loadPendingRequest refuses a request that is already decided, writing the response.
 func (r inviteRequestRoutes) loadPendingRequest(w http.ResponseWriter, req *http.Request) (model.InviteRequest, bool) {
 	request, err := r.requests.Get(req.Context(), req.PathValue("invite_request_id"))
 	if err != nil {
@@ -193,9 +173,7 @@ func (r inviteRequestRoutes) loadPendingRequest(w http.ResponseWriter, req *http
 	return request, true
 }
 
-// callerOwnsTenantName reports whether the caller's own current tenant name
-// matches tenantName — the "authority over that tenant" a JOIN_TENANT
-// decision requires — writing a 403 itself when it does not.
+// callerOwnsTenantName writes the 403 itself on a mismatch.
 func (r inviteRequestRoutes) callerOwnsTenantName(w http.ResponseWriter, req *http.Request, tenantName string) bool {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
@@ -209,50 +187,32 @@ func (r inviteRequestRoutes) callerOwnsTenantName(w http.ResponseWriter, req *ht
 	return true
 }
 
-// InviteRequestTokenVerifier verifies a bearer token and returns its claims,
-// tolerating a caller resolved to no tenant at all — the case the normal
-// protected registrar's auth middleware rejects (erun-backend-api/AGENTS.md's
-// Authentication section: "an unknown external subject is unauthorized for a
-// tenant that already has a user"). Its method set matches
-// backendapi.TokenVerifier exactly (a type alias over the same
-// security.Claims), so the same verifier instance satisfies both without an
-// adapter — this package just cannot name that type directly, since routes
-// must not import the root backendapi package.
+// InviteRequestTokenVerifier verifies a token without requiring a tenant. Its
+// method set matches backendapi.TokenVerifier, which routes must not import.
 type InviteRequestTokenVerifier interface {
 	VerifyBearerToken(ctx context.Context, token string) (security.Claims, error)
 }
 
-// InviteRequestSubmitter is the persistence dependency for the unauthenticated
-// submit/status routes. *repository.InviteRequestRepository satisfies it.
+// InviteRequestSubmitter persists submissions for the unauthenticated routes.
 type InviteRequestSubmitter interface {
 	Submit(ctx context.Context, params repository.SubmitInviteRequestParams) (model.InviteRequest, error)
 	GetByIdentity(ctx context.Context, issuer string, subject string) (model.InviteRequest, error)
 }
 
-// InviteRequestWindowReader reads the platform's current invite-request
-// rate-limit window. *repository.PlatformRateLimitRepository satisfies it.
+// InviteRequestWindowReader reads the current invite-request rate-limit window.
 type InviteRequestWindowReader interface {
 	Get(ctx context.Context) (model.PlatformRateLimit, error)
 }
 
-// preVerificationLimit/Window is the cheap burst ceiling ahead of token
-// verification (issue §9): not operator-tunable, unlike the post-verification
-// window below — it exists purely to bound the cost of verifying (fetching
-// JWKS, checking a signature) a flood of tokens that will mostly turn out
-// invalid, so it has to run before verification, not after.
+// The pre-verification tier bounds the cost of verifying a flood of invalid
+// tokens, so it runs before verification and is not operator-tunable.
 const (
 	preVerificationLimit  = 20
 	preVerificationWindow = time.Minute
 )
 
-// InviteRequestRateLimiter is POST /v1/invite-requests' two-tier abuse bound:
-// a cheap pre-verification tier keyed on source address, and a
-// post-verification tier keyed on the verified (issuer, subject) whose
-// window is read fresh from configuration on every call, so an operator's
-// change takes effect on the very next request with no redeploy. Built on
-// internal/ratelimit.Limiter, a general fixed-window bucket, so the
-// documented per-token/per-tenant limiter (erun-docs' api-protocol.md "Rate
-// limits") can adopt the same abstraction later rather than replace it.
+// InviteRequestRateLimiter bounds abuse per source address before verification and
+// per verified identity after; the identity window is read fresh on every call.
 type InviteRequestRateLimiter struct {
 	limiter *ratelimit.Limiter
 	windows InviteRequestWindowReader
@@ -281,15 +241,8 @@ type inviteRequestPublicRoutes struct {
 	limiter  *InviteRequestRateLimiter
 }
 
-// RegisterInviteRequestPublicRoutes registers the two routes reachable by a
-// caller who has proven who they are at their own IdP but is enrolled
-// nowhere: submitting a request, and reading back its own status. Neither
-// can run behind the normal protected registrar — that chain's tenant/user
-// resolution rejects exactly this caller — so, like POST /v1/invites/accept,
-// they are registered directly on the mux instead. Unlike that route, the
-// caller here does present a bearer token; verifyInviteRequestBearerToken
-// verifies its signature in full and stops there, never resolving a tenant
-// or user.
+// RegisterInviteRequestPublicRoutes registers routes for a caller enrolled nowhere,
+// directly on the mux: the protected chain's tenant resolution rejects this caller.
 func RegisterInviteRequestPublicRoutes(mux *http.ServeMux, verifier InviteRequestTokenVerifier, requests InviteRequestSubmitter, limiter *InviteRequestRateLimiter) {
 	routes := inviteRequestPublicRoutes{verifier: verifier, requests: requests, limiter: limiter}
 	mux.HandleFunc("POST /v1/invite-requests", routes.submit)
@@ -305,10 +258,8 @@ type submitInviteRequestBody struct {
 	Note            string `json:"note,omitempty"`
 }
 
-// submit records a new (or updates the caller's existing pending) invite
-// request. The response is identical whether or not TenantName names a real
-// tenant — Submit itself never looks that up — so this can never become a
-// tenant-name oracle (issue §4).
+// submit answers identically whether or not TenantName exists, so it is never a
+// tenant-name oracle.
 func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Request) {
 	if result := r.limiter.allowSourceAddress(sourceAddress(req)); !result.Allowed {
 		writeRateLimited(w, result)
@@ -345,9 +296,6 @@ func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Reque
 	writeJSON(w, http.StatusAccepted, request)
 }
 
-// parseSubmitInviteRequestParams decodes and validates the submit body,
-// returning a non-empty message (with its HTTP status) when the input must
-// be refused before ever reaching the repository.
 func parseSubmitInviteRequestParams(req *http.Request, claims security.Claims) (repository.SubmitInviteRequestParams, int, string) {
 	var body submitInviteRequestBody
 	if err := decodeJSON(req, &body); err != nil {
@@ -379,9 +327,6 @@ func parseSubmitInviteRequestParams(req *http.Request, claims security.Claims) (
 	}, 0, ""
 }
 
-// mine answers "what is the state of my own request" — the one thing a
-// requester can check while waiting, without an account on the platform
-// (issue §5/§7).
 func (r inviteRequestPublicRoutes) mine(w http.ResponseWriter, req *http.Request) {
 	claims, ok := verifyInviteRequestBearerToken(req, r.verifier)
 	if !ok {
@@ -396,10 +341,8 @@ func (r inviteRequestPublicRoutes) mine(w http.ResponseWriter, req *http.Request
 	writeJSON(w, http.StatusOK, request)
 }
 
-// verifyInviteRequestBearerToken verifies the request's bearer token in
-// full — the same signature/issuer check every protected route requires —
-// but stops there: it does not resolve a tenant or user, which is the whole
-// point of this registrar.
+// verifyInviteRequestBearerToken verifies the token fully but never resolves a
+// tenant or user.
 func verifyInviteRequestBearerToken(req *http.Request, verifier InviteRequestTokenVerifier) (security.Claims, bool) {
 	token, ok := bearerTokenFromHeader(req.Header.Get("Authorization"))
 	if !ok {
@@ -428,10 +371,6 @@ func sourceAddress(req *http.Request) string {
 	return host
 }
 
-// writeRateLimited refuses with 429 and the documented Retry-After/
-// RateLimit-* headers (erun-docs/docs/agent-reference/api-protocol.md's Rate
-// limits section) — the shape this endpoint's limiter is the first
-// implementation of.
 func writeRateLimited(w http.ResponseWriter, result ratelimit.Result) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(result.RetryAfter.Round(time.Second).Seconds())))
 	w.Header().Set("RateLimit-Limit", strconv.Itoa(result.Limit))

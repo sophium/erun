@@ -7,20 +7,8 @@ import {
 import { test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Regression coverage for a shared-primitive defect in erun-kit's DialogContent
-// (dialog.tsx): with no explicit grid-template-columns, the browser sizes the
-// implicit single grid column to the max-content width of its widest
-// descendant. An unbroken string with no min-w-0 anywhere above it (a long
-// guidance-file path, in the Edit orchestrator dialog) forced that column —
-// and every sibling grid item — wider than the card's own box, spilling
-// in-flow content past the card while its background/border still painted at
-// the correct, clamped width. The absolutely-positioned close button was
-// unaffected, since absolute positioning is removed from grid flow and
-// resolves against the card's own padding box, not the blown-out column.
-//
-// This reproduces in plain headless Chromium at deviceScaleFactor 1 with no
-// platform involved, which rules out a Windows/high-DPI compositing mismatch:
-// it is a box-model defect in the shared primitive, not a paint/raster one.
+// DialogContent's implicit grid column sizes to its widest descendant, so an unbreakable string
+// must not push in-flow content past the card.
 
 async function stubOrchestratorEnvCandidate(
   page: Page,
@@ -45,9 +33,7 @@ test.describe('dialog content stays within its own card', () => {
   }) => {
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
     await app.orchestratorDialog.waitForOpen('Edit orchestrator');
-    // The seeded orchestrator already renders a real, long CLAUDE.<id>.md
-    // guidance path — the exact "long unbreakable value" shape that reproduced
-    // the defect, with no stubbing required.
+    // The seeded orchestrator's long guidance path is the unbreakable value.
     await expectDialogContentStaysWithinCard(
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog',
@@ -60,8 +46,6 @@ test.describe('dialog content stays within its own card', () => {
     app,
     page,
   }) => {
-    // Direct coverage for the issue's own validation case: an unbroken,
-    // backslash-separated Windows path with no space to wrap on.
     const longWindowsPath =
       'C:\\Users\\operator\\workspaces\\' + 'project-segment-'.repeat(8) + 'repo';
     await stubOrchestratorEnvCandidate(page, {
@@ -120,11 +104,7 @@ test.describe('dialog content stays within its own card', () => {
 });
 
 test.describe('dialog content stays within its own card — deviceScaleFactor 1.5', () => {
-  // The issue's leading hypothesis was a composited-transform/DPI-scale
-  // mismatch specific to Windows' WebView2. That did not hold up (the defect
-  // reproduces at scale 1 above, with no platform involved), but this still
-  // guards the case explicitly so a future scale-dependent regression cannot
-  // slip back in unnoticed.
+  // Guards a scale-dependent regression explicitly.
   test.use({ deviceScaleFactor: 1.5 });
 
   test('Edit orchestrator dialog still holds at a non-1 device scale factor', async ({ app }) => {
@@ -139,14 +119,8 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
   });
 });
 
-// The vertical half of the same contract, which the width checks above cannot
-// see: the Edit orchestrator form carries the linked environments, the
-// orchestrator's own directories and its guidance, and at a
-// short window that outgrows the viewport. With no height bound on the panel the
-// footer — and with it Save — sat half off the bottom edge, so the dialog looked
-// like it simply would not save: no call was made, no error was shown, and
-// nothing was written. The panel is bounded and its field region scrolls, so the
-// footer stays fully on screen.
+// At a short window the panel must stay height-bounded with a scrolling field region, keeping Save
+// on screen.
 test.describe('dialog footer stays reachable at a short window height', () => {
   test('the Edit orchestrator Save button is fully within the viewport', async ({ app, page }) => {
     const viewportHeight = 520;

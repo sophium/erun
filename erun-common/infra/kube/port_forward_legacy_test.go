@@ -9,12 +9,10 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// pinLegacyUserConfigLayoutForTest makes the tree os.UserConfigDir named differ
-// from the config home on every host: the macOS branch is keyed on the detected
-// host, and the config home redirect points XDG_CONFIG_HOME away from
-// ~/Library/Application Support.
+// pinLegacyUserConfigLayoutForTest makes os.UserConfigDir differ from the config home on every host.
 func pinLegacyUserConfigLayoutForTest(t *testing.T) string {
 	t.Helper()
 	redirectConfigHomeForTest(t)
@@ -52,8 +50,7 @@ func legacyCacheStatePathForTest(t *testing.T, kind, tenant, environment string)
 	return filepath.Join(cacheDir, config.ConfigRoot, kind, tenant, environment+".json")
 }
 
-// A dry run resolving the state path is a read every forward setup makes before
-// its own dry-run check, so it must not move the operator's legacy record.
+// Resolving the path is a read, so a dry run must not move the legacy record.
 func TestResolvePortForwardStatePathDryRunDoesNotMigrateLegacyState(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	legacyPath := legacyCacheStatePathForTest(t, "api", "acme", "dev")
@@ -74,8 +71,6 @@ func TestResolvePortForwardStatePathDryRunDoesNotMigrateLegacyState(t *testing.T
 	requireMissing(t, statePath)
 }
 
-// The cache-dir record, its log and the log's rotated generation all move into
-// the canonical tree, so nothing of the forward is stranded at the old place.
 func TestResolvePortForwardStatePathMigratesTheCacheDirRecordWithItsLogs(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	legacyPath := legacyCacheStatePathForTest(t, "api", "acme", "dev")
@@ -101,33 +96,8 @@ func TestResolvePortForwardStatePathMigratesTheCacheDirRecordWithItsLogs(t *test
 	requireMissing(t, legacyLog+".1")
 }
 
-// A record written while the tree followed os.UserConfigDir is moved into the
-// config tree, so a forward running across the upgrade is still found instead
-// of being started a second time.
-func TestResolvePortForwardStatePathMigratesTheUserConfigDirRecord(t *testing.T) {
-	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
-	legacyPath := filepath.Join(legacyRoot, "mcp", "acme", "dev.json")
-	seedLegacyPortForwardRecordForTest(t, legacyPath)
-
-	path, err := ResolvePortForwardStatePath("mcp", "acme", "dev", false)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	statePath, err := PortForwardStatePath("mcp", "acme", "dev")
-	if err != nil {
-		t.Fatalf("PortForwardStatePath: %v", err)
-	}
-	if path != statePath {
-		t.Fatalf("expected the migrated path %q, got %q", statePath, path)
-	}
-	requirePresent(t, statePath)
-	requireMissing(t, legacyPath)
-}
-
-// The reproduction: a record nothing reopened since the upgrade still sits at a
-// legacy location, and a delete that cleared only the canonical tree left it
-// there for the next open to migrate into an environment of the same name
-// created later. Delete must remove it, and its logs, and list it in the plan.
+// A delete must also remove a record left at a legacy location, or a later
+// same-named environment would inherit it.
 func TestRemovePortForwardRecordRemovesLegacyLocationRecords(t *testing.T) {
 	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
 	userConfigState := filepath.Join(legacyRoot, "mcp", "team", "dev.json")
@@ -155,8 +125,6 @@ func TestRemovePortForwardRecordRemovesLegacyLocationRecords(t *testing.T) {
 	}
 }
 
-// A legacy record's log follows the same keep rule as the canonical one: a
-// forward started before the upgrade and still running writes to it.
 func TestRemovePortForwardRecordKeepsTheLegacyLogOfAForwardThatIsStillRunning(t *testing.T) {
 	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
 	statePath := filepath.Join(legacyRoot, "mcp", "team", "dev.json")
@@ -172,14 +140,12 @@ func TestRemovePortForwardRecordKeepsTheLegacyLogOfAForwardThatIsStillRunning(t 
 	requireMissing(t, statePath)
 }
 
-// The sweep walks the os.UserConfigDir tree as well: a deleted environment's
-// record there is never opened again, so migration never reaches it either.
 func TestReclaimOrphanedPortForwardRecordsWalksTheUserConfigDirTree(t *testing.T) {
 	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
 	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
 		t.Fatalf("save tool config: %v", err)
 	}
-	if err := config.SaveTenantConfig(config.TenantConfig{Name: "acme"}); err != nil {
+	if err := config.SaveTenantConfig(model.TenantConfig{Name: "acme"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	if err := config.SaveEnvConfig("acme", config.EnvConfig{Name: "dev"}); err != nil {

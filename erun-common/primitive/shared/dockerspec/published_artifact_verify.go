@@ -1,0 +1,17 @@
+package dockerspec
+
+import (
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
+)
+
+// RunCommandCapturingOutput stays quiet on success but surfaces the tool's diagnostics.
+func RunCommandCapturingOutput(ctx core.Context, spec helm.CommandSpec) (string, error) {
+	capture := &core.CommandOutputCapture{}
+	cmd := core.Command(spec.Name, spec.Args...)
+	cmd.Dir = spec.Dir
+	cmd.Stdout = &capture.Stdout
+	cmd.Stderr = core.TeeWriter(ctx.Stderr, &capture.Stderr)
+	err := cmd.Run()
+	return capture.Combined(), err
+}

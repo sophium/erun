@@ -8,16 +8,18 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	erunmcp "github.com/sophium/erun/erun-mcp"
+	"github.com/sophium/erun/erun-mcp"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestRunUsesDefaultMCPConfig(t *testing.T) {
 	var gotInfo model.BuildInfo
 	var gotCfg erunmcp.HTTPConfig
 	var gotMetricsCfg erunmcp.MetricsConfig
-	var gotRuntime erunmcp.RuntimeConfig
+	var gotRuntime runtimecfg.RuntimeConfig
 
-	exitCode := run(nil, new(bytes.Buffer), model.BuildInfo{Version: "1.2.3"}, func(ctx context.Context, info model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
+	exitCode := run(nil, new(bytes.Buffer), model.BuildInfo{Version: "1.2.3"}, func(ctx context.Context, info model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
 		if ctx == nil {
 			t.Fatal("expected non-nil context")
 		}
@@ -37,7 +39,7 @@ func TestRunUsesDefaultMCPConfig(t *testing.T) {
 		t.Fatalf("unexpected MCP config: %+v", gotCfg)
 	}
 	assertMetricsConfig(t, gotMetricsCfg, erunmcp.DefaultMetricsHost, erunmcp.DefaultMetricsPort, true)
-	if gotRuntime.Context != (erunmcp.RuntimeContext{}) {
+	if gotRuntime.Context != (toolio.RuntimeContext{}) {
 		t.Fatalf("unexpected runtime config: %+v", gotRuntime)
 	}
 }
@@ -49,38 +51,6 @@ func assertMetricsConfig(t *testing.T, got erunmcp.MetricsConfig, wantHost strin
 	}
 }
 
-func TestRunPassesResolvedFlags(t *testing.T) {
-	var gotCfg erunmcp.HTTPConfig
-	var gotMetricsCfg erunmcp.MetricsConfig
-	var gotRuntime erunmcp.RuntimeConfig
-
-	exitCode := run([]string{
-		"--host", "0.0.0.0", "--port", "17001", "--path", "custom",
-		"--metrics-host", "0.0.0.0", "--metrics-port", "9101", "--metrics-enabled=false",
-		"--tenant", "tenant-a", "--environment", "dev", "--repo-path", "/tmp/project", "--kubernetes-context", "cluster-dev", "--namespace", "tenant-a-dev",
-	}, new(bytes.Buffer), model.BuildInfo{}, func(_ context.Context, _ model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
-		gotCfg = cfg
-		gotMetricsCfg = metricsCfg
-		gotRuntime = runtime
-		return nil
-	})
-	if exitCode != 0 {
-		t.Fatalf("expected success exit code, got %d", exitCode)
-	}
-	if gotCfg.Host != "0.0.0.0" || gotCfg.Port != 17001 || gotCfg.Path != "custom" {
-		t.Fatalf("unexpected MCP config: %+v", gotCfg)
-	}
-	assertMetricsConfig(t, gotMetricsCfg, "0.0.0.0", 9101, false)
-	assertRuntimeContext(t, gotRuntime.Context)
-}
-
-func assertRuntimeContext(t *testing.T, got erunmcp.RuntimeContext) {
-	t.Helper()
-	if got.Tenant != "tenant-a" || got.Environment != "dev" || got.RepoPath != "/tmp/project" || got.KubernetesContext != "cluster-dev" || got.Namespace != "tenant-a-dev" {
-		t.Fatalf("unexpected runtime context: %+v", got)
-	}
-}
-
 func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
 	stderr := new(bytes.Buffer)
 	called := false
@@ -88,7 +58,7 @@ func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
 	exitCode := run([]string{
 		"--metrics-enabled", "true",
 		"--tenant", "tenant-a", "--environment", "dev",
-	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error {
 		called = true
 		return nil
 	})
@@ -113,7 +83,7 @@ func TestRunRefusesUnrecognizedPositionalArgument(t *testing.T) {
 
 	exitCode := run([]string{
 		"bogus", "--tenant", "tenant-a",
-	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error {
 		called = true
 		return nil
 	})
@@ -138,7 +108,7 @@ func TestRunRefusesUnrecognizedPositionalArgument(t *testing.T) {
 func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	stderr := new(bytes.Buffer)
 
-	exitCode := run(nil, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	exitCode := run(nil, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error {
 		return errors.New("boom")
 	})
 	if exitCode != 1 {

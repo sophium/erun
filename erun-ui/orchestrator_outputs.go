@@ -6,16 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// orchestratorOutputsDir is where one orchestrator's deliverables land on this
-// host. An orchestrator has no pod, so the outputs convention an in-pod agent
-// already follows — write to $ERUN_OUTPUTS_DIR — needs a host directory to point
-// at. It is per-orchestrator and sits beside the other per-orchestrator state,
-// so two orchestrators never read each other's files.
+// orchestratorOutputsDir is the per-orchestrator host directory $ERUN_OUTPUTS_DIR
+// points at; an orchestrator has no pod.
 func orchestratorOutputsDir(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -31,9 +29,6 @@ func orchestratorOutputsDir(id string) (string, error) {
 	return filepath.Join(configDir, "ERun", "orchestrator-outputs", id), nil
 }
 
-// ensureOrchestratorOutputsDir creates the directory before the session starts,
-// so an agent told to write there finds it rather than having to create it and
-// guess the convention.
 func ensureOrchestratorOutputsDir(id string) (string, error) {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
@@ -45,21 +40,17 @@ func ensureOrchestratorOutputsDir(id string) (string, error) {
 	return dir, nil
 }
 
-// ListOrchestratorOutputs lists what an orchestrator produced on this host,
-// newest-first. It reads the filesystem directly — there is no pod to exec into
-// — through the same resolver the in-pod MCP server uses, so the read-model the
-// dialog renders is identical for both.
-func (a *App) ListOrchestratorOutputs(id string) (jobs.RuntimeOutputsListResult, error) {
+// ListOrchestratorOutputs lists outputs newest-first via the in-pod MCP server's resolver.
+func (a *App) ListOrchestratorOutputs(id string) (model.RuntimeOutputsListResult, error) {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
-		return jobs.RuntimeOutputsListResult{}, err
+		return model.RuntimeOutputsListResult{}, err
 	}
-	return jobs.ResolveLocalOutputs(jobs.RuntimeOutputsParams{Dir: dir})
+	return jobs.ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 }
 
-// DownloadOrchestratorOutput saves one entry through a native Save dialog and
-// returns the saved path, or an empty string when the operator cancels. A folder
-// saves as a <name>.tar.gz, matching the environment flow.
+// DownloadOrchestratorOutput saves one entry via a Save dialog (a folder as
+// <name>.tar.gz); "" means cancelled.
 func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
@@ -71,7 +62,7 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	out, err := jobs.DownloadLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	out, err := jobs.DownloadLocalOutput(model.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return "", err
 	}
@@ -83,29 +74,24 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 		return "", err
 	}
 	if strings.TrimSpace(dest) == "" {
-		return "", nil // operator cancelled the dialog
+		return "", nil
 	}
 	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
 		return "", err
 	}
-	// The download already signed the source, and an ad-hoc signature travels
-	// inside the Mach-O — but the saved copy still lands 0644, so it needs the
-	// execute bit this seam applies.
-	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
+	// The saved copy lands 0644, so it still needs the execute bit.
+	a.reportHostArtifactSigning(codesign.SignHostArtifact(dest))
 	return dest, nil
 }
 
-// RunOrchestratorOutputOnHost runs one produced file here. An orchestrator's
-// outputs are already host-native — it produced them on this machine — so this
-// is the run an environment's artifacts need a mirror to reach.
+// RunOrchestratorOutputOnHost runs one produced, already host-native file.
 func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
 		return err
 	}
-	// Reuse the download resolver's containment check rather than re-deriving
-	// it: it already refuses a name that climbs out of the outputs directory.
-	entry, err := jobs.StatLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	// StatLocalOutput refuses a name that climbs out of the outputs directory.
+	entry, err := jobs.StatLocalOutput(model.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return err
 	}
@@ -113,6 +99,6 @@ func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 		return fmt.Errorf("output %q is a directory", name)
 	}
 	exePath := filepath.Join(dir, entry.Name)
-	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(exePath))
+	a.reportHostArtifactSigning(codesign.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }

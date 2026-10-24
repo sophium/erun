@@ -41,27 +41,10 @@ export const DEFAULT_SIDEBAR_WIDTH = 338;
 export const MIN_REVIEW_WIDTH = 420;
 export const MAX_REVIEW_WIDTH = 1400;
 export const DEFAULT_REVIEW_WIDTH = 620;
-// MIN_MAIN_PANE_WIDTH is the narrowest <main> the shell treats as usable
-// while showing the terminal/diff-review surface — the only other content
-// that competes with the review panel for the same viewport, so they can't
-// independently agree to starve it.
+// MIN_MAIN_PANE_WIDTH is the narrowest usable <main> beside the review panel.
 export const MIN_MAIN_PANE_WIDTH = 360;
-// MIN_DASHBOARD_PANE_WIDTH is the narrowest <main> the shell treats as usable
-// while showing the tenant dashboard, which never renders alongside the
-// review panel (MainPane.tsx shows one or the other), so it is its own,
-// wider floor rather than folded into MIN_MAIN_PANE_WIDTH above. Measured,
-// not guessed: the dashboard's header and panel chrome plus the page
-// header's padding has an unshrinkable content width of ~495px in Chromium.
-// The tab strip itself no longer sets this floor — it wraps onto as many
-// rows as the width calls for, which is what keeps the strip usable in the
-// band where the sidebar is still open and <main> is already narrower than
-// nine tabs in a row. MIN_MAIN_PANE_WIDTH's
-// 360 let that content render wider than <main>, invisibly — the
-// intermediate overflow-x-auto wrapper (MainPane.tsx) permits the overflow
-// but never paints a discoverable scrollbar for it. 500 rounds the
-// measurement up with a small margin for cross-platform font metrics. The
-// sidebar breakpoint below is sized off this, the larger of the two floors,
-// since the sidebar competes with whichever of the two is showing.
+// MIN_DASHBOARD_PANE_WIDTH is the dashboard's measured unshrinkable width
+// (~495px) rounded up; the sidebar breakpoint is sized off this larger floor.
 export const MIN_DASHBOARD_PANE_WIDTH = 500;
 export const GRID_DIVIDER_WIDTH = 10;
 
@@ -70,18 +53,12 @@ export function computeMaxReviewWidth(
   effectiveSidebarWidth: number,
 ): number {
   const fittable = viewportWidth - effectiveSidebarWidth - MIN_MAIN_PANE_WIDTH - GRID_DIVIDER_WIDTH;
-  // Floor at 0, not MIN_REVIEW_WIDTH: a floor at the panel's own minimum
-  // forced it wider than the viewport had room for whenever fittable went
-  // negative, which is the starved-<main> overflow this module prevents.
+  // Floor at 0, not MIN_REVIEW_WIDTH, so the panel never exceeds the viewport.
   return Math.max(0, Math.min(MAX_REVIEW_WIDTH, fittable));
 }
 
-// Mirrors computeMaxReviewWidth for the sidebar. Unlike the review panel, its
-// floor stays at MIN_SIDEBAR_WIDTH — collapsing away entirely is the separate
-// decision nextSidebarHidden below makes, not a width squeeze. Reserves room
-// for MIN_DASHBOARD_PANE_WIDTH (not the smaller MIN_MAIN_PANE_WIDTH) because
-// the sidebar has no visibility into which of the two <main> contents is
-// showing, so it must leave enough for the wider requirement either way.
+// computeMaxSidebarWidth reserves MIN_DASHBOARD_PANE_WIDTH since the sidebar
+// cannot tell which <main> content is showing.
 export function computeMaxSidebarWidth(viewportWidth: number): number {
   return Math.max(
     MIN_SIDEBAR_WIDTH,
@@ -89,11 +66,8 @@ export function computeMaxSidebarWidth(viewportWidth: number): number {
   );
 }
 
-// What the shell actually renders for the sidebar column: 0 while collapsed,
-// otherwise the stored width reclamped to the viewport. Every consumer that
-// needs the sidebar's real current width (the review-panel max-width calc,
-// the CSS var writer) goes through this instead of layout.sidebarWidth
-// directly, so a resize is reflected everywhere at once.
+// effectiveSidebarWidth is the rendered width (0 when collapsed); use it instead
+// of layout.sidebarWidth.
 export function effectiveSidebarWidth(
   hidden: boolean,
   width: number,
@@ -105,22 +79,14 @@ export function effectiveSidebarWidth(
   return Math.min(computeMaxSidebarWidth(viewportWidth), Math.max(MIN_SIDEBAR_WIDTH, width));
 }
 
-// Below this viewport width, the sidebar at its own minimum plus the divider
-// already leaves <main> under MIN_DASHBOARD_PANE_WIDTH, so the shell
-// collapses the sidebar instead of continuing to squeeze it.
 export const SIDEBAR_COLLAPSE_BREAKPOINT =
   MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH + MIN_DASHBOARD_PANE_WIDTH;
-// A widen has to clear the breakpoint by this margin before the sidebar
-// auto-reopens, so a window parked on the breakpoint doesn't oscillate.
+// Hysteresis so a window parked on the breakpoint doesn't oscillate.
 export const SIDEBAR_COLLAPSE_HYSTERESIS = 40;
-// Below this width even a collapsed sidebar's own divider has nowhere to sit
-// beside a non-empty <main>; no user override can keep it open past this.
+// Below this no user override can keep the sidebar open.
 export const SIDEBAR_HARD_COLLAPSE_WIDTH = MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH;
 
-// Distinguishes the operator's explicit sidebar choice from the shell's
-// automatic viewport-driven collapse. null means no explicit choice yet, so
-// the automatic threshold governs; once the operator toggles the sidebar,
-// their choice sticks across future resizes until they toggle it again.
+// null means no explicit choice, so the viewport threshold governs.
 export type SidebarUserOverride = 'shown' | 'hidden' | null;
 
 export function nextSidebarHidden(
@@ -165,19 +131,12 @@ export interface EnvironmentDialogState {
     memory: string;
   };
   containerRegistry: string;
-  // clusterRegistry is the in-cluster erun-registry detected for the selected
-  // Kubernetes context (null when none / not yet resolved). When present and
-  // useClusterRegistry is set, the env is created with a resolvable cluster:
-  // registry entry instead of the containerRegistry string.
+  // clusterRegistry is the detected in-cluster erun-registry, or null.
   clusterRegistry: UIClusterRegistryStatus | null;
   useClusterRegistry: boolean;
-  // useErunRegistry selects erun's hosted registry (registry.erunpaas.com/<tenant>),
-  // authenticated by the tenant's own API token. Exclusive with the other two.
+  // useErunRegistry selects registry.erunpaas.com/<tenant>; exclusive with the other two.
   useErunRegistry: boolean;
-  // hostedRegistry is the reachability probe result for erun's hosted
-  // registry, checked once when the dialog opens (the host is fixed, not
-  // context-dependent like clusterRegistry). Null while the check is still in
-  // flight; useErunRegistry only takes effect once it resolves available.
+  // hostedRegistry is null while the probe is in flight.
   hostedRegistry: UIHostedRegistryStatus | null;
   envType: EnvironmentType;
   localRepoPath: string;
@@ -207,27 +166,16 @@ export interface ManageDialogState {
   choicesOpen: boolean;
   error: string;
   pendingRedeploy: boolean;
-  // Version suggestions are dialog-owned, not read from the shared tenants slice:
-  // that slice is (re)written by boot and every environment-change delta for the
-  // sidebar-selected env, which would clobber this dialog's env-specific picker
-  // (e.g. showing only the upstream fallback while a tenant build fires deltas).
+  // Dialog-owned: the tenants slice is rewritten for the sidebar-selected env.
   versionSuggestions: UIVersionSuggestion[];
   versionSuggestionNotices: UIVersionSuggestionNotice[];
   deployComponents: UIDeployableComponent[];
   deployComponentSelection: string[];
   deployComponentsLoading: boolean;
-  // Which chart a deploy of the picked version would install. Dialog-owned like
-  // the suggestions above, and null until the version-aware probe answers.
+  // null until the version-aware probe answers.
   runtimeChartPlan: UIRuntimeChartPlan | null;
-  // Result of the General tab's "Check environment" health run, null until the
-  // operator runs it. healthLoading gates the in-flight indicator.
   health: UIEnvironmentHealth | null;
   healthLoading: boolean;
-  // The Ports tab's public-exposure surface (issue #1351). Exposures is loaded
-  // automatically alongside the rest of the dialog's read models, matching
-  // deployComponents; exposeForm/exposeBusy/exposeError track the "Expose a
-  // service" form, and unexposeConfirming/unexposeBusy/unexposeError track the
-  // two-step "Remove public access" confirm below the list.
   exposures: UIExposureList;
   exposuresLoading: boolean;
   environmentServices: UIEnvironmentServiceList;
@@ -254,14 +202,9 @@ export interface GlobalConfigDialogState {
   open: boolean;
   config: UIERunConfig;
   cloudContextDraft: UICloudContextInitInput;
-  // erunApiUrlDraft is the "Add erun platform" popover's own input — the only
-  // field InitERunCloudProvider needs; everything else is discovered from the
-  // platform itself.
   erunApiUrlDraft: string;
   configLoading: boolean;
   busy: boolean;
-  // 'cloud-provider-init' is the AWS add action; 'cloud-provider-cloudflare-init' is Cloudflare;
-  // 'cloud-provider-erun-init' is the erun platform add action.
   busyAction:
     | ''
     | 'save'
@@ -309,26 +252,17 @@ export type ReconnectStatus = 'idle' | 'confirm' | 'running' | 'error';
 
 export interface ReconnectState {
   status: ReconnectStatus;
-  // tenant + environment scope the in-flight reconnect so other envs can stay
-  // interactive while this one is running. Empty when status === 'idle'.
+  // Empty when status === 'idle'.
   tenant: string;
   environment: string;
-  // Which reachability shape triggered this reconnect, so the dialog and
-  // status panel can say "Open" for a stopped environment and "Reconnect" for
-  // a stale forward instead of one fixed script for both (#1230).
   kind: ReachabilityKind;
-  // Rolling buffer of the latest reconnect output lines, not the full transcript.
   lines: string[];
   error: string;
 }
 
-// Caps ReconnectState.lines so the buffer can't grow unbounded across a long deploy.
 export const RECONNECT_LINE_BUFFER_LIMIT = 200;
 
-// AutoStartPromptState backs the first-time "Auto-start this environment?" dialog,
-// shown when opening a remote env whose cloud context is stopped and that has no
-// AutoStart choice recorded yet. The answer is persisted so the prompt does not
-// reappear unless the setting is reset.
+// AutoStartPromptState backs the first-time "Auto-start this environment?" dialog.
 export interface AutoStartPromptState {
   open: boolean;
   selection: UISelection | null;
@@ -336,9 +270,6 @@ export interface AutoStartPromptState {
   error: string;
 }
 
-// AIOccupancyPendingStart carries what a confirmed retry needs to actually
-// start the session and record its tab — captured at the moment the
-// unconfirmed start reported the environment occupied.
 export interface AIOccupancyPendingStart {
   key: string;
   selection: UISelection;
@@ -348,10 +279,8 @@ export interface AIOccupancyPendingStart {
   label: string;
 }
 
-// AIOccupancyPromptState backs the "an agent is already here" dialog shown
-// when starting the AI tab finds the environment held by another job's
-// activity lease. Confirming is a deliberate "start a second agent anyway",
-// never an automatic retry.
+// AIOccupancyPromptState backs the "an agent is already here" dialog; confirming
+// is deliberate, never an automatic retry.
 export interface AIOccupancyPromptState {
   open: boolean;
   leases: UIEnvironmentLease[];
@@ -603,8 +532,7 @@ export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
 export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
   useMantle: false,
   useBedrock: false,
-  // False until the backend reports the erun-level catalog, so the per-env
-  // gateway controls never flash before the read lands.
+  // False until the backend reports it, so gateway controls never flash.
   gatewayConfigured: false,
   gatewayModels: [],
   gatewayDefaultModel: '',

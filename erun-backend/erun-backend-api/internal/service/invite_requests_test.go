@@ -104,11 +104,6 @@ func joinInviteRequest() model.InviteRequest {
 	}
 }
 
-// TestApproveJoinEnrolsSubjectAndMintsInvite locks the issue's two required
-// effects of approving a join request: the verified subject is enrolled
-// into the caller's own (already-authorized) tenant, and an invite is minted
-// for that same tenant through the existing repository.InviteRepository.Create
-// path — never a reimplementation of invite minting.
 func TestApproveJoinEnrolsSubjectAndMintsInvite(t *testing.T) {
 	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
 	users := &stubInviteRequestUserEnroller{user: model.User{UserID: "user-1"}}
@@ -143,12 +138,6 @@ func TestApproveJoinEnrolsSubjectAndMintsInvite(t *testing.T) {
 	}
 }
 
-// TestApproveCreateTenantRegistersTenantEnrolsFirstUserAndMintsInvite locks
-// the CREATE_TENANT approval workflow: the tenant is registered with the
-// requester's own verified issuer as its mapping, the requester is enrolled
-// as that new tenant's first user (under a security context bound to the
-// new tenant, not the approving operations caller's own), and an invite is
-// minted for the new tenant.
 func TestApproveCreateTenantRegistersTenantEnrolsFirstUserAndMintsInvite(t *testing.T) {
 	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
 	tenants := &stubInviteRequestTenantCreator{tenant: model.Tenant{TenantID: "tenant-new", Name: "newco", Type: model.TenantTypeCompany}}
@@ -186,13 +175,6 @@ func TestApproveCreateTenantRegistersTenantEnrolsFirstUserAndMintsInvite(t *test
 	}
 }
 
-// TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts is
-// erun#1722's reproduction: the requested tenant name was registered
-// out-of-band between the request being raised and decided (a race, not a
-// mistake). Approving must not 500 on the resulting unique violation and
-// must not leave the request PENDING with no reachable outcome — it enrols
-// the requester into the tenant that already holds the name and completes
-// the approval, landing on APPROVED, a state the operator can act on.
 func TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts(t *testing.T) {
 	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
 	tenants := &stubInviteRequestTenantCreator{
@@ -234,11 +216,7 @@ func TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts(t *testing
 	}
 }
 
-// TestApproveCreateTenantSurfacesUnrelatedTenantCreateFailure is the
-// catch-all guard: only the specific name-conflict sentinel resolves to the
-// existing tenant. Any other failure registering the tenant (a genuine
-// database fault) must still fail the approval outright, leaving the
-// request PENDING rather than silently marking it decided.
+// Only the name-conflict sentinel resolves to the existing tenant; other failures leave the request PENDING.
 func TestApproveCreateTenantSurfacesUnrelatedTenantCreateFailure(t *testing.T) {
 	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
 	tenants := &stubInviteRequestTenantCreator{err: errors.New("connection reset by peer")}

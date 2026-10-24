@@ -7,13 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// reportExecutionModes answers "it behaves differently on my machine" for the
-// subprocess/library execution switch (see erun-common/execution_mode.go):
-// without this, an operator who flipped execution.modes.<operation> to
-// "library" in config.yaml has no way to confirm it actually took effect
-// short of reading the config file by hand. Root config, not
-// per-environment, so it runs unconditionally — it needs no runtime pod and
-// nothing here can fail dry-run.
+// reportExecutionModes shows the effective subprocess/library mode per operation.
 func reportExecutionModes(ctx core.Context) error {
 	config, _, _ := configpkg.LoadERunConfig()
 	statuses := configpkg.ExecutionModeReport(config)

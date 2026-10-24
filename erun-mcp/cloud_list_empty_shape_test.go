@@ -7,27 +7,18 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	cloudpkg "github.com/sophium/erun/erun-mcp/tools/cloud"
+	"github.com/sophium/erun/erun-mcp/tools/kubecontext"
 )
 
-// unconfiguredStore is the state the reported defect is about: a store that
-// resolves fine and has no cloud aliases and no cloud contexts in it.
 type unconfiguredStore struct{}
 
 func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	return config.ERunConfig{}, "", nil
 }
 
-// TestCollectionToolsReportAnEmptyCollectionAsAnArray pins both tools the
-// report measured answering an empty environment with a bare `{}`. The key was
-// absent, not null, so a caller reading result.contexts.length threw where the
-// sibling idle_stop_history and activity_lease_list tools returned 0 -- and
-// there was no way to tell "no aliases are configured", the diagnosis
-// cloud_list exists to confirm, from "this tool does not report aliases".
-//
-// The two builders behind these fields already returned a non-nil slice, so
-// this is the field's own contract and not the builder's: omitempty drops a
-// slice of length zero exactly as it drops a nil one, and initialising the
-// slice without dropping the tag would have changed nothing.
+// An empty collection must serialize as [] not be omitted; omitempty drops empty slices
+// as well as nil ones.
 func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
 	providers, err := cloud.ListCloudProviderStatuses(unconfiguredStore{}, cloud.CloudDependencies{})
 	if err != nil {
@@ -44,8 +35,8 @@ func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
 		value any
 		field string
 	}{
-		{"cloud_list", CloudListResult{CloudProviders: providers}, "cloudProviders"},
-		{"context_list", ContextListResult{CloudContexts: contexts.CloudContexts}, "cloudContexts"},
+		{"cloud_list", cloudpkg.CloudListResult{CloudProviders: providers}, "cloudProviders"},
+		{"context_list", kubecontext.ContextListResult{CloudContexts: contexts.CloudContexts}, "cloudContexts"},
 	}
 
 	for _, tc := range cases {

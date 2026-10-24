@@ -2,19 +2,10 @@ package main
 
 import "strings"
 
-// Two recorders once told the desktop which conversation an orchestrator was
-// on: orchestrator-session/<id>.json, and later orchestrator-live/<id>.json
-// stamped with a launch nonce. Neither is read any more: an orchestrator runs
-// as a Claude background agent, which keeps its own conversation.
-//
-// Ceasing to install a hook leaves it installed everywhere it already is,
-// where it keeps writing on every turn boundary. This removes both, so the
-// upgrade actually retires the mechanism instead of only stopping new ones.
+// The orchestrator-session and orchestrator-live recorder hooks are retired; an
+// installed hook keeps writing, so upgrades remove it.
 
-// pruneRetiredSessionRecorderHooks drops the recorders from one event's blocks.
-// It matches on what a command does -- writes a conversation id into one of
-// those directories -- so a block is only removed when it is provably one of
-// those hooks and never because it merely sits nearby.
+// pruneRetiredSessionRecorderHooks removes only blocks whose command provably is a recorder.
 func pruneRetiredSessionRecorderHooks(blocks any) []any {
 	list, ok := blocks.([]any)
 	if !ok {

@@ -13,21 +13,19 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type ContextRepository interface {
 	List(ctx context.Context) ([]model.Context, error)
-	// Get takes the owning tenant alongside the context id: contexts is
-	// tenant-owned and erun_operations' RLS policy is unconditional, so an
-	// id-only lookup would hand an OPERATIONS caller a stranger's context.
+	// Get is tenant-scoped because erun_operations' RLS policy is unconditional.
 	Get(ctx context.Context, tenantID, contextID string) (model.Context, error)
 	Create(ctx context.Context, cloudContext model.Context) (model.Context, error)
 }
 
-// ContextProvisioner starts the durable live provisioning of a freshly-created
-// context. Optional: when nil, POST /v1/contexts only registers the row and
-// returns the bootstrap plan (no live cluster bootstrap).
+// ContextProvisioner starts live provisioning of a new context. When nil,
+// POST /v1/contexts only registers the row and returns the plan.
 type ContextProvisioner interface {
 	Start(provision.ProvisionInput) error
 }
@@ -37,8 +35,7 @@ type ContextRoutes struct {
 	provisioner ContextProvisioner
 }
 
-// createContextRequest is the BYO-cloud registration body for bootstrapping a
-// managed cluster on the tenant's own AWS account.
+// createContextRequest is the BYO-cloud cluster registration body.
 type createContextRequest struct {
 	Name               string `json:"name"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
@@ -46,8 +43,7 @@ type createContextRequest struct {
 	InstanceType       string `json:"instanceType"`
 	DiskType           string `json:"diskType"`
 	DiskSizeGB         int    `json:"diskSizeGb"`
-	// MaxEnvironments is this context's placement capacity (#1112); zero uses
-	// repository.DefaultContextMaxEnvironments.
+	// Zero uses repository.DefaultContextMaxEnvironments.
 	MaxEnvironments int  `json:"maxEnvironments"`
 	Preview         bool `json:"preview"`
 }
@@ -57,8 +53,7 @@ type createContextResponse struct {
 	Plan    []string       `json:"plan"`
 }
 
-// contextBootstrapParams are the trimmed cluster-bootstrap inputs. Both the
-// context-create route and the provision preview plan from the same shape.
+// contextBootstrapParams are the trimmed cluster-bootstrap inputs.
 type contextBootstrapParams struct {
 	name            string
 	alias           string
@@ -69,14 +64,12 @@ type contextBootstrapParams struct {
 	maxEnvironments int
 }
 
-// createContextInput is a validated registration request.
 type createContextInput struct {
 	contextBootstrapParams
 	preview bool
 }
 
-// decodeCreateContextInput validates the registration body. Its error message is
-// the operator-facing 400 reason.
+// decodeCreateContextInput validates the body; errors are the 400 reason.
 func decodeCreateContextInput(req *http.Request) (createContextInput, error) {
 	var body createContextRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -97,10 +90,7 @@ func decodeCreateContextInput(req *http.Request) (createContextInput, error) {
 	if input.name == "" || input.alias == "" || input.region == "" {
 		return createContextInput{}, errors.New("name, cloudProviderAlias, and region are required")
 	}
-	// The name becomes the kubeconfig context label a deploy/stop/delete Job
-	// interpolates into a shell-quoted kubectl argv (deployexec.PlacementParams)
-	// and a Kubernetes label value; a DNS-1123 label keeps both safe, the same
-	// constraint environment names already carry.
+	// The name reaches a shell-quoted kubectl argv and a label value; DNS-1123 keeps both safe.
 	if !validNamespaceLabel(input.name) {
 		return createContextInput{}, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
@@ -132,10 +122,6 @@ func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
-	// A context read through this route is always the caller's own: this route
-	// exposes no cross-tenant context administration, and naming the caller's
-	// tenant explicitly is what keeps an OPERATIONS caller from reading a
-	// stranger's context by id.
 	cloudContext, err := r.contexts.Get(req.Context(), securityContext.TenantID, req.PathValue("context_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
@@ -153,8 +139,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 
 	plan, err := buildContextBootstrapPlan(input.contextBootstrapParams)
 	if err != nil {
-		// A dry-run InitCloudContext failure here is an input-resolution error
-		// (e.g. an unsupported region/instance type), not a server fault.
+		// A dry-run failure is an input error, not a server fault.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -180,9 +165,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Live bootstrap runs for minutes: when a provisioner is wired, start it
-	// durably and return 202 so the caller can poll GET /v1/contexts/{id};
-	// otherwise the context is only registered (201).
+	// Live bootstrap takes minutes, so a wired provisioner returns 202 for polling.
 	if r.provisioner == nil {
 		writeJSON(w, http.StatusCreated, createContextResponse{Context: &created, Plan: plan})
 		return
@@ -211,8 +194,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusAccepted, createContextResponse{Context: &created, Plan: plan})
 }
 
-// buildContextBootstrapPlan returns the cluster-bootstrap plan — the commands the
-// real bootstrap would run — via a dry-run that never reaches AWS.
+// buildContextBootstrapPlan returns the bootstrap commands via a dry-run that never reaches AWS.
 func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, error) {
 	var trace bytes.Buffer
 	logger := core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(&trace)
@@ -224,7 +206,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 	}
 
 	store := newInMemoryCloudStore(bootstrap.alias)
-	params := cloud.InitCloudContextParams{
+	params := modelpkg.InitCloudContextParams{
 		Name:               bootstrap.name,
 		CloudProviderAlias: bootstrap.alias,
 		Region:             bootstrap.region,
@@ -232,9 +214,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 		DiskType:           bootstrap.diskType,
 		DiskSizeGB:         bootstrap.diskSizeGB,
 	}
-	// Zero-value dependencies: InitCloudContext normalizes them to its own
-	// defaults, and in DryRun the default RunAWS/RunKubectl only trace the argv
-	// (they never invoke the real CLIs).
+	// In DryRun the default runners only trace argv.
 	if _, err := cloud.InitCloudContext(ctx, store, params, cloud.CloudContextDependencies{}); err != nil {
 		return nil, err
 	}
@@ -252,9 +232,7 @@ func splitTraceLines(trace string) []string {
 	return lines
 }
 
-// inMemoryCloudStore lets the dry-run InitCloudContext resolve the caller's AWS
-// alias without touching disk or AWS; the dry-run never persists, so
-// SaveERunConfig is unused.
+// inMemoryCloudStore resolves the AWS alias for the dry-run without touching disk.
 type inMemoryCloudStore struct {
 	config configpkg.ERunConfig
 }
@@ -262,7 +240,7 @@ type inMemoryCloudStore struct {
 func newInMemoryCloudStore(alias string) *inMemoryCloudStore {
 	return &inMemoryCloudStore{
 		config: configpkg.ERunConfig{
-			CloudProviders: []configpkg.CloudProviderConfig{{
+			CloudProviders: []modelpkg.CloudProviderConfig{{
 				Alias:    alias,
 				Provider: configpkg.CloudProviderAWS,
 			}},

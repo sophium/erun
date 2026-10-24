@@ -8,23 +8,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
 )
 
-// The lease verbs are the CLI half of the activity lease: a long job announces
-// what it is, and the environment reports that instead of reading as untouched.
-// Shaped for a shell wrapper first — take, trap the release, let the recorded
-// pid reclaim the lease if the wrapper dies — and usable directly by an agent
-// that holds one across a detached run. A lease belongs to the environment it
-// holds, so off-environment these act through its edge.
+// Lease verbs let a long job announce itself so the environment does not read
+// as idle; off-environment they act through its edge.
 
-func newActivityLeaseCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newActivityLeaseCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "lease",
 		Short:         "Hold, release, and inspect activity leases",
@@ -35,7 +35,7 @@ func newActivityLeaseCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func newActivityLeaseTakeCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newActivityLeaseTakeCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -85,7 +85,7 @@ func newActivityLeaseTakeCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 				TTL:         ttl,
 				Scope:       scope,
 				Exclusive:   exclusive,
-				Holder:      activity.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
+				Holder:      model.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			}, jsonOutput)
 		},
 	}
@@ -98,15 +98,15 @@ func newActivityLeaseTakeCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON (alias for --output json)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseTake(cmd *cobra.Command, resolveOpen shared.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
+func runActivityLeaseTake(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
 	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	lease, resolved, err := takeLease(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen shared.OpenResolver, p
 	if !resolved {
 		return nil
 	}
-	if shared.CommandWantsJSON(ctx, jsonOutput) {
+	if clicmd.CommandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(lease)
@@ -123,8 +123,8 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen shared.OpenResolver, p
 	return err
 }
 
-func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams) (activity.EnvironmentActivityLease, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
@@ -134,16 +134,16 @@ func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen shared.
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
 		}
-		return activity.EnvironmentActivityLease{}, false, nil
+		return model.EnvironmentActivityLease{}, false, nil
 	}
 	lease, err := activity.TakeEnvironmentActivityLease(params)
 	if err != nil {
-		return activity.EnvironmentActivityLease{}, false, err
+		return model.EnvironmentActivityLease{}, false, err
 	}
 	return lease, true, nil
 }
 
-func newActivityLeaseReleaseCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newActivityLeaseReleaseCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -171,18 +171,18 @@ func newActivityLeaseReleaseCmd(resolveOpen shared.OpenResolver) *cobra.Command 
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to release")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Release an exclusive claim rather than a plain lease; must match how it was taken")
 	cmd.Flags().StringVar(&scope, "scope", "", "The scope the exclusive claim was taken on (default \"worktree\"); only meaningful with --exclusive")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen shared.OpenResolver, tenant, environment, id, scope string, exclusive bool) error {
+func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen envscope.OpenResolver, tenant, environment, id, scope string, exclusive bool) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("lease id is required")
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	outcome, resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
 	if err != nil {
 		return err
@@ -190,41 +190,33 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen shared.OpenResolver
 	if !resolved {
 		return nil
 	}
-	// The note is resolved only for the wrong-store outcome, and only by
-	// asking the store that does hold the id. A note that cannot be read falls
-	// back to the plain summary rather than failing a release that already
-	// did the right thing.
+	// An unreadable note falls back to the plain summary; the release already succeeded.
 	note := ""
-	if outcome == activity.EnvironmentActivityLeaseHeldElsewhere {
+	if outcome == model.EnvironmentActivityLeaseHeldElsewhere {
 		note, _ = activity.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id, note))
 	return err
 }
 
-// releaseLeaseSummary reports what the release actually did. A caller that
-// cannot tell "removed" apart from "there was nothing there" has no way to
-// notice a release aimed at the wrong store -- an exclusive claim released
-// without --exclusive reported the same "lease released" line as a real
-// release, while the exclusive claim it never touched stayed held for its
-// full TTL. A no-match that the id turns out to be holding under the other
-// shape says so, and names the release that would match, rather than leaving
-// the operator to conclude the claim is already gone.
-func releaseLeaseSummary(outcome activity.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
+// releaseLeaseSummary distinguishes "removed" from "nothing held", and names the
+// matching release when the id holds a lease of the other shape.
+func releaseLeaseSummary(outcome model.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
 	trimmed := strings.TrimSpace(id)
 	switch outcome {
-	case activity.EnvironmentActivityLeaseReleased:
+	case model.EnvironmentActivityLeaseReleased:
 		return fmt.Sprintf("lease released: %s", trimmed)
-	case activity.EnvironmentActivityLeaseHeldElsewhere:
+	case model.EnvironmentActivityLeaseHeldElsewhere:
 		if note != "" {
 			return fmt.Sprintf("lease not released: %s is %s", trimmed, note)
 		}
+	case model.EnvironmentActivityLeaseNotHeld:
 	}
 	return fmt.Sprintf("lease not held: %s", trimmed)
 }
 
-func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment, id, scope string, exclusive bool) (activity.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, tenant, environment, id, scope string, exclusive bool) (model.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
 	if commandCtx.DryRun {
@@ -234,23 +226,23 @@ func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen shar
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
 		}
-		return activity.EnvironmentActivityLeaseNotHeld, false, nil
+		return model.EnvironmentActivityLeaseNotHeld, false, nil
 	}
 	if exclusive {
 		outcome, err := activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		if err != nil {
-			return activity.EnvironmentActivityLeaseNotHeld, false, err
+			return model.EnvironmentActivityLeaseNotHeld, false, err
 		}
 		return outcome, true, nil
 	}
 	outcome, err := activity.ReleaseEnvironmentActivityLease(tenant, environment, id)
 	if err != nil {
-		return activity.EnvironmentActivityLeaseNotHeld, false, err
+		return model.EnvironmentActivityLeaseNotHeld, false, err
 	}
 	return outcome, true, nil
 }
 
-func newActivityLeaseListCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newActivityLeaseListCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -266,15 +258,15 @@ func newActivityLeaseListCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON (alias for --output json)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseList(cmd *cobra.Command, resolveOpen shared.OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runActivityLeaseList(cmd *cobra.Command, resolveOpen envscope.OpenResolver, tenant, environment string, jsonOutput bool) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	leases, resolved, err := listLeases(cmd.Context(), ctx, resolveOpen, tenant, environment)
 	if err != nil {
 		return err
@@ -285,9 +277,9 @@ func runActivityLeaseList(cmd *cobra.Command, resolveOpen shared.OpenResolver, t
 	return WriteActivityLeases(ctx, leases, time.Now(), jsonOutput)
 }
 
-func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment string) ([]activity.EnvironmentActivityLease, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
-		return shared.ListLeasesInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment)
+func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, tenant, environment string) ([]model.EnvironmentActivityLease, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
+		return envcall.ListLeasesInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment)
 	}
 	if commandCtx.DryRun {
 		commandCtx.TraceCommand("", "activity", "lease-list", tenant, environment)
@@ -300,12 +292,12 @@ func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen shared
 	return leases, true, nil
 }
 
-func WriteActivityLeases(ctx core.Context, leases []activity.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
-	if shared.CommandWantsJSON(ctx, jsonOutput) {
+func WriteActivityLeases(ctx core.Context, leases []model.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
+	if clicmd.CommandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		if leases == nil {
-			leases = []activity.EnvironmentActivityLease{}
+			leases = []model.EnvironmentActivityLease{}
 		}
 		return encoder.Encode(leases)
 	}
@@ -314,20 +306,15 @@ func WriteActivityLeases(ctx core.Context, leases []activity.EnvironmentActivity
 		return err
 	}
 	for _, lease := range leases {
-		if err := shared.WriteLabeledValue(ctx, lease.ID, activityLeaseSummary(lease, now)); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, lease.ID, activityLeaseSummary(lease, now)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// activityLeaseSummary renders one held claim, and renders an exclusive one as
-// exclusive. A presence lease's "name, expires in ..." line is indistinguishable
-// from an exclusive claim's, so a caller reading the list could not tell a claim
-// that refuses everyone else in its scope from one that refuses nobody — the
-// same invisibility that let an inert concurrency guard go unnoticed, because
-// nothing on this surface said the claim was there or what it covered.
-func activityLeaseSummary(lease activity.EnvironmentActivityLease, now time.Time) string {
+// activityLeaseSummary renders one held claim, marking exclusive ones.
+func activityLeaseSummary(lease model.EnvironmentActivityLease, now time.Time) string {
 	value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
 	if lease.Exclusive {
 		value = fmt.Sprintf("%s, exclusive on %s, held by %s, expires in %s",
@@ -342,7 +329,7 @@ func activityLeaseSummary(lease activity.EnvironmentActivityLease, now time.Time
 	return value
 }
 
-func formatLeaseRemaining(lease activity.EnvironmentActivityLease, now time.Time) string {
+func formatLeaseRemaining(lease model.EnvironmentActivityLease, now time.Time) string {
 	remaining := lease.ExpiresAt.Sub(now)
 	if remaining < 0 {
 		remaining = 0
@@ -350,11 +337,8 @@ func formatLeaseRemaining(lease activity.EnvironmentActivityLease, now time.Time
 	return fmt.Sprintf("%ds", int64(remaining.Round(time.Second)/time.Second))
 }
 
-// newActivitySampleCmd is the uninstrumented-work half. The environment monitor
-// calls it on its tick; work that took no lease still registers because the
-// processes doing it burned CPU since the previous tick. The same tick retains a
-// resource-usage reading, so an environment accumulates the history its sizing
-// recommendation is derived from without a second scheduled job.
+// newActivitySampleCmd records activity from CPU use for work that took no lease,
+// and retains a resource-usage reading on the same tick.
 func newActivitySampleCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -377,13 +361,11 @@ func newActivitySampleCmd() *cobra.Command {
 	return cmd
 }
 
-// recordActivityIf records the given kind only when found is true, so a
-// sampler tick that detects nothing leaves the activity snapshot untouched.
 func recordActivityIf(found bool, tenant, environment, kind string) error {
 	if !found {
 		return nil
 	}
-	return activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	return activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Kind:        kind,
@@ -418,11 +400,11 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err := recordActivityIf(interactiveSSH, tenant, environment, config.ActivityKindSSH); err != nil {
 		return err
 	}
-	return WriteActivitySampleResult(shared.CommandContext(cmd), result, jsonOutput)
+	return WriteActivitySampleResult(clicmd.CommandContext(cmd), result, jsonOutput)
 }
 
-func WriteActivitySampleResult(ctx core.Context, result activity.ResidentActivityResult, jsonOutput bool) error {
-	if shared.CommandWantsJSON(ctx, jsonOutput) {
+func WriteActivitySampleResult(ctx core.Context, result model.ResidentActivityResult, jsonOutput bool) error {
+	if clicmd.CommandWantsJSON(ctx, jsonOutput) {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}
 	if !result.Busy {
@@ -433,16 +415,13 @@ func WriteActivitySampleResult(ctx core.Context, result activity.ResidentActivit
 	return err
 }
 
-// retainRuntimeUsage folds this tick's cgroup reading into the environment's
-// retained history. A host that supplies no counters records nothing: a history
-// of empty samples would only ever support "no evidence", and this runs on a
-// laptop as readily as in a container.
+// retainRuntimeUsage records nothing when the host supplies no cgroup counters.
 func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	sample := config.ReadLocalRuntimeUsage(cgroupRoot)
 	if !sample.HasCounters() {
 		return nil
 	}
-	history, err := common.LoadRuntimeUsageHistory(tenant, environment)
+	history, err := deploy.LoadRuntimeUsageHistory(tenant, environment)
 	if err != nil {
 		return err
 	}
@@ -450,7 +429,7 @@ func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 }
 
 func validateActivityTarget(tenant, environment string) error {
-	missing := shared.MissingTenantOrEnvironmentFlags(tenant, environment)
+	missing := envcall.MissingTenantOrEnvironmentFlags(tenant, environment)
 	if len(missing) == 0 {
 		return nil
 	}

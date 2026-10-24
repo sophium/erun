@@ -27,9 +27,8 @@ interface ActivityQueueDrawerProps {
 const drawerSurfaceClassName =
   'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-150 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-150';
 
-// Announces a status transition once per entry, not the per-second ticking
-// clock a card renders locally -- an aria-live region wrapping the whole card
-// list re-announced that clock every second (WCAG 2.2.2).
+// Announces status transitions only; a live region over the cards re-announced
+// the ticking clock every second (WCAG 2.2.2).
 function useActivityStatusAnnouncement(entries: ActivityQueueEntry[]): string {
   const previousStatuses = React.useRef<Map<string, ActivityQueueEntry['status']>>(new Map());
   const [announcement, setAnnouncement] = React.useState('');
@@ -52,13 +51,7 @@ function useActivityStatusAnnouncement(entries: ActivityQueueEntry[]): string {
   return announcement;
 }
 
-// ActivityQueueDrawer is the slide-in activity queue drawer. The queue is
-// rebuilt from live cluster and host state on every launch and never persists
-// across restarts, so failures from a previous session don't reappear. The
-// one exception is a synthetic 'invite-approval' entry (activityQueueState.ts'
-// pushInviteApprovalActivityEntry): nothing to rebuild it from on relaunch,
-// so it simply does not survive one either -- same non-persistence, just for
-// a different reason.
+// The queue is rebuilt from live state on launch and never persisted.
 export function ActivityQueueDrawer({
   open,
   onClose,
@@ -75,12 +68,8 @@ export function ActivityQueueDrawer({
   );
   const statusAnnouncement = useActivityStatusAnnouncement(entries);
 
-  // A synthetic 'invite-approval' entry has no backend deploy record behind
-  // it, so the ordinary dismiss RPC (DismissDeploy)
-  // would find nothing to dismiss and leave the row stuck on screen after a
-  // click that reported success -- exactly the dead end root AGENTS.md's
-  // "Smooth, Seamless, No Dead Ends" forbids. Dismiss it locally instead;
-  // every other entry keeps going through the real backend dismiss.
+  // invite-approval entries have no backend record, so DismissDeploy would
+  // leave them stuck; dismiss them locally.
   const dismissHistoryEntry = React.useCallback(
     async (id: string) => {
       const entry = entries.find((candidate) => candidate.id === id);
@@ -373,9 +362,7 @@ function ActivitySection({
   );
 }
 
-// ClearAllButton surfaces its hint through the app tooltip primitive, not a
-// native title attribute — AGENTS.md forbids native title for meaningful
-// product info and it is not keyboard-reachable.
+// Uses the app tooltip, not a native title, which is not keyboard-reachable.
 function ClearAllButton({
   label,
   hint,

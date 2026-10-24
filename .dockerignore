@@ -1,5 +1,4 @@
-# Keep the build context lean and stable. Mirrors .gitignore plus VCS,
-# IDE, and tooling state that must never enter the image or perturb cache keys.
+# Keep the build context lean and fingerprint-stable: .gitignore plus VCS, IDE and tooling state.
 
 # Version control / hooks
 .git
@@ -11,26 +10,13 @@
 .vscode
 .claude
 .codex
-# .erun/config.yaml is checked into git (the repo's own project config) and
-# TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
-# it inside the erun-devops image's cli-test stage, so it is carved out with the same
-# ".erun/*" plus negation shape ProjectConfigGitIgnoreFix documents for
-# .gitignore -- a bare ".erun" exclusion cannot be un-excluded per file
-# (docker cannot re-include a file whose parent directory is excluded).
+# config.yaml is tracked and read by the cli-test stage; a bare .erun exclusion could not re-include it.
 .erun/*
 !.erun/config.yaml
-# Root .gitignore excludes this unanchored (any depth); computeBuildFingerprint
-# (erun-common/build_incremental.go) honours nested .gitignores too, so a
-# macOS checkout that leaves one of these under a COPYd module would enter the
-# real build context without moving the fingerprint unless mirrored here.
+# The fingerprint honours nested .gitignores; mirror them so the real context matches it.
 **/.DS_Store
 
-# Same asymmetry, for the two things `terraform init` writes into the module
-# tree it initializes: the module guides tell a developer to run `terraform
-# test` by hand in a module under erun-devops/terraform-erun. Root .gitignore
-# excludes both unanchored at any depth, so the fingerprint already ignores them; without these rules the real
-# build context would still carry ~105MB of provider binaries per initialized
-# module for a file the fingerprint never sees.
+# Provider binaries from a hand-run `terraform init`; the fingerprint already ignores them.
 **/.terraform/
 **/.terraform.lock.hcl
 
@@ -48,30 +34,21 @@ profile.cov
 __debug_bin*
 .gomodcache
 
-# Integration-suite local artifacts (regenerated per run; must not enter the
-# build context or perturb fingerprint cache keys)
+# Integration-suite local artifacts
 /erun-integration/coverage
 /erun-integration/bin
 
-# eslint/prettier --cache output; never COPYd into a build context, mirrored
-# here only for hygiene
+# eslint/prettier --cache output
 /.cache/
 
 # Local packaging / release artifacts
 /erun-devops/linux/*/dist
 /erun-cli/bin
 
-# Desktop UI build outputs. /erun-ui/frontend/wailsjs is the one exception
-# to "not consumed by service Dockerfiles": the erun-ui build stage
-# regenerates it in-image with `go tool wails generate module` before
-# typechecking/building erun-ui/frontend, so a possibly-stale host copy must never leak into the build context.
+# Desktop UI build outputs; wailsjs is regenerated in-image, so a stale host copy must stay out.
 /erun-ui/bin
 /erun-ui/build/bin
-# The macOS app bundle and the darwin build tree a local desktop build leaves
-# beside the module (excluded only by a clone's own .git/info/exclude, which
-# neither docker nor the fingerprint reads): ~90MB of host binaries no Linux
-# build consumes, which would bloat every context that COPYs erun-ui and move
-# its fingerprint on every local desktop build.
+# Local macOS desktop build output (~90MB) that no Linux build consumes.
 /erun-ui/ERun.app
 /erun-ui/darwin
 /erun-ui/frontend/node_modules
@@ -85,12 +62,7 @@ __debug_bin*
 /erun-ui/playwright/playwright/.cache
 /erun-ui/.golangci-cache
 
-# Root yarn workspace (erun-kit, erun-console, erun-ui/frontend): the
-# erun-console and erun-ui Dockerfiles run `yarn install` in-image, so hoisted
-# deps and build outputs are regenerated there and must
-# never enter the build context — the workspace root node_modules alone is
-# hundreds of MB, and its presence would diverge the context from the
-# fingerprint the same way /erun-docs/node_modules would.
+# Root yarn workspace deps and outputs, regenerated in-image by the console and UI Dockerfiles.
 /node_modules
 /erun-kit/node_modules
 /erun-kit/dist
@@ -108,12 +80,7 @@ __debug_bin*
 /erun-devops/e2e/*/test-results
 /erun-devops/e2e/*/playwright-report
 
-# Docs site dependencies and build outputs. The erun-docs image runs
-# `yarn install` + `yarn build` inside its Dockerfile, so these are
-# regenerated in-image and must never enter the build context: they bloat it
-# (~1GB of node_modules alone) and, because the build only honours this root
-# .dockerignore while the fingerprint also honours erun-docs/.gitignore, their
-# presence diverges the real context from the fingerprint.
+# Regenerated in-image by the erun-docs Dockerfile; docker ignores erun-docs/.gitignore, the fingerprint does not.
 /erun-docs/node_modules
 /erun-docs/build
 /erun-docs/.docusaurus

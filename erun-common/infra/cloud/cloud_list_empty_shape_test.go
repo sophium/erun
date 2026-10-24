@@ -8,19 +8,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// unconfiguredStore is the state the reported defect is about: a store that
-// resolves fine and has no cloud providers and no cloud contexts in it. The
-// listing still succeeds, and the question is only what an empty listing
-// serialises as.
+// unconfiguredStore has no cloud providers and no cloud contexts.
 type unconfiguredStore struct{}
 
 func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	return config.ERunConfig{}, "", nil
 }
 
-// TestCloudProviderListStatusesIsNeverNil pins the producers' half of the
-// collection shape, so the field's own contract can be asserted against the
-// real type at the transport that owns it instead of against a copy.
 func TestCloudProviderListStatusesIsNeverNil(t *testing.T) {
 	statuses, err := ListCloudProviderStatuses(unconfiguredStore{}, CloudDependencies{})
 	if err != nil {
@@ -32,12 +26,7 @@ func TestCloudProviderListStatusesIsNeverNil(t *testing.T) {
 	}
 }
 
-// TestCloudContextListResultCarriesAnEmptyArray pins the shape of the type the
-// CLI's `context list` and the context_list MCP tool share, including the
-// contrast that justifies leaving the sibling field alone: RefreshFailures is
-// an annotation on the rows, and it stays omitted when the refresh was never
-// attempted, because an empty array there would assert that it ran and found
-// nothing to report -- a different fact from never having looked.
+// RefreshFailures stays omitted: the refresh was never attempted.
 func TestCloudContextListResultCarriesAnEmptyArray(t *testing.T) {
 	result, err := RefreshCloudContextList(core.Context{}, unconfiguredStore{}, CloudContextDependencies{})
 	if err != nil {

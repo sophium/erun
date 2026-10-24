@@ -7,69 +7,38 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
 	desktopAppStat     = os.Stat
 	desktopAppReadFile = os.ReadFile
-	// desktopAppSystemApplicationsDirOverrideEnv is a test seam so the
-	// integration suite can point the system-wide candidate at a fixture
-	// directory instead of the real /Applications; production never sets it.
+	// Test seam for the system /Applications dir; production never sets it.
 	desktopAppSystemApplicationsDirOverrideEnv = func() string {
 		return os.Getenv("ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE")
 	}
-	// desktopAppExecutableDirOverrideEnv is the same kind of seam for the
-	// candidate that comes from this executable's own directory -- where a
-	// packaged install and the dev wrapper's BIN_DIR both put the bundle the
-	// CLI actually launches. A scenario cannot write beside the shared
-	// instrumented binary without leaking a bundle into every other scenario
-	// in the run, so it points this at a directory it owns instead.
-	// Production never sets it.
+	// Test seam for this executable's own directory; production never sets it.
 	desktopAppExecutableDirOverrideEnv = func() string {
 		return os.Getenv("ERUN_DESKTOP_APP_EXECUTABLE_DIR_OVERRIDE")
 	}
 )
 
-// cfBundleShortVersionPattern extracts CFBundleShortVersionString out of a
-// standard Info.plist without a full plist parser -- build.sh always writes
-// this exact key/value shape, and a minimal pattern keeps this reader
-// tolerant of a hand-edited or differently ordered plist too.
+// build.sh always writes this key/value shape, so no plist parser is needed.
 var cfBundleShortVersionPattern = regexp.MustCompile(`<key>CFBundleShortVersionString</key>\s*<string>([^<]*)</string>`)
 
 type installedDesktopApp struct {
 	Path    string
 	Version string
-	// Launched is true for the copy `erun app` would actually start, which is
-	// not necessarily the first one on this list: that resolution picks the
-	// newest copy among the layouts beside this CLI, and a copy in
-	// /Applications is not one of them.
+	// Launched marks the copy `erun app` would start, which need not be first.
 	Launched bool
 }
 
-// installedDesktopAppCandidates lists where a copy of the desktop app bundle
-// could live.
-//
-// The copies `erun app` itself launches from come first -- beside this
-// executable, and the checkout's erun-ui/bin -- because those are the ones a
-// running desktop actually started from, and a check that only looked at
-// /Applications reported on a bundle nothing was running while the live app
-// was a different build at a path it never inspected. The dev wrapper's
-// BIN_DIR (erun-cli/bin, or $ERUN_DEV_BIN_DIR) is exactly this executable's
-// directory, which is why the sibling candidate covers it without knowing
-// about the wrapper at all.
-//
-// The macOS install locations follow, in the order macOS itself favors when
-// two copies share the same bundle id: a user's ~/Applications install
-// shadows the system-wide /Applications one -- the same convention already
-// applied to IntelliJ discovery (resolveInstalledIntelliJContentsDir in
-// open_ide.go). Only darwin ships this bundle shape: Homebrew/Scoop always
-// build the CLI and the desktop binary from the same tagged source into the
-// same keg, so neither package manager ever leaves a second,
-// independently-aging copy behind the way a manually built and relocated .app
-// bundle can.
-func installedDesktopAppCandidates(hostOS core.HostOS) []string {
-	if hostOS != core.HostOSDarwin {
+// installedDesktopAppCandidates lists the copies `erun app` launches from first,
+// then macOS installs with ~/Applications shadowing /Applications.
+func installedDesktopAppCandidates(hostOS model.HostOS) []string {
+	if hostOS != model.HostOSDarwin {
 		return nil
 	}
 	seen := make(map[string]struct{}, 4)
@@ -86,21 +55,18 @@ func installedDesktopAppCandidates(hostOS core.HostOS) []string {
 	}
 
 	if dir := desktopAppExecutableDir(); dir != "" {
-		for _, layout := range shared.DesktopAppLayouts(dir, core.DesktopAppName, hostOS) {
+		for _, layout := range desktop.DesktopAppLayouts(dir, core.DesktopAppName, hostOS) {
 			add(layout.Launch)
 		}
 	}
 	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
-		add(filepath.Join(homeDir, "Applications", shared.DesktopAppBundleName))
+		add(filepath.Join(homeDir, "Applications", desktop.DesktopAppBundleName))
 	}
-	add(filepath.Join(systemApplicationsDir(), shared.DesktopAppBundleName))
+	add(filepath.Join(systemApplicationsDir(), desktop.DesktopAppBundleName))
 	return candidates
 }
 
-// desktopAppExecutableDir is the directory this CLI is running from, which is
-// where `erun app` looks first for the desktop app to launch. A process that
-// cannot name its own executable yields no sibling candidate rather than a
-// guessed one.
+// desktopAppExecutableDir returns "" when the process cannot name its own executable.
 func desktopAppExecutableDir() string {
 	if override := strings.TrimSpace(desktopAppExecutableDirOverrideEnv()); override != "" {
 		return override
@@ -112,15 +78,13 @@ func desktopAppExecutableDir() string {
 	return filepath.Dir(executable)
 }
 
-// launchedDesktopAppPath is the copy `erun app` would start right now, or ""
-// when there is none -- the same resolution the launch itself uses, so the
-// bundle doctor reports on is the bundle a launch would actually reach.
-func launchedDesktopAppPath(hostOS core.HostOS) string {
+// launchedDesktopAppPath uses the launch's own resolution, or "" when there is none.
+func launchedDesktopAppPath(hostOS model.HostOS) string {
 	dir := desktopAppExecutableDir()
 	if dir == "" {
 		return ""
 	}
-	chosen, _ := shared.ResolveAppExecutableNear(filepath.Join(dir, core.DesktopAppName), core.DesktopAppName, hostOS)
+	chosen, _ := desktop.ResolveAppExecutableNear(filepath.Join(dir, core.DesktopAppName), core.DesktopAppName, hostOS)
 	return chosen
 }
 
@@ -131,10 +95,7 @@ func systemApplicationsDir() string {
 	return "/Applications"
 }
 
-// inspectInstalledDesktopApps reads every installed desktop app bundle this
-// host's OS convention could hold, returning one entry per bundle that
-// actually exists on disk, in candidate order.
-func inspectInstalledDesktopApps(hostOS core.HostOS) []installedDesktopApp {
+func inspectInstalledDesktopApps(hostOS model.HostOS) []installedDesktopApp {
 	launched := launchedDesktopAppPath(hostOS)
 	var found []installedDesktopApp
 	for _, bundlePath := range installedDesktopAppCandidates(hostOS) {
@@ -167,15 +128,8 @@ func readDesktopAppBundleVersion(bundlePath string) (string, bool) {
 	return version, true
 }
 
-// reportInstalledDesktopAppVersion flags an installed desktop app bundle that
-// has drifted from this CLI's own version, and a stale second copy sharing
-// the bundle id (com.sophium.erun) with a current one -- both invisible
-// today, since nothing about launching a stale bundle (Finder, Spotlight, the
-// Dock) ever consults the CLI it sits beside. Detection only, and
-// unconditional: a stale or duplicated bundle is a fact about this host, not
-// about the tenant/environment doctor is scoped to, so this runs before any
-// tenant resolves and the same in --dry-run as for real -- there is no live
-// action to skip, only files to read.
+// reportInstalledDesktopAppVersion flags bundles that drift from this CLI's version
+// and stale duplicates. Host-scoped, so it runs before tenant resolution and under --dry-run.
 func reportInstalledDesktopAppVersion(ctx core.Context) error {
 	found := inspectInstalledDesktopApps(core.DetectHost().OS)
 	if len(found) == 0 {
@@ -192,15 +146,12 @@ func reportInstalledDesktopAppVersion(ctx core.Context) error {
 	for _, app := range found {
 		w.Linef("%s: %s", app.Path, app.Version)
 	}
-	// Named explicitly because the list alone does not answer the question this
-	// section exists for: a copy matching this CLI says nothing about whether
-	// the copy a launch reaches is that one. Without this, doctor could report
-	// no drift while the live app was a different build at a third path.
+	// A matching copy says nothing about which copy a launch reaches.
 	if launched := launchedDesktopAppAmong(found); launched != "" {
 		w.Linef("erun app launches %s.", launched)
 	}
 	if len(found) > 1 {
-		w.Linef("Multiple %s bundles share the bundle id com.sophium.erun; macOS (Finder, Spotlight, the Dock) can launch either one regardless of which is current. Remove the stale copy(ies) so only the current version can be launched.", shared.DesktopAppBundleName)
+		w.Linef("Multiple %s bundles share the bundle id com.sophium.erun; macOS (Finder, Spotlight, the Dock) can launch either one regardless of which is current. Remove the stale copy(ies) so only the current version can be launched.", desktop.DesktopAppBundleName)
 	}
 	for _, app := range mismatched {
 		w.Linef("%s (%s) does not match this CLI (%s). erun has no automated updater for the installed desktop app bundle; rebuild it (./erun-ui/build.sh from a checkout at this version) or reinstall to update it.", app.Path, app.Version, cliVersion)
@@ -209,10 +160,6 @@ func reportInstalledDesktopAppVersion(ctx core.Context) error {
 	return w.Err()
 }
 
-// launchedDesktopAppAmong names the inspected copy `erun app` would start, or
-// "" when a launch reaches none of them -- which is the ordinary case for an
-// installed CLI whose bundle a launch resolves from somewhere the check did
-// not enumerate.
 func launchedDesktopAppAmong(found []installedDesktopApp) string {
 	for _, app := range found {
 		if app.Launched {
@@ -222,10 +169,7 @@ func launchedDesktopAppAmong(found []installedDesktopApp) string {
 	return ""
 }
 
-// installedDesktopAppsMismatching returns the copies whose version differs
-// from this CLI's own. A CLI that cannot name its own version (a "dev" build
-// with none stamped) flags nothing: it has nothing to compare against, and
-// inventing a mismatch there would report every bundle on the host.
+// installedDesktopAppsMismatching flags nothing for a CLI with no stamped version.
 func installedDesktopAppsMismatching(found []installedDesktopApp, cliVersion string) []installedDesktopApp {
 	if cliVersion == "" {
 		return nil

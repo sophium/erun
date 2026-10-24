@@ -8,8 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// CloudProviderAliasWriter stores a tenant's BYO-cloud credentials. The
-// credentials blob is opaque to the API and encrypted at rest.
+// CloudProviderAliasWriter stores a tenant's BYO-cloud credentials, encrypted at rest.
 type CloudProviderAliasWriter interface {
 	Set(ctx context.Context, alias, provider, credentials string) error
 }
@@ -28,8 +27,7 @@ func RegisterCloudProviderAliasRoutes(register ProtectedRouteRegistrar, aliases 
 	register(http.MethodPut, "/v1/cloud-provider-aliases/{alias}", http.HandlerFunc(routes.setAlias))
 }
 
-// setAlias needs no operations gate: RLS binds each alias row to the caller, so
-// every authorized tenant manages only its own aliases.
+// No operations gate: RLS binds each alias row to the caller.
 func (r CloudProviderAliasRoutes) setAlias(w http.ResponseWriter, req *http.Request) {
 	if r.aliases == nil {
 		writeError(w, http.StatusNotImplemented, "cloud provider alias storage is not configured (ERUN_SECRETS_KEY is unset)")

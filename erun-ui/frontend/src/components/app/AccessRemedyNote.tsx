@@ -7,15 +7,8 @@ import { useAppDispatch } from '@/app/hooks';
 import { showNotification } from '@/app/notificationThunks';
 import type { UIAccessRemedy } from '@/types';
 
-// AccessRemedyNote renders the "hand this to an administrator" half of a
-// denial — the same next step the not-enrolled screen already gives, applied
-// to an access the caller is missing rather than an enrollment they lack. The
-// command is complete as rendered: it carries this caller's own user id, so
-// copying it is the whole of the work the operator has left to do.
-//
-// The backend omits a remedy entirely when no role covers the missing access
-// or the tenant's roles could not be read, which is why it is optional here
-// and absent renders nothing at all.
+// AccessRemedyNote renders the copyable grant command for an administrator; the
+// backend omits it when no role covers the missing access.
 export function AccessRemedyNote({
   remedy,
 }: {
@@ -29,8 +22,7 @@ export function AccessRemedyNote({
   return (
     <div className="mt-2 grid gap-1">
       <div className="flex flex-wrap items-center justify-center gap-2">
-        {/* The sentence above already says to ask an administrator, so this
-            half is the artifact itself rather than a second request for one. */}
+        {/* The sentence above already asks for an administrator. */}
         <span>
           {remedy.roleName
             ? `Send an administrator the command that grants you ${remedy.roleName}:`
@@ -56,11 +48,7 @@ export function AccessRemedyNote({
   );
 }
 
-// AccessDeniedBody is the shared body of a capability denial: the sentence
-// naming what is missing, plus the copyable grant when the backend resolved
-// one. Every denial that says "It needs X. Ask an administrator for access."
-// renders through here, so all of them hand over the request together rather
-// than one at a time.
+// AccessDeniedBody is the shared body of every capability denial.
 export function AccessDeniedBody({
   remedies,
   restricted,

@@ -18,9 +18,6 @@ func newTestAppForWindowClose(t *testing.T) *App {
 	return app
 }
 
-// TestBeforeCloseBlocksWithRunningWork pins the actual "Fix" erun#1214 asks
-// for: a running deploy must block the window from closing and name itself
-// to the operator, instead of the previous unconditional `return false`.
 func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()
@@ -54,8 +51,6 @@ func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	}
 }
 
-// TestBeforeCloseIdleQueueUnchanged is the no-op path from the issue's own
-// validation list: closing with an idle queue must not prompt.
 func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()
@@ -72,11 +67,6 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	}
 }
 
-// TestATabStillBeingEstablishedDoesNotBlockTheClose holds each gated tab kind
-// in its setup phase — started, but before its ready marker — exactly as every
-// launch does for the selected environment's tabs, and asks whether the window
-// may close. Setting up a terminal is not in-flight work: the idle path must not
-// prompt, while a deploy running beside the held tab still must.
 func TestATabStillBeingEstablishedDoesNotBlockTheClose(t *testing.T) {
 	for _, kind := range []gatedSessionKind{
 		gatedSessionKindOpen,
@@ -130,8 +120,6 @@ func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
 	}
 }
 
-// TestAnUnregisteredGatedSessionKindIsRefused keeps every entry
-// enqueueGatedSession creates recognisable to the close gate.
 func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	t.Cleanup(app.stopActionRunners)
@@ -145,9 +133,6 @@ func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
 	}
 }
 
-// TestConfirmWindowClosePersistsRecordThenQuits pins the second half of the
-// fix: confirming the close records what was running before anything is
-// killed, then quits without re-prompting.
 func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	quit := 0
@@ -179,8 +164,7 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 		t.Fatalf("unexpected recorded entries: %+v", record.Entries)
 	}
 
-	// The confirmation must survive into the Quit-driven beforeClose pass
-	// without re-prompting, or the dialog would reopen on its own confirm.
+	// Must not re-prompt, or the dialog would reopen on its own confirm.
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	if prevent := app.beforeClose(context.Background()); prevent {
@@ -191,9 +175,6 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	}
 }
 
-// TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning covers the race where
-// the running work finishes between the prompt and the confirm click: no
-// stale record should be written.
 func TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	app.deps.quitApp = func() {}
@@ -206,13 +187,9 @@ func TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning(t *testing.T) {
 	}
 }
 
-// TestConfirmWindowCloseStillQuitsWhenRecordingFails: the operator already
-// confirmed closing despite the running work, so a disk error persisting the
-// courtesy record must not trap them in the window — it surfaces as a
-// returned error but the quit still happens.
 func TestConfirmWindowCloseStillQuitsWhenRecordingFails(t *testing.T) {
 	app := newTestAppForWindowClose(t)
-	// Point the record path's "directory" at a plain file, so MkdirAll fails.
+	// A plain file as the parent makes MkdirAll fail.
 	blocker := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)

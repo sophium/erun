@@ -7,24 +7,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	modelpkg "github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// A tenant serves more than one repository, and they share branch names — that
-// is the whole reason a review records which repository its branches belong
-// to. These gates drive two real (local, file://) remotes that both carry one
-// target branch of the same name, against a real migrated Postgres, and check
-// which repository a MERGED report is actually verified against.
-//
-// The row that matters is the one created before the platform recorded a
-// repository: it carries none, so anything that resolves a repository for it
-// has to resolve one it can genuinely be said to belong to, and never fall
-// back to "every repository" — a filter the repository layer reads as no
-// filter at all.
+// Repositories of one tenant share branch names, so a MERGED report must be
+// verified against the reporting repository, never "every repository".
 
-// newRemoteSharingBranch stands up a second, independent bare repository whose
-// target branch carries the same name as another remote's, which is what makes
-// the two collide in the platform's (targetBranch)-keyed bookkeeping.
+// newRemoteSharingBranch creates an independent remote with the same target branch name.
 func newRemoteSharingBranch(t *testing.T, branch string) mergeQueueRemote {
 	t.Helper()
 	bare := t.TempDir()
@@ -37,14 +26,7 @@ func newRemoteSharingBranch(t *testing.T, branch string) mergeQueueRemote {
 	return mergeQueueRemote{url: "file://" + bare, main: branch}
 }
 
-// e2eOpenReviewInRepository is shared with legacy_repository_queue_e2e_test.go,
-// which also needs its empty-repository form to recreate a row created before
-// the platform recorded one. Every call here names a real repository.
-
-// e2eReportMergedKeepingBody is e2eReportMerged with the response body kept,
-// so a refusal can be reported in the platform's own words — which repository
-// and which commit it measured the report against — rather than as a bare
-// status code.
+// e2eReportMergedKeepingBody keeps the refusal body, which names the repository and commit measured.
 func e2eReportMergedKeepingBody(t *testing.T, baseURL, reviewID, buildID, remoteURL string) (int, string, mergeReviewResponse) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{
@@ -59,10 +41,8 @@ func e2eReportMergedKeepingBody(t *testing.T, baseURL, reviewID, buildID, remote
 	return code, body, review
 }
 
-// e2eMergeAndReportMerged drives one review through the last two steps an
-// environment performs — merge the source onto the target for real, record
-// the merge commit's build, then report MERGED — and returns the merge commit it produced
-// alongside the report's own outcome.
+// e2eMergeAndReportMerged merges for real, records the build, reports MERGED, and
+// returns the merge commit.
 func e2eMergeAndReportMerged(t *testing.T, baseURL string, remote mergeQueueRemote, reviewID, sourceBranch, mergeMessage string) (string, int, string, mergeReviewResponse) {
 	t.Helper()
 	mergeCommit := remote.merge(t, remote.main, sourceBranch, mergeMessage)
@@ -71,9 +51,7 @@ func e2eMergeAndReportMerged(t *testing.T, baseURL string, remote mergeQueueRemo
 	return mergeCommit, code, body, review
 }
 
-// forkRemote stands up a second bare remote that carries the first one's
-// history, the shape two repositories of one tenant share when one was forked
-// from the other — or when both descend from a common one.
+// forkRemote creates a second remote sharing the first one's history.
 func forkRemote(t *testing.T, origin mergeQueueRemote) mergeQueueRemote {
 	t.Helper()
 	bare := t.TempDir()
@@ -84,9 +62,7 @@ func forkRemote(t *testing.T, origin mergeQueueRemote) mergeQueueRemote {
 	return mergeQueueRemote{url: "file://" + bare, main: origin.main}
 }
 
-// forceTargetInto replaces to's target branch with from's, discarding
-// whatever to had there — the force-push a buggy or malicious reporter stands
-// in for, since no well-behaved push can manufacture a replaced history.
+// forceTargetInto force-replaces to's target branch with from's.
 func forceTargetInto(t *testing.T, from, to mergeQueueRemote) {
 	t.Helper()
 	dir := t.TempDir()
@@ -94,10 +70,6 @@ func forceTargetInto(t *testing.T, from, to mergeQueueRemote) {
 	runGit(t, dir, "push", "--force", to.url, from.main+":"+to.main)
 }
 
-// commitPresentIn reports whether commit exists anywhere in remote's fetched
-// history. It is how these gates establish that the repositories they stand up
-// really are disjoint: an anchor naming a commit absent from one of them can
-// only have come from the other.
 func commitPresentIn(t *testing.T, remote mergeQueueRemote, commit string) bool {
 	t.Helper()
 	dir := t.TempDir()
@@ -108,33 +80,16 @@ func commitPresentIn(t *testing.T, remote mergeQueueRemote, commit string) bool 
 	return cmd.Run() == nil
 }
 
-// TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit is
-// the reproduction of the report this change fixes.
-//
-// Two repositories of one tenant both serve a target branch named the same.
-// Repository A merges a review through the queue, so the platform records A's
-// merge commit as the gated tip for that branch name. Repository B then merges
-// a review of its own — a row created before the platform recorded a
-// repository, so it carries none — and reports it.
-//
-// Repository B's queue has never merged onto this branch, so there is no gated
-// tip in B's own history for the report to be measured against, and the report
-// is a real, fully-verifiable landing. Anchoring it on the repository column
-// rather than on the repository the report names resolved the tip through an
-// empty filter — which the repository layer reads as "every repository" — and
-// answered with A's merge commit, refusing B's landing because a stranger's
-// commit is not one of its ancestors.
+// A legacy review without a repository must be measured against the reporting
+// repository's history, not another repository's tip for the same branch name.
 func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
 
-	// One target branch name, served by two different repositories.
 	target := uniqueBranchName(t, "shared-target")
 	repoA := newRemoteSharingBranch(t, target)
 	repoB := newRemoteSharingBranch(t, target)
 
-	// Repository A merges a review of its own through the queue, moving the
-	// platform's record of this target branch name forward.
 	branchA := uniqueBranchName(t, "repo-a-feature")
 	repoA.branch(t, branchA, "a.txt")
 	reviewA := e2eOpenReviewInRepository(t, srv.URL, "cross-repo-a", repoA.url, target, branchA)
@@ -147,9 +102,7 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 		t.Fatalf("review A did not merge: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
 
-	// Repository B merges a review of its own. It was created without a
-	// repository — the legacy row shape — so the report's remote is the only
-	// thing naming which repository this is.
+	// Legacy row without a repository: only the report's remote names it.
 	branchB := uniqueBranchName(t, "repo-b-feature")
 	repoB.branch(t, branchB, "b.txt")
 	reviewB := e2eOpenReview(t, srv.URL, "cross-repo-b", target, branchB)
@@ -160,11 +113,6 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 
 	mergeB, code, body, merged := e2eMergeAndReportMerged(t, srv.URL, repoB, reviewB, branchB, "merge "+branchB)
 
-	// The two repositories are genuinely disjoint: repository A's merge commit
-	// is nowhere in repository B's history. Nothing about repository B can
-	// therefore answer for it, and an anchor naming that commit — which is
-	// exactly what the pre-fix refusal above names — could only have been
-	// read out of repository A.
 	if commitPresentIn(t, repoB, mergeA) {
 		t.Fatalf("repository A's merge commit %s is present in repository B; these two remotes were meant to be disjoint", mergeA)
 	}
@@ -174,18 +122,13 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 	if merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("review B status = %s, want MERGED", merged.Status)
 	}
-	wantRepository, err := modelpkg.RepositoryIdentity(repoB.url)
+	wantRepository, err := core.RepositoryIdentity(repoB.url)
 	mustNoErr(t, err, "canonicalize repository B")
 	if merged.Repository != wantRepository {
 		t.Fatalf("review B repository = %q, want the repository its report named, %q", merged.Repository, wantRepository)
 	}
 }
 
-// TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly is the
-// other half of that acceptance: a review that *does* record a repository
-// keeps verifying against that one, and is still refused for a different one.
-// The fix for the row above must not have been "stop telling repositories
-// apart".
 func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -205,8 +148,6 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 	mergeCommit := repoA.merge(t, target, sourceBranch, "merge "+sourceBranch)
 	buildID := e2ePostMergeBuild(t, srv.URL, reviewID, mergeCommit)
 
-	// Reporting the merge against a repository this review does not belong to
-	// is refused, and refused without leaving the review somewhere else.
 	if code, body, _ := e2eReportMergedKeepingBody(t, srv.URL, reviewID, buildID, repoB.url); code != http.StatusConflict {
 		t.Fatalf("reporting the review's merge against repository B: HTTP %d (want %d): %s", code, http.StatusConflict, body)
 	}
@@ -214,8 +155,6 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 		t.Fatalf("status after the refusal = %s, want the review left at MERGE", status)
 	}
 
-	// Its own repository is accepted, and the identity it recorded is the one
-	// it keeps.
 	code, body, merged := e2eReportMergedKeepingBody(t, srv.URL, reviewID, buildID, repoA.url)
 	if code != http.StatusOK {
 		t.Fatalf("reporting the review's merge against its own repository: HTTP %d: %s", code, body)
@@ -223,28 +162,14 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 	if merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("status = %s, want MERGED", merged.Status)
 	}
-	wantRepository, err := modelpkg.RepositoryIdentity(repoA.url)
+	wantRepository, err := core.RepositoryIdentity(repoA.url)
 	mustNoErr(t, err, "canonicalize repository A")
 	if merged.Repository != wantRepository {
 		t.Fatalf("repository = %q, want the review's own %q", merged.Repository, wantRepository)
 	}
 }
 
-// TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck is the
-// other half of the same defect, and the reason it is not merely a false
-// refusal.
-//
-// Two repositories share history. Repository B merges once through the queue,
-// so the platform records B's own gated tip. Repository A then merges, more
-// recently, and A's target is force-pushed over B's — replacing B's history, so
-// the tip B was gated against is gone. A second, legacy review in B is gated
-// against the replaced history and reports.
-//
-// Its reported commit descends from A's merge commit and not from B's own
-// gated tip, which is exactly the rewrite condition 2 exists to refuse. Anchored
-// on "every repository" it finds A's commit, an ancestor of the report, and
-// accepts the rewrite; anchored on the repository the report names it finds
-// B's own replaced tip and refuses.
+// Another repository's tip must not satisfy the gated-tip check for a rewritten history.
 func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -253,7 +178,6 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 	repoA := newRemoteSharingBranch(t, target)
 	repoB := forkRemote(t, repoA)
 
-	// Repository B merges once through the queue: this is B's own gated tip.
 	branchB1 := uniqueBranchName(t, "repo-b-first")
 	repoB.branch(t, branchB1, "b1.txt")
 	reviewB1 := e2eOpenReviewInRepository(t, srv.URL, "fork-b-first", repoB.url, target, branchB1)
@@ -263,8 +187,7 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 		t.Fatalf("repository B's first merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
 
-	// Repository A merges on its own target — more recently than B's, so a
-	// cross-repository lookup would answer with A's commit.
+	// More recent than B's, so a cross-repository lookup would answer with A's commit.
 	branchA := uniqueBranchName(t, "repo-a-feature")
 	repoA.branch(t, branchA, "a.txt")
 	reviewA := e2eOpenReviewInRepository(t, srv.URL, "fork-a", repoA.url, target, branchA)
@@ -273,15 +196,12 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 		t.Fatalf("repository A's merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
 
-	// A's target replaces B's: the tip B was gated against is gone.
 	forceTargetInto(t, repoA, repoB)
 	if commitPresentIn(t, repoB, mergeB1) {
 		t.Fatalf("repository B's gated tip %s survived the force-push; the replaced history this test needs was not created", mergeB1)
 	}
 
-	// Repository B's next review is gated against the replaced history, and
-	// reports a commit that descends from A's merge but not from B's own gated
-	// tip. It carries no repository, so nothing but the report names B.
+	// Descends from A's merge but not B's gated tip, and carries no repository.
 	branchB2 := uniqueBranchName(t, "repo-b-second")
 	repoB.branch(t, branchB2, "b2.txt")
 	reviewB2 := e2eOpenReview(t, srv.URL, "fork-b-second", target, branchB2)

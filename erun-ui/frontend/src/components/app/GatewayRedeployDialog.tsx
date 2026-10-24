@@ -14,10 +14,8 @@ import { closeGatewayRedeployDialog, confirmGatewayRedeploy } from '@/app/gatewa
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { UIGatewayRouting } from '@/uiOpenRouterTypes';
 
-// GatewayRedeployDialog says what a gateway switch in ERun settings has not
-// done yet: the gateway is rendered into each runtime at deploy time, so the
-// listed pods keep routing the old way until they are redeployed. Redeploying
-// restarts their pods, so it is offered, never done on the operator's behalf.
+// The gateway is rendered at deploy time, so pods keep the old routing until
+// redeployed. Redeploying restarts pods, so it is only offered.
 export function GatewayRedeployDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const { open, items } = useAppSelector((state) => state.gatewayRedeploy);

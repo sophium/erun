@@ -1,10 +1,7 @@
 import type { CloudNodeOperation } from './model';
 
-// cloudNodeOperationFor answers "is there an operation in flight against THIS
-// node", which is the only form of the question a label naming one node may
-// ask. The flag it replaced was a single global boolean, so a start on one
-// environment's node put a progressive label on every other environment's
-// control — including environments with nothing running at all.
+// cloudNodeOperationFor scopes in-flight operations to one node, so a start on
+// one node does not mark every other control as progressing.
 export function cloudNodeOperationFor(
   operations: Record<string, CloudNodeOperation>,
   name: string | undefined,

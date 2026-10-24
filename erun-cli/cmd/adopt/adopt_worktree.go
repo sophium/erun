@@ -1,15 +1,14 @@
 package adopt
 
 import (
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
 
-// NewAdoptWorktreeCmd is run by the runtime chart's adopt-worktree init
-// container, never by an operator: it is the one moment the home volume and
-// the worktree claim are both visible off the live /home/erun path.
+// NewAdoptWorktreeCmd runs only in the runtime chart's adopt-worktree init container.
 func NewAdoptWorktreeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt-worktree LEGACY_DIR CLAIM_DIR",
@@ -28,15 +27,15 @@ func NewAdoptWorktreeCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAdoptWorktreeCommand(shared.CommandContext(cmd), args[0], args[1])
+			return runAdoptWorktreeCommand(clicmd.CommandContext(cmd), args[0], args[1])
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 func runAdoptWorktreeCommand(ctx core.Context, legacyDir, claimDir string) error {
-	result, err := podruntime.AdoptWorktree(ctx, podruntime.WorktreeAdoptParams{LegacyDir: legacyDir, ClaimDir: claimDir})
+	result, err := podruntime.AdoptWorktree(ctx, model.WorktreeAdoptParams{LegacyDir: legacyDir, ClaimDir: claimDir})
 	if err != nil {
 		return err
 	}

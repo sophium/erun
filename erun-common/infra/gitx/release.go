@@ -10,11 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-type (
-	GitValueResolverFunc func(core.Context, string) (string, error)
-	GitCommandRunnerFunc func(string, io.Writer, io.Writer, ...string) error
-)
-
 func GitCurrentBranch(ctx core.Context, projectRoot string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := core.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()

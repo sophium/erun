@@ -14,11 +14,8 @@ function cloudContextStatusOf(status: UIIdleStatus | null): string {
   return (status?.cloudContextStatus ?? '').trim().toLowerCase();
 }
 
-// A context returning to Running does not restore its tabs on its own:
-// tryReconnect drops the AI/ERun tabs while it is stopped and won't respawn
-// them. The Play button re-opens them on its own success path; this handles
-// the recovery case where the start command errored but the instance reached
-// Running anyway.
+// tryReconnect drops the AI/ERun tabs while stopped; reopen them when a context
+// reaches Running even though its start command errored.
 function reactToCloudContextTransition(
   previousStatus: string,
   nextStatus: string,
@@ -47,9 +44,7 @@ function isRequestStillCurrent(
   return current?.tenant === selection.tenant && current.environment === selection.environment;
 }
 
-// refreshIdleStatus polls the selected env's idle status and re-arms the
-// self-rescheduling poll timer. A request whose selection changed mid-flight
-// detects it is stale and skips its state write.
+// refreshIdleStatus skips its state write when the selection changed mid-flight.
 export const refreshIdleStatus =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const controller = requireController(extra);
@@ -65,15 +60,8 @@ export const refreshIdleStatus =
     }
 
     try {
-      // refreshIdleStatus has more than one trigger for the same selection --
-      // the self-rescheduling poll below, selectionSyncMiddleware on an env
-      // switch, a cloud-context start/stop, and cancelPendingIdleStop -- so a
-      // forced refetch here can land while another one for the identical
-      // selection is already in flight. RTK Query's condition() bails a
-      // forced refetch out from under a pending request for the same query
-      // before ever looking at forceRefetch (see erun#1953's getInitialState
-      // fix), so without this wait the triggering event's own fresh read
-      // would silently resolve with the in-flight request's older data.
+      // Several triggers share this selection, and RTK Query's condition() bails a
+      // forced refetch while one is in flight, so wait for it first.
       await dispatch(idleApi.util.getRunningQueryThunk('getIdleStatus', selection));
       const status = await dispatch(
         idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }),
@@ -95,9 +83,7 @@ export const refreshIdleStatus =
     }
   };
 
-// cancelPendingIdleStop dismisses the grace-period auto-stop warning for the
-// env. This is a one-shot snooze, not a permanent opt-out: if the user stays
-// idle, the next poll re-arms the warning with a fresh grace window.
+// cancelPendingIdleStop is a one-shot snooze; the next idle poll re-arms it.
 export const cancelPendingIdleStop =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {

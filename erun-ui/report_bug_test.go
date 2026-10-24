@@ -7,12 +7,8 @@ import (
 	"time"
 )
 
-// ReportBugFailure reuses InvestigateFailure's exact bounded-spawn plumbing
-// (spawnFailureAgent) and, with it, investigation_bounds.go's shared
-// population — these tests lock the two contracts a bug-report draft adds on
-// top of that reuse: a refusal is reported as a value rather than a Go error,
-// and a refusal naming an already-admitted session carries that session's id
-// so the caller can focus it instead of erroring.
+// A refusal is reported as a value, carrying the existing session's id when
+// one already covers the failure.
 
 func TestReportBugFailureWithNoDiagnosticContentIsRefused(t *testing.T) {
 	harness := newInvestigationHarness(t)
@@ -55,8 +51,6 @@ func TestReportBugFailureWithDiagnosticContentSpawnsADraftAgent(t *testing.T) {
 	}
 }
 
-// A repeat report of the same failure must not spawn a second agent — it
-// refuses, naming the first draft so the caller can focus it instead.
 func TestReportBugFailureRefusalNamesTheExistingDraftToFocus(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")
@@ -80,9 +74,7 @@ func TestReportBugFailureRefusalNamesTheExistingDraftToFocus(t *testing.T) {
 	}
 }
 
-// investigate and report-bug spend the same shared agent account, so they
-// must share investigation_bounds.go's one population rather than each
-// getting a cap of its own (root AGENTS.md "do not grow a second policy").
+// Investigate and report-bug share one population, not a cap each.
 func TestReportBugAndInvestigateShareTheSameBoundedPopulation(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")

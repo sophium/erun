@@ -4,14 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/deploynotice"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
 	var erunAlias string
@@ -47,40 +53,34 @@ func NewDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
 			ctx.PlatformAlias = strings.TrimSpace(erunAlias)
-			deployTarget, err := shared.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
+			deployTarget, err := opentarget.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
 			deployTarget.Components = components
-			// deploy consumes a version by reference and never mints one, so it
-			// must be told which to install.
+			// deploy never mints a version.
 			if strings.TrimSpace(deployTarget.VersionOverride) == "" && !useCurrent {
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
-			// A scope-defaulted deploy carries no tenant/environment on the
-			// target, so name them up front: the per-env trace log and every
-			// `==> ...` line must identify the env even when the deploy fails
-			// before spec resolution names it.
-			tenant, environment := common.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
+			// Resolve the scope up front so failure traces name the env.
+			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, tenant, environment)
+			ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
 				tenant, environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
 			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
-				// Transports that react only to `==> ...` trace lines (the desktop
-				// activity queue) need one for a deploy that fails before rollout,
-				// or they surface nothing.
+				// The desktop activity queue reacts only to `==> ...` lines.
 				ctx.Trace(deployFailedTrace(tenant, environment, err))
 				return err
 			}
 			return nil
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
 	cmd.Flags().StringVar(&target.RuntimeChartOverride, "runtime-chart", "", "Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:1.0.178). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart")
@@ -90,9 +90,7 @@ func NewDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	return cmd
 }
 
-// deployFailedTrace renders the failure header transports parse for the failed
-// env. When the scope never resolved there is no env to name, so the pair is
-// dropped rather than rendered as a bare separator no reader or parser can use.
+// deployFailedTrace omits the env when the scope never resolved.
 func deployFailedTrace(tenant, environment string, err error) string {
 	if tenant != "" && environment != "" {
 		return fmt.Sprintf("==> Deploy failed %s/%s: %s", tenant, environment, err.Error())
@@ -100,25 +98,25 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
-	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
+	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
 		return err
 	}
 	ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
-	if err := common.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
+	if err := deploy.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
 		return err
 	}
-	if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+	if err := deploy.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion); err != nil {
 		return err
 	}
-	shared.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
+	deploynotice.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
 	return nil
 }
 
-func NewK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
 		Short:         "Deploy a component Helm chart",
@@ -126,23 +124,23 @@ func NewK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
-			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
+			deploySpec, err := deploy.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
 			}
-			if err := common.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
+			if err := deploy.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
 				return err
 			}
-			return common.PersistRuntimeVersionFromDeploySpecs(ctx, []common.DeploySpec{deploySpec}, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
+			return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, []deploy.DeploySpec{deploySpec}, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	return cmd
 }
 
-func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
+func addDeployCommandTargetFlags(cmd *cobra.Command, target *model.DeployTarget) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to install by reference (produced by `erun build`/`erun push`); fails if that version's image is absent")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")

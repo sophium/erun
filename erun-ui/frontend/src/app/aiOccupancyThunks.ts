@@ -25,12 +25,8 @@ interface StartAITabParams {
 
 const AI_TAB_KIND: TerminalTabKind = 'ai';
 
-// startAITabOrPrompt is the single AI-tab spawn chokepoint for every caller
-// (initial env open, dead-tab respawn): it starts unconfirmed, and when the
-// environment is already held by another job's activity lease, opens the
-// occupancy prompt instead of recording a tab — starting a second agent stays
-// a deliberate choice (erun#1221). Returns the started session, or null when
-// the prompt took over and nothing was started yet.
+// startAITabOrPrompt is the single AI-tab spawn point: when another job's lease
+// holds the env, it opens the occupancy prompt instead and returns null.
 export const startAITabOrPrompt =
   (params: StartAITabParams): AppThunk<Promise<StartSessionResult | null>> =>
   async (dispatch) => {
@@ -56,9 +52,7 @@ export const cancelAIOccupancyPrompt = (): AppThunk => (dispatch) => {
   dispatch(resetAIOccupancyPrompt());
 };
 
-// confirmAIOccupancyPrompt is the explicit "start a second agent anyway": it
-// retries the pending start with confirmed=true and, only on success, records
-// the tab and (if the user is still looking at this environment) surfaces it.
+// confirmAIOccupancyPrompt retries the pending start with confirmed=true.
 export const confirmAIOccupancyPrompt =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const state = getState().aiOccupancyPrompt;

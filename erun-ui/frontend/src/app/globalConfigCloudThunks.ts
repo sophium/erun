@@ -42,9 +42,6 @@ import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state
 import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
-// The controller is reserved for imperative xterm/PTY work; thunks otherwise
-// operate purely on Redux state.
-
 export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().globalConfigDialog;
   if (!dialog.open || dialog.busy) {
@@ -179,8 +176,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
     return;
   }
   const selection = state.selection.selected ? { ...state.selection.selected } : null;
-  // Recorded against the node, not as a bare "something is busy": the titlebar
-  // renders the progressive label only for the node its own name refers to.
+  // Keyed by node: the titlebar shows the label only for the node it names.
   dispatch(startCloudNodeOperation({ name: action.name, operation: action.operation }));
   try {
     const context = (await action.run(action.name)) as UICloudContextStatus;
@@ -207,8 +203,6 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-// Adding a cloud alias is delegated entirely to the CLI (prompt, verify,
-// resolve, persist); the desktop only hands the terminal over to it.
 const startCloudInitSession =
   (
     busyAction: 'cloud-provider-init' | 'cloud-provider-cloudflare-init',
@@ -266,12 +260,8 @@ export const startCloudflareCloudInit = (): AppThunk<Promise<void>> =>
     StartCloudInitCloudflareSession,
   );
 
-// startERunCloudInit reaches the exact code path the tenant dashboard's
-// Connect panel already uses (tenantApi's connectERunPlatform, which attaches
-// the alias with no sign-in of its own), then signs in through
-// loginGlobalCloudProvider the same way an existing alias row's own Login
-// button does — so settings never grows a second, sign-in-less way to create
-// an erun alias.
+// startERunCloudInit reuses the tenant dashboard's connect path, then signs in, so
+// there is no sign-in-less way to create an erun alias.
 export const startERunCloudInit =
   (apiUrl: string): AppThunk<Promise<boolean>> =>
   async (dispatch, getState) => {
@@ -331,23 +321,15 @@ export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>>
     dispatch(cloudApi.endpoints.loginCloudProvider.initiate(target)).unwrap(),
   );
 
-// logoutGlobalCloudProvider signs an alias out from Settings' own row action.
-// It revokes nothing server-side (erun has no revocation endpoint to call),
-// only the locally cached access token and stored refresh token, so the
-// alias can no longer mint a fresh access token from this machine. Any
-// access token already handed out elsewhere remains valid until its own
-// short issuer-configured expiry.
+// logoutGlobalCloudProvider only drops local tokens; erun has no revocation
+// endpoint, so issued access tokens stay valid until they expire.
 export const logoutGlobalCloudProvider = (alias: string): AppThunk<Promise<void>> =>
   updateGlobalCloudProvider(alias, 'cloud-provider-logout', (target, dispatch) =>
     dispatch(cloudApi.endpoints.logoutCloudProvider.initiate(target)).unwrap(),
   );
 
-// switchGlobalCloudProviderIdentity is "Sign in as someone else" on an
-// already-connected alias row -- a force re-authentication, not a logout
-// followed by a login. The backend only overwrites the stored refresh/access
-// tokens once the new sign-in actually succeeds, so a cancelled or failed
-// switch leaves the previous identity signed in rather than landing the
-// alias fully signed out.
+// switchGlobalCloudProviderIdentity forces re-authentication; the stored tokens are
+// replaced only on success, so a failed switch keeps the previous identity.
 export const switchGlobalCloudProviderIdentity = (alias: string): AppThunk<Promise<void>> =>
   updateGlobalCloudProvider(alias, 'cloud-provider-switch', (target, dispatch) =>
     dispatch(cloudApi.endpoints.switchCloudProviderIdentity.initiate(target)).unwrap(),

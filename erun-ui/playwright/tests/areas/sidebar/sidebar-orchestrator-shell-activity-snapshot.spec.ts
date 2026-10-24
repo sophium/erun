@@ -3,24 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// A running background shell had no activity affordance at all — the
-// desktop rendered it as static text, so working and wedged looked identical.
-// The fix follows the exact busy-snapshot pattern this mirrors: orchestratorInfo
-// carries shellRunning/shellCommand/shellStartedAtUnix directly, so a snapshot
-// taken after the shell started reflects it even when the
-// orchestrator-shell-activity event that announced it was never observed —
-// and it is independent of the turn's own busy state, since a background
-// shell can keep running after the turn that started it goes idle.
-//
-// This spec drives the fix's frontend half directly: it stubs
-// ListOrchestrators over /__erun_invoke to answer a running shell without
-// ever emitting the orchestrator-shell-activity event, then reboots the app
-// (a real fresh mount) and asserts the indicator still shows. The event path
-// itself and the backend's own re-emit timing are covered by the Go tests in
-// erun-ui/session_heartbeat_test.go
-// (TestReconcileOrchestratorActivityReEmitsShellStateEveryTick,
-// TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent), since the
-// headless harness cannot wait out a real 15s poll deterministically.
+// The shell indicator must render from the ListOrchestrators snapshot alone,
+// without the orchestrator-shell-activity event; the event path is Go-tested.
 
 const RUNNING_SESSION_ID = 4242;
 const SHELL_COMMAND = 'sleep 300';
@@ -69,7 +53,6 @@ test.describe('orchestrator background shell renders from the list snapshot', ()
     await app.reboot();
 
     await expect(app.sidebar.orchestratorShellSpinner(SEED_ORCHESTRATOR)).toBeVisible();
-    // The whole point: not just a bare spinner, but what is running.
     await expect(app.sidebar.orchestratorShellSpinner(SEED_ORCHESTRATOR)).toHaveAccessibleName(
       new RegExp(SHELL_COMMAND),
     );
@@ -83,10 +66,7 @@ test.describe('orchestrator background shell renders from the list snapshot', ()
     await expect(app.sidebar.orchestratorShellSpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
   });
 
-  // The turn's own busy spinner and the shell indicator are independent
-  // facts, but the row shows only one motion cue at a time: a turn that is
-  // actively busy already spins, so the shell indicator stays hidden rather
-  // than doubling up.
+  // The row shows one motion cue at a time: a busy turn hides the shell indicator.
   test('an actively busy turn shows only the busy spinner, not the shell indicator too', async ({
     app,
     page,

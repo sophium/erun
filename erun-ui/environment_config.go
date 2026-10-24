@@ -1,20 +1,17 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -79,43 +76,7 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 	return updated, nil
 }
 
-// applyContainerRegistries routes the registry list by env type: local-agent
-// and host envs store it in project config, where the build/deploy resolvers
-// read it (both have their project root on this machine); remote/runtime envs
-// keep it on the env config because their project config is not on the local
-// machine. A host env never actually deploys against a registry, so this only
-// matters if a project build pushes images independent of any pod.
-func (a *App) applyContainerRegistries(selection uiSelection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
-	switch updated.ResolvedType() {
-	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
-		updated.ContainerRegistries = nil
-		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
-	default:
-		updated.ContainerRegistries = registries.Clone()
-		return nil
-	}
-}
-
-// saveEnvironmentProjectRegistries writes a local-agent env's registry list to
-// its repo's .erun/config.yaml — the only place such a list can live — so it
-// fails clearly when the project root can't be resolved.
-func (a *App) saveEnvironmentProjectRegistries(tenant string, config configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
-	projectRoot, store, ok := a.environmentProjectConfigStore(config)
-	if !ok {
-		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
-	}
-	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
-	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
-		return err
-	}
-	projectConfig.SetContainerRegistriesForEnvironment(environmentName(config.Name, config), registries)
-	return store.SaveProjectConfig(projectRoot, projectConfig)
-}
-
-// SetEnvironmentAutoStart persists the desktop's per-env auto-start preference:
-// "ask" prompts again on next open, "always" starts the linked cloud context
-// without prompting, "never" shows the "Start environment" empty state. Only
-// the desktop honors it; CLI users always run the preflight start.
+// SetEnvironmentAutoStart persists the desktop-only auto-start preference.
 func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
@@ -140,18 +101,21 @@ func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnv
 	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, ports)
 }
 
+// parseAutoStartMode maps "ask" to nil.
 func parseAutoStartMode(mode string) (*bool, error) {
+	var value *bool
 	switch strings.TrimSpace(mode) {
 	case "", "ask":
-		return nil, nil
 	case "always":
 		v := true
-		return &v, nil
+		value = &v
 	case "never":
 		v := false
-		return &v, nil
+		value = &v
+	default:
+		return nil, fmt.Errorf("invalid auto-start mode %q (expected ask, always, or never)", mode)
 	}
-	return nil, fmt.Errorf("invalid auto-start mode %q (expected ask, always, or never)", mode)
+	return value, nil
 }
 
 func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
@@ -177,7 +141,7 @@ func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current stri
 	})
 }
 
-func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.ProjectFinderFunc) string {
+func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot seam.ProjectFinderFunc) string {
 	if findProjectRoot == nil {
 		return ""
 	}
@@ -188,9 +152,7 @@ func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.Proje
 	return strings.TrimSpace(projectRoot)
 }
 
-// ChooseLocalRepoPath opens a native directory picker for the env-init dialog's
-// local repo path. A local-agent env mounts this path into the agent pod as its
-// worktree, so it must be a real directory on this machine.
+// ChooseLocalRepoPath opens a native directory picker for the local repo path.
 func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
@@ -212,11 +174,7 @@ func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
-	// The repository path is the one field the desktop runs on the same machine
-	// as, so it is refused here — with the reason env-init gives for the same
-	// value — rather than written and left to surface at the next deploy as a
-	// failure of the mount. Both callers share ValidateEnvRepoPath, so the
-	// dialog accepts exactly the paths init accepts.
+	// Shares ValidateEnvRepoPath with init so both accept exactly the same paths.
 	if err := configpkg.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
@@ -253,30 +211,7 @@ func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	return nil
 }
 
-func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated configpkg.EnvConfig) error {
-	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
-		return nil
-	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
-	if err != nil {
-		return err
-	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := a.ensureMCPAvailable(ctx, result); err != nil {
-		return err
-	}
-	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
-	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), bearer, selection.Tenant, selection.Environment, updated.CloudProviderAlias)
-	return err
-}
-
-func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports configpkg.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports model.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -325,7 +260,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		Claude:            claudeConfigToUI(config.Claude),
 		ClaudeDefaults:    claudeDefaultsForUI(gateway),
 		AITool:            strings.TrimSpace(config.AITool),
-		AILaunchSignature: eruncommon.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
+		AILaunchSignature: open.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart:          ports.RangeStart,
 			RangeEnd:            ports.RangeEnd,
@@ -356,214 +291,11 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 	return result, nil
 }
 
-func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRegistryEntry {
-	entries := make([]uiContainerRegistryEntry, 0, len(list))
-	for _, entry := range list {
-		roles := make([]string, 0, len(entry.Roles))
-		for _, role := range entry.Roles {
-			roles = append(roles, string(role))
-		}
-		uiEntry := uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles}
-		// A cluster entry carries no static host, so surface its resolved
-		// service/namespace/port and a legible label instead of an empty
-		// Registry string that would render as a blank text box.
-		if entry.Cluster != nil {
-			cluster := entry.Cluster.WithDefaults()
-			uiEntry.Cluster = &uiContainerRegistryCluster{
-				Service:   cluster.Service,
-				Namespace: cluster.Namespace,
-				Port:      cluster.Port,
-				Insecure:  cluster.Insecure,
-				Label:     fmt.Sprintf("%s.%s:%d", cluster.Service, cluster.Namespace, cluster.Port),
-			}
-		}
-		entries = append(entries, uiEntry)
-	}
-	return entries
-}
-
-// uiToContainerRegistries builds the marked list from the editor's rows; an
-// empty result (all rows blank) clears the env's override so it inherits the
-// project default.
-func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
-	list := make(configpkg.ContainerRegistries, 0, len(entries))
-	for _, entry := range entries {
-		roles := make([]configpkg.RegistryRole, 0, len(entry.Roles))
-		for _, role := range entry.Roles {
-			if trimmed := strings.TrimSpace(role); trimmed != "" {
-				roles = append(roles, configpkg.RegistryRole(trimmed))
-			}
-		}
-		// A cluster entry has no static host: preserve it as a cluster block so a
-		// context-resolved registry is not silently dropped on save.
-		if entry.Cluster != nil {
-			list = append(list, configpkg.ContainerRegistryEntry{
-				Cluster: &configpkg.ClusterRegistry{
-					Service:   strings.TrimSpace(entry.Cluster.Service),
-					Namespace: strings.TrimSpace(entry.Cluster.Namespace),
-					Port:      entry.Cluster.Port,
-					Insecure:  entry.Cluster.Insecure,
-				},
-				Roles: roles,
-			})
-			continue
-		}
-		registry := strings.TrimSpace(entry.Registry)
-		if registry == "" {
-			continue
-		}
-		list = append(list, configpkg.ContainerRegistryEntry{Registry: registry, Roles: roles})
-	}
-	if list.IsZero() {
-		return nil, nil
-	}
-	if err := list.Validate(); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// effectiveEnvironmentContainerRegistries mirrors the container-registry
-// resolution order the build/deploy resolvers use, so the editor shows the same
-// list they will act on. The second return is true when the list was resolved
-// from the project's .erun/config.yaml (inherited-from-project) rather than
-// carried on the env config.
-func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config configpkg.EnvConfig) (configpkg.ContainerRegistries, bool) {
-	if !config.ContainerRegistries.IsZero() {
-		return config.ContainerRegistries, false
-	}
-	projectConfig, ok := a.loadEnvironmentProjectConfig(tenant, config)
-	if !ok {
-		return nil, false
-	}
-	list := projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config))
-	return list, !list.IsZero()
-}
-
-func (a *App) loadEnvironmentProjectConfig(tenant string, config configpkg.EnvConfig) (configpkg.ProjectConfig, bool) {
-	projectRoot, store, ok := a.environmentProjectConfigStore(config)
-	if !ok {
-		return configpkg.ProjectConfig{}, false
-	}
-	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
-	if err != nil {
-		return configpkg.ProjectConfig{}, false
-	}
-	return projectConfig, true
-}
-
-func (a *App) environmentProjectConfigStore(config configpkg.EnvConfig) (string, projectConfigStore, bool) {
-	if a.deps.store == nil {
-		return "", nil, false
-	}
-	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
-	if projectRoot == "" {
-		return "", nil, false
-	}
-	store, ok := a.deps.store.(projectConfigStore)
-	if !ok {
-		return "", nil, false
-	}
-	return projectRoot, store, true
-}
-
 func environmentName(fallbackName string, config configpkg.EnvConfig) string {
 	if name := strings.TrimSpace(config.Name); name != "" {
 		return name
 	}
 	return strings.TrimSpace(fallbackName)
-}
-
-// environmentCloudProviderTypes is the render order for cloud-alias slots, AWS
-// first as the legacy primary. Adding a type here gives it its own env selector
-// and sidebar login row.
-var environmentCloudProviderTypes = []string{
-	configpkg.CloudProviderAWS,
-	configpkg.CloudProviderCloudflare,
-}
-
-// environmentCloudAliasSlots builds the per-provider-type cloud-alias slots for
-// one env. Two rules shape it: omit a type that has no configured aliases and
-// nothing attached, so a new env shows no empty selector before any token of
-// that type exists; and keep a currently-attached alias whose provider config
-// was deleted as an option, so the operator can still see and clear it
-// (recognition over recall).
-func environmentCloudAliasSlots(store configpkg.CloudReadStore, config configpkg.EnvConfig) []uiEnvironmentCloudAlias {
-	optionsByType := configuredCloudAliasesByType(store)
-	attached := config.ResolvedCloudAliases()
-	slots := make([]uiEnvironmentCloudAlias, 0, len(environmentCloudProviderTypes))
-	for _, providerType := range environmentCloudProviderTypes {
-		options := append([]string(nil), optionsByType[providerType]...)
-		current := strings.TrimSpace(attached[providerType])
-		if current != "" && !cloudAliasListContains(options, current) {
-			options = append([]string{current}, options...)
-		}
-		if current == "" && len(options) == 0 {
-			continue
-		}
-		slots = append(slots, uiEnvironmentCloudAlias{
-			Provider: providerType,
-			Alias:    current,
-			Options:  options,
-		})
-	}
-	return slots
-}
-
-func configuredCloudAliasesByType(store configpkg.CloudReadStore) map[string][]string {
-	grouped := make(map[string][]string)
-	providers, err := cloud.ListCloudProviders(store)
-	if err != nil {
-		return grouped
-	}
-	for _, provider := range providers {
-		alias := strings.TrimSpace(provider.Alias)
-		providerType := strings.ToLower(strings.TrimSpace(provider.Provider))
-		if alias == "" || providerType == "" {
-			continue
-		}
-		if cloudAliasListContains(grouped[providerType], alias) {
-			continue
-		}
-		grouped[providerType] = append(grouped[providerType], alias)
-	}
-	return grouped
-}
-
-func cloudAliasListContains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
-func environmentCloudProviderAliases(store configpkg.CloudReadStore, current string) []string {
-	providers, err := cloud.ListCloudProviders(store)
-	if err != nil {
-		return nil
-	}
-	current = strings.TrimSpace(current)
-	aliases := make([]string, 0, len(providers)+1)
-	seen := make(map[string]struct{}, len(providers)+1)
-	for _, provider := range providers {
-		alias := strings.TrimSpace(provider.Alias)
-		if alias == "" {
-			continue
-		}
-		if _, ok := seen[alias]; ok {
-			continue
-		}
-		aliases = append(aliases, alias)
-		seen[alias] = struct{}{}
-	}
-	if current != "" {
-		if _, ok := seen[current]; !ok {
-			aliases = append([]string{current}, aliases...)
-		}
-	}
-	return aliases
 }
 
 func localPortStatus(port int) uiPortStatus {
@@ -591,8 +323,7 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvConfig) configpkg.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	applyEnvironmentCloudAliasSlots(&existing, config)
-	// ContainerRegistries are intentionally not set here; SaveEnvironmentConfig
-	// routes the marked list to the right store by env type.
+	// ContainerRegistries are routed by env type in SaveEnvironmentConfig.
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)
@@ -612,21 +343,14 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvC
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
-	// The chart the env rides is the operator's standing statement of one of the
-	// four deploy coordinates; a redeploy installs it, so saving it is enough --
-	// nothing derives it.
 	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
-	// Both are pull-time coordinates the operator states once: the registry
-	// erun's own chart comes from, and the secrets the pod pulls its image
-	// with. An empty list clears the secrets rather than keeping a stale one.
+	// An empty list clears the pull secrets rather than keeping a stale one.
 	existing.RuntimeRegistry = strings.TrimSpace(config.RuntimeRegistry)
 	existing.ImagePullSecrets = trimmedNonEmpty(config.ImagePullSecrets)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
-	// Preserve the sibling deploy.timeout; only the saved component selection is
-	// edited here. An empty slice clears the saved default (omitempty), reverting
-	// the env to the repo plan / runtime-only default.
+	// Preserve the sibling deploy.timeout; an empty slice clears the saved default.
 	existing.Deploy.Components = trimmedComponentNames(config.DeployComponents)
 	if configpkg.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
@@ -638,8 +362,6 @@ func trimmedComponentNames(names []string) []string {
 	return trimmedNonEmpty(names)
 }
 
-// trimmedNonEmpty drops blanks so an omitempty field clears rather than
-// persisting a list of empty strings the operator never entered.
 func trimmedNonEmpty(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, raw := range values {
@@ -649,121 +371,6 @@ func trimmedNonEmpty(values []string) []string {
 	}
 	if len(out) == 0 {
 		return nil
-	}
-	return out
-}
-
-// applyEnvironmentCloudAliasSlots writes the edited cloud aliases back onto the
-// env config. The AWS alias stays in the legacy CloudProviderAlias scalar so
-// every existing AWS reader is unchanged; other types live in the per-type
-// CloudProviderAliases map. An empty slot value clears that type's attachment.
-// When the UI sends no slots (the AWS-only single-selector path), the legacy
-// scalar is applied directly to preserve older-caller behavior.
-func applyEnvironmentCloudAliasSlots(existing *configpkg.EnvConfig, config uiEnvironmentConfig) {
-	if len(config.CloudAliasSlots) == 0 {
-		existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
-		return
-	}
-	for _, slot := range config.CloudAliasSlots {
-		providerType := strings.ToLower(strings.TrimSpace(slot.Provider))
-		alias := strings.TrimSpace(slot.Alias)
-		if providerType == "" || providerType == configpkg.CloudProviderAWS {
-			existing.CloudProviderAlias = alias
-			continue
-		}
-		if alias == "" {
-			delete(existing.CloudProviderAliases, providerType)
-			continue
-		}
-		if existing.CloudProviderAliases == nil {
-			existing.CloudProviderAliases = make(map[string]string)
-		}
-		existing.CloudProviderAliases[providerType] = alias
-	}
-}
-
-func claudeConfigToUI(config configpkg.EnvironmentClaudeConfig) uiClaudeConfig {
-	out := uiClaudeConfig{
-		UseMantle:       copyBoolPtr(config.UseMantle),
-		UseBedrock:      copyBoolPtr(config.UseBedrock),
-		UseGateway:      copyBoolPtr(config.UseGateway),
-		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
-		Effort:          copyStringPtr(config.Effort),
-		DefaultModel:    copyStringPtr(config.DefaultModel),
-		VerboseDebug:    config.VerboseDebug,
-	}
-	if models := config.NormalizedModels(); len(models) > 0 {
-		out.Models = models
-	}
-	return out
-}
-
-func claudeConfigFromUI(config uiClaudeConfig) configpkg.EnvironmentClaudeConfig {
-	models := []string(nil)
-	if normalized := normalizeUIClaudeModels(config.Models); len(normalized) > 0 {
-		models = normalized
-	}
-	return configpkg.EnvironmentClaudeConfig{
-		UseMantle:       copyBoolPtr(config.UseMantle),
-		UseBedrock:      copyBoolPtr(config.UseBedrock),
-		UseGateway:      copyBoolPtr(config.UseGateway),
-		Models:          models,
-		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
-		Effort:          copyStringPtr(config.Effort),
-		DefaultModel:    copyStringPtr(config.DefaultModel),
-		VerboseDebug:    config.VerboseDebug,
-	}
-}
-
-func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
-	minTokens, maxTokens := configpkg.ClaudeMaxOutputTokensRange()
-	gatewayModels := gateway.ModelIDs()
-	if gatewayModels == nil {
-		gatewayModels = []string{}
-	}
-	return uiClaudeDefaults{
-		UseMantle:  configpkg.DefaultClaudeUseMantle,
-		UseBedrock: configpkg.DefaultClaudeUseBedrock,
-		// The environment's own models, which is what an environment without a
-		// gateway (or one that opted out of it) launches from. The catalog's set
-		// travels separately below, because the Anthropic aliases are not models
-		// a gateway necessarily serves and the catalog's ids are not models an
-		// environment's own sign-in can.
-		Models:          configpkg.DefaultClaudeAvailableModels(),
-		MaxOutputTokens: configpkg.DefaultClaudeMaxOutputTokens,
-		KnownModels:     configpkg.KnownClaudeModels(),
-		MinTokens:       minTokens,
-		MaxTokens:       maxTokens,
-		Effort:          ai.DefaultClaudeEffortLevel,
-		EffortLevels:    ai.ClaudeEffortLevels(),
-		// The per-environment gateway controls override an erun-level catalog, so
-		// they are only meaningful when one exists. Resolved from the catalog,
-		// not the environment's effective gateway, so an environment that opted
-		// out can still opt back in.
-		GatewayConfigured:   gateway.Configured(),
-		GatewayModels:       gatewayModels,
-		GatewayDefaultModel: gateway.ResolveDefaultModel(),
-	}
-}
-
-// resolveOpenRouterConfig reads the erun-level gateway catalog for the desktop's
-// read models. A root config that cannot be read yields no catalog rather than
-// failing an environment's config view: the unreadable case is the unconfigured
-// one, and every path that acts on a gateway re-resolves it where it matters.
-func (a *App) resolveOpenRouterConfig() *configpkg.OpenRouterConfig {
-	gateway, err := configpkg.ResolveOpenRouterConfig(a.deps.store)
-	if err != nil {
-		return nil
-	}
-	return gateway
-}
-
-func normalizeUIClaudeModels(models []string) []string {
-	out := make([]string, 0, len(models))
-	for _, m := range models {
-		if m = strings.TrimSpace(m); m != "" {
-			out = append(out, m)
-		}
 	}
 	return out
 }
@@ -792,7 +399,7 @@ func copyStringPtr(value *string) *string {
 	return &v
 }
 
-func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConfig {
+func runtimePodConfigToUI(config model.RuntimePodResources) uiRuntimePodConfig {
 	config = configpkg.NormalizeRuntimePodResources(config)
 	return uiRuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
@@ -800,8 +407,8 @@ func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConf
 	}
 }
 
-func runtimePodConfigFromUI(config uiRuntimePodConfig) configpkg.RuntimePodResources {
-	return configpkg.NormalizeRuntimePodResources(configpkg.RuntimePodResources{
+func runtimePodConfigFromUI(config uiRuntimePodConfig) model.RuntimePodResources {
+	return configpkg.NormalizeRuntimePodResources(model.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	})
@@ -813,72 +420,4 @@ func idleConfigValue(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-// linkedCloudContext returns the cloud context backing the env, with Status
-// filled from the background poller's in-memory cache. The persisted config no
-// longer carries Status, so a missing cache entry surfaces as Status="" that
-// callers must treat as "not yet observed," not "stopped."
-func (a *App) linkedCloudContext(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
-	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
-}
-
-// linkedCloudContextFor is the same resolution keyed on the two fields it
-// actually reads, for read-model callers that hold a list result rather than a
-// full EnvConfig.
-func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (configpkg.CloudContextStatus, bool, error) {
-	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
-	kubernetesContext = strings.TrimSpace(kubernetesContext)
-	if kubernetesContext == "" {
-		return configpkg.CloudContextStatus{}, false, nil
-	}
-	statuses, err := cloud.ListCloudContextStatuses(a.deps.store)
-	if err != nil {
-		return configpkg.CloudContextStatus{}, false, err
-	}
-	for _, status := range statuses {
-		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
-		if cloudProviderAlias != "" && strings.TrimSpace(context.CloudProviderAlias) != cloudProviderAlias {
-			continue
-		}
-		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
-			status.CloudContextConfig = context
-			status.Status = a.cloudContextStatus(context.Name)
-			return status, true, nil
-		}
-	}
-	return configpkg.CloudContextStatus{}, false, nil
-}
-
-func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
-	status, ok, err := a.linkedCloudContext(config)
-	if err != nil || !ok {
-		return status, ok, err
-	}
-	if strings.TrimSpace(status.Status) == cloud.CloudContextStatusRunning {
-		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
-		return status, true, nil
-	}
-	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
-	status, err = cloud.StartCloudContext(core.Context{}, a.deps.store, cloud.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
-	if err != nil {
-		return configpkg.CloudContextStatus{}, true, err
-	}
-	a.clearIdleStopsForCloudContext(status.Name)
-	a.setCloudContextStatusInCache(status.Name, status.Status)
-	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
-	return status, true, nil
-}
-
-func (a *App) stopCloudContext(name string) (configpkg.CloudContextStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	status, err := a.deps.stopCloudContext(ctx, name)
-	if err != nil {
-		return status, err
-	}
-	a.setCloudContextStatusInCache(status.Name, status.Status)
-	return status, nil
 }

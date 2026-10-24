@@ -10,10 +10,7 @@ import { LoadStopHistory } from '../../../wailsjs/go/main/App';
 const STOP_SOURCE_POD_MONITOR = 'pod-monitor';
 const STOP_SOURCE_HOST_MANUAL = 'host-manual';
 
-// HistoryTab answers "why did my env stop?": it re-fetches on every open so a
-// stop that fired while the dialog was open shows up when the user returns, and
-// shows enough per-stop detail to distinguish a manual Stop from an idle-policy
-// fire from a single marker that was wrongly quiet.
+// HistoryTab re-fetches on every open so a stop fired while the dialog was open shows up.
 export function HistoryTab({
   selection,
   open,
@@ -158,8 +155,7 @@ function formatSourceLabel(source: string | undefined): string {
     case STOP_SOURCE_HOST_MANUAL:
       return 'Desktop manual stop';
     default:
-      // Legacy entries written before the source field existed —
-      // we still want a sensible row header rather than nothing.
+      // Legacy entries predate the source field.
       return 'Auto-stop';
   }
 }

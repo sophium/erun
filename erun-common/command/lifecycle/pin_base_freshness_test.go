@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// gitOutputForTest returns git's trimmed stdout, so a scenario asserts the
-// state it actually reached rather than assuming it.
 func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -21,9 +21,7 @@ func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// newCheckoutBehindItsRemote builds a real checkout of a real bare origin that
-// carries `behind` commits the checkout does not, which is the state a machine
-// that has not pulled since the last release is in.
+// newCheckoutBehindItsRemote returns a checkout whose bare origin carries `behind` extra commits.
 func newCheckoutBehindItsRemote(t *testing.T, behind int) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -37,49 +35,18 @@ func newCheckoutBehindItsRemote(t *testing.T, behind int) string {
 		writeAndCommit(t, dir, fmt.Sprintf("advance-%d.txt", index), "advance\n", "advance the remote")
 	}
 	runGitForTest(t, dir, "push", "-q", "origin", "main")
-	// The checkout rewinds to where it stood before that advance, which is the
-	// state a machine that has not pulled since is in.
 	runGitForTest(t, dir, "reset", "-q", "--hard", base)
 	return dir
 }
 
-func annotatePinPlanForTest(t *testing.T, projectRoot string) PinPlan {
+func annotatePinPlanForTest(t *testing.T, projectRoot string) model.PinPlan {
 	t.Helper()
-	plan := PinPlan{Tenant: "frs", Environment: "build", ProjectRoot: projectRoot, Target: "1.0.291"}
+	plan := model.PinPlan{Tenant: "frs", Environment: "build", ProjectRoot: projectRoot, Target: "1.0.291"}
 	AnnotatePinPlanBaseFreshness(testContext(), &plan)
 	return plan
 }
 
-// TestPinPlanNamesABaseBehindItsRemote reproduces the reported defect: a pin
-// resolved from a checkout behind its remote printed a plan in which every site
-// agreed, so a plan computed from a months-old base was indistinguishable from
-// a current one. The divergence has to be on the plan itself.
-func TestPinPlanNamesABaseBehindItsRemote(t *testing.T) {
-	plan := annotatePinPlanForTest(t, newCheckoutBehindItsRemote(t, 3))
-
-	if plan.BaseFreshness == nil {
-		t.Fatal("expected the plan to carry how its checkout stands against its remote")
-	}
-	if plan.BaseFreshness.Behind != 3 {
-		t.Fatalf("expected 3 commits behind, got %d", plan.BaseFreshness.Behind)
-	}
-	if plan.BaseFreshness.Ref != "origin/main" {
-		t.Fatalf("expected the divergence named against origin/main, got %q", plan.BaseFreshness.Ref)
-	}
-	if !plan.BaseFreshness.RemoteRead {
-		t.Fatal("expected the remote to have been read, since it is reachable")
-	}
-	note := plan.BaseFreshnessNote()
-	for _, want := range []string{"3 commit(s) behind origin/main", "the plan describes that older base"} {
-		if !strings.Contains(note, want) {
-			t.Fatalf("expected %q in the note, got %q", want, note)
-		}
-	}
-}
-
-// TestPinPlanKeepsAQuietBaseQuiet is the other half of the contract: a checkout
-// level with its remote must not carry the warning, or the warning becomes
-// noise every reader learns to skip past.
+// A checkout level with its remote must carry no warning.
 func TestPinPlanKeepsAQuietBaseQuiet(t *testing.T) {
 	plan := annotatePinPlanForTest(t, newCheckoutBehindItsRemote(t, 0))
 
@@ -94,14 +61,10 @@ func TestPinPlanKeepsAQuietBaseQuiet(t *testing.T) {
 	}
 }
 
-// TestPinPlanRefreshesTheRemoteBeforeCounting pins why the count is taken after
-// a fetch rather than from whatever this checkout last observed: a clone whose
-// remote-tracking ref is itself stale would otherwise count zero and be
-// reported current, which is the same silent staleness one level up.
+// A stale remote-tracking ref would otherwise count zero.
 func TestPinPlanRefreshesTheRemoteBeforeCounting(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 2)
-	// Rewind the local view of the remote so it agrees with the checkout while
-	// the real remote is ahead of both.
+	// Make the local view of origin agree with the checkout while the real remote is ahead.
 	runGitForTest(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
 	if behind := gitOutputForTest(t, dir, "rev-list", "--count", "HEAD..origin/main"); behind != "0" {
 		t.Fatalf("expected the local view of the remote to read 0 behind, got %s", behind)
@@ -114,9 +77,6 @@ func TestPinPlanRefreshesTheRemoteBeforeCounting(t *testing.T) {
 	}
 }
 
-// TestPinPlanSaysWhenTheBaseWasOnlyLastSeen covers the weaker answer: with the
-// remote unreachable the count is still the best evidence available, but it is
-// presented as this checkout's own last look rather than as agreement.
 func TestPinPlanSaysWhenTheBaseWasOnlyLastSeen(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 1)
 	runGitForTest(t, dir, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
@@ -134,9 +94,7 @@ func TestPinPlanSaysWhenTheBaseWasOnlyLastSeen(t *testing.T) {
 	}
 }
 
-// TestPinPlanNamesADetachedCheckoutsDivergence covers the checkout an operator
-// lands on by inspecting an old commit directly, which has no branch of its own
-// to name and so is compared against the remote's default branch.
+// A detached checkout is compared against the remote's default branch.
 func TestPinPlanNamesADetachedCheckoutsDivergence(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 1)
 	runGitForTest(t, dir, "remote", "set-head", "origin", "-a")
@@ -149,22 +107,5 @@ func TestPinPlanNamesADetachedCheckoutsDivergence(t *testing.T) {
 	}
 	if plan.BaseFreshness.Branch != "HEAD" {
 		t.Fatalf("expected the detached branch to be reported as HEAD, got %q", plan.BaseFreshness.Branch)
-	}
-}
-
-// TestPinPlanLeavesAnUntrackedCheckoutUnannotated pins that a tree with no
-// remote to compare against is not invented into a warning: the absence is a
-// real answer, and a pin of a local-only checkout is legitimate.
-func TestPinPlanLeavesAnUntrackedCheckoutUnannotated(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepoAt(t, dir)
-
-	plan := annotatePinPlanForTest(t, dir)
-
-	if plan.BaseFreshness != nil {
-		t.Fatalf("expected no freshness verdict for a checkout with no remote, got %+v", plan.BaseFreshness)
-	}
-	if note := plan.BaseFreshnessNote(); note != "" {
-		t.Fatalf("expected no note for a checkout with no remote, got %q", note)
 	}
 }

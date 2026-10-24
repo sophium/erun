@@ -18,9 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// stubEntitlementChecker stands in for the real permission authorizer.
-// grantedMethod/Path record what authorizeScope actually asked for, so a test
-// can pin the exact mapping decision (erun#1891) rather than only its outcome.
+// stubEntitlementChecker records what authorizeScope asked for.
 type stubEntitlementChecker struct {
 	err         error
 	askedMethod string
@@ -52,9 +50,6 @@ func mintMCPToken(routes MCPTokenRoutes, userID string) *httptest.ResponseRecord
 	return mintMCPTokenWithScope(routes, userID, "")
 }
 
-// mintMCPTokenWithScope mints with an optional caller-requested scope; an
-// empty scope sends a body-less request, exercising the same path a caller
-// that doesn't know about scope yet takes.
 func mintMCPTokenWithScope(routes MCPTokenRoutes, userID, scope string) *httptest.ResponseRecorder {
 	var body *bytes.Reader
 	if scope == "" {
@@ -77,9 +72,6 @@ func mintMCPTokenWithScope(routes MCPTokenRoutes, userID, scope string) *httptes
 	return rec
 }
 
-// decodeMCPTokenClaims extracts the claims segment of a minted JWT so a test
-// can assert what capability it actually carries, not just that minting
-// succeeded.
 func decodeMCPTokenClaims(t *testing.T, token string) mcpauth.MCPTokenClaims {
 	t.Helper()
 	parts := strings.Split(token, ".")
@@ -97,9 +89,6 @@ func decodeMCPTokenClaims(t *testing.T, token string) mcpauth.MCPTokenClaims {
 	return claims
 }
 
-// TestMintMCPTokenReturnsPerEnvToken mints a token for the caller's env and
-// returns the per-env audience; the token carries the ERun-user sub, so the
-// deployed edge can attribute the call.
 func TestMintMCPTokenReturnsPerEnvToken(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -122,12 +111,6 @@ func TestMintMCPTokenReturnsPerEnvToken(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenDefaultsToReadNotAdmin is the regression this route exists
-// to close (erun#1877): a caller that doesn't ask for a scope -- exactly what
-// an unaware or malicious consumer of this endpoint would do -- must not
-// receive the desktop's admin-by-default compatibility case. It must receive
-// the least capability a token can usefully carry, and its capability set
-// must not be able to reach a mutating or execution tool.
 func TestMintMCPTokenDefaultsToReadNotAdmin(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -157,12 +140,6 @@ func TestMintMCPTokenDefaultsToReadNotAdmin(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenAdminScopeIsAdminEndToEnd covers the console's own case, the
-// one erun#1877 says is defensible: an operator who genuinely holds the
-// mapped entitlement (erun#1891) and explicitly asks for a full-capability
-// token for their own environment gets one, verified by decoding the minted
-// token's claims through the same Capabilities() the deployed edge uses to
-// authorize tool calls.
 func TestMintMCPTokenAdminScopeIsAdminEndToEnd(t *testing.T) {
 	entitlement := &stubEntitlementChecker{}
 	routes := MCPTokenRoutes{
@@ -191,11 +168,6 @@ func TestMintMCPTokenAdminScopeIsAdminEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenRefusesAdminWithoutEntitlement is the entitlement gate this
-// PR closes (erun#1891): a TenantUserClass caller who is not entitled to
-// delete this environment must not receive an erun:admin token, even though
-// the route itself is reachable by any tenant user. 403, and no token is
-// minted at all.
 func TestMintMCPTokenRefusesAdminWithoutEntitlement(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -216,14 +188,6 @@ func TestMintMCPTokenRefusesAdminWithoutEntitlement(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenRefusesAdminWithClearReason pins the actual refusal body a
-// console operator sees when they pick "Admin" in the scope selector without
-// holding the delete-environment entitlement: a bare ErrForbidden renders as
-// the generic "Forbidden" through writeRepositoryError's shared mapping,
-// which erun-console's httpBaseQuery would then show verbatim as "Could not
-// mint an MCP token: Forbidden" -- indistinguishable from a broken request.
-// This is the one call site where the reason is always the same one, so it
-// is named instead.
 func TestMintMCPTokenRefusesAdminWithClearReason(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -247,10 +211,6 @@ func TestMintMCPTokenRefusesAdminWithClearReason(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenNoEntitlementCheckerRefusesAdmin proves the fail-closed
-// default: a deployment with no permission backend wired (entitlement is nil)
-// must refuse erun:admin rather than mint it unconditionally, the exact
-// regression this issue exists to close.
 func TestMintMCPTokenNoEntitlementCheckerRefusesAdmin(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -263,13 +223,6 @@ func TestMintMCPTokenNoEntitlementCheckerRefusesAdmin(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd proves the refusal above
-// is scoped to erun:admin, not the whole route: the same caller, still denied
-// admin entitlement, can mint the read tier the route's own TenantUserClass
-// gate already entitles every caller to -- decoded end to end, the same
-// standard TestMintMCPTokenAdminScopeIsAdminEndToEnd holds the positive case
-// to, so a caller entitled to none of the escalated tiers is never left with
-// no way to obtain a usable token at all.
 func TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -295,11 +248,6 @@ func TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd is the test erun#1809's
-// isolation guarantee was missing: it proves the *minting path* -- not just
-// the capability table in isolation -- can actually produce a token that
-// carries the attach tier and nothing else. Before erun#1877 this route could
-// not produce such a token at all; every mint was unconditionally admin.
 func TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -329,12 +277,7 @@ func TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd is erun#1107's Phase 3
-// mint path: erun:operate needs no entitlement beyond reaching this route
-// (the same as erun:read/erun:attach), because it only ever drives the
-// lifecycle of an environment the caller's tenant already owns -- unlike
-// erun:admin, it grants nothing a TenantUser could not already do through
-// the API.
+// erun:operate needs no extra entitlement: it only drives environments the tenant owns.
 func TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -369,10 +312,6 @@ func TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd proves the
-// entitlement refusal above is scoped to erun:admin, the same way
-// TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd already proves it for
-// erun:read: a caller denied the admin entitlement can still mint operate.
 func TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -394,12 +333,6 @@ func TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenRefusesUnrecognizedScope is the entitlement test: a caller
-// cannot mint a token carrying a capability string this platform never
-// defined. The server is the authority over what a token may claim, not the
-// request body -- an unrecognized value must not reach the signed token at
-// all, in case some future code path resolves an unknown value more
-// permissively than MCPCapabilitiesFromClaims does today.
 func TestMintMCPTokenRefusesUnrecognizedScope(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -412,10 +345,7 @@ func TestMintMCPTokenRefusesUnrecognizedScope(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenRefusesMalformedBody proves a body that isn't valid JSON is
-// rejected outright rather than silently falling back to the safe default,
-// which would mask a caller's mistake as a narrower token than it thought it
-// asked for.
+// Falling back to the default would mask the caller's mistake as a narrower token.
 func TestMintMCPTokenRefusesMalformedBody(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
@@ -435,8 +365,6 @@ func TestMintMCPTokenRefusesMalformedBody(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenNotConfigured reports 501 when no backend signing key is set,
-// rather than minting a token no edge can verify.
 func TestMintMCPTokenNotConfigured(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{Name: "prod"}},
@@ -449,8 +377,6 @@ func TestMintMCPTokenNotConfigured(t *testing.T) {
 	}
 }
 
-// TestMintMCPTokenUnknownEnvironment surfaces a 404 for an env the caller's
-// tenant does not own (RLS returns not-found), never leaking cross-tenant state.
 func TestMintMCPTokenUnknownEnvironment(t *testing.T) {
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{err: repository.ErrNotFound},

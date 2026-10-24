@@ -36,16 +36,6 @@ func putAlias(t *testing.T, routes CloudProviderAliasRoutes, alias string, body 
 	return rec
 }
 
-// TestSetAliasRefusesWithNoStorageConfigured is the regression test for a
-// real defect this driving-the-console pass found: with no ERUN_SECRETS_KEY
-// configured, server.go used to leave this whole route unregistered, so a
-// PUT here 404'd with the mux's own generic "not found" -- no diagnosis an
-// operator (or the console rendering "Could not save credentials: alias
-// request failed (404)") could act on. Every real deployment leaves
-// ERUN_SECRETS_KEY unset today (no chart sets it), so this was not a
-// hypothetical: the console's cloud-context provisioning surface was a
-// complete, silent dead end in production. The route is now always
-// registered and refuses with a named, actionable 501 instead.
 func TestSetAliasRefusesWithNoStorageConfigured(t *testing.T) {
 	routes := CloudProviderAliasRoutes{aliases: nil}
 	rec := putAlias(t, routes, "acme", map[string]string{"credentials": `{"accessKeyId":"x"}`})

@@ -6,14 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
-
-// tenant_review_write.go gives the desktop the review write surface the CLI's
-// `erun review create|close|merge-queue advance` and the equivalent MCP tools
-// already have: opening a review, closing one, and advancing a target
-// branch's merge queue, all through the same eruncommon.PlatformClient the
-// dashboard's reads already use.
 
 // The write routes the dashboard gates on, in the same canonical
 // "METHOD /path" form tenant_dashboard.go's read routes use.
@@ -21,15 +16,12 @@ const (
 	tenantDashboardWriteCreateReview      = "POST /v1/reviews"
 	tenantDashboardWriteReviewStatus      = "PATCH /v1/reviews/{review_id}/status"
 	tenantDashboardWriteAdvanceMergeQueue = "POST /v1/reviews/merge-queue/advance"
-	// The platform gates this on its own, distinct route so a tenant can grant
-	// it to a narrower set of roles than ordinary advance (see erun-backend-api
-	// AGENTS.md "Merge Queue").
+	// Gated on its own route so a tenant can grant it more narrowly than advance.
 	tenantDashboardWriteOverrideAdvanceMergeQueue = "POST /v1/reviews/merge-queue/override-advance"
 	tenantDashboardWriteCommentStatus             = "PATCH /v1/reviews/{review_id}/comments/{comment_id}/status"
 )
 
-// CreateReview opens a review. It is a real, immediate write — there is no
-// dashboard preview path, matching every other side-effecting action here.
+// CreateReview opens a review.
 func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, error) {
 	tenant, err := requireTenant("opening a review", input.Tenant)
 	if err != nil {
@@ -52,7 +44,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	}
 	defer cancel()
 
-	review, err := client.CreateReview(requestCtx, platformclient.PlatformCreateReviewParams{
+	review, err := client.CreateReview(requestCtx, model.PlatformCreateReviewParams{
 		Repository: strings.TrimSpace(input.Repository),
 		Name:       name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
 	})
@@ -62,9 +54,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	return tenantDashboardReview(review), nil
 }
 
-// CloseReview closes a review without merging it, mirroring `erun review
-// close` and the MCP review_close tool: always a transition to CLOSED, not a
-// general status setter.
+// CloseReview transitions a review to CLOSED without merging.
 func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, error) {
 	tenant, err := requireTenant("closing a review", input.Tenant)
 	if err != nil {
@@ -92,38 +82,22 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	return tenantDashboardReview(review), nil
 }
 
-// mergeQueueAddress names the queue an advance acts on. The repository is
-// what settles which of several same-branch queues it is, so it is sent
-// whenever the caller knows it — the Reviews panel derives it from the rows it
-// is showing. Empty is passed through as "every repository's queue" rather
-// than refused here, the same shape the CLI has when it is not standing in a
-// checkout: the platform refuses that when it is genuinely ambiguous
-// (MERGE_QUEUE_AMBIGUOUS) and promotes normally when the branch's queue is one
-// repository's, which is what a review created before repositories were
-// recorded leaves behind.
-func mergeQueueAddress(repository, targetBranch string) (platformclient.PlatformMergeQueueParams, error) {
-	queue := platformclient.PlatformMergeQueueParams{
+// mergeQueueAddress passes an empty repository through as every repository's
+// queue; the platform refuses it only when genuinely ambiguous.
+func mergeQueueAddress(repository, targetBranch string) (model.PlatformMergeQueueParams, error) {
+	queue := model.PlatformMergeQueueParams{
 		Repository:   strings.TrimSpace(repository),
 		TargetBranch: strings.TrimSpace(targetBranch),
 	}
 	if queue.TargetBranch == "" {
-		return platformclient.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
+		return model.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
 	}
 	return queue, nil
 }
 
-// AdvanceMergeQueue advances one repository's merge queue head to MERGE. When
-// the queue head still has unresolved comment threads, the platform refuses
-// and this reports the block (which review, how many threads) on the same
-// review shape rather than a bare error string — Blocked/UnresolvedThreads
-// let the caller route the operator to the threads, or to
-// OverrideAdvanceMergeQueue, instead of hitting a dead end.
-//
-// An occupied MERGE slot is the other refusal this cannot leave to the generic
-// conflict sentence: nothing changed under the caller and retrying will not
-// help, so "refresh and try again" would loop them forever. The platform's own
-// message names the review holding the branch and says to requeue it, so that
-// sentence is what surfaces.
+// AdvanceMergeQueue advances the queue head to MERGE. Unresolved threads come
+// back as a Blocked result, and an occupied MERGE slot surfaces the platform's
+// message, since retrying cannot help.
 func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
 	tenant, err := requireTenant("advancing the merge queue", input.Tenant)
 	if err != nil {
@@ -160,9 +134,8 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 	return tenantDashboardReview(review), nil
 }
 
-// OverrideAdvanceMergeQueue bypasses AdvanceMergeQueue's unresolved-thread
-// gate. Reason is required — the backend refuses a blank one — and is
-// recorded in the platform's audit trail alongside the caller's identity.
+// OverrideAdvanceMergeQueue bypasses the unresolved-thread gate; Reason is
+// required and audited.
 func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
 	tenant, err := requireTenant("overriding the merge queue's unresolved-thread gate", input.Tenant)
 	if err != nil {
@@ -194,10 +167,8 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 	return tenantDashboardReview(review), nil
 }
 
-// AddReviewer assigns userId as a reviewer on a review. The Add reviewers
-// picker (uiReviewDetail.AvailableReviewers) already constrains userId to the
-// tenant's own enrolled users, so a cross-tenant id is structurally
-// unreachable from this control rather than merely refused after the fact.
+// AddReviewer assigns userId as a reviewer; the picker offers only the tenant's
+// enrolled users.
 func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
 	tenant, err := requireTenant("assigning a reviewer", input.Tenant)
 	if err != nil {
@@ -260,9 +231,7 @@ func (a *App) RemoveReviewer(input uiRemoveReviewerInput) error {
 	return nil
 }
 
-// validateCreateReviewCommentInput checks CreateReviewComment's already-
-// trimmed input, kept apart from the call itself so that function's own
-// branching stays under the module's cyclomatic-complexity cap.
+// validateCreateReviewCommentInput is split out to stay under the complexity cap.
 func validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body string) error {
 	if _, err := requireTenant("commenting on a review", tenant); err != nil {
 		return err
@@ -279,11 +248,7 @@ func validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body
 	return nil
 }
 
-// CreateReviewComment starts a new top-level thread anchored to a diff line —
-// as opposed to CreateReviewReply, which replies within an existing thread.
-// tenant_review_detail.go's ParentCommentID-required check stays as the
-// reply path's own contract; this is the sibling entry point for opening a
-// thread the diff panel's line click provides the anchor for.
+// CreateReviewComment starts a new top-level thread anchored to a diff line.
 func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewComment, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	reviewID := strings.TrimSpace(input.ReviewID)
@@ -316,10 +281,8 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 	return tenantDashboardComment(comment), nil
 }
 
-// ResolveReviewComment marks a comment thread CLOSED (resolved). The
-// dashboard only ever offers this on a thread's root comment — never a reply —
-// so, unlike the CLI/MCP paths, there is no reply-addressed-to-root rejection
-// to surface here.
+// ResolveReviewComment marks a thread CLOSED; the UI offers it only on root
+// comments.
 func (a *App) ResolveReviewComment(input uiUpdateReviewCommentStatusInput) (uiReviewComment, error) {
 	return a.updateReviewCommentStatus(input, "CLOSED")
 }

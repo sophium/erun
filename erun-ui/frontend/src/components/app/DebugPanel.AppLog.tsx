@@ -31,8 +31,6 @@ function useAppLogPoll(): { appLog: UIAppLog | null; refresh: () => void } {
   return { appLog, refresh };
 }
 
-// AppLogPane is the desktop's own bounded log tail — evidence for the App
-// context, and the tail of the orchestrator context's own pane below it.
 export function AppLogPane({ label }: { label: string }): React.ReactElement {
   const { appLog, refresh } = useAppLogPoll();
   const content = appLog?.available ? (appLog.content ?? '') : '';
@@ -60,10 +58,6 @@ export function AppLogPane({ label }: { label: string }): React.ReactElement {
   );
 }
 
-// OrchestratorPane is the orchestrator context: its identity and linked
-// environments up top (the evidence an env trace can't carry — an
-// orchestrator has no selection to load one for), the desktop log below,
-// since a session or shell fault is desktop-side, not env-side.
 export function OrchestratorPane({
   orchestrator,
 }: {

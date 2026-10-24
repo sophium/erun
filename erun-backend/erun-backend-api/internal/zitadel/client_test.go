@@ -94,7 +94,8 @@ func TestCallSetsHostHeaderAndNeverLeaksPATOnError(t *testing.T) {
 	if gotHost != "auth.example.com" {
 		t.Fatalf("request Host = %q, want the configured external domain", gotHost)
 	}
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok {
 		t.Fatalf("err = %T, want *APIError", err)
 	}
@@ -196,13 +197,8 @@ func TestCreateHumanUserSendsInviteWithNoPassword(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow locks the
-// no-SMTP fallback (issue #1168): Zitadel only skips its initialization
-// email when the email is marked verified AND a password is set (confirmed
-// live -- either alone still leaves the account in USER_STATE_INITIAL
-// waiting on a link nothing will ever send), so a caller-supplied
-// InitialPassword must mark the email verified too, and the returned user
-// must report USER_STATE_ACTIVE, not the invite-flow INITIAL state.
+// Zitadel skips its initialization email only when the email is verified AND a
+// password is set; either alone leaves the user in USER_STATE_INITIAL.
 func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
 	var gotBody map[string]any
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -229,13 +225,6 @@ func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken is the
-// reproduction of the reported failure: a login name the instance already
-// holds reached the caller as Zitadel's own AlreadyExists text, which names
-// the account rather than the one thing the caller can change, so an invitee
-// accepting an invite at that moment was told something they could not act
-// on. The instance signals the case with the message key
-// Errors.User.AlreadyExists.
 func TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -259,11 +248,6 @@ func TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserLeavesAnUnrelatedConflictAsItself is the crossed state
-// of the test above: a conflict on this endpoint that is not the
-// user-already-exists collision must not be relabelled as a username
-// collision, or the caller is sent to change a name that was never the
-// problem.
 func TestCreateHumanUserLeavesAnUnrelatedConflictAsItself(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -307,17 +291,14 @@ func TestDeactivateUserPropagatesNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	err := client.DeactivateUser(context.Background(), "", "missing")
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok || !apiErr.NotFound() {
 		t.Fatalf("err = %v, want a not-found *APIError", err)
 	}
 }
 
-// TestListUsersOrgIDSetsHeaderOnlyWhenGiven locks the org-targeting fix
-// itself: a non-empty orgID must reach Zitadel as x-zitadel-orgid (the
-// header Zitadel scopes a Management API call by), and an empty one must
-// send no override at all -- not an empty header value -- so existing
-// callers keep resolving to the credential's own org exactly as before.
+// An empty orgID must send no header at all, not an empty one.
 func TestListUsersOrgIDSetsHeaderOnlyWhenGiven(t *testing.T) {
 	var sawHeader bool
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -346,11 +327,6 @@ func TestListUsersOrgIDSetsHeaderOnlyWhenGiven(t *testing.T) {
 	}
 }
 
-// TestDeactivateAndReactivateUserSetOrgHeader is the same proof as
-// TestListUsersOrgIDSetsHeaderOnlyWhenGiven for the other two Zitadel calls
-// this issue's reproduction named directly: deactivate/reactivate must
-// reach the org the identity actually lives in, not only the credential's
-// own.
 func TestDeactivateAndReactivateUserSetOrgHeader(t *testing.T) {
 	var gotHeaders []string
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

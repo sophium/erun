@@ -9,15 +9,10 @@ import (
 	"strings"
 )
 
-// oidc_apps.go is the Management API binding for the platform's own OIDC
-// sign-in applications (erun-console, erun-cli, erun-mobile), which the
-// erun-zitadel chart's oidc-bootstrap sidecar reconciles through
-// internal/oidcbootstrap. Every call acts in the credential's own
-// organization: those applications are the platform's, shared by every
-// tenant, so there is no other org to address.
+// Bindings for the platform's shared OIDC sign-in applications; every call acts
+// in the credential's own organization.
 
-// EnsureProject returns the id of the project named name, creating it when
-// the credential's organization holds none.
+// EnsureProject returns the id of the project named name, creating it if absent.
 func (c *Client) EnsureProject(ctx context.Context, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -26,25 +21,19 @@ func (c *Client) EnsureProject(ctx context.Context, name string) (string, error)
 	return c.ensureProject(ctx, "", name)
 }
 
-// FindAppID returns the id of the application named name in projectID, or ""
-// when the project holds none.
+// FindAppID returns the id of the application named name in projectID, or "".
 func (c *Client) FindAppID(ctx context.Context, projectID string, name string) (string, error) {
 	return c.findAppID(ctx, "", projectID, name)
 }
 
-// OIDCApp is an existing OIDC application as the Management API reports it.
-//
-// Config is the live oidcConfig kept field by field rather than decoded into
-// a struct, because the config update endpoint replaces the whole config: a
-// caller changing one field has to send every other one back exactly as it
-// was, including fields this package never names.
+// OIDCApp is an existing OIDC application. Config stays raw because the update
+// endpoint replaces the whole config, including fields this package never names.
 type OIDCApp struct {
 	ClientID string
 	Config   map[string]json.RawMessage
 }
 
-// StringList decodes the string-list field key of the live config, treating
-// an absent or null field as empty.
+// StringList decodes a string-list config field; absent or null is empty.
 func (a OIDCApp) StringList(key string) ([]string, error) {
 	raw, ok := a.Config[key]
 	if !ok || string(raw) == "null" {
@@ -99,8 +88,7 @@ type OIDCAppSpec struct {
 	AccessTokenType        string   `json:"accessTokenType"`
 }
 
-// CreateOIDCApp creates an OIDC application in projectID and returns its
-// client id.
+// CreateOIDCApp creates an OIDC application and returns its client id.
 func (c *Client) CreateOIDCApp(ctx context.Context, projectID string, spec OIDCAppSpec) (string, error) {
 	var created struct {
 		ClientID string `json:"clientId"`
@@ -115,9 +103,7 @@ func (c *Client) CreateOIDCApp(ctx context.Context, projectID string, spec OIDCA
 	return created.ClientID, nil
 }
 
-// UpdateOIDCConfig replaces the OIDC config of an application. The endpoint
-// replaces rather than merges, so config must carry every field the caller
-// wants kept (see OIDCApp).
+// UpdateOIDCConfig replaces (not merges) an application's OIDC config.
 func (c *Client) UpdateOIDCConfig(ctx context.Context, projectID string, appID string, config map[string]json.RawMessage) error {
 	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s/oidc_config", url.PathEscape(projectID), url.PathEscape(appID))
 	return c.call(ctx, http.MethodPut, path, config, nil)

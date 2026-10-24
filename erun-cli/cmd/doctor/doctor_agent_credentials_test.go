@@ -5,23 +5,24 @@ import (
 	"strings"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-func agentCredentialDiagnosis(state common.RuntimeAgentCredentialState) common.DeployDiagnosisResult {
-	status := common.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
-	if state == common.RuntimeAgentCredentialMissing || state == common.RuntimeAgentCredentialConfigured {
+func agentCredentialDiagnosis(state model.RuntimeAgentCredentialState) model.DeployDiagnosisResult {
+	status := model.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
+	if state == model.RuntimeAgentCredentialMissing || state == model.RuntimeAgentCredentialConfigured {
 		status.GatewayBaseURL = "https://openrouter.ai/api"
 	}
-	if state == common.RuntimeAgentCredentialUnknown {
+	if state == model.RuntimeAgentCredentialUnknown {
 		status.ReadError = "read the runtime pod template: deployments.apps \"frs-devops\" is forbidden"
 	}
-	return common.DeployDiagnosisResult{AgentCredentials: status}
+	return model.DeployDiagnosisResult{AgentCredentials: status}
 }
 
-func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis common.DeployDiagnosisResult) string {
+func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis model.DeployDiagnosisResult) string {
 	t.Helper()
 	var out bytes.Buffer
 	ctx.Stdout = &out
@@ -32,19 +33,13 @@ func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis common.Dep
 	return out.String()
 }
 
-// TestReportAgentCredentialsNamesTheCauseAndTheFix is the operator-facing half
-// of the defect's reproduction: the state the report described, printed as a
-// finding that names what is actually wrong rather than leaving the next error
-// to be read as a quota problem. Every assertion here is about what an operator
-// can act on — the missing variable, the reason it is missing, and the command
-// that resolves it.
 func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(common.RuntimeAgentCredentialMissing))
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialMissing))
 
 	for _, want := range []string{
 		"Agent capability",
 		"UNAVAILABLE",
-		common.GatewayBaseURLEnv,
+		deploy.GatewayBaseURLEnv,
 		"https://openrouter.ai/api",
 		"predates the credential injection",
 		"erun deploy frs build",
@@ -53,9 +48,7 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 			t.Fatalf("report does not contain %q:\n%s", want, rendered)
 		}
 	}
-	// The finding must not read as a deploy failure: the release in this state
-	// is genuinely deployed, and saying otherwise would send the operator after
-	// the wrong recovery.
+	// The release is genuinely deployed; this must not read as a deploy failure.
 	for _, unwanted := range []string{"roll back", "rollback", "clear pending"} {
 		if strings.Contains(strings.ToLower(rendered), unwanted) {
 			t.Fatalf("report suggests %q for an environment whose release is deployed:\n%s", unwanted, rendered)
@@ -63,27 +56,20 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply locks the
-// behaviour that keeps this from becoming noise, and from becoming a false
-// accusation: an environment no gateway routes can still reach a provider by
-// other means, so there is nothing to print and nothing to infer.
 func TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply(t *testing.T) {
 	ctx := core.Context{}
-	rendered := renderAgentCredentials(t, ctx, agentCredentialDiagnosis(common.RuntimeAgentCredentialNotApplicable))
+	rendered := renderAgentCredentials(t, ctx, agentCredentialDiagnosis(model.RuntimeAgentCredentialNotApplicable))
 	if rendered != "" {
 		t.Fatalf("report printed %q for an environment no gateway routes, want nothing", rendered)
 	}
-	rendered = renderAgentCredentials(t, ctx, common.DeployDiagnosisResult{})
+	rendered = renderAgentCredentials(t, ctx, model.DeployDiagnosisResult{})
 	if rendered != "" {
 		t.Fatalf("report printed %q for an unset status, want nothing", rendered)
 	}
 }
 
-// TestReportAgentCredentialsSaysSoWhenItCouldNotRead is the "no silent success"
-// half: a check that could not run must say that, rather than printing nothing
-// and leaving the operator to read silence as health.
 func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(common.RuntimeAgentCredentialUnknown))
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialUnknown))
 	if !strings.Contains(rendered, "unknown") || !strings.Contains(rendered, "forbidden") {
 		t.Fatalf("report does not name the unreadable template:\n%s", rendered)
 	}
@@ -92,12 +78,8 @@ func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsSkipsAnUnreachableCluster mirrors the neighbouring
-// pod-backed sections: once the diagnosis has established the cluster is
-// unreachable, this says it skipped rather than paying its own kubectl timeout
-// to rediscover it — and it does not dress the skip up as a missing credential.
 func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
-	diagnosis := agentCredentialDiagnosis(common.RuntimeAgentCredentialUnknown)
+	diagnosis := agentCredentialDiagnosis(model.RuntimeAgentCredentialUnknown)
 	diagnosis.ClusterUnreachable = true
 	rendered := renderAgentCredentials(t, core.Context{}, diagnosis)
 	if !strings.Contains(rendered, "skipped") {
@@ -105,20 +87,16 @@ func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsIsSilentUnderDryRun locks the section to the same
-// dry-run contract its pod-backed neighbours follow.
 func TestReportAgentCredentialsIsSilentUnderDryRun(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{DryRun: true}, agentCredentialDiagnosis(common.RuntimeAgentCredentialMissing))
+	rendered := renderAgentCredentials(t, core.Context{DryRun: true}, agentCredentialDiagnosis(model.RuntimeAgentCredentialMissing))
 	if rendered != "" {
 		t.Fatalf("report printed %q under --dry-run, want nothing", rendered)
 	}
 }
 
-// TestReportAgentCredentialsConfirmsAHealthyEnvironment pins the positive arm,
-// so the section cannot degenerate into one that only ever prints problems.
 func TestReportAgentCredentialsConfirmsAHealthyEnvironment(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(common.RuntimeAgentCredentialConfigured))
-	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, common.GatewayBaseURLEnv) {
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialConfigured))
+	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, deploy.GatewayBaseURLEnv) {
 		t.Fatalf("report does not confirm a routed environment:\n%s", rendered)
 	}
 }

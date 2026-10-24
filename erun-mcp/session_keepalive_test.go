@@ -11,33 +11,28 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
-// sessionTestTimeout is small enough that a test outlives it in seconds. Every
-// wait below is however on an observable condition the edge produces, never on
-// a duration: the renewals it has issued, and the SDK's own disconnection log.
+// sessionTestTimeout is short; waits below are on observable conditions, never durations.
 const sessionTestTimeout = 2 * time.Second
 
-// sessionTestEdge starts the production edge — the same newHTTPHandler a
-// deployed pod runs, with the same middleware chain — over a timeout small
-// enough to observe.
+// sessionTestEdge runs the production handler and middleware chain.
 func sessionTestEdge(t *testing.T) *httptest.Server {
 	t.Helper()
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	previousTimeout := mcpSessionTimeout
 	mcpSessionTimeout = sessionTestTimeout
 	t.Cleanup(func() { mcpSessionTimeout = previousTimeout })
 
-	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, RuntimeConfig{}, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtimecfg.RuntimeConfig{}, nil))
 	t.Cleanup(server.Close)
 	return server
 }
 
-// captureServerLogs routes the SDK's own server-side logging into a buffer for
-// the duration of a test, which is also how the reaping case below observes a
-// session actually ending.
 func captureServerLogs(t *testing.T) *lockedBuffer {
 	t.Helper()
 	previous := mcpServerLogger
@@ -47,8 +42,6 @@ func captureServerLogs(t *testing.T) *lockedBuffer {
 	return logs
 }
 
-// postMCPJSONRPC sends one JSON-RPC message the way a caller does, with the
-// session header only when there is a session to name.
 func postMCPJSONRPC(t *testing.T, server *httptest.Server, sessionID, body string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(body))
@@ -72,8 +65,6 @@ func postMCPJSONRPC(t *testing.T, server *httptest.Server, sessionID, body strin
 	return resp.StatusCode, string(reply)
 }
 
-// claimSession performs the handshake and returns the session id the edge
-// handed out, which is the id every later request pins.
 func claimSession(t *testing.T, server *httptest.Server) string {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(
@@ -101,9 +92,8 @@ func claimSession(t *testing.T, server *httptest.Server) string {
 	return sessionID
 }
 
-// getMCPStream opens the session's standalone SSE stream and hands it back
-// still open, which is the state a connected client is in between its calls.
-func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) *http.Response {
+// getMCPStream holds the standalone SSE stream open until the test ends.
+func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -122,12 +112,8 @@ func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) *http
 		_ = resp.Body.Close()
 		t.Fatalf("opening the session stream returned HTTP %d, want 200", resp.StatusCode)
 	}
-	return resp
 }
 
-// waitFor polls an observable condition to a deadline. The condition is always
-// something the edge itself produced; the interval only bounds how often it is
-// re-read.
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -142,24 +128,14 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	}
 }
 
-// TestASessionSurvivesItsIdleTimeoutWhileItsStreamIsHeld is the reported
-// failure: a caller that is connected and streaming still lost its session,
-// because the SDK's idle timer counts POSTs and the GET stream is not one.
-//
-// The wait is on the edge's own renewal count, not on a duration. The ticker
-// cannot fire early, so by the time it reports five renewals at a quarter of
-// the timeout, more than the timeout has elapsed since the last POST — and if
-// those renewals did not rearm the timer, the session would have been closed
-// before the tool call below is sent.
+// The ticker cannot fire early, so five renewals at a quarter of the timeout
+// prove the timeout passed since the last POST.
 func TestASessionSurvivesItsIdleTimeoutWhileItsStreamIsHeld(t *testing.T) {
 	logs := captureServerLogs(t)
 	server := sessionTestEdge(t)
 	sessionID := claimSession(t, server)
 	getMCPStream(t, server, sessionID)
 
-	// Either outcome is observable without sleeping: the edge renews past the
-	// timeout, or the SDK reaps the session for being idle. Which one happened
-	// is what the call below then decides.
 	renewals := int64(5)
 	baseline := mcpSessionKeepAlivePings.Load()
 	waitFor(t, "the streamed session to be renewed or reaped", func() bool {
@@ -176,15 +152,8 @@ func TestASessionSurvivesItsIdleTimeoutWhileItsStreamIsHeld(t *testing.T) {
 	}
 }
 
-// TestASessionWithNoHeldStreamIsStillReapedWhenIdle is the other half of the
-// trade: renewing a session must not amount to never reaping one. With nothing
-// attached to it, a session is still closed on the SDK's own schedule — which
-// is what keeps a caller that abandons a session without terminating it (every
-// one-shot CLI call does) from accumulating for the lifetime of the pod.
-//
-// The SDK's own disconnection log is the observable: the session is known to
-// be gone before the call below is made, rather than assumed gone because a
-// duration passed.
+// Renewal must not mean never reaping: an abandoned session is still closed,
+// observed through the SDK's disconnection log.
 func TestASessionWithNoHeldStreamIsStillReapedWhenIdle(t *testing.T) {
 	logs := captureServerLogs(t)
 	server := sessionTestEdge(t)

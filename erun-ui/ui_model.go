@@ -1,10 +1,7 @@
 package main
 
 import (
-	"github.com/sophium/erun/erun-common"
-	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -16,11 +13,7 @@ type uiState struct {
 	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
 	VersionSuggestionNotices []uiVersionNotice       `json:"versionSuggestionNotices,omitempty"`
 	CloudProviders           []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
-	// ConfigUnreadable is set when one or more config files could not be read
-	// (e.g. a torn write) even after erun-common's own retries, so Tenants is
-	// empty for a reason other than "no environments configured". The
-	// sidebar must render this distinctly from a genuine empty state rather
-	// than showing "Create your first environment" for a read failure.
+	// ConfigUnreadable distinguishes a failed config read from no environments.
 	ConfigUnreadable bool `json:"configUnreadable,omitempty"`
 }
 
@@ -38,98 +31,59 @@ type uiEnvironment struct {
 	MCPURL         string `json:"mcpUrl,omitempty"`
 	APIURL         string `json:"apiUrl,omitempty"`
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
-	// RuntimeVersionLine, ErunVersion, and RuntimeImageLineMismatch mirror
-	// eruncommon.ListEnvironmentResult's own fields of the same name -- see
-	// erun-common/runtime_version_line.go and erun-common/list.go. The
-	// environment hover card is the only consumer today.
-	RuntimeVersionLine       *eruncommon.RuntimeVersionLine             `json:"runtimeVersionLine,omitempty"`
-	ErunVersion              *eruncommon.ErunVersion                    `json:"erunVersion,omitempty"`
-	RuntimeImageLineMismatch *eruncommon.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
-	KubernetesContext        string                                     `json:"kubernetesContext,omitempty"`
-	IsActive                 bool                                       `json:"isActive,omitempty"`
-	SSHDEnabled              bool                                       `json:"sshdEnabled,omitempty"`
-	AutoStart                *bool                                      `json:"autoStart,omitempty"`
-	// Activity is the environment-activity poller's last observation for this
-	// env, if any. The poller only emits a Wails event on a transition, so a
-	// Redux store that resets without the Go process restarting (e.g. the
-	// ErrorBoundary "Reload app" button) would otherwise have nothing to seed
-	// from and render a still-busy env as idle until its next transition —
-	// which for a long agent turn can be tens of minutes away, if it comes
-	// before the turn ends at all. nil means the poller has not observed this
-	// env yet.
+	// These mirror lifecycle.ListEnvironmentResult's fields of the same name.
+	RuntimeVersionLine       *model.RuntimeVersionLine             `json:"runtimeVersionLine,omitempty"`
+	ErunVersion              *model.ErunVersion                    `json:"erunVersion,omitempty"`
+	RuntimeImageLineMismatch *model.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	KubernetesContext        string                                `json:"kubernetesContext,omitempty"`
+	IsActive                 bool                                  `json:"isActive,omitempty"`
+	SSHDEnabled              bool                                  `json:"sshdEnabled,omitempty"`
+	AutoStart                *bool                                 `json:"autoStart,omitempty"`
+	// Activity seeds a frontend store reset; the poller only emits on transitions.
+	// nil means not yet observed.
 	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
-	// Usage is the environment-usage poller's last cached reading for this env,
-	// if any. Populated on the same "nil means not yet observed" contract as
-	// Activity, and for the same reason: a Redux reset that does not restart the
-	// Go process would otherwise have no reading to seed a hover card from until
-	// the next sweep tick.
+	// Usage is the usage poller's last reading; nil means not yet observed.
 	Usage *uiEnvironmentUsageSnapshot `json:"usage,omitempty"`
-	// Node is the cloud node this env's cluster runs on, if it has one. nil is
-	// the definite answer "this environment is not backed by a node erun
-	// manages" — never "the node could not be read", which is Status instead.
+	// Node nil means erun manages no node for this env, never a failed read.
 	Node *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
 }
 
-// uiEnvironmentNodeSnapshot is the machine an environment's cluster runs on,
-// as the cloud-context poller last observed it (cloud_context_cache.go). It is
-// a fact about the NODE, kept apart from every field above, which are facts
-// about the environment: a stopped node and a stopped environment are
-// different things with different remedies, and the row that renders them must
-// not be able to conflate the two.
+// uiEnvironmentNodeSnapshot describes the node, kept apart from environment
+// state: a stopped node and a stopped environment have different remedies.
 type uiEnvironmentNodeSnapshot struct {
-	Name string `json:"name"`
-	// Label is the operator-facing name for the same node, falling back to Name.
+	Name  string `json:"name"`
 	Label string `json:"label,omitempty"`
-	// Status is the poller's cached reading: "running", "pending", "stopped",
-	// "unknown" once a known-good reading has gone stale, or "" when the poller
-	// has not observed this node yet. The last two both mean "we do not know",
-	// and neither may be rendered as stopped.
+	// Status "unknown" (stale) and "" (unobserved) must never render as stopped.
 	Status string `json:"status"`
 }
 
-// envNodePayload publishes one environment's node reading, on the same
-// transition-only cadence envActivityPayload uses. Node is nil for an
-// environment with no node erun manages, which is a state the row renders
-// (nothing about a node) rather than a reason to withhold the event.
+// envNodePayload is emitted on transitions; a nil Node is still published.
 type envNodePayload struct {
 	Tenant      string                     `json:"tenant"`
 	Environment string                     `json:"environment"`
 	Node        *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
 }
 
-// uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation
-// fields, minus the tenant/environment identity envActivityPayload carries
-// for the event stream — here that identity is already the enclosing
-// uiEnvironment.
+// uiEnvironmentActivitySnapshot mirrors envActivityPayload without the identity.
 type uiEnvironmentActivitySnapshot struct {
 	Reachable bool `json:"reachable"`
 	Observed  bool `json:"observed"`
 	Outage    bool `json:"outage"`
-	// CheckFailed mirrors environmentActivityState's own field: a real attempt
-	// to reach an environment with no local forward (over kubectl exec) that
-	// did not come back, as opposed to an environment nobody has asked about at
-	// all. Kept apart from Outage for the same reason Outage is kept apart from
-	// Reachable — the two failures name different remedies.
+	// CheckFailed is a kubectl-exec probe that did not answer, distinct from Outage.
 	CheckFailed bool   `json:"checkFailed,omitempty"`
 	Busy        bool   `json:"busy"`
 	Detail      string `json:"detail,omitempty"`
 }
 
-// uiEnvironmentUsageSnapshot is the environment-usage poller's last cached
-// reading for this env (environment_usage.go), mirroring envUsagePayload minus
-// the tenant/environment identity the event stream carries. ObservedAtUnix and
-// StaleAfterSeconds let a renderer show the reading's age and mark it stale
-// without hardcoding the sweep interval — an unlabelled stale number is worse
-// than none.
+// uiEnvironmentUsageSnapshot lets the renderer mark a reading stale without
+// knowing the sweep interval.
 type uiEnvironmentUsageSnapshot struct {
 	Usage             uiRuntimeUsage `json:"usage"`
 	ObservedAtUnix    int64          `json:"observedAtUnix"`
 	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
 }
 
-// uiWorkingIssue backs the sidebar hover card's "what is this env working on".
-// Available is false when the env worktree isn't reachable from the host
-// (remote-agent / runtime envs).
+// uiWorkingIssue: Available is false when the worktree is not on this host.
 type uiWorkingIssue struct {
 	Available   bool   `json:"available"`
 	Branch      string `json:"branch,omitempty"`
@@ -138,58 +92,37 @@ type uiWorkingIssue struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
-// Env-status values carried by the env-status event. The empty string clears
-// the state (the env is healthy again, or a fresh open attempt is in flight).
-// The two stopped values are separate because their recovery differs: a stopped
-// cloud context is started from the titlebar, while a runtime scaled to zero is
-// woken by opening the environment.
+// Env-status values; "" clears. Stopped context and stopped runtime differ in
+// recovery.
 const (
 	envStatusStopped        = "stopped"
 	envStatusRuntimeStopped = "runtime-stopped"
 	envStatusFailed         = "failed"
 )
 
-// envStatusPayload tells the sidebar the real per-env condition behind the
-// open dot (tab presence alone is not running-ness — the dot must
-// not show green for an env that is actually stopped or whose deploy failed).
-// Status is one of "", envStatusStopped, envStatusRuntimeStopped, envStatusFailed.
+// envStatusPayload: tab presence alone does not mean running.
 type envStatusPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Status      string `json:"status"`
 }
 
-// envActivityPayload is the observed half of the same sidebar state: whether the
-// environment's edge answers at all (reachable — true whoever opened it, the
-// desktop or a bare `erun open`), and whether the environment reports work in
-// flight (busy) and what. Separate from envStatusPayload because the lifetimes
-// differ: a status is a sticky condition, this is replaced on every poll.
+// envActivityPayload is replaced every poll, unlike the sticky envStatusPayload.
 type envActivityPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Reachable   bool   `json:"reachable"`
-	// Observed separates "the environment answered, and said no work" from
-	// "nobody got an answer": busy is false in both, and the sidebar acts on
-	// the difference when deciding whether a row may stop spinning.
+	// Observed separates "answered, no work" from "no answer".
 	Observed bool `json:"observed"`
-	// Outage is the diagnosis behind an environment that had a forward and no
-	// longer has a working one — the local port free after kubectl exited with
-	// its pod, or held by something that replies to nothing — once
-	// re-establishing it did not help. Without it such a row renders exactly
-	// like a quiet environment or an unopened one, which is how one stayed dead
-	// for hours. It is deliberately independent of Reachable: the dropped shape
-	// is unreachable *and* diagnosed, and only the second of those is news.
-	Outage bool `json:"outage"`
-	// CheckFailed mirrors uiEnvironmentActivitySnapshot's own field; see there
-	// for why it is kept apart from both Reachable and Outage.
+	// Outage diagnoses a dropped forward that reconnecting did not fix, so the row
+	// does not look merely quiet.
+	Outage      bool   `json:"outage"`
 	CheckFailed bool   `json:"checkFailed,omitempty"`
 	Busy        bool   `json:"busy"`
 	Detail      string `json:"detail,omitempty"`
 }
 
-// envUsagePayload is the usage-sweep counterpart to envActivityPayload: a
-// cached reading of what this environment's own runtime pod is using,
-// published on the sweep's cadence rather than per-hover (environment_usage.go).
+// envUsagePayload is published on the sweep cadence, not per hover.
 type envUsagePayload struct {
 	Tenant            string         `json:"tenant"`
 	Environment       string         `json:"environment"`
@@ -205,36 +138,21 @@ type uiEnvironmentStopResult struct {
 	Release        string `json:"release"`
 	Namespace      string `json:"namespace"`
 	AlreadyStopped bool   `json:"alreadyStopped"`
-	// RemainingComponents names the platform components the stop deliberately
-	// left running (eruncommon.StopEnvironmentResult.RemainingComponents): a
-	// stop scales the runtime Deployment alone, so an outcome that does not say
-	// which component pods it left holding capacity reads as a stop that did not
-	// finish.
+	// RemainingComponents names components the stop deliberately left running.
 	RemainingComponents []string `json:"remainingComponents,omitempty"`
 }
 
-// uiRuntimeRunState is the Runtime tab's reading of the environment's runtime
-// Deployment, taken before anything is asked of it. Stop is only a real action
-// when the Deployment currently wants pods: erun stop reads exactly these
-// replica counts to decide its own no-op, so the control that offers the action
-// has to consult the same state rather than discover it by being pressed.
-//
-// Message is the failed-read case. An unreadable cluster leaves Present false,
-// which the tab must not render as "not deployed" — see LoadRuntimeRunState.
+// uiRuntimeRunState lets Stop be offered only when the Deployment wants pods.
+// On a failed read Present is false and Message is set; that is not "not deployed".
 type uiRuntimeRunState struct {
 	Tenant          string `json:"tenant"`
 	Environment     string `json:"environment"`
 	Present         bool   `json:"present"`
 	DesiredReplicas int    `json:"desiredReplicas"`
 	ReadyReplicas   int    `json:"readyReplicas"`
-	// Stopped is Present && DesiredReplicas == 0, mirroring
-	// eruncommon.RuntimeRunState.Stopped — deliberately distinct from "pods
-	// exist but are not ready", which is an unhealthy environment.
+	// Stopped is distinct from pods that exist but are not ready.
 	Stopped bool `json:"stopped"`
-	// RemainingComponents names the platform components a stop of this
-	// environment would leave running (eruncommon.StopRemainingComponents), so
-	// the control can say what it will not touch before it is pressed rather
-	// than leaving the surviving pods to be read afterwards as a failed stop.
+	// RemainingComponents names what a stop would leave running.
 	RemainingComponents []string `json:"remainingComponents,omitempty"`
 	Message             string   `json:"message,omitempty"`
 }
@@ -248,37 +166,26 @@ type uiSelection struct {
 	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
-	// ClusterRegistry selects the in-cluster erun-registry (resolved from the
-	// env's kube-context) instead of the static ContainerRegistry string; the two
-	// are mutually exclusive and ClusterRegistry wins when set.
+	// ClusterRegistry wins over ContainerRegistry when set.
 	ClusterRegistry bool `json:"clusterRegistry,omitempty"`
-	// ErunRegistry selects erun's hosted registry for the tenant. Mutually
-	// exclusive with both ContainerRegistry and ClusterRegistry, matching
-	// `erun init --erun-registry`.
+	// ErunRegistry excludes ContainerRegistry and ClusterRegistry.
 	ErunRegistry bool `json:"erunRegistry,omitempty"`
-	// RuntimeRegistry and ImagePullSecrets carry `erun init`'s
-	// --runtime-registry and --image-pull-secret, without which an env created
-	// here cannot pull a private runtime image.
+	// RuntimeRegistry and ImagePullSecrets let the env pull a private runtime image.
 	RuntimeRegistry  string   `json:"runtimeRegistry,omitempty"`
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 	Type             string   `json:"type,omitempty"`
 	LocalRepoPath    string   `json:"localRepoPath,omitempty"`
 	NoGit            bool     `json:"noGit,omitempty"`
 	SetDefaultTenant bool     `json:"setDefaultTenant,omitempty"`
-	// Components is the explicit one-shot deploy selection from the Runtime tab's
-	// "Components to deploy" checklist; empty leaves deploy to resolve the env's
-	// saved default. Values are chart directory names (plus the runtime release
-	// name) — never the wrapped erun-* dependency names.
+	// Components are chart directory names, never erun-* dependency names; empty
+	// uses the env's saved default.
 	Components []string `json:"components,omitempty"`
 }
 
 type uiDiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target selects which repository to diff. "" or "env" diffs the
-	// environment's runtime working directory (the historical default).
-	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
-	// the environment.
+	// Target "" or "env" diffs the runtime workdir; "erun" the contribute clone.
 	Target string `json:"target,omitempty"`
 }
 
@@ -290,10 +197,7 @@ type uiBuildDetails struct {
 
 type uiVersion = registry.RuntimeVersionSuggestion
 
-// uiVersionNotice explains why a runtime-image source produced no version
-// suggestions, so the picker shows an actionable line instead of rendering
-// nothing. Kind is "auth" (private/unauthorized — the operator must log in) or
-// "unreachable" (registry or network failure).
+// uiVersionNotice explains empty suggestions; Kind is "auth" or "unreachable".
 type uiVersionNotice struct {
 	Image string `json:"image"`
 	Kind  string `json:"kind"`
@@ -310,40 +214,26 @@ type uiERunConfig struct {
 	DefaultTenant  string                  `json:"defaultTenant"`
 	CloudProviders []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 	CloudContexts  []uiCloudContextStatus  `json:"cloudContexts,omitempty"`
-	// OpenRouter is the erun-level gateway catalog. It lives in root config
-	// because it is one list the operator maintains and every environment
-	// selects from it, rather than a per-environment setting.
+	// OpenRouter is one root-level catalog every environment selects from.
 	OpenRouter *uiOpenRouterConfig `json:"openRouter,omitempty"`
-	// OpenRouterDefaults is the gateway this machine's own Claude Code already
-	// routes through, so a catalog can be offered pre-filled from it rather than
-	// asking the operator to retype what they configured once already. It is a
-	// starting point, not stored config: nothing here is persisted until the
-	// operator saves the catalog.
+	// OpenRouterDefaults pre-fills the catalog from this machine's Claude Code; it
+	// is not persisted.
 	OpenRouterDefaults *uiHostGatewayDefaults `json:"openRouterDefaults,omitempty"`
 }
 
-// uiOpenRouterModel is one selectable gateway model id and the context window
-// Claude Code must assume for it, since a gateway id carries none of its own.
+// uiOpenRouterModel carries the context window, which a gateway id lacks.
 type uiOpenRouterModel struct {
 	ID      string `json:"id"`
 	Context int    `json:"context,omitempty"`
-	// RequiresReasoningEcho mirrors the catalog's own declaration (see
-	// OpenRouterModel in erun-common/openrouter.go). It travels through this
-	// type rather than being dropped because the desktop catalog editor writes
-	// the whole catalog back on save: a field the conversion did not carry would
-	// be removed by the first edit, silently returning the model to the
-	// selectable set the declaration exists to keep it out of.
+	// RequiresReasoningEcho must round-trip: the editor writes the whole catalog
+	// back, so a dropped field would be erased.
 	RequiresReasoningEcho bool `json:"requiresReasoningEcho,omitempty"`
 }
 
-// uiOpenRouterConfig is the gateway an environment's Claude Code is routed
-// through and the models selectable from it. The credential is a Secret
-// reference, never a value, so config.yaml stays safe to back up and share.
+// uiOpenRouterConfig references the credential as a Secret, never a value.
 type uiOpenRouterConfig struct {
 	BaseURL string `json:"baseUrl,omitempty"`
-	// AuthTokenRef is the operator secret store ref the gateway credential is
-	// saved under. A ref, not a value: the token itself never enters the config,
-	// this read model, or a chart value.
+	// AuthTokenRef is a secret store ref; the token never enters config.
 	AuthTokenRef string              `json:"authTokenRef,omitempty"`
 	DefaultModel string              `json:"defaultModel,omitempty"`
 	Models       []uiOpenRouterModel `json:"models,omitempty"`
@@ -358,624 +248,9 @@ type uiTenantConfig struct {
 	CloudProviders            []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 }
 
-type uiTenantDashboardInput struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment,omitempty"`
-	MCPURL            string `json:"mcpUrl,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	// PlatformAlias optionally names which configured erun-type cloud alias's
-	// platform to read. Empty defers to the caller's sole configured erun
-	// alias; when more than one is configured the load reports every alias as
-	// a choice instead of guessing. See tenant_platform.go — the desktop
-	// resolves the platform's base URL and identity the same way `erun
-	// platform` does, never from an environment's own apiUrl.
-	PlatformAlias string `json:"platformAlias,omitempty"`
-	// ReviewFilterMine/ReviewFilterWaitingOnMe are the Reviews tab's one-click
-	// discovery filters. Both resolve to the signed-in user's own id (already
-	// known from this same load's whoami call) rather than asking the
-	// frontend to carry a user id it has no other reason to know.
-	ReviewFilterMine        bool `json:"reviewFilterMine,omitempty"`
-	ReviewFilterWaitingOnMe bool `json:"reviewFilterWaitingOnMe,omitempty"`
-
-	// mcpBearer is the per-env MCP edge token for the dashboard's MCP API-log
-	// read. Set server-side from the desktop identity, never by the frontend;
-	// unexported so the secret never crosses the Wails boundary.
-	mcpBearer string
-}
-
-type uiTenantDashboard struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment,omitempty"`
-	APIURL      string `json:"apiUrl,omitempty"`
-	// APIError is a whole-dashboard failure: the caller's identity could not be
-	// read, so no panel can be resolved or gated. A single panel's own failure
-	// belongs on that panel, not here.
-	APIError    string `json:"apiError,omitempty"`
-	APILog      string `json:"apiLog,omitempty"`
-	APILogError string `json:"apiLogError,omitempty"`
-	// PlatformState names why the platform identity is not ready to load, so
-	// the frontend renders the one action that resolves it instead of a
-	// generic error. "" means the platform resolved and the load proceeded
-	// (see tenantPlatformStateReady and its siblings in tenant_platform.go).
-	PlatformState string `json:"platformState,omitempty"`
-	// PlatformAliasChoices lists every configured erun-type alias when more
-	// than one exists and the caller did not name one to use.
-	PlatformAliasChoices []string `json:"platformAliasChoices,omitempty"`
-	// PlatformAlias is the erun-type cloud alias actually resolved (or that a
-	// not-signed-in/not-enrolled/no-permission state must act on).
-	PlatformAlias string `json:"platformAlias,omitempty"`
-	// PlatformURL is the platform base URL actually resolved (or that would be
-	// contacted once signed in), so the surface can name what it talked to.
-	PlatformURL string `json:"platformUrl,omitempty"`
-	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
-	// identity already in hand, once a bearer minted successfully — set even
-	// when the subsequent identity read itself failed (not-enrolled).
-	PlatformIssuer  string `json:"platformIssuer,omitempty"`
-	PlatformSubject string `json:"platformSubject,omitempty"`
-	// AccessRemedies keys each panel's restricted route to the copyable grant
-	// that would give the caller the access they were refused, so a restricted
-	// tab hands over the request instead of only naming what is missing.
-	// Absent when no role covers the access or the roles could not be read.
-	AccessRemedies map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
-	User           *uiTenantDashboardUser                         `json:"user,omitempty"`
-	// Users is the Users tab's roster: the tenant's users, read from
-	// GET /v1/users. Distinct from User above, which is the caller's own
-	// identity from whoami — the tab lists the tenant, not the caller, and an
-	// unreadable roster is reported on the panel rather than collapsing back
-	// to that one row.
-	Users      []uiTenantDashboardUser   `json:"users,omitempty"`
-	Reviews    []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds     []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	// Pipeline is the Pipeline tab's own view: every job and review the
-	// platform holds for this tenant, unioned on the issue each belongs to
-	// and labelled by the rung it stands on. It spans the Reviews tab rather
-	// than repeating it — planned work with no branch and no review is only
-	// visible here.
-	Pipeline    []uiPipelineIssue        `json:"pipeline,omitempty"`
-	AuditEvents []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
-	Panels      []uiTenantDashboardPanel `json:"panels,omitempty"`
-	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
-	// may attempt those writes at all, so the composing actions can be hidden
-	// rather than rendered to fail on submit — the same contract CanComment
-	// already gives the reply composer.
-	CanCreateReview      bool `json:"canCreateReview"`
-	CanAdvanceMergeQueue bool `json:"canAdvanceMergeQueue"`
-	// CanOverrideMergeQueue reports whether the signed-in user may bypass the
-	// unresolved-thread gate, a distinct (usually narrower) grant from
-	// CanAdvanceMergeQueue's — see tenantDashboardWriteOverrideAdvanceMergeQueue.
-	CanOverrideMergeQueue bool `json:"canOverrideMergeQueue"`
-	// MineReviewCount/WaitingOnMeReviewCount are the Reviews tab's filter
-	// buttons' own discovery signal: how many reviews match each filter,
-	// visible before the caller clicks either one. Unset (rather than 0) when
-	// the caller cannot read reviews at all, or has no signed-in user id to
-	// filter by.
-	MineReviewCount        *int `json:"mineReviewCount,omitempty"`
-	WaitingOnMeReviewCount *int `json:"waitingOnMeReviewCount,omitempty"`
-	// Contexts/Environments are the Registration tab's two lists: the
-	// platform's own cloud contexts (managed clusters) and hosted
-	// environments — the objects `erun platform` registers, distinct from
-	// (and with no automatic link to) this machine's local tenant/env config.
-	// Each degrades independently (ContextsRestricted/ContextsError,
-	// EnvironmentsRestricted/EnvironmentsError) so a caller denied one list,
-	// or a list read that fails, does not blank the other.
-	Contexts               []uiPlatformContext     `json:"contexts,omitempty"`
-	ContextsRestricted     string                  `json:"contextsRestricted,omitempty"`
-	ContextsError          string                  `json:"contextsError,omitempty"`
-	Environments           []uiPlatformEnvironment `json:"environments,omitempty"`
-	EnvironmentsRestricted string                  `json:"environmentsRestricted,omitempty"`
-	EnvironmentsError      string                  `json:"environmentsError,omitempty"`
-	// CanCreateContext/CanRegisterEnvironment/CanDeployEnvironment/
-	// CanStopEnvironment/CanDeleteEnvironment report whether the signed-in
-	// user may attempt each registration write at all, so the composing
-	// forms/buttons can be hidden rather than rendered to fail on submit,
-	// mirroring CanCreateReview/CanAdvanceMergeQueue above. Previewing an
-	// environment (PreviewPlatformEnvironment) shares CanRegisterEnvironment's
-	// own gate — it is the same POST /v1/environments route, requested with
-	// preview:true — rather than a separate capability.
-	CanCreateContext       bool `json:"canCreateContext"`
-	CanRegisterEnvironment bool `json:"canRegisterEnvironment"`
-	CanDeployEnvironment   bool `json:"canDeployEnvironment"`
-	CanStopEnvironment     bool `json:"canStopEnvironment"`
-	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
-	// MyInviteRequest is the caller's own most recent invite request, set
-	// whenever a bearer minted successfully (PlatformIssuer/PlatformSubject is
-	// set) regardless of whether the identity read itself succeeded — a
-	// not-enrolled caller is exactly who needs to see this. nil means either
-	// never submitted one, or the read itself failed — MyInviteRequestError
-	// distinguishes the two; a nil MyInviteRequest with no
-	// MyInviteRequestError is the genuine "never submitted" case.
-	MyInviteRequest *uiInviteRequest `json:"myInviteRequest,omitempty"`
-	// MyInviteRequestError is set when the platform round trip for
-	// MyInviteRequest failed for a reason other than "none exists" (a
-	// transport fault, a 5xx) — it must never be presented as "never
-	// requested", since the caller could already have a pending or approved
-	// request the dashboard just failed to read.
-	MyInviteRequestError string `json:"myInviteRequestError,omitempty"`
-	// InviteRequests/PendingInviteRequestCount are the operator/admin queue:
-	// every pending request naming this tenant (or, for an operations-scoped
-	// caller, every tenant). PendingInviteRequestCount is unset (rather than
-	// 0) when the caller cannot read the queue at all, mirroring
-	// MineReviewCount's degrade-by-permission contract above.
-	InviteRequests            []uiInviteRequest `json:"inviteRequests,omitempty"`
-	PendingInviteRequestCount *int              `json:"pendingInviteRequestCount,omitempty"`
-	CanApproveInviteRequests  bool              `json:"canApproveInviteRequests"`
-	CanDeclineInviteRequests  bool              `json:"canDeclineInviteRequests"`
-	// InviteRequestRateLimitWindowSeconds is the platform's current
-	// per-identity invite-request submission window, best effort (0 when it
-	// could not be read) — the request dialog uses it to show "you can submit
-	// once every N seconds" before a first attempt, not only after a 429.
-	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds,omitempty"`
-}
-
-// uiPlatformContext mirrors eruncommon.PlatformContext's JSON-safe subset the
-// dashboard's Registration tab renders.
-type uiPlatformContext struct {
-	ContextID          string `json:"contextId"`
-	Name               string `json:"name"`
-	Provider           string `json:"provider"`
-	CloudProviderAlias string `json:"cloudProviderAlias,omitempty"`
-	Region             string `json:"region,omitempty"`
-	InstanceType       string `json:"instanceType,omitempty"`
-	KubernetesContext  string `json:"kubernetesContext,omitempty"`
-	Status             string `json:"status"`
-	ProvisionError     string `json:"provisionError,omitempty"`
-}
-
-// uiPlatformEnvironment mirrors eruncommon.PlatformEnvironment's JSON-safe
-// subset the dashboard's Registration tab renders.
-type uiPlatformEnvironment struct {
-	EnvironmentID     string `json:"environmentId"`
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	ContextID         string `json:"contextId,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
-	Status            string `json:"status"`
-	ProvisionError    string `json:"provisionError,omitempty"`
-	DeployedVersion   string `json:"deployedVersion,omitempty"`
-	DeleteError       string `json:"deleteError,omitempty"`
-}
-
-// uiCreatePlatformContextInput registers (or, with Preview set, only
-// previews) a cloud context on the platform: the hosted managed cluster an
-// environment deploys into.
-type uiCreatePlatformContextInput struct {
-	Tenant             string `json:"tenant"`
-	Name               string `json:"name"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceType       string `json:"instanceType,omitempty"`
-	DiskType           string `json:"diskType,omitempty"`
-	DiskSizeGB         int    `json:"diskSizeGb,omitempty"`
-	Preview            bool   `json:"preview,omitempty"`
-}
-
-// uiPlatformContextOutcome is CreatePlatformContext's result. Kind
-// "conflict"/"unavailable" is a refusal that is itself an expected,
-// actionable state, carried in Message verbatim from the platform — never
-// rendered as a raw error; only "accepted" carries Context (a real create) or
-// Plan (a preview).
-type uiPlatformContextOutcome struct {
-	Kind    string             `json:"kind"`
-	Context *uiPlatformContext `json:"context,omitempty"`
-	Plan    []string           `json:"plan,omitempty"`
-	Message string             `json:"message,omitempty"`
-}
-
-// uiPlatformProvisionResult mirrors eruncommon.PlatformProvisionResult:
-// always a successful preview, QuotaOk names whether the plan can actually
-// register without hitting the tenant's quota cap.
-type uiPlatformProvisionResult struct {
-	Plan    []string `json:"plan"`
-	QuotaOk bool     `json:"quotaOk"`
-}
-
-// uiRegisterPlatformEnvironmentInput registers a hosted environment, or —
-// passed to PreviewPlatformEnvironment instead of RegisterPlatformEnvironment
-// — resolves the ordered plan the exact same fields would submit without
-// creating anything: one field set backs both actions, so the plan an
-// operator previews can never diverge from what register then does. Adopt
-// records an environment that already exists — see
-// eruncommon.PlatformCreateEnvironmentParams.Adopt — instead of asking the
-// platform to provision one.
-type uiRegisterPlatformEnvironmentInput struct {
-	Tenant            string `json:"tenant"`
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	ContextID         string `json:"contextId,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
-	Adopt             bool   `json:"adopt,omitempty"`
-}
-
-// uiPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input: the
-// registered environment to act on, plus an optional Version (deploy only)
-// for redeploying at an explicit published version.
-type uiPlatformEnvironmentActionInput struct {
-	Tenant        string `json:"tenant"`
-	EnvironmentID string `json:"environmentId"`
-	Version       string `json:"version,omitempty"`
-}
-
-// uiPlatformEnvironmentOutcome is the shared result for
-// RegisterPlatformEnvironment/DeployPlatformEnvironment/
-// StopPlatformEnvironment/DeletePlatformEnvironment. Kind "conflict" (a
-// quota cap, or another deploy/delete already in flight) and "unavailable"
-// (no deploy executor configured on this control plane) are expected,
-// actionable outcomes carried in Message verbatim from the platform — never
-// raw errors; only "accepted" carries Environment.
-type uiPlatformEnvironmentOutcome struct {
-	Kind        string                 `json:"kind"`
-	Environment *uiPlatformEnvironment `json:"environment,omitempty"`
-	Message     string                 `json:"message,omitempty"`
-}
-
-// uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab
-// strip tell "there is nothing here" apart from "you may not look": a panel the
-// caller lacks the permission for carries Restricted and is not rendered, while
-// one that failed carries Error and does not blank its neighbours.
-type uiTenantDashboardPanel struct {
-	Tab string `json:"tab"`
-	// Restricted names the API read the caller lacks, in canonical form
-	// ("GET /v1/audit-events"), so the reason can be shown rather than inferred.
-	Restricted string `json:"restricted,omitempty"`
-	Error      string `json:"error,omitempty"`
-}
-
-type uiTenantDashboardUser struct {
-	TenantID string `json:"tenantId"`
-	// TenantName is the name the platform itself gives the tenant these rows
-	// belong to, from whoami. It is set on the caller's own row only, where
-	// the identity read resolved it, and is the one value that names whose
-	// reviews, queue, users and audit a dashboard is rendering when the local
-	// tenant it was opened from is not the platform tenant its credential
-	// reaches. Empty on a platform that reports no name.
-	TenantName string   `json:"tenantName,omitempty"`
-	UserID     string   `json:"userId"`
-	Username   string   `json:"username,omitempty"`
-	Roles      []string `json:"roles,omitempty"`
-	Issuer     string   `json:"issuer,omitempty"`
-	Subject    string   `json:"subject,omitempty"`
-	CreatedAt  string   `json:"createdAt,omitempty"`
-	UpdatedAt  string   `json:"updatedAt,omitempty"`
-}
-
-type uiTenantDashboardReview struct {
-	ReviewID     string `json:"reviewId"`
-	TenantID     string `json:"tenantId"`
-	AuthorUserID string `json:"authorUserId,omitempty"`
-	// AuthorUsername is the tenant user directory's display name for
-	// AuthorUserID, resolved best-effort (see tenant_dashboard.go's
-	// tenantDashboardUsernames). Empty when it could not be resolved, so the
-	// frontend falls back to the raw id rather than showing nothing (#1378).
-	AuthorUsername string `json:"authorUsername,omitempty"`
-	Name           string `json:"name"`
-	// Repository is the repository the review's branches belong to, as the
-	// platform records it. Empty for a review created before the platform
-	// recorded one; the merge-queue panel names it so a queue spanning more
-	// than one repository is visibly not one queue.
-	Repository   string `json:"repository,omitempty"`
-	TargetBranch string `json:"targetBranch"`
-	SourceBranch string `json:"sourceBranch"`
-	Status       string `json:"status"`
-	// UnresolvedThreads is the review's "still being discussed" signal at a
-	// glance, from the row rather than only inside the detail dialog. Left
-	// unset (rather than 0) when it was not computed for this listing (see
-	// tenant_dashboard.go's reviewThreadCounts) so a caller can tell "zero
-	// unresolved" apart from "not read for this row".
-	UnresolvedThreads *int `json:"unresolvedThreads,omitempty"`
-	// Blocked is AdvanceMergeQueue's own report that it refused to promote
-	// this review: the queue head still has unresolved comment threads
-	// (UnresolvedThreads then carries the count). Every other read path
-	// leaves it unset — it is not a property of the review itself, only of
-	// that one call's outcome.
-	Blocked           bool   `json:"blocked,omitempty"`
-	LastFailedBuildID string `json:"lastFailedBuildId,omitempty"`
-	LastReadyBuildID  string `json:"lastReadyBuildId,omitempty"`
-	LastMergedBuildID string `json:"lastMergedBuildId,omitempty"`
-	CreatedAt         string `json:"createdAt,omitempty"`
-	UpdatedAt         string `json:"updatedAt,omitempty"`
-}
-
-type uiTenantDashboardBuild struct {
-	BuildID  string `json:"buildId"`
-	TenantID string `json:"tenantId"`
-	// ReviewID is empty for a build with no review attached (erun#1954) --
-	// identified by EnvironmentID instead.
-	ReviewID        string `json:"reviewId,omitempty"`
-	ReviewName      string `json:"reviewName,omitempty"`
-	EnvironmentID   string `json:"environmentId,omitempty"`
-	EnvironmentName string `json:"environmentName,omitempty"`
-	Successful      bool   `json:"successful"`
-	CommitID        string `json:"commitId"`
-	Version         string `json:"version"`
-	// Profile is the bounded per-step profile this build self-reported, when
-	// it collected one -- nil for a build reported before this feature
-	// existed, or one whose caller collected none.
-	Profile   *core.BuildProfileSummary `json:"profile,omitempty"`
-	CreatedAt string                    `json:"createdAt,omitempty"`
-	UpdatedAt string                    `json:"updatedAt,omitempty"`
-}
-
-type uiTenantDashboardAudit struct {
-	Type      string `json:"type"`
-	Actor     string `json:"actor,omitempty"`
-	Action    string `json:"action"`
-	CreatedAt string `json:"createdAt,omitempty"`
-}
-
-// uiPipelineIssue is one issue's own group of pipeline work, with every item
-// keyed on it. IssueKey is empty for the single group that names no issue,
-// which the platform orders last -- the view shows work without an issue
-// rather than guessing an issue for it.
-type uiPipelineIssue struct {
-	IssueKey string           `json:"issueKey"`
-	Items    []uiPipelineItem `json:"items"`
-}
-
-// uiPipelineItem is one piece of work on one rung, with the record it came
-// from. Exactly one of Job or Review is set: a row that could not say which
-// it was would send an operator looking for a branch that does not exist (a
-// job) or a job that does (a review).
-//
-// Rung is the platform's own label (PLANNED, IN_PROGRESS, REVIEW_OPEN,
-// READY, MERGING, MERGED, or an outcome such as FAILED), never re-derived
-// here: the desktop renders whatever the platform said, under the shared
-// vocabulary in erun-kit's pipelineRungs.
-type uiPipelineItem struct {
-	IssueKey string `json:"issueKey"`
-	// IssueRef/IssueRefSource are the item's own link and where it came from,
-	// so a branch-derived one renders as inferred. Empty IssueRefSource is
-	// "the platform stated no link", never "the author declared this".
-	IssueRef       string            `json:"issueRef,omitempty"`
-	IssueRefSource string            `json:"issueRefSource,omitempty"`
-	Rung           string            `json:"rung"`
-	Job            *uiPipelineJob    `json:"job,omitempty"`
-	Review         *uiPipelineReview `json:"review,omitempty"`
-}
-
-// uiPipelineJob is the job half: work that exists as a record and carries its
-// own issue reference and owning actor. It has no branch, and nothing derives
-// one for it.
-type uiPipelineJob struct {
-	JobID     string `json:"jobId"`
-	JobType   string `json:"jobType"`
-	IssueRef  string `json:"issueRef,omitempty"`
-	Summary   string `json:"summary"`
-	Status    string `json:"status"`
-	ActorKind string `json:"actorKind"`
-	ActorID   string `json:"actorId"`
-	StartedAt string `json:"startedAt,omitempty"`
-	EndedAt   string `json:"endedAt,omitempty"`
-}
-
-// uiPipelineReview is the review half: work proposed for merge, with the
-// branches it moves between.
-type uiPipelineReview struct {
-	ReviewID     string `json:"reviewId"`
-	Repository   string `json:"repository,omitempty"`
-	Name         string `json:"name"`
-	TargetBranch string `json:"targetBranch"`
-	SourceBranch string `json:"sourceBranch"`
-	Status       string `json:"status"`
-}
-
-type uiReviewDetailInput struct {
-	Tenant   string `json:"tenant"`
-	ReviewID string `json:"reviewId"`
-}
-
-// uiReviewDetail is the Reviews tab's per-row detail: the review itself, its
-// comment threads, its recorded builds, and its position in its target
-// branch's merge queue. Each sub-read degrades independently — the same
-// restricted-vs-failed-vs-empty distinction the dashboard's own panels make —
-// so one forbidden or failing read never blanks the rest of the detail.
-type uiReviewDetail struct {
-	ReviewID string `json:"reviewId"`
-	// APIError is a whole-detail failure: identity could not be read, so no
-	// capability set exists to gate the reads below honestly.
-	APIError   string `json:"apiError,omitempty"`
-	Restricted string `json:"restricted,omitempty"`
-	// AccessRemedies keys each restricted route above to the copyable grant
-	// that would give the caller the access they were refused, so a denial
-	// hands over the request instead of only naming what is missing. Absent
-	// when no role covers the access or the roles could not be read.
-	AccessRemedies     map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
-	Error              string                                         `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview                       `json:"review,omitempty"`
-	Comments           []uiReviewComment                              `json:"comments,omitempty"`
-	CommentsRestricted string                                         `json:"commentsRestricted,omitempty"`
-	CommentsError      string                                         `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild                       `json:"builds,omitempty"`
-	BuildsRestricted   string                                         `json:"buildsRestricted,omitempty"`
-	BuildsError        string                                         `json:"buildsError,omitempty"`
-	// QueuePosition is 1-based; 0 means the review is not in its target
-	// branch's merge queue right now.
-	QueuePosition int `json:"queuePosition,omitempty"`
-	// UnresolvedThreads counts root comments still OPEN, valid whenever
-	// Comments loaded (CommentsRestricted and CommentsError both empty).
-	UnresolvedThreads int `json:"unresolvedThreads,omitempty"`
-	// CanComment reports whether the signed-in user may reply at all, so the
-	// composer can be hidden rather than rendered to fail on submit.
-	CanComment bool `json:"canComment"`
-	// CanClose mirrors CanComment for the close action.
-	CanClose bool `json:"canClose"`
-	// CanResolveComments mirrors CanComment for the resolve/unresolve action,
-	// gated on its own write route since resolving a thread and posting to it
-	// are different permissions on the platform.
-	CanResolveComments  bool         `json:"canResolveComments"`
-	Reviewers           []uiReviewer `json:"reviewers,omitempty"`
-	ReviewersRestricted string       `json:"reviewersRestricted,omitempty"`
-	ReviewersError      string       `json:"reviewersError,omitempty"`
-	// CanAssignReviewers mirrors CanComment for the Add reviewers action,
-	// gated on its own write route (POST .../reviewers) since assigning a
-	// reviewer is a distinct permission from every other review write.
-	CanAssignReviewers bool `json:"canAssignReviewers"`
-	// CanRemoveReviewers mirrors CanAssignReviewers for the Remove action —
-	// DELETE is a distinct route from POST, gated separately.
-	CanRemoveReviewers bool `json:"canRemoveReviewers"`
-	// AvailableReviewers lists the tenant's enrolled users the Add reviewers
-	// picker may choose from — populated only when CanAssignReviewers is set,
-	// so a caller who cannot assign never pays for the extra read. A
-	// constrained picker, not a free-text id, is the point: it is how a
-	// cross-tenant userId becomes structurally impossible to submit rather
-	// than merely refused after the fact.
-	AvailableReviewers []uiReviewer `json:"availableReviewers,omitempty"`
-}
-
-// uiReviewer is one entry in a review's assigned-reviewers list.
-// Username is resolved best-effort the same way uiTenantDashboardReview's
-// AuthorUsername is, empty when it could not be resolved.
-type uiReviewer struct {
-	UserID   string `json:"userId"`
-	Username string `json:"username,omitempty"`
-}
-
-type uiReviewComment struct {
-	CommentID     string `json:"commentId"`
-	CreatorUserID string `json:"creatorUserId,omitempty"`
-	// CreatorUsername mirrors uiTenantDashboardReview.AuthorUsername: the
-	// tenant user directory's display name for CreatorUserID, resolved
-	// best-effort, empty when it could not be resolved.
-	CreatorUsername string `json:"creatorUsername,omitempty"`
-	Status          string `json:"status"`
-	ParentCommentID string `json:"parentCommentId,omitempty"`
-	CommitID        string `json:"commitId"`
-	FilePath        string `json:"filePath"`
-	Line            int    `json:"line"`
-	Body            string `json:"body"`
-	CreatedAt       string `json:"createdAt,omitempty"`
-}
-
-// uiUpdateReviewCommentStatusInput resolves or unresolves a comment thread.
-// CommentID must be a thread's root; the frontend never offers the action on
-// a reply, so there is no reply-rejection path to surface here.
-type uiUpdateReviewCommentStatusInput struct {
-	Tenant    string `json:"tenant"`
-	ReviewID  string `json:"reviewId"`
-	CommentID string `json:"commentId"`
-}
-
-// uiCreateReviewReplyInput replies to an existing comment thread. CommitID,
-// FilePath, and Line are copied from the parent comment the frontend already
-// holds — a reply must anchor to the same line as the thread it joins — so
-// Body is the only field the operator actually authors.
-type uiCreateReviewReplyInput struct {
-	Tenant          string `json:"tenant"`
-	ReviewID        string `json:"reviewId"`
-	ParentCommentID string `json:"parentCommentId"`
-	CommitID        string `json:"commitId"`
-	FilePath        string `json:"filePath"`
-	Line            int    `json:"line"`
-	Body            string `json:"body"`
-}
-
-// uiCreateReviewInput opens a review on the platform. sourceBranch must
-// already be pushed to the remote — see ExecPush — since the review
-// references it by name. Repository is the repository those branches belong
-// to, in any form git accepts; the platform canonicalizes it. Without one the
-// review cannot be placed in any repository's merge queue, so it is worth
-// naming whenever the caller knows which checkout the work came from.
-type uiCreateReviewInput struct {
-	Tenant       string `json:"tenant"`
-	Repository   string `json:"repository"`
-	Name         string `json:"name"`
-	TargetBranch string `json:"targetBranch"`
-	SourceBranch string `json:"sourceBranch"`
-}
-
-type uiCloseReviewInput struct {
-	Tenant   string `json:"tenant"`
-	ReviewID string `json:"reviewId"`
-}
-
-type uiAdvanceMergeQueueInput struct {
-	Tenant string `json:"tenant"`
-	// Repository and TargetBranch name the queue to advance. Both are
-	// required: advancing is a single-queue-head write, and the two together
-	// are what name one queue — a target branch alone names one only in a
-	// tenant that serves exactly one repository.
-	Repository   string `json:"repository"`
-	TargetBranch string `json:"targetBranch"`
-}
-
-type uiOverrideAdvanceMergeQueueInput struct {
-	Tenant       string `json:"tenant"`
-	Repository   string `json:"repository"`
-	TargetBranch string `json:"targetBranch"`
-	// Reason is required by the platform and is recorded in its audit trail
-	// alongside the caller's identity.
-	Reason string `json:"reason"`
-}
-
-// uiAddReviewerInput assigns userId as a reviewer on a review. userId must
-// already be enrolled in the caller's own tenant.
-type uiAddReviewerInput struct {
-	Tenant   string `json:"tenant"`
-	ReviewID string `json:"reviewId"`
-	UserID   string `json:"userId"`
-}
-
-// uiRemoveReviewerInput unassigns userId from a review's reviewers.
-type uiRemoveReviewerInput struct {
-	Tenant   string `json:"tenant"`
-	ReviewID string `json:"reviewId"`
-	UserID   string `json:"userId"`
-}
-
-// uiCreateReviewCommentInput starts a new top-level thread anchored to a diff
-// line, as opposed to uiCreateReviewReplyInput's reply-in-an-existing-thread.
-// Every field but Body is the anchor the operator picked by clicking a line in
-// the diff panel, not a value they typed.
-type uiCreateReviewCommentInput struct {
-	Tenant   string `json:"tenant"`
-	ReviewID string `json:"reviewId"`
-	CommitID string `json:"commitId"`
-	FilePath string `json:"filePath"`
-	Line     int    `json:"line"`
-	Body     string `json:"body"`
-}
-
-type uiSSHDConfig struct {
-	Enabled                    bool   `json:"enabled"`
-	LocalPort                  int    `json:"localPort"`
-	PublicKeyPath              string `json:"publicKeyPath"`
-	WorkspaceSyncEnabled       bool   `json:"workspaceSyncEnabled"`
-	WorkspaceSyncLocalPath     string `json:"workspaceSyncLocalPath,omitempty"`
-	WorkspaceSyncStatus        string `json:"workspaceSyncStatus,omitempty"`
-	WorkspaceSyncStatusMessage string `json:"workspaceSyncStatusMessage,omitempty"`
-}
-
-type uiEnvironmentLocalPorts struct {
-	RangeStart          int          `json:"rangeStart"`
-	RangeEnd            int          `json:"rangeEnd"`
-	MCP                 int          `json:"mcp"`
-	API                 int          `json:"api"`
-	SSH                 int          `json:"ssh"`
-	ContributeApp       int          `json:"contributeApp"`
-	MCPStatus           uiPortStatus `json:"mcpStatus"`
-	APIStatus           uiPortStatus `json:"apiStatus"`
-	SSHStatus           uiPortStatus `json:"sshStatus"`
-	ContributeAppStatus uiPortStatus `json:"contributeAppStatus"`
-}
-
-type uiPortStatus struct {
-	Available bool   `json:"available"`
-	Status    string `json:"status"`
-}
-
-// uiExposureList is the Ports tab's read model for an environment's public
-// exposures. Configured is false when exposure cannot apply here at all,
-// which the tab renders as "not applicable" rather than an empty list —
-// distinct from Restricted (the caller cannot see the answer) and from a
-// genuinely empty Services list (configured, nothing exposed yet). Error
-// carries a listing failure that is neither of those two named cases.
-// NotConfiguredReason names which of two distinct causes made Configured
-// false, since they call for different copy and different recovery: a host
-// environment has no cluster and can never be exposed, while a cluster-backed
-// environment whose project simply hasn't declared a platform: block yet is
-// the fixable case.
+// uiExposureList: Configured false means exposure cannot apply, distinct from
+// Restricted and from an empty list. NotConfiguredReason separates a host env
+// from a project missing its platform: block.
 type uiExposureList struct {
 	Configured          bool               `json:"configured"`
 	Restricted          bool               `json:"restricted"`
@@ -990,10 +265,7 @@ const (
 	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
 )
 
-// uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
-// TLSReady/TLSNotReadyReason are meaningful only when Scheme is "https": see
-// eruncommon.ExposedService for why Scheme alone cannot say whether the URL
-// is actually safe to open yet.
+// uiExposedService: TLSReady matters only for https.
 type uiExposedService struct {
 	Service           string `json:"service"`
 	Hostname          string `json:"hostname"`
@@ -1003,11 +275,7 @@ type uiExposedService struct {
 	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
 }
 
-// uiEnvironmentServiceList is the Ports tab's read model for what the
-// environment is actually running — the list the operator picks from. It
-// mirrors uiExposureList's shape (Configured / Restricted / Error) so the tab
-// renders the same three states for both reads rather than inventing a second
-// vocabulary for the same conditions.
+// uiEnvironmentServiceList mirrors uiExposureList's three states.
 type uiEnvironmentServiceList struct {
 	Configured          bool                   `json:"configured"`
 	Restricted          bool                   `json:"restricted"`
@@ -1016,17 +284,14 @@ type uiEnvironmentServiceList struct {
 	NotConfiguredReason string                 `json:"notConfiguredReason,omitempty"`
 }
 
-// uiEnvironmentService is one Service in the environment, with the exposure it
-// already has. Ports is what makes the picker able to offer a port instead of
-// asking the operator to remember one.
+// uiEnvironmentService lists Ports so the picker can offer one.
 type uiEnvironmentService struct {
 	Name     string                     `json:"name"`
 	Type     string                     `json:"type,omitempty"`
 	Ports    []uiEnvironmentServicePort `json:"ports,omitempty"`
 	Hostname string                     `json:"hostname,omitempty"`
 	Scheme   string                     `json:"scheme,omitempty"`
-	// ExposedAs is the logical label in the hostname, which is not necessarily
-	// the Service's own name.
+	// ExposedAs is the hostname label, not necessarily the Service name.
 	ExposedAs string `json:"exposedAs,omitempty"`
 }
 
@@ -1035,10 +300,7 @@ type uiEnvironmentServicePort struct {
 	Port int    `json:"port"`
 }
 
-// uiExposeServiceInput is the Ports tab's "Expose a service" form. Service is
-// the public label; BackendService is the Service in the namespace to route
-// to, which the picker fills in from the operator's choice. Empty keeps the
-// <tenant>-<service> derivation for a caller that only knows a label.
+// uiExposeServiceInput: empty BackendService derives <tenant>-<service>.
 type uiExposeServiceInput struct {
 	Service        string `json:"service"`
 	BackendService string `json:"backendService,omitempty"`
@@ -1046,534 +308,9 @@ type uiExposeServiceInput struct {
 	Port           int    `json:"port,omitempty"`
 }
 
-// uiUnexposeResult confirms which DNS record un-exposing removed, so the
-// dialog can name it back to the operator.
+// uiUnexposeResult names the DNS record removed.
 type uiUnexposeResult struct {
 	WildcardName string `json:"wildcardName"`
-}
-
-// uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
-// desktop registry-list editor. Roles carry the value set build/from/to/deploy
-// but ride as plain strings because RegistryRole is a string alias at the Wails
-// boundary.
-type uiContainerRegistryEntry struct {
-	Registry string `json:"registry"`
-	// Cluster is set for a context-resolved in-cluster registry (a `cluster:`
-	// entry) instead of a static Registry host. It carries a legible Label so the
-	// editor renders it as a readable line rather than a blank text box, and its
-	// concrete fields so the entry round-trips losslessly on save.
-	Cluster *uiContainerRegistryCluster `json:"cluster,omitempty"`
-	Roles   []string                    `json:"roles"`
-}
-
-// uiContainerRegistryCluster mirrors eruncommon.ClusterRegistry for the desktop
-// registry-list editor, plus a Label the frontend shows verbatim.
-type uiContainerRegistryCluster struct {
-	Service   string `json:"service"`
-	Namespace string `json:"namespace"`
-	Port      int    `json:"port"`
-	Insecure  bool   `json:"insecure"`
-	Label     string `json:"label"`
-}
-
-// uiDeployComponents is the Runtime tab's read model for a deploy at a chosen
-// version: the charts it would roll out, and which chart the runtime itself would
-// be installed from -- the second coordinate the version does not name.
-type uiDeployComponents struct {
-	Components   []eruncommon.DeployableComponent `json:"components"`
-	RuntimeChart uiRuntimeChartPlan               `json:"runtimeChart"`
-}
-
-type uiEnvironmentConfig struct {
-	Name                string                     `json:"name"`
-	Type                config.EnvironmentType     `json:"type,omitempty"`
-	LocalRepoPath       string                     `json:"localRepoPath,omitempty"`
-	RepoPath            string                     `json:"repoPath"`
-	KubernetesContext   string                     `json:"kubernetesContext"`
-	ContainerRegistries []uiContainerRegistryEntry `json:"containerRegistries"`
-	// ContainerRegistriesInherited is true when the shown list is resolved from
-	// the project's .erun/config.yaml (a local-agent env with no env-level
-	// override) rather than carried on the env config. The editor marks it so the
-	// operator sees these are inherited-from-project, not an env override.
-	ContainerRegistriesInherited bool                      `json:"containerRegistriesInherited"`
-	CloudProviderAlias           string                    `json:"cloudProviderAlias"`
-	CloudProviderAliases         []string                  `json:"cloudProviderAliases,omitempty"`
-	CloudAliasSlots              []uiEnvironmentCloudAlias `json:"cloudAliasSlots,omitempty"`
-	CloudContext                 *uiCloudContextStatus     `json:"cloudContext,omitempty"`
-	RuntimeVersion               string                    `json:"runtimeVersion"`
-	// RuntimeChart is the chart this env's runtime is installed from, stated as an
-	// OCI reference that may carry its own version. Empty means "the chart
-	// published with the deployed version", which is right whenever the chart and
-	// the runtime image ride one release line. See EnvConfig.RuntimeChart.
-	RuntimeChart string `json:"runtimeChart,omitempty"`
-	// RuntimeRegistry is where the env resolves erun's OWN artifacts from -- the
-	// runtime chart and platform images -- as distinct from the registry this
-	// project's images are pushed to. Set it when the deploy registry holds only
-	// the project's images, so erun's chart is not there to pull.
-	RuntimeRegistry string `json:"runtimeRegistry,omitempty"`
-	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
-	// pod pulls its image with. Without one a private runtime image leaves the
-	// pod in ImagePullBackOff, which the app could previously cause and not fix.
-	ImagePullSecrets []string           `json:"imagePullSecrets,omitempty"`
-	RuntimePod       uiRuntimePodConfig `json:"runtimePod"`
-	SSHD             uiSSHDConfig       `json:"sshd"`
-	Idle             uiIdleConfig       `json:"idle"`
-	Claude           uiClaudeConfig     `json:"claude"`
-	ClaudeDefaults   uiClaudeDefaults   `json:"claudeDefaults"`
-	AITool           string             `json:"aiTool,omitempty"`
-	// AILaunchSignature is the command the environment's AI tab launches with
-	// for the persisted config, computed by the same eruncommon resolution the
-	// launch uses (gateway, model, effort, Remote Control). A save whose value
-	// changed reopens the open AI tabs; deciding that here rather than from a
-	// copy of the rules in the frontend keeps the two from disagreeing. Read
-	// only: a save ignores it and returns a fresh one.
-	AILaunchSignature     string                  `json:"aiLaunchSignature"`
-	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
-	AutoStart             *bool                   `json:"autoStart,omitempty"`
-	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
-	AutoUpgrade           bool                    `json:"autoUpgrade"`
-	UpgradeChannel        string                  `json:"upgradeChannel,omitempty"`
-	DisableBuildScript    bool                    `json:"disableBuildScript"`
-	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
-	// in-pod platform Terraform (the cluster edge) and component installs can
-	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.
-	PlatformAccount bool `json:"platformAccount"`
-	// MountSource opts a runtime env into a mutable source worktree the pod clones
-	// at the deployed release ref; RepoURL is the git remote it clones. Runtime
-	// envs only, and a no-op without RepoURL. See EnvConfig.MountsRuntimeSource.
-	MountSource bool   `json:"mountSource"`
-	RepoURL     string `json:"repoURL"`
-	// DeployComponents is the per-machine saved deploy selection: the charts
-	// `erun deploy` rolls out for this env by default. Empty means no saved
-	// selection — deploy falls back to the repo plan, then the runtime chart
-	// alone. Editing it raises the pending-redeploy banner, since it changes what
-	// a redeploy rolls out.
-	DeployComponents []string `json:"deployComponents,omitempty"`
-	// Hosted is the platform row this environment corresponds to, when it has
-	// one. Nil means the environment is not marked as hosted. See
-	// eruncommon.HostedEnvironment.
-	Hosted *uiHostedEnvironment `json:"hosted,omitempty"`
-}
-
-// uiHostedEnvironment is the desktop's view of eruncommon.HostedEnvironment:
-// which platform row this local environment corresponds to, and how far the
-// local copy has fallen behind the definition that row holds.
-type uiHostedEnvironment struct {
-	// Describe renders the row for the operator: host, tenant, environment.
-	Describe string `json:"describe"`
-	APIHost  string `json:"apiHost"`
-	TenantID string `json:"tenantId"`
-	// EnvironmentID is the platform row's environment_id, shown so the
-	// operator can match the local environment against `erun platform env
-	// list` without guessing.
-	EnvironmentID string `json:"environmentId"`
-	// DefinitionRevision is the revision this local copy was last synced
-	// from; zero means it has never been synced.
-	DefinitionRevision int `json:"definitionRevision"`
-	// LocalChange is whether this machine's settings have moved since that
-	// revision was recorded. Unlike Drift it needs no platform read, so it is
-	// always resolved — including for an operator who has never connected.
-	LocalChange uiHostedDefinitionLocalChange `json:"localChange"`
-	// Drift is the read-only "the platform has moved" hint, resolved on the
-	// desktop's own poll. Nil when no comparison has been made yet, which
-	// reads as "nothing to say" rather than as "up to date".
-	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
-}
-
-// uiHostedDefinitionLocalChange mirrors eruncommon.HostedDefinitionLocalChange:
-// whether this machine's portable settings have moved since the marker last
-// recorded a transfer. It is the offline half of the marker panel — no
-// platform read, no button — which is what makes a change made while the
-// desktop was closed visible at all.
-type uiHostedDefinitionLocalChange struct {
-	// Available is false when the marker records no digest, so nothing can be
-	// said either way. It is deliberately not rendered as "in step".
-	Available bool   `json:"available"`
-	Changed   bool   `json:"changed"`
-	Describe  string `json:"describe"`
-}
-
-// uiHostedDefinitionDrift is the half of the marker panel that only the
-// platform can answer: what it holds against what this machine last pulled.
-type uiHostedDefinitionDrift struct {
-	LocalRevision    int  `json:"localRevision"`
-	PlatformRevision int  `json:"platformRevision"`
-	Behind           bool `json:"behind"`
-	// Describe is the operator-facing sentence, worded once in
-	// eruncommon.HostedDefinitionDrift.Describe so the CLI and the desktop
-	// cannot phrase the same state two ways.
-	Describe string `json:"describe"`
-	// Error is set when the comparison could not be made; it states what could
-	// not be read before the cause, per the Diagnostic Decision Record in
-	// erun-common/AGENTS.md.
-	Error string `json:"error,omitempty"`
-}
-
-type uiClaudeConfig struct {
-	UseMantle       *bool    `json:"useMantle,omitempty"`
-	UseBedrock      *bool    `json:"useBedrock,omitempty"`
-	UseGateway      *bool    `json:"useGateway,omitempty"`
-	Models          []string `json:"models,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
-	Effort          *string  `json:"effort,omitempty"`
-	DefaultModel    *string  `json:"defaultModel,omitempty"`
-	VerboseDebug    bool     `json:"verboseDebug,omitempty"`
-}
-
-type uiClaudeDefaults struct {
-	UseMantle       bool     `json:"useMantle"`
-	UseBedrock      bool     `json:"useBedrock"`
-	Models          []string `json:"models"`
-	MaxOutputTokens int      `json:"maxOutputTokens"`
-	KnownModels     []string `json:"knownModels"`
-	MinTokens       int      `json:"minTokens"`
-	MaxTokens       int      `json:"maxTokens"`
-	Effort          string   `json:"effort"`
-	EffortLevels    []string `json:"effortLevels"`
-	// GatewayConfigured reports whether the erun-level catalog names a gateway.
-	// Without one the per-environment controls have nothing to override, so the
-	// AI tab hides them rather than offering a switch that changes nothing.
-	GatewayConfigured bool `json:"gatewayConfigured"`
-	// GatewayModels and GatewayDefaultModel are the catalog's selectable models
-	// and the model a gateway launch falls back to. They stand beside Models and
-	// KnownModels rather than replacing them, because which set applies is the
-	// environment's own choice: the AI tab picks from the draft's useGateway, so
-	// an environment that leaves the gateway is offered its own models at once.
-	GatewayModels       []string `json:"gatewayModels"`
-	GatewayDefaultModel string   `json:"gatewayDefaultModel"`
-}
-
-type uiRuntimePodConfig struct {
-	CPU    string `json:"cpu"`
-	Memory string `json:"memory"`
-}
-
-type uiRuntimeResourceInput struct {
-	KubernetesContext string `json:"kubernetesContext"`
-	Tenant            string `json:"tenant,omitempty"`
-	Environment       string `json:"environment,omitempty"`
-}
-
-// uiRuntimeResourceStatus is a reading of node capacity taken at one instant,
-// not a fixed ceiling: allocatable moves as the node's own reservations move,
-// and every free figure depends on what the other pods currently hold.
-//
-// It carries two readings because the two capacity questions have different
-// answers, and reporting one of them without saying which it is was the defect
-// this shape exists to close: the limits sum can read zero on a node with ample
-// room to place a pod, and an operator who reads that as scheduling then
-// shrinks a limit the node's own capacity planning assumes will be burst into.
-type uiRuntimeResourceStatus struct {
-	KubernetesContext string `json:"kubernetesContext"`
-	Available         bool   `json:"available"`
-	// Message is why no reading was taken. Empty whenever one was: the headline
-	// an operator reads then belongs to a reading, because the two differ.
-	Message string `json:"message,omitempty"`
-	Node    string `json:"node,omitempty"`
-	// Schedulable is what the scheduler will do on the chosen node: allocatable
-	// minus the pods' declared requests. This is the reading a deploy's outcome
-	// follows, and the one the configuration dialog's bounds come from.
-	Schedulable uiRuntimeResourceReading `json:"schedulable"`
-	// SchedulableComplete is false when a pod on the chosen node declares a
-	// request the reading could not parse. The free figure above is then an
-	// upper bound, never a zero and never an exact answer.
-	SchedulableComplete bool `json:"schedulableComplete"`
-	// WorstCase is what would be left on the chosen node if every container on
-	// it ran to its declared limit at once -- oversubscription headroom, a
-	// capacity-planning figure that is not scheduling capacity.
-	WorstCase uiRuntimeResourceReading `json:"worstCase"`
-	// Floored marks a worst-case reading clamped up to what this environment
-	// already holds, so its maximum equals its current limit. Without it the
-	// slider reads as a hard product limit rather than "the node is full".
-	Floored bool `json:"floored"`
-	// MeasuredUsage reports whether a metrics source answered, so the UI can say
-	// whether unlimited containers were counted at their real usage or not
-	// counted at all.
-	MeasuredUsage bool `json:"measuredUsage"`
-	// UnmeasuredContainers counts containers on the chosen node that declare no
-	// limits and had no measured usage either — capacity the worst-case reading
-	// cannot see.
-	UnmeasuredContainers int `json:"unmeasuredContainers,omitempty"`
-	// UnreadableRequests counts pods on the chosen node whose declared requests
-	// could not be read, which is what makes SchedulableComplete false.
-	UnreadableRequests int                     `json:"unreadableRequests,omitempty"`
-	Nodes              []uiRuntimeResourceNode `json:"nodes,omitempty"`
-}
-
-// uiRuntimeResourceReading is one node's answer to one capacity question, and
-// states which question that is. Message and Notice travel with the reading
-// rather than with the status because the two readings answer different
-// questions and need different remedies named.
-type uiRuntimeResourceReading struct {
-	CPU    uiRuntimeResourceMetric `json:"cpu"`
-	Memory uiRuntimeResourceMetric `json:"memory"`
-	// Message says which question this reading answers, in its own figures.
-	Message string `json:"message,omitempty"`
-	// Notice carries what the figures alone cannot: why a figure is capped,
-	// what is invisible to it, and which lever actually moves it.
-	Notice string `json:"notice,omitempty"`
-}
-
-type uiRuntimeResourceMetric struct {
-	Total     float64 `json:"total"`
-	Used      float64 `json:"used"`
-	Free      float64 `json:"free"`
-	Unit      string  `json:"unit"`
-	Formatted string  `json:"formatted"`
-	// Floored marks this metric's free value as clamped up to the environment's
-	// own current limit because the node had nothing left to give.
-	Floored bool `json:"floored"`
-}
-
-// uiRuntimeActivity is one live reading of what an environment's runtime pod is
-// running: its persistent desktop sessions and the processes holding memory.
-type uiRuntimeActivity struct {
-	Tenant          string                  `json:"tenant"`
-	Environment     string                  `json:"environment"`
-	Available       bool                    `json:"available"`
-	Message         string                  `json:"message,omitempty"`
-	SessionsRunning int                     `json:"sessionsRunning"`
-	Sessions        []uiRuntimeSession      `json:"sessions,omitempty"`
-	Processes       []uiRuntimeProcessGroup `json:"processes,omitempty"`
-	MemoryHeld      string                  `json:"memoryHeld,omitempty"`
-	MemoryHeldMiB   int64                   `json:"memoryHeldMiB,omitempty"`
-}
-
-// uiRuntimeSession is one persistent desktop session as the pod reports it:
-// Running is observed (a live program behind the socket), never inferred from
-// how recently the session printed something.
-type uiRuntimeSession struct {
-	ID      string `json:"id"`
-	Running bool   `json:"running"`
-	Program string `json:"program,omitempty"`
-}
-
-// uiRuntimeProcessGroup is a class of resource-holding process the operator can
-// recognise and, when Reclaim is set, act on.
-type uiRuntimeProcessGroup struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Count        int    `json:"count"`
-	Memory       string `json:"memory"`
-	MemoryMiB    int64  `json:"memoryMiB"`
-	Reclaim      string `json:"reclaim,omitempty"`
-	ReclaimLabel string `json:"reclaimLabel,omitempty"`
-}
-
-type uiRuntimeReclaimInput struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Action      string `json:"action"`
-}
-
-type uiRuntimeReclaimResult struct {
-	Action  string `json:"action"`
-	Message string `json:"message"`
-}
-
-// uiRuntimeUsage is one live reading of the selected environment's own CPU,
-// memory and disk usage against its cgroup limits — as opposed to
-// uiRuntimeResourceStatus, which reads the node. Available is the probe's own
-// reachability; CPU/Memory/Disk each additionally state their own
-// unavailability, since cgroup v1, an unlimited limit, or an unreadable file
-// are all normal readings, not probe failures.
-type uiRuntimeUsage struct {
-	Tenant      string               `json:"tenant"`
-	Environment string               `json:"environment"`
-	Available   bool                 `json:"available"`
-	Message     string               `json:"message,omitempty"`
-	CPU         uiRuntimeCPUUsage    `json:"cpu"`
-	Memory      uiRuntimeMemoryUsage `json:"memory"`
-	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
-	Warnings    []string             `json:"warnings,omitempty"`
-	// ExcludesBuilds marks an environment whose runtime pod carries the
-	// erun-dind sidecar builds actually run in: CPU and Memory above are the
-	// runtime container's alone and can never see a build. Mirrors
-	// eruncommon.RuntimeUsage.ExcludesBuilds.
-	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
-	// Dind is the sidecar's own reading, and is what makes a build-capable
-	// environment's CPU legible: a release lane waiting on bounded `erun exec
-	// job await` calls is near-idle in the runtime container by construction, so
-	// without this the one figure a build-capable env reports is always ~0 and a
-	// healthy build is indistinguishable from a wedged one.
-	//
-	// Nil on every other environment, and nil (not a zero value) when the exec
-	// into the sidecar failed, so "could not read it" never renders as "read as
-	// zero".
-	Dind *uiRuntimeDindUsage `json:"dind,omitempty"`
-	// Requests is what the scheduler admits this environment's pod on -- the
-	// declared resources.requests, which no cgroup file records. It is what the
-	// limits above must be read against: `Mem 0% of 27.0GiB` measures a ceiling
-	// that reserves nothing, so the card states the reservation beside it.
-	// Mirrors eruncommon.RuntimeUsage.Requests; nil when nothing was read, and
-	// carrying Unavailable (never a zero) when the pod spec could not be.
-	Requests *uiRuntimeUsageRequests `json:"requests,omitempty"`
-}
-
-// uiRuntimeUsageRequests mirrors the half of eruncommon.RuntimeUsageRequests
-// this surface renders: the runtime container's own request, which is the
-// reservation the CPU and Memory rows above are measured against, resolved here
-// rather than in the component so no frontend code has to know the chart's
-// container name.
-type uiRuntimeUsageRequests struct {
-	Runtime     uiRuntimeContainerRequests `json:"runtime"`
-	Unavailable string                     `json:"unavailable,omitempty"`
-}
-
-// uiRuntimeContainerRequests is one container's declared request in the units a
-// comparison needs (millicores, bytes) and in the strings a card shows. A
-// zero/empty pair is a container that declares nothing for that resource, which
-// reserves nothing -- it is rendered as absent, never as a measured zero.
-type uiRuntimeContainerRequests struct {
-	CPUMilli    int64  `json:"cpuMilli,omitempty"`
-	MemoryBytes int64  `json:"memoryBytes,omitempty"`
-	CPU         string `json:"cpu,omitempty"`
-	Memory      string `json:"memory,omitempty"`
-}
-
-// uiRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading.
-// Deliberately carries no disk field: the sidecar mounts the same workspace
-// volume uiRuntimeUsage.Disk already reports, and a second figure under its own
-// name invites reading it as an independent filesystem.
-type uiRuntimeDindUsage struct {
-	CPU    uiRuntimeCPUUsage    `json:"cpu"`
-	Memory uiRuntimeMemoryUsage `json:"memory"`
-}
-
-// uiRuntimeCPUUsage carries Available=false with Unavailable set when the
-// reader could not measure utilisation at all (no cgroup v2, or cpu.max
-// reports no quota) — never a zero utilisation, which would read as "idle"
-// rather than "unknown".
-type uiRuntimeCPUUsage struct {
-	Available          bool    `json:"available"`
-	Unavailable        string  `json:"unavailable,omitempty"`
-	QuotaCores         float64 `json:"quotaCores,omitempty"`
-	Quota              string  `json:"quota,omitempty"`
-	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
-	Utilization        string  `json:"utilization,omitempty"`
-	// UsageUsec is cpu.stat's cumulative usage for the current container
-	// lifetime. It is carried on an unavailable reading as well as an available
-	// one, because it is the only CPU figure a container with no cpu.max quota
-	// can offer: utilisation needs a ceiling to be a fraction of, and the
-	// erun-dind sidecar is commonly declared without one, so without this a
-	// build-capable environment's real CPU work has no representation at all.
-	UsageUsec int64 `json:"usageUsec,omitempty"`
-}
-
-// uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is
-// a real, available reading (the container simply has no ceiling declared),
-// distinct from Unavailable (the cgroup file itself could not be read). Both
-// suppress the percent-of-limit figure, but only Unavailable is an error
-// state the panel should call out.
-type uiRuntimeMemoryUsage struct {
-	Available      bool    `json:"available"`
-	Unavailable    string  `json:"unavailable,omitempty"`
-	Unlimited      bool    `json:"unlimited,omitempty"`
-	CurrentBytes   int64   `json:"currentBytes,omitempty"`
-	Current        string  `json:"current,omitempty"`
-	PeakBytes      int64   `json:"peakBytes,omitempty"`
-	Peak           string  `json:"peak,omitempty"`
-	LimitBytes     int64   `json:"limitBytes,omitempty"`
-	Limit          string  `json:"limit,omitempty"`
-	PercentOfLimit float64 `json:"percentOfLimit,omitempty"`
-	OOMKills       int64   `json:"oomKills"`
-}
-
-type uiRuntimeDiskUsage struct {
-	Mount       string  `json:"mount"`
-	Available   bool    `json:"available"`
-	Unavailable string  `json:"unavailable,omitempty"`
-	TotalBytes  int64   `json:"totalBytes,omitempty"`
-	Total       string  `json:"total,omitempty"`
-	UsedBytes   int64   `json:"usedBytes,omitempty"`
-	Used        string  `json:"used,omitempty"`
-	PercentUsed float64 `json:"percentUsed,omitempty"`
-	Percent     string  `json:"percent,omitempty"`
-}
-
-// uiClusterRegistryStatus reports whether the selected Kubernetes context has an
-// in-cluster erun-registry deployed, so the new-environment dialog can default to
-// a resolvable cluster: registry entry instead of a hardcoded host.
-type uiClusterRegistryStatus struct {
-	KubernetesContext string `json:"kubernetesContext"`
-	Deployed          bool   `json:"deployed"`
-	Service           string `json:"service,omitempty"`
-	Namespace         string `json:"namespace,omitempty"`
-	Port              int    `json:"port,omitempty"`
-	Insecure          bool   `json:"insecure"`
-	Message           string `json:"message,omitempty"`
-}
-
-// uiHostedRegistryStatus reports whether erun's hosted container registry
-// (registry.erunpaas.com) is currently reachable, so the new-environment
-// dialog can gate offering it the same way uiClusterRegistryStatus gates the
-// in-cluster registry. Reason and Recovery are only set when Available is
-// false, and name the specific cause the probe observed and the action that
-// resolves it.
-type uiHostedRegistryStatus struct {
-	Host      string `json:"host"`
-	Available bool   `json:"available"`
-	Reason    string `json:"reason,omitempty"`
-	Recovery  string `json:"recovery,omitempty"`
-}
-
-// uiRuntimeResourceNode is one node's pair of readings. Unlike the chosen
-// node's, a node here carries no message of its own: the panel states the two
-// questions once, for the node it anchors to, and a per-node paragraph would
-// repeat it once per node on any cluster worth inspecting.
-type uiRuntimeResourceNode struct {
-	Name                string                   `json:"name"`
-	Schedulable         uiRuntimeResourceReading `json:"schedulable"`
-	SchedulableComplete bool                     `json:"schedulableComplete"`
-	WorstCase           uiRuntimeResourceReading `json:"worstCase"`
-}
-
-// Health-check statuses. "ok" is a passing check, "error" a blocking problem
-// the operator must fix before the env can run, "unknown" a check that could
-// not be evaluated (e.g. no kube-context to query).
-const (
-	healthCheckStatusOK      = "ok"
-	healthCheckStatusError   = "error"
-	healthCheckStatusUnknown = "unknown"
-)
-
-// Health-check fix affordances the frontend maps to a recovery action.
-const (
-	healthCheckFixNone        = ""
-	healthCheckFixDeploy      = "deploy"
-	healthCheckFixSetRegistry = "set-registry"
-)
-
-// Stable health-check ids so the frontend can key on the check, not its prose.
-const (
-	healthCheckIDRegistry = "container-registry"
-	healthCheckIDRuntime  = "runtime-deployed"
-)
-
-// uiEnvironmentHealthCheck is one out-of-pod diagnostic result. Title is the
-// user-facing check name; Detail explains the current outcome; Fix names the
-// recovery action the frontend renders (empty when the check passed).
-type uiEnvironmentHealthCheck struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-	Fix    string `json:"fix,omitempty"`
-}
-
-// uiEnvironmentHealth is the result of a "Check environment" run: the checks it
-// evaluated and whether every one passed.
-type uiEnvironmentHealth struct {
-	Tenant      string                     `json:"tenant"`
-	Environment string                     `json:"environment"`
-	Healthy     bool                       `json:"healthy"`
-	Checks      []uiEnvironmentHealthCheck `json:"checks"`
-}
-
-type uiIdleConfig struct {
-	Timeout          string `json:"timeout"`
-	WorkingHours     string `json:"workingHours"`
-	IdleTrafficBytes int64  `json:"idleTrafficBytes"`
 }
 
 type uiCloudProviderStatus struct {
@@ -1621,9 +358,8 @@ type uiAWSCloudAliasInput struct {
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
 }
 
-// uiEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
-// view. The frontend renders one selector per slot so an env can attach an AWS
-// alias AND a Cloudflare alias at once.
+// uiEnvironmentCloudAlias is one provider-type slot, so AWS and Cloudflare
+// aliases can coexist.
 type uiEnvironmentCloudAlias struct {
 	Provider string   `json:"provider"`
 	Alias    string   `json:"alias"`
@@ -1644,29 +380,18 @@ type startSessionResult struct {
 	Selection uiSelection `json:"selection"`
 	Slot      int         `json:"slot,omitempty"`
 	Kind      string      `json:"kind,omitempty"`
-	// Orchestrated is true when the call started a background command
-	// orchestration (e.g. an agent-env deploy composing build -> push ->
-	// deploy) instead of a foreground PTY session. There is no Local tab to
-	// activate; progress and completion surface through the activity queue.
+	// Orchestrated means a background orchestration ran instead of a PTY session.
 	Orchestrated bool `json:"orchestrated,omitempty"`
-	// Occupancy lists the leases already holding the environment when an
-	// unconfirmed AI session start found it occupied: SessionID is 0 and no
-	// session was started. The caller shows who is already here and, if the
-	// user wants a second agent anyway, retries with confirmed=true.
+	// Occupancy is set when an unconfirmed AI start found held leases; no session
+	// started.
 	Occupancy []uiEnvironmentLease `json:"occupancy,omitempty"`
 }
 
-// uiEnvironmentLease is one activity lease surfaced from
-// eruncommon.EnvironmentActivityLease so the desktop can name the job already
-// working in an environment. PID and lease ID are implementation detail, not
-// shown; SecondsHeld is precomputed so the renderer never redoes the time math.
+// uiEnvironmentLease names a job holding an environment.
 type uiEnvironmentLease struct {
 	Name        string `json:"name"`
 	SecondsHeld int64  `json:"secondsHeld,omitempty"`
-	// JobID is set only when the lease is held by a job, so the surface that
-	// names the occupancy can also act on it. Empty for every other holder,
-	// which is what keeps a non-job lease from rendering a cancel that cannot
-	// work.
+	// JobID is empty for non-job holders, which cannot be cancelled.
 	JobID string `json:"jobId,omitempty"`
 }
 
@@ -1687,25 +412,13 @@ type terminalOutputPayload struct {
 type terminalExitPayload struct {
 	SessionID int    `json:"sessionId"`
 	Reason    string `json:"reason,omitempty"`
-	// Deliberate reports that the desktop had already ended this session — an
-	// env close, a tab close, an AI-session end — when its read ended. Every
-	// one of those teardowns kills the PTY, so the reader that wakes on it
-	// carries a non-empty Reason ("signal: killed") that describes the kill the
-	// operator asked for rather than a failure. The flag travels on the exit
-	// itself because the session is the only thing that can answer the
-	// question: the set the desktop set out to tear down is not the set it
-	// reached, and a session it kills before the frontend has heard of it has
-	// no other record anywhere. Absent on an exit nothing deliberate caused.
+	// Deliberate marks an exit the desktop caused, whose Reason describes the kill
+	// rather than a failure.
 	Deliberate bool `json:"deliberate,omitempty"`
 }
 
-// aiActivityPayload carries the AI-session "busy" signal the sidebar uses to
-// spin env rows whose AI tab is working. It has two sources, and the tool's own
-// report wins where it exists: the AI tool's turn-boundary events (busy while a
-// turn is in flight, released when it reports the turn ended or that it is
-// waiting on the operator — see ai_session_status.go), and, only for a session
-// that has never reported one, the debounced output-volume fallback (true after
-// ~5 s of sustained output, false after ~3 s of silence).
+// aiActivityPayload drives the sidebar spinner. The tool's turn report wins;
+// the output-volume debounce applies only to sessions that never reported.
 type aiActivityPayload struct {
 	SessionID   int    `json:"sessionId"`
 	Tenant      string `json:"tenant"`
@@ -1713,15 +426,8 @@ type aiActivityPayload struct {
 	Busy        bool   `json:"busy"`
 }
 
-// orchestratorShellActivityPayload carries whether an orchestrator's
-// background shell is running, its command and when it started, so the
-// sidebar can spin and show elapsed time for a shell the orchestrator's own
-// turn may already have gone idle around. Emitted every heartbeat tick, busy
-// or not, the same re-emit-regardless-of-change treatment aiActivityPayload
-// was given earlier and for the same reason: a snapshot field
-// (orchestratorInfo.ShellRunning) carries the same signal so a missed or
-// mistimed event self-heals within one tick instead of staying wrong until
-// the state itself next changes.
+// orchestratorShellActivityPayload is emitted every tick so a missed event
+// self-heals.
 type orchestratorShellActivityPayload struct {
 	SessionID     int    `json:"sessionId"`
 	Running       bool   `json:"running"`
@@ -1734,39 +440,22 @@ type appStatusPayload struct {
 	Busy    bool   `json:"busy"`
 }
 
-// appNotificationPayload carries a classified notification retained in the
-// frontend's message-centre history for the session. success/info entries
-// auto-dismiss (leaving the history entry behind); warning/error persist
-// until acknowledged. Kind matches the frontend's AppNotification kinds:
-// success | warning | error | info | debug (debug is never emitted by this
-// backend today — the class exists so a future diagnostic emitter has
-// somewhere to go that isn't the operator-facing classes).
+// appNotificationPayload: success/info auto-dismiss; warning/error persist.
+// debug is never emitted by this backend.
 type appNotificationPayload struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
-	// Tenant/Environment/Source tag a notification so it can be cleared later
-	// by the state it describes. The runtime-unreachable warning
-	// carries the env it targets and a stable source, so the deploy lifecycle
-	// (a deploy starting for that env, or the runtime becoming reachable) can
-	// dismiss it without touching an unrelated toast.
+	// Tenant/Environment/Source let a later state change dismiss this notification.
 	Tenant      string `json:"tenant,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	Source      string `json:"source,omitempty"`
-	// OrchestratorID tags a notification about a specific orchestrator so the
-	// frontend can render an action that operates on that orchestrator
-	// directly (e.g. restarting it), the orchestrator-scoped analogue of
-	// Tenant/Environment.
+	// OrchestratorID lets the frontend act on that orchestrator.
 	OrchestratorID string `json:"orchestratorId,omitempty"`
-	// Action names a control the frontend can render beside the message that
-	// actually performs the remedy the message names, e.g. "deploy" opens the
-	// tagged env's deploy dialog. Empty means the message carries no action the
-	// app can perform — the operator-facing text is the whole of the recovery.
+	// Action names a control that performs the remedy; empty means none.
 	Action string `json:"action,omitempty"`
 }
 
-// appNotificationClearPayload dismisses an env-tagged notification. The frontend
-// clears the current notification only when its source/tenant/environment all
-// match.
+// appNotificationClearPayload clears only an exact source/tenant/environment match.
 type appNotificationClearPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -1789,11 +478,7 @@ type uiIdleStatus struct {
 	StopEligible        bool  `json:"stopEligible"`
 	OutsideWorkingHours bool  `json:"outsideWorkingHours"`
 	ManagedCloud        bool  `json:"managedCloud"`
-	// FromPod is true only when this reading came from the pod's own idle
-	// monitor over MCP. False means it was assembled on the host because the
-	// pod could not be reached — the same moment the sidebar may be showing
-	// this environment as unreachable — so the countdown it carries is a
-	// best-effort local reconstruction, not a live observation.
+	// FromPod false means a host-side reconstruction, not a live observation.
 	FromPod            bool           `json:"fromPod"`
 	StopBlockedReason  string         `json:"stopBlockedReason,omitempty"`
 	StopError          string         `json:"stopError,omitempty"`
@@ -1801,27 +486,17 @@ type uiIdleStatus struct {
 	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
 	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
 	Markers            []uiIdleMarker `json:"markers,omitempty"`
-	// Leases are the work claims currently holding the environment (an
-	// orchestrator or CLI job running via job_start/AttachEnvironmentJob) — not
-	// this desktop's own interactive AI/ERun/Local sessions, which never take
-	// one. A non-empty list is a coexisting agent the AI tab does not manage.
+	// Leases are job claims; the desktop's own sessions never take one.
 	Leases []uiEnvironmentLease `json:"leases,omitempty"`
-	// StopPendingSince carries the RFC3339 timestamp at which this env
-	// first became StopEligible. When set, the desktop has armed the
-	// grace-period warning and the user has SecondsUntilForcedStop
-	// seconds to cancel or resume activity before the real
-	// ec2:StopInstances fires. Empty when no auto-stop is pending.
+	// StopPendingSince is when the env became StopEligible; empty when no auto-stop
+	// is pending.
 	StopPendingSince       string `json:"stopPendingSince,omitempty"`
 	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
 }
 
-// uiLastStopEvent describes the most recent automatic stop of a managed cloud
-// env, surfaced in the idle tooltip so the user can answer "why did my env
-// stop?" without trawling the activity drawer. Source is one of "pod-monitor"
-// or "host-manual". ArmedAt is empty for host-manual stops without a prior
-// armed grace. Policy is snapshotted at fire time so the row stays
-// interpretable after the user later edits the timeout.
+// uiLastStopEvent explains the latest automatic stop. Source is "pod-monitor" or
+// "host-manual"; Policy is snapshotted at fire time.
 type uiLastStopEvent struct {
 	StoppedAt        string             `json:"stoppedAt"`
 	ArmedAt          string             `json:"armedAt,omitempty"`
@@ -1833,9 +508,7 @@ type uiLastStopEvent struct {
 	Markers          []uiLastStopMarker `json:"markers,omitempty"`
 }
 
-// uiIdlePolicy is the History-tab-facing snapshot of the resolved idle policy.
-// It renders TimeoutSeconds rather than a Go duration so the frontend never has
-// to parse "10m0s".
+// uiIdlePolicy uses seconds so the frontend never parses Go durations.
 type uiIdlePolicy struct {
 	TimeoutSeconds   int64  `json:"timeoutSeconds"`
 	WorkingHours     string `json:"workingHours,omitempty"`
@@ -1843,9 +516,7 @@ type uiIdlePolicy struct {
 	IdleTrafficBytes int64  `json:"idleTrafficBytes,omitempty"`
 }
 
-// uiLastStopMarker records the per-marker idle/active state captured
-// at the moment the auto-stop fired so the user can see which
-// activity sources were quiet.
+// uiLastStopMarker is a marker's state when the auto-stop fired.
 type uiLastStopMarker struct {
 	Name           string `json:"name"`
 	Idle           bool   `json:"idle"`
@@ -1861,8 +532,7 @@ type uiIdleMarker struct {
 	Clients          []uiIdleMarkerClient `json:"clients,omitempty"`
 }
 
-// uiIdleMarkerClient is the desktop's per-IP detail row for a marker. Only the
-// SSH-proxy populates it; other activity kinds leave Clients nil.
+// uiIdleMarkerClient is populated only by the SSH proxy.
 type uiIdleMarkerClient struct {
 	Address    string `json:"address"`
 	Bytes      int64  `json:"bytes,omitempty"`

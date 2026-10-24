@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-// TestRuntimeActivityGroupsResourceHoldingProcesses covers the leftover case
-// the operator hit: Gradle runs finished but left thirteen resident JVMs
-// holding memory, with nothing in the desktop showing them. The panel groups
-// what an operator recognises and names the action that reclaims it — a pid
-// table would be homework, not a decision.
 func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 	probe := strings.Join([]string{
 		"erun-session\tai\t900\tclaude",
@@ -29,8 +24,6 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 
 	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
 
-	// The pod's own supervision (the `sh` line) is not something the operator can
-	// reclaim, so it is neither grouped nor counted.
 	want := []uiRuntimeProcessGroup{
 		{ID: runtimeProcessGroupGradle, Label: "2 Gradle daemons", Count: 2, Memory: "3.0 GiB", MemoryMiB: 3072, Reclaim: runtimeReclaimGradleDaemons, ReclaimLabel: "Stop build daemons"},
 		{ID: runtimeProcessGroupJava, Label: "1 Java process", Count: 1, Memory: "512 MiB", MemoryMiB: 512, Reclaim: runtimeReclaimGradleDaemons, ReclaimLabel: "Stop build daemons"},
@@ -47,13 +40,7 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 	}
 }
 
-// TestRuntimeActivityGroupsAreReadOnly pins the "show first, reclaim on an
-// explicit action" rule at the level that matters: a class of process nobody
-// should be killed out from under (the agent's own tool) is shown but carries
-// no reclaim action.
 func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
-	// A suffixed name, not `claude`: the real memory holder can be reported under
-	// a longer comm than the name an exact-match classifier would look for.
 	probe := "erun-process\t1048576\tclaude.exe\tclaude.exe --continue --model opus"
 	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
 	if len(activity.Processes) != 1 {
@@ -64,9 +51,6 @@ func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeActivityFailsSoft keeps the Runtime tab a status surface: an
-// unreachable or stopped environment explains itself rather than turning the
-// dialog into an error.
 func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
@@ -85,12 +69,7 @@ func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled is the reported
-// defect for the "Running in this environment" panel: with the app's own
-// context already past its deadline, probeRuntimeActivity's derived ctx reads
-// as already timed out (context.WithTimeout on an expired parent inherits its
-// Err() immediately), so the panel must name that timeout rather than the
-// "signal: killed" text the mocked exec below deliberately returns.
+// An already-expired parent ctx must be reported as our timeout, not the mocked "signal: killed".
 func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
@@ -116,11 +95,6 @@ func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout covers a kill
-// this probe did not cause: ctx has not expired, but the pod exec still
-// terminated by signal (an OOM kill, an evicted pod, most likely). That is a
-// different situation from the self-inflicted timeout above and must read
-// differently, without ever naming the bare signal either.
 func TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("signal-terminated exec is a POSIX concept")
@@ -156,8 +130,6 @@ func TestRuntimeReclaimScriptsAreScopedToBuildLeftovers(t *testing.T) {
 	if !strings.Contains(cache, "prune") {
 		t.Fatalf("build-cache reclaim must prune, got %q", cache)
 	}
-	// Neither action may touch the worktree or a running session — those are the
-	// operator's work, and a reclaim that ate them would be a data-loss bug.
 	for _, script := range []string{cache, mustReclaimScript(t, runtimeReclaimGradleDaemons)} {
 		for _, forbidden := range []string{"rm -rf", "dtach", "/home/erun/git"} {
 			if strings.Contains(script, forbidden) {
@@ -167,17 +139,8 @@ func TestRuntimeReclaimScriptsAreScopedToBuildLeftovers(t *testing.T) {
 	}
 }
 
-// TestGradleReclaimSurvivesItsOwnProcessScan runs the daemon reclaim for real.
-// `pgrep -f` matches whole command lines, and this script's own command line
-// contains its pattern — so a literal spelling makes the script kill the shell
-// running it. That is invisible in the script text; it only shows up when the
-// script runs (it reached a live pod as exit 143), so the regression test has to
-// execute it.
-//
-// Only this action is executed. The build-cache reclaim's commands act on
-// whatever docker daemon the test host is pointed at, and a test that prunes a
-// developer's real build cache is a worse defect than the one it guards. Its
-// self-scan hazard does not exist anyway: it runs no process scan.
+// Executed for real: the self-kill via `pgrep -f` only shows up when the script runs.
+// The build-cache reclaim is not run because it would prune the host's real docker cache.
 func TestGradleReclaimSurvivesItsOwnProcessScan(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("reclaim scripts are sh scripts that run inside the runtime pod")

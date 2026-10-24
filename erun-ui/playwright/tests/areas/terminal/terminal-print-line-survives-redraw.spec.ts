@@ -1,17 +1,9 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { LOCAL_SHELL_PROMPT, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The terminal specs print a known line at the top of a cleared screen and then
-// hover, click or select row 0. The pane is backed by a live shell, and a shell
-// with line editing redraws its current line when it is resized: macOS's
-// /bin/sh (bash 3.2, readline) writes "\r\x1b[K" plus its prompt on SIGWINCH,
-// while Linux's dash writes nothing. So a printed line that such a redraw can
-// erase reds every row-0 spec on macOS and none on Linux. Emitting the redraw
-// directly makes that state reachable on every host. Its prompt is a sentinel
-// rather than the real one, so seeing it on screen proves this redraw -- not
-// one the live shell sent on its own -- has landed. It ends by moving to the
-// next row, so a real redraw arriving afterwards lands there instead of
-// erasing the sentinel this spec waits on.
+// Some shells (macOS bash 3.2) redraw the current line on SIGWINCH, which can
+// erase a printed row 0. The redraw is emitted directly with a sentinel prompt
+// and ends on the next row, so a later real redraw cannot erase the sentinel.
 const REDRAW_PROMPT = 'erun-redraw-sentinel$ ';
 const READLINE_RESIZE_REDRAW = `\r\x1b[K${REDRAW_PROMPT}\r\n`;
 

@@ -7,16 +7,9 @@ import (
 	"github.com/adrg/xdg"
 )
 
-// redirectConfigHomeForTest points the on-disk config store (and therefore
-// PortForwardStatePath/ConfigStore) at a fresh temp root. adrg/xdg caches
-// ConfigHome at process init rather than re-reading the environment per
-// call, so the Setenv calls alone would not redirect it -- xdg.Reload is
-// what makes it honour this test's temp root (mirrors
-// erun-ui/environment_activity_observed_test.go's seedMCPForward).
-//
-// The cache dir and Windows' AppData roots are redirected too, because the
-// forward removal also clears the legacy locations they name; left alone, a
-// test could remove a record from the operator's real tree.
+// redirectConfigHomeForTest needs xdg.Reload because adrg/xdg caches ConfigHome
+// at init. Cache and AppData roots are redirected too, since forward removal
+// also clears legacy locations.
 func redirectConfigHomeForTest(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()

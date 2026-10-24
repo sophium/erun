@@ -4,19 +4,10 @@ import (
 	"strings"
 )
 
-// intentional_stop.go records user-driven Stop intent so the per-terminal
-// reconnect loop does not re-run `erun open` — which would restart the
-// instance and undo the stop — after the user clicks the Power button.
-//
-// Stopping the instance drops the kubectl session, which wakes the reconnect
-// loop. The status-based respawn guard alone cannot suppress the respawn: it
-// reads on-disk env status that lags the AWS Stop call, leaving a race window
-// in which the loop still sees the env as running. Latching the intent the
-// instant the user clicks Stop closes that window; an explicit resume clears it.
+// The stop intent is latched at click time because on-disk status lags the AWS
+// Stop call, and the reconnect loop would otherwise re-run `erun open`.
 
-// markIntentionalStopForCloudContext must run before StopCloudContext's AWS
-// Stop call, so the intent is latched before the kubectl session drops and the
-// reconnect loop wakes.
+// Must run before the AWS Stop call drops the kubectl session.
 func (a *App) markIntentionalStopForCloudContext(name string) {
 	keys := a.selectionsLinkedToCloudContext(name)
 	if len(keys) == 0 {
@@ -29,8 +20,6 @@ func (a *App) markIntentionalStopForCloudContext(name string) {
 	a.mu.Unlock()
 }
 
-// clearIntentionalStopForCloudContext clears the latch after a successful
-// start, so a later kubectl drop reconnects instead of staying stopped.
 func (a *App) clearIntentionalStopForCloudContext(name string) {
 	keys := a.selectionsLinkedToCloudContext(name)
 	if len(keys) == 0 {
@@ -43,9 +32,7 @@ func (a *App) clearIntentionalStopForCloudContext(name string) {
 	a.mu.Unlock()
 }
 
-// isIntentionalStop reads the flag without consuming it: several sessions for
-// one env (an ERun tab plus an AI tab) hit the reconnect gate together when
-// kubectl drops, and each must see the marker.
+// Not consumed: several sessions for one env each check it.
 func (a *App) isIntentionalStop(selection uiSelection) bool {
 	key := selectionKey(selection)
 	a.mu.Lock()
@@ -54,8 +41,7 @@ func (a *App) isIntentionalStop(selection uiSelection) bool {
 	return ok
 }
 
-// selectionsLinkedToCloudContext mirrors the env walk in
-// clearIdleStopsForCloudContext so the two latches stay in sync.
+// Mirrors clearIdleStopsForCloudContext so the two latches stay in sync.
 func (a *App) selectionsLinkedToCloudContext(name string) []string {
 	selections := a.selectionsForCloudContext(name)
 	keys := make([]string, 0, len(selections))

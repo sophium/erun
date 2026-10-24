@@ -3,37 +3,27 @@ package open
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
+	"github.com/sophium/erun/cmd/shared/portfwd"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/spf13/cobra"
 )
 
-type openNoShellDialect string
-
-const (
-	openNoShellDialectPOSIX      openNoShellDialect = "posix"
-	openNoShellDialectPowerShell openNoShellDialect = "powershell"
-)
-
-// refuseOpenForHostEnvironment refuses `open` against a host env: it has no
-// pod and no cluster to open a kubectl-exec shell into. Its worktree is
-// already the operator's own directory, so the resolution here is to open
-// that directory directly rather than through erun. Checked against
-// ResolvedType rather than the broader !HasPod() so a legacy env with an
-// unresolved type (ResolvedType == "", see EnvConfig docs) keeps opening
-// exactly as it did before host existed, instead of being misreported as a
-// host environment it never was. Checked before any other open side effect
-// (persisting the local port range, ensuring the kubernetes context) so a
-// refusal never partially applies one.
+// refuseOpenForHostEnvironment refuses a host env before any side effect. It checks
+// ResolvedType, not !HasPod(), so legacy untyped envs keep opening.
 func refuseOpenForHostEnvironment(result config.OpenResult) error {
 	if result.EnvConfig.ResolvedType() != config.EnvironmentTypeHost {
 		return nil
@@ -41,29 +31,25 @@ func refuseOpenForHostEnvironment(result config.OpenResult) error {
 	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
 }
 
-// resolveOpenTarget runs the resolution chain that must complete before a
-// runtime can be opened: flag validation, parameter resolution, the init
-// hand-off, the host-environment refusal, and persisting the local port range.
-// done reports that init already handled the request, so the caller returns
-// without opening anything.
+// resolveOpenTarget resolves everything needed before opening; done means init handled it.
 func resolveOpenTarget(
 	ctx core.Context,
 	args []string,
-	target common.OpenParams,
+	target model.OpenParams,
 	vscode bool,
 	intellij bool,
-	resolveOpen func(common.OpenParams) (config.OpenResult, error),
-	runInitForOpen func(core.Context, common.OpenParams) error,
+	resolveOpen func(model.OpenParams) (config.OpenResult, error),
+	runInitForOpen func(core.Context, model.OpenParams) error,
 	saveEnvConfig func(string, config.EnvConfig) error,
 ) (config.OpenResult, bool, error) {
 	if vscode && intellij {
 		return config.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
 	}
-	params, err := shared.ResolveOpenParams(ctx.Command, args, target)
+	params, err := opentarget.ResolveOpenParams(ctx.Command, args, target)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shared.ShouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, opentarget.ShouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
@@ -73,14 +59,14 @@ func resolveOpenTarget(
 	if err := refuseOpenForHostEnvironment(result); err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	result, err = open.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, common.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -92,7 +78,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	var aiTab bool
 	var contributeTab bool
 	var reconnect bool
-	target := common.OpenParams{}
+	target := model.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:   "open [TENANT] [ENVIRONMENT]",
@@ -115,7 +101,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
@@ -140,14 +126,13 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 				AI:               aiTab,
 				Contribute:       contributeTab,
 				Reconnect:        reconnect,
-				// A --version or --runtime-image override also implies a deploy:
-				// pinning a version is only meaningful if it rolls out.
+				// Pinning a version only means something if it rolls out.
 				Deploy: deployRuntime || strings.TrimSpace(versionOverride) != "" || strings.TrimSpace(runtimeImage) != "",
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Open a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Open a specific environment")
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
@@ -156,10 +141,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
-	// Desktop-integration flags: the app runs the remote shell as a persistent,
-	// reattachable session so closing and reopening a tab reconnects to the
-	// running shell. Hidden because they only make sense when the desktop
-	// manages the session lifecycle.
+	// Hidden desktop-integration flags for reattachable sessions.
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
@@ -187,34 +169,34 @@ type OpenOptions struct {
 	Reconnect        bool
 }
 
-func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
-	_, result, err := shared.ResolveOpenArgs(ctx.Command, args, resolveOpen)
+func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
+	_, result, err := opentarget.ResolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
-	if initErr := shared.RunInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
+	if initErr := opentarget.RunInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
 		return config.OpenResult{}, true, initErr
 	}
 
 	return config.OpenResult{}, true, nil
 }
 
-func resolveOpenWithInitStopForParams(ctx core.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, common.OpenParams) error) (config.OpenResult, bool, error) {
+func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams, shouldRunInit func(error) bool, resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, model.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
-	if initErr := shared.RunInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
+	if initErr := opentarget.RunInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
 		return config.OpenResult{}, true, initErr
 	}
 
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
-	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
 		ctx:                       ctx,
@@ -226,7 +208,7 @@ func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, o
 		checkKubernetesDeployment: checkKubernetesDeployment,
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
-		resolveDeployedVersion:    common.ResolveDeployedHelmReleaseVersion,
+		resolveDeployedVersion:    deploy.ResolveDeployedHelmReleaseVersion,
 		activateMCP:               activateMCP,
 		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
@@ -240,16 +222,16 @@ type resolvedOpenRunner struct {
 	ctx                       core.Context
 	result                    config.OpenResult
 	options                   OpenOptions
-	promptRunner              shared.PromptRunner
+	promptRunner              prompt.PromptRunner
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
-	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (common.DeploySpec, error)
-	deployHelmChart           common.HelmChartDeployerFunc
-	resolveDeployedVersion    common.HelmReleaseVersionResolverFunc
-	activateMCP               shared.MCPForwarder
-	activateAPI               shared.APIForwarder
-	activateSSHD              shared.SSHDActivator
+	checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error)
+	deployHelmChart           deploy.HelmChartDeployerFunc
+	resolveDeployedVersion    seam.HelmReleaseVersionResolverFunc
+	activateMCP               portfwd.MCPForwarder
+	activateAPI               portfwd.APIForwarder
+	activateSSHD              sshdlink.SSHDActivator
 	launchVSCode              VSCodeLauncher
 	launchIntelliJ            IntelliJLauncher
 }
@@ -267,14 +249,12 @@ func (r *resolvedOpenRunner) run() error {
 		return err
 	}
 
-	shellReq := common.ShellLaunchParamsFromResult(r.result)
+	shellReq := cloud.ShellLaunchParamsFromResult(r.result)
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	// Opening an environment means running it, so drop any recorded stop before
-	// the chart is rendered: a deploy that still saw the flag would re-apply
-	// replicas: 0 and the wake below would have to undo its own rollout. A
-	// reconnect makes no such statement — see clearStopIntent.
+	// Clear any recorded stop before rendering, or the deploy re-applies replicas: 0.
+	// A reconnect does not; see clearStopIntent.
 	if err := r.clearStopIntent(); err != nil {
 		return err
 	}
@@ -298,20 +278,8 @@ func (r *resolvedOpenRunner) run() error {
 	return r.runShellLoop(shellReq)
 }
 
-// emitNoShellFallbackIfNeeded handles --no-shell and the non-interactive
-// fallback (an MCP client, an orchestrator, a script — kubectl exec -it
-// would read EOF on a non-TTY stdin and return almost instantly). done
-// reports whether the caller should return immediately; err may be nil on
-// the plain setup-emitted success path.
-//
-// The two branches treat an unreachable forward differently on purpose.
-// --no-shell is an explicit request for the forwards alone, so one that
-// stayed unreachable must fail the run rather than read as success (root
-// AGENTS.md § "Smooth, Seamless, No Dead Ends"). The non-TTY fallback is
-// reached by callers that asked for none of this — a script or an MCP
-// client that simply has no terminal — and the forwards are a laptop-side
-// convenience for them, not the deliverable, so a degraded one is traced
-// and the run still succeeds.
+// emitNoShellFallbackIfNeeded handles --no-shell and non-TTY callers. --no-shell fails
+// on an unreachable forward (it is the deliverable); the non-TTY fallback only traces it.
 func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (done bool, err error) {
 	switch {
 	case r.options.NoShell:
@@ -320,7 +288,7 @@ func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (do
 		}
 		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
 		return true, r.emitNoShellSetup()
-	case !shared.StdinIsTerminal():
+	case !prompt.StdinIsTerminal():
 		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
 		return true, r.emitNoShellSetup()
 	default:
@@ -339,12 +307,8 @@ func openIDEKindLabel(options OpenOptions) string {
 	}
 }
 
-// ensureKubernetesContext runs open's cloud-context preflight, which starts the
-// machine behind a stopped context so the cluster is reachable. A reconnect
-// skips it for the same reason it does not wake the runtime: starting what an
-// operator — or an idle policy — just stopped is not something a reattach gets
-// to decide. The reattach then fails against the unreachable cluster, which is
-// the honest outcome. `erun stop` skips the same preflight, for the same reason.
+// ensureKubernetesContext starts a stopped context's machine; a reconnect skips it,
+// since a reattach must not undo a stop.
 func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 	if r.options.Reconnect {
 		r.ctx.Trace("open: --reconnect, so a stopped cloud context is left stopped rather than started to reach it")
@@ -355,7 +319,7 @@ func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 
 func (r *resolvedOpenRunner) recordActivity() {
 	if !r.ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
-		_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+		_ = activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 			Tenant:      r.result.Tenant,
 			Environment: r.result.Environment,
 			Kind:        config.ActivityKindCLI,
@@ -377,230 +341,13 @@ func (r *resolvedOpenRunner) validateIDEOptions() error {
 	return nil
 }
 
-func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParams) error {
-	if r.resolveRuntimeDeploySpec == nil || r.deployHelmChart == nil {
-		return nil
-	}
-	execution, err := r.resolveRuntimeExecution()
-	if err != nil {
-		return err
-	}
-	shouldDeploy, err := r.shouldDeployRuntime(shellReq, execution)
-	if err != nil {
-		return err
-	}
-	if !shouldDeploy {
-		return nil
-	}
-	return r.deployRuntime(execution)
-}
-
-func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
-	// Heal envs created by older binaries: their tenant Chart.yaml is pinned to
-	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-devops:1.0.0
-	// image that was never published and every rollout fails at pod startup.
-	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
-	if appVersion == "" {
-		appVersion = shared.CurrentBuildInfo().Version
-	}
-	if err := common.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
-		return common.DeploySpec{}, err
-	}
-	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
-	if err != nil {
-		return common.DeploySpec{}, err
-	}
-	execution, err = applyRuntimeDeployImageOverride(r.ctx, r.result, execution, r.options.RuntimeImage)
-	if err != nil {
-		return common.DeploySpec{}, err
-	}
-	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
-}
-
-func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
-	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
-		return true, nil
-	}
-	if r.checkKubernetesDeployment == nil {
-		return false, nil
-	}
-	deployed, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
-		Name:               config.RuntimeReleaseName(r.result.Tenant),
-		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
-		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
-		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
-		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
-		ExpectedMCPPort:    config.MCPPortForResult(r.result),
-		ExpectedSSHPort:    config.SSHLocalPortForResult(r.result),
-		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
-	})
-	if err != nil {
-		if r.ctx.DryRun {
-			r.ctx.Trace("open: dry-run: kubernetes deployment check failed (" + err.Error() + "), assuming not deployed")
-			return true, nil
-		}
-		return false, err
-	}
-	return !deployed, nil
-}
-
-func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
-	if r.options.VSCode || r.options.IntelliJ {
-		if r.ctx.DryRun {
-			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun deploy %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
-			return nil
-		}
-		return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun deploy %s %s` first, then retry", ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment)
-	}
-	if r.result.EnvConfig.SSHD.Enabled {
-		execution.Deploy.SSHDEnabled = true
-	}
-	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
-		return err
-	}
-	// Persist through the same shared writer `erun deploy`/`erun upgrade` use
-	// (common.PersistRuntimeVersionFromDeploySpecs) instead of a hand-rolled
-	// subset: the hand-rolled version only ever wrote RuntimeVersion and
-	// RuntimeRegistry, so an operator's own --runtime-image on `open --deploy`
-	// installed correctly this one time and then was silently forgotten on the
-	// next plain open/deploy. The shared writer also heals RuntimeRunningImage, a
-	// stated RuntimeChart, and the MCP-auth key, and already knows to heal to
-	// the running version instead of a never-pushed snapshot when every image
-	// came from the fingerprint cache (SkipHelm).
-	return common.PersistRuntimeVersionFromDeploySpecs(r.ctx, []common.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
-}
-
-func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
-	return shared.WrapHelmDeployWithReleaseRecovery(
-		r.promptRunner,
-		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
-		common.ClearHelmReleasePendingOperation,
-	)
-}
-
-// ensureRuntimeDeployed fails a pure `open` when the env's runtime is not
-// deployed. Because a port-forward that cannot bind is no longer fatal, a
-// genuinely undeployed runtime is detected here by deployment presence rather
-// than inferred from a downstream forward timeout — this is the accurate signal
-// the desktop surfaces as "deploy this environment".
-func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
-	release := config.RuntimeReleaseName(r.result.Tenant)
-	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
-	if r.ctx.DryRun {
-		// Show the check in the dry-run plan, then assume present so the rest of
-		// the plan still renders. CheckKubernetesDeployment emits this same line
-		// itself in real mode.
-		r.ctx.TraceCommand("", "kubectl", runtimeDeploymentPresenceArgs(r.result.EnvConfig.KubernetesContext, namespace, release)...)
-		return nil
-	}
-	if r.checkKubernetesDeployment == nil {
-		return nil
-	}
-	present, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
-		Name:              release,
-		Namespace:         namespace,
-		KubernetesContext: r.result.EnvConfig.KubernetesContext,
-	})
-	if err != nil {
-		return err
-	}
-	if !present {
-		// Builds on common.KubernetesDeploymentAbsentMessageMarker so the
-		// desktop, reading only this text across a CLI subprocess boundary, can
-		// tell a genuine absence apart from a check that could not resolve an
-		// answer without re-deriving kubectl's own error grammar.
-		return fmt.Errorf("runtime for %s/%s "+common.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
-			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
-	}
-	return nil
-}
-
-// prepareRuntime brings the environment to a state the rest of open can use:
-// deploy when the operator asked for it, otherwise verify the runtime is there,
-// and either way start it if it was stopped. The wake comes last because it is
-// the step that must hold immediately before the port-forwards.
-func (r *resolvedOpenRunner) prepareRuntime(shellReq config.ShellLaunchParams) error {
-	if r.options.Deploy {
-		// --deploy is operator-convenience only (root AGENTS.md § "Command
-		// primitives vs orchestration"): programmatic callers like the desktop
-		// must NOT use it — they compose build→push→deploy themselves and open
-		// the pure shell.
-		if err := r.maybeDeployRuntime(shellReq); err != nil {
-			return err
-		}
-	} else {
-		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
-		if err := r.ensureRuntimeDeployed(); err != nil {
-			return err
-		}
-	}
-	// Wake before the forwards: kubectl port-forward cannot attach to a
-	// Deployment with zero replicas, so a stopped environment would otherwise
-	// surface as a forward timeout instead of starting.
-	return r.ensureRuntimeAwake()
-}
-
-// clearStopIntent records that this environment is wanted running again. It
-// touches only the config, so it is safe to run before the runtime is known to
-// exist (a first `open --deploy` has no Deployment yet). A reconnect declares
-// itself as machine-initiated and is therefore not that statement: the operator
-// stopped the environment, which is what dropped the session being reattached.
-func (r *resolvedOpenRunner) clearStopIntent() error {
-	if r.options.Reconnect {
-		r.ctx.Trace("open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started")
-		return nil
-	}
-	updated, err := lifecycle.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
-	if err != nil {
-		return err
-	}
-	r.result.EnvConfig = updated
-	return nil
-}
-
-// ensureRuntimeAwake scales a stopped environment back to one replica and waits
-// for the rollout. It is quiet for an environment that is already running: the
-// single read below decides, and no scale call is made. A reconnect never
-// scales — a stopped environment fails the reattach instead of being restarted
-// behind the operator.
-func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
-	wake, err := lifecycle.EnsureEnvironmentAwake(r.ctx, lifecycle.WakeEnvironmentParams{
-		Result:        r.result,
-		SaveEnvConfig: r.options.SaveEnvConfig,
-		Reconnect:     r.options.Reconnect,
-	})
-	if err != nil {
-		return err
-	}
-	r.result.EnvConfig = wake.EnvConfig
-	return nil
-}
-
-func runtimeDeploymentPresenceArgs(kubernetesContext, namespace, release string) []string {
-	args := make([]string, 0, 7)
-	if strings.TrimSpace(kubernetesContext) != "" {
-		args = append(args, "--context", kubernetesContext)
-	}
-	if strings.TrimSpace(namespace) != "" {
-		args = append(args, "--namespace", namespace)
-	}
-	return append(args, "get", "deployment", release, "-o", "name")
-}
-
-// refreshHostCredentials re-injects the operator's short-lived AWS credentials
-// at the moment they declare they are about to use the env. Nothing else renews
-// them, so a long-lived environment silently loses AWS access mid-session and
-// the failure surfaces layers away as an unrelated image-pull error. It writes
-// into the pod's credentials file, so it has to run after the runtime is awake —
-// a stopped environment has nothing to write to. Best-effort like the
-// forwarders: a lapsed SSO session degrades the environment but must not block
-// the session being opened.
+// refreshHostCredentials re-injects short-lived AWS credentials into the awake pod.
+// Best-effort: a lapsed SSO session must not block opening.
 func (r *resolvedOpenRunner) refreshHostCredentials() {
 	if !r.result.EnvConfig.HasAWSCloudAlias() {
 		return
 	}
-	refresh, err := shared.RefreshEnvironmentHostCredentials(r.ctx, r.result)
+	refresh, err := RefreshEnvironmentHostCredentials(r.ctx, r.result)
 	if err != nil {
 		r.ctx.Trace("open: host AWS credential refresh failed; the environment keeps whatever credentials it already had: " + strings.TrimSpace(err.Error()))
 		return
@@ -611,25 +358,11 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 	r.ctx.Trace(fmt.Sprintf("open: refreshed host AWS credentials for %s into the %s profile", refresh.Alias, refresh.Profile))
 }
 
-// activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API).
-// None is a prerequisite for the session being opened: the remote shell/AI
-// session runs in-pod via `kubectl exec` and never uses these forwards — they
-// only back local tooling (the desktop app's panels, `erun api`, `erun mcp`).
-// Every forward is still attempted regardless of an earlier one's failure, and
-// each failure is traced as a warning, so an interactive shell that follows is
-// never aborted by a laptop-side convenience.
-//
-// The returned error carries every failure anyway, because a caller with no
-// shell to fall back on (--no-shell, or the non-TTY fallback) has nothing else
-// to show for the run: the forwards it just attempted are the whole
-// deliverable, and reporting success while one of them stayed unreachable is
-// exactly the "action that succeeds and changes nothing" dead end. run()
-// decides whether that error matters for the branch it is in.
+// activateForwarders attempts every laptop-side port-forward, tracing failures. The
+// returned error matters only when the forwards are the deliverable (no shell).
 func (r *resolvedOpenRunner) activateForwarders() error {
-	// Reclaim before starting anything: this is the moment the forward store
-	// is read and appended to, and the records being removed are the ones no
-	// environment left can reopen.
-	shared.ReclaimOrphanedPortForwardRecords(r.ctx)
+	// Reclaim orphaned records before the forward store is read and appended to.
+	ReclaimOrphanedPortForwardRecords(r.ctx)
 	var failures []string
 	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
 		if err := r.activateSSHD(r.ctx, r.result); err != nil {
@@ -688,7 +421,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 }
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams) {
-	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
+	if preview, err := open.PreviewShellLaunch(shellReq); err == nil {
 		if len(preview.SeedArgs) > 0 {
 			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
 			r.ctx.Trace("open: SSH private key streamed to the runtime pod on stdin (kept off the command line)")
@@ -708,18 +441,15 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams
 func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
-		if errors.Is(err, common.ErrShellPodReplaced) {
+		if errors.Is(err, open.ErrShellPodReplaced) {
 			continue
 		}
-		if errors.Is(err, common.ErrShellSessionTakenOver) {
-			// Another ERun window re-attached this persistent session; it keeps
-			// running there, so end this viewer cleanly. The notice line is the
-			// desktop's signal to stop its reconnect loop instead of stealing the
-			// session straight back.
-			r.ctx.Info(common.ShellSessionTakenOverNotice)
+		if errors.Is(err, open.ErrShellSessionTakenOver) {
+			// Another window took over this session; the notice stops the desktop's reconnect loop.
+			r.ctx.Info(open.ShellSessionTakenOverNotice)
 			return nil
 		}
-		if !errors.Is(err, common.ErrShellReattachDeploy) {
+		if !errors.Is(err, open.ErrShellReattachDeploy) {
 			return err
 		}
 		if r.runManagedDeploy == nil {
@@ -739,279 +469,4 @@ func ideOpenLabel(options OpenOptions) string {
 		return "VS Code"
 	}
 	return "the IDE"
-}
-
-func sshdExpectationForDeployment(result config.OpenResult) *bool {
-	if !result.EnvConfig.SSHD.Enabled {
-		return nil
-	}
-	expected := true
-	return &expected
-}
-
-func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
-	if deployHelmChart == nil {
-		return nil
-	}
-	return func(params common.HelmDeployParams) error {
-		return runWithSpinner(
-			ctx,
-			" deploying "+releaseName+" with helm",
-			"deployment updated: "+releaseName+"\n",
-			func() error {
-				return deployHelmChart(params)
-			},
-		)
-	}
-}
-
-// applyRuntimeDeployImageOverride applies a runtime-image override only for
-// published-chart envs; envs on a repo-local chart ignore it because the local
-// chart's templates own their image references.
-func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
-	runtimeImage = strings.TrimSpace(runtimeImage)
-	if runtimeImage == "" {
-		return execution, nil
-	}
-	if !result.RemoteRepo() && !common.IsOCIChartReference(execution.Deploy.ChartPath) {
-		return execution, nil
-	}
-	result.EnvConfig.RuntimeImage = runtimeImage
-	return common.ResolvePublishedDevopsDeploySpec(ctx, result, "")
-}
-
-func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverride string) common.DeploySpec {
-	versionOverride = strings.TrimSpace(versionOverride)
-	if versionOverride == "" {
-		return execution
-	}
-	execution.Deploy.Version = versionOverride
-	return execution
-}
-
-func emitLocalShellSetupForOpenResult(ctx core.Context, result config.OpenResult, promptRunner shared.PromptRunner, stdout, stderr io.Writer) error {
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	if stderr == nil {
-		stderr = io.Discard
-	}
-
-	dialect := openNoShellDialectForShell(os.Getenv("SHELL"))
-	if stdoutIsTerminalForAliasSetup(stdout) {
-		if err := maybeConfigureOpenNoShellAlias(ctx, result, promptRunner, os.Getenv("SHELL"), stderr); err != nil {
-			return err
-		}
-	}
-
-	_, err := io.WriteString(stdout, localShellSetupScript(result, dialect))
-	return err
-}
-
-func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
-	return shared.WriterIsTerminal(stdout)
-}
-
-// nopWriteCloser adapts a writer to promptui's io.WriteCloser Stdout field so
-// promptui can render to it but never closes the underlying stream.
-type nopWriteCloser struct{ io.Writer }
-
-func (nopWriteCloser) Close() error { return nil }
-
-// UnwrapWriter exposes the adapted stream so a check that has to know what the
-// bytes land on -- the prompt's echo suppression -- can see past the adapter to
-// the file underneath it.
-func (w nopWriteCloser) UnwrapWriter() io.Writer { return w.Writer }
-
-// promptStderr targets the confirm render at the process's real stderr (the same
-// TTY as stdout), wrapped so promptui cannot close it.
-func promptStderr() io.WriteCloser { return nopWriteCloser{os.Stderr} }
-
-func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, promptRunner shared.PromptRunner, shellPath string, stderr io.Writer) error {
-	dialect := openNoShellDialectForShell(shellPath)
-	aliasName := openNoShellAliasName(result)
-	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
-	if aliasConfigured {
-		return nil
-	}
-	if startupFile == "" || promptRunner == nil || dialect == openNoShellDialectPowerShell {
-		writeOpenNoShellHintLines(stderr, result, shellPath)
-		return nil
-	}
-
-	// Route the confirm to stderr: promptui repaints from a readline goroutine
-	// and the eval-able setup script prints to stdout right after, so sharing
-	// stdout lets the two interleave (see confirmPromptTo). os.Stderr is the same
-	// TTY, wrapped so promptui cannot close the process's real stderr.
-	ok, err := shared.ConfirmPromptTo(promptRunner, fmt.Sprintf("add %s to %s", aliasName, startupFile), promptStderr())
-	if err != nil {
-		return err
-	}
-	if !ok {
-		writeOpenNoShellHintLines(stderr, result, shellPath)
-		return nil
-	}
-
-	ctx.Trace(fmt.Sprintf("open: append %s alias to %s", aliasName, startupFile))
-	if ctx.DryRun {
-		return nil
-	}
-	if err := appendOpenNoShellAlias(startupFile, openNoShellAliasCommand(result, shellPath)); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(stderr, "added %s to %s\n", aliasName, startupFile)
-	_, _ = fmt.Fprintf(stderr, "open a new shell to use %s\n", aliasName)
-	return nil
-}
-
-func writeOpenNoShellHintLines(stderr io.Writer, result config.OpenResult, shellPath string) {
-	for _, line := range openNoShellHintLines(result, shellPath) {
-		_, _ = fmt.Fprintln(stderr, line)
-	}
-}
-
-func openNoShellHintLines(result config.OpenResult, shellPath string) []string {
-	dialect := openNoShellDialectForShell(shellPath)
-	return []string{
-		openNoShellHintPrefix(dialect),
-		openNoShellAliasCommand(result, shellPath),
-	}
-}
-
-func openNoShellAliasName(result config.OpenResult) string {
-	if strings.TrimSpace(result.Title) != "" {
-		return strings.TrimSpace(result.Title)
-	}
-	return strings.TrimSpace(result.Tenant) + "-" + strings.TrimSpace(result.Environment)
-}
-
-func openNoShellAliasCommand(result config.OpenResult, shellPath string) string {
-	aliasName := openNoShellAliasName(result)
-	command := fmt.Sprintf("erun open %s %s --no-shell", result.Tenant, result.Environment)
-	dialect := openNoShellDialectForShell(shellPath)
-	if dialect == openNoShellDialectPowerShell {
-		return "function " + aliasName + " { " + command + " | Invoke-Expression }"
-	}
-	if filepath.Base(strings.TrimSpace(shellPath)) == "fish" {
-		return "alias " + aliasName + " 'eval (" + command + ")'"
-	}
-	return "alias " + aliasName + `='eval "$(` + command + `)"'`
-}
-
-func detectOpenNoShellAliasStartupFile(result config.OpenResult, shellPath string) (string, bool) {
-	if openNoShellDialectForShell(shellPath) == openNoShellDialectPowerShell {
-		return "", false
-	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(homeDir) == "" {
-		return "", false
-	}
-
-	preferred, candidates := openNoShellStartupFiles(homeDir, shellPath)
-	for _, candidate := range candidates {
-		configured, err := startupFileHasAlias(candidate, openNoShellAliasName(result))
-		if err != nil {
-			continue
-		}
-		if configured {
-			return candidate, true
-		}
-	}
-	return preferred, false
-}
-
-func openNoShellStartupFiles(homeDir, shellPath string) (string, []string) {
-	switch filepath.Base(strings.TrimSpace(shellPath)) {
-	case "bash":
-		preferred := filepath.Join(homeDir, ".bashrc")
-		return preferred, []string{
-			preferred,
-			filepath.Join(homeDir, ".bash_profile"),
-			filepath.Join(homeDir, ".profile"),
-		}
-	case "fish":
-		preferred := filepath.Join(homeDir, ".config", "fish", "config.fish")
-		return preferred, []string{preferred}
-	default:
-		preferred := filepath.Join(homeDir, ".zshrc")
-		return preferred, []string{preferred}
-	}
-}
-
-func startupFileHasAlias(path, aliasName string) (bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "alias "+aliasName+"=") || strings.HasPrefix(trimmed, "alias "+aliasName+" ") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func appendOpenNoShellAlias(path, aliasCommand string) error {
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if strings.Contains(string(data), aliasCommand) {
-		return nil
-	}
-
-	content := string(data)
-	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += aliasCommand + "\n"
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-func openNoShellDialectForShell(shellPath string) openNoShellDialect {
-	return detectOpenNoShellDialect(shared.CurrentHostOS(), shellPath)
-}
-
-func detectOpenNoShellDialect(hostOS core.HostOS, shellPath string) openNoShellDialect {
-	switch strings.ToLower(filepath.Base(strings.TrimSpace(shellPath))) {
-	case "pwsh", "pwsh.exe", "powershell", "powershell.exe":
-		return openNoShellDialectPowerShell
-	case "bash", "bash.exe", "zsh", "zsh.exe", "sh", "sh.exe", "fish", "fish.exe":
-		return openNoShellDialectPOSIX
-	}
-	if hostOS == core.HostOSWindows {
-		return openNoShellDialectPowerShell
-	}
-	return openNoShellDialectPOSIX
-}
-
-func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect) string {
-	switch dialect {
-	case openNoShellDialectPowerShell:
-		commands := []string{
-			"kubectl config use-context " + powerShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext)) + " | Out-Null",
-			"kubectl config set-context --current " + powerShellQuote("--namespace="+config.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
-			"Set-Location -LiteralPath " + powerShellQuote(result.RepoPath),
-		}
-		return strings.Join(commands, "\n") + "\n"
-	default:
-		return common.LocalShellSetupScript(result)
-	}
-}
-
-func openNoShellHintPrefix(dialect openNoShellDialect) string {
-	if dialect == openNoShellDialectPowerShell {
-		return "one-liner function:"
-	}
-	return "one-liner alias:"
-}
-
-func powerShellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

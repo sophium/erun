@@ -7,12 +7,8 @@ import type { AppDispatch, RootState } from '../store';
 import { thunkExtra } from '../thunkExtra';
 import { selectionKey } from '../versionSuggestions';
 
-// Re-attaches the terminal to the selected env's session. setSelected paths
-// that bypass openSelection would otherwise leave the terminal on the
-// previously-visible session — possibly another env's PTY — so the sidebar
-// shows one env while the terminal renders and takes input for another.
-// Keep the reconcile rule in sync with surfaceEnvSession in sessionThunks;
-// returning 0 tells the display middleware to resetTerminal().
+// selectionSyncMiddleware keeps the terminal on the selected env's session even
+// when setSelected bypasses openSelection. Keep in sync with surfaceEnvSession.
 export const selectionSyncMiddleware = createListenerMiddleware();
 
 const startListening = selectionSyncMiddleware.startListening.withTypes<RootState, AppDispatch>();
@@ -25,9 +21,7 @@ startListening({
     if (next !== state.terminal.sessionId) {
       listenerApi.dispatch(setSessionId(next));
     }
-    // Refresh idle status now so the titlebar Play button reflects the new
-    // env immediately, not after the next poll leaves the user without a
-    // visible Start affordance.
+    // So the titlebar Play button reflects the new env without waiting for a poll.
     if (thunkExtra.controller) {
       void listenerApi.dispatch(refreshIdleStatus());
     }

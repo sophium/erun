@@ -13,20 +13,17 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
-// JobRepository is the persistence access job routes need: the claim
-// primitive's lookup, the follow-up reads, and the status/summary writes.
+// JobRepository is the persistence access job routes need.
 type JobRepository interface {
-	// Get takes the caller's tenant alongside the job id: erun_operations'
-	// unconditional RLS policy means an id-only lookup answers an OPERATIONS
-	// caller with any tenant's job.
+	// Get takes the tenant because erun_operations' RLS would otherwise return any
+	// tenant's job to an OPERATIONS caller.
 	Get(ctx context.Context, tenantID, jobID string) (model.Job, error)
 	List(ctx context.Context, filter apirepository.JobFilter) ([]model.Job, error)
 	ListByEnvironment(ctx context.Context, environmentID string) ([]model.Job, error)
 	FindOpenByScope(ctx context.Context, scope string) (model.Job, error)
 }
 
-// JobService is the write path: claiming (including the scope collision
-// check) and moving a job forward.
+// JobService claims and updates jobs.
 type JobService interface {
 	Claim(ctx context.Context, job model.Job) (model.Job, error)
 	Update(ctx context.Context, tenantID, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error)
@@ -38,10 +35,8 @@ type JobRoutes struct {
 	service      JobService
 }
 
-// RegisterJobRoutes wires the jobs API: what an agent or orchestrator is
-// working on, recorded before the work starts rather than only after it
-// finishes, so an operator can watch the queue and two actors can see each
-// other's in-flight work instead of duplicating it.
+// RegisterJobRoutes wires the jobs API, recording work before it starts so actors
+// can see each other's in-flight work.
 func RegisterJobRoutes(register ProtectedRouteRegistrar, jobs JobRepository, environments EnvironmentGetter, jobService JobService) {
 	routes := JobRoutes{jobs: jobs, environments: environments, service: jobService}
 	register(http.MethodGet, "/v1/jobs", http.HandlerFunc(routes.listJobs))
@@ -74,9 +69,6 @@ func (r JobRoutes) getJob(w http.ResponseWriter, req *http.Request) {
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
-	// A job read through this route is always the caller's own: an
-	// OPERATIONS caller naming a stranger tenant's job id gets the same 404 a
-	// genuinely absent id does, rather than the stranger's row.
 	job, err := r.jobs.Get(req.Context(), securityContext.TenantID, req.PathValue("job_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
@@ -85,10 +77,8 @@ func (r JobRoutes) getJob(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
-// claimJobRequest carries only what the caller actually knows. There is no
-// client-supplied startedAt/endedAt: the server stamps both, so a caller's
-// clock cannot make a job look older or newer than the claim that recorded
-// it — the same discipline the ai-sessions self-report follows.
+// claimJobRequest has no timestamps: the server stamps them so a client clock
+// cannot age a job.
 type claimJobRequest struct {
 	EnvironmentID string          `json:"environmentId,omitempty"`
 	JobType       model.JobType   `json:"jobType"`
@@ -142,9 +132,6 @@ func (r JobRoutes) updateJob(w http.ResponseWriter, req *http.Request) {
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
-	// Only the caller's own job can be moved forward: a cross-tenant id fails
-	// the same not-found lookup Get makes, so the write answers 404 for it
-	// exactly as it does for an id that names nothing.
 	job, err := r.service.Update(
 		req.Context(),
 		securityContext.TenantID,
@@ -160,10 +147,8 @@ func (r JobRoutes) updateJob(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
-// listEnvironmentJobs is the per-environment view, mirroring the ai-sessions
-// sub-route: the environment is confirmed to belong to the caller's tenant
-// (RLS-scoped) before any job is read, so another tenant's environment id
-// reads as not-found rather than as an empty queue.
+// listEnvironmentJobs confirms the environment first so a foreign id reads as
+// not-found, not an empty queue.
 func (r JobRoutes) listEnvironmentJobs(w http.ResponseWriter, req *http.Request) {
 	environmentID := req.PathValue("environment_id")
 	if _, err := r.environments.Get(req.Context(), environmentID); err != nil {
@@ -178,9 +163,6 @@ func (r JobRoutes) listEnvironmentJobs(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusOK, jobs)
 }
 
-// writeJobError gives InvalidJobInputError, JobScopeHeldError and
-// JobAlreadyFinishedError their own machine codes; every other failure falls
-// through to the generic status-derived code.
 func writeJobError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidInput *service.InvalidJobInputError
 	if errors.As(err, &invalidInput) {
@@ -189,10 +171,7 @@ func writeJobError(w http.ResponseWriter, req *http.Request, err error) {
 	}
 	var scopeHeld *service.JobScopeHeldError
 	if errors.As(err, &scopeHeld) {
-		// The refusal's whole value is that it names the holder, so the
-		// details carry who holds the scope, what they are doing, and since
-		// when — a caller told only "conflict" has learned nothing it can act
-		// on, and would have to guess whether to wait or duplicate the work.
+		// Naming the holder lets the caller choose to wait rather than duplicate the work.
 		writeErrorDetails(w, http.StatusConflict, "JOB_SCOPE_HELD", scopeHeld.Error(), map[string]any{
 			"scope":     scopeHeld.Scope,
 			"jobId":     scopeHeld.Holder.JobID,

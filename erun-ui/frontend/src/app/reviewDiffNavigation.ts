@@ -13,9 +13,8 @@ export function scrollSelectedDiffIntoView(
     ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
-// scrollSelectedTreeNodeIntoView keeps the tree's active node visible as the
-// diff scrolls, moving it only when it is off-screen so it never fights the
-// diff→tree scrollspy or jerks the tree on every scroll tick.
+// scrollSelectedTreeNodeIntoView moves only when off-screen, so it never fights
+// the scrollspy.
 export function scrollSelectedTreeNodeIntoView(
   treeContainer: HTMLDivElement | null,
   selectedDiffPath: string,
@@ -37,11 +36,7 @@ export function scrollSelectedTreeNodeIntoView(
   }
 }
 
-// diffHunkElements returns every hunk's focusable scroller (DiffList.tsx's
-// `role="region"` divs) in DOM order, spanning every linked environment's
-// section. A binary file (DiffList.tsx renders "Binary file changed" instead
-// of hunks for one) has none, so it is not a stop on this list -- reachable
-// through the changed-files tree or Tab, not through hunk/file stepping.
+// diffHunkElements spans every environment section; binary files have no hunks.
 export function diffHunkElements(diffList: HTMLDivElement | null): HTMLElement[] {
   if (!diffList) {
     return [];
@@ -55,11 +50,7 @@ export function diffHunkFilePath(hunk: HTMLElement | undefined): string {
   return hunk?.closest<HTMLElement>('.diff-file[data-path]')?.dataset.path ?? '';
 }
 
-// stepDiffHunk moves one hunk at a time in DOM order, so stepping past a
-// file's last hunk lands on the next file's first -- "next/previous hunk"
-// and "next/previous changed file" share one underlying order. Clamped, not
-// wrapped: a diff reads like a document, not a cyclic tab strip, so stepping
-// past either end is a no-op rather than jumping to the other end.
+// stepDiffHunk clamps at either end rather than wrapping.
 export function stepDiffHunk(
   hunks: HTMLElement[],
   active: Element | null,
@@ -73,8 +64,6 @@ export function stepDiffHunk(
   return hunks[nextIndex] ?? null;
 }
 
-// nextDiffFileHunk finds the first hunk after startIndex whose file differs
-// from startPath -- the next file's first hunk.
 function nextDiffFileHunk(hunks: HTMLElement[], startIndex: number, startPath: string): number {
   for (let i = startIndex + 1; i < hunks.length; i += 1) {
     if (diffHunkFilePath(hunks[i]) !== startPath) {
@@ -84,8 +73,6 @@ function nextDiffFileHunk(hunks: HTMLElement[], startIndex: number, startPath: s
   return -1;
 }
 
-// previousDiffFileHunk walks back past the current file's own hunks, then
-// past the previous file's hunks, landing on that previous file's first one.
 function previousDiffFileHunk(hunks: HTMLElement[], startIndex: number, startPath: string): number {
   let i = startIndex - 1;
   while (i >= 0 && diffHunkFilePath(hunks[i]) === startPath) {
@@ -101,8 +88,6 @@ function previousDiffFileHunk(hunks: HTMLElement[], startIndex: number, startPat
   return i;
 }
 
-// stepDiffFile jumps straight to the first hunk of the next (or previous)
-// file, skipping over every other hunk of the current file in one press.
 export function stepDiffFile(
   hunks: HTMLElement[],
   active: Element | null,
@@ -121,21 +106,14 @@ export function stepDiffFile(
   return targetIndex < 0 ? null : (hunks[targetIndex] ?? null);
 }
 
-// VisibleDiffFile is the diff section the review viewport is anchored on: the
-// bare path the DOM carries (`data-path`) and the environment section that
-// holds it (`data-env-key`). Both, because the two callers need different
-// halves -- the selection is stored env-keyed (diffPathKey) while every DOM
-// lookup selects on the bare path.
+// VisibleDiffFile carries both halves: selection is env-keyed, DOM lookups use
+// the bare path.
 export interface VisibleDiffFile {
   envKey: string;
   path: string;
 }
 
-// diffSectionTarget reads the two things a diff section is addressed by: the
-// bare path it renders (data-path) and the environment section holding it
-// (data-env-key). A section missing either is not a candidate at all -- with
-// no env key there is nothing for the env-keyed selection to compare against,
-// so it is no more selectable than a section with no path.
+// diffSectionTarget is null when either attribute is missing.
 function diffSectionTarget(section: HTMLElement): VisibleDiffFile | null {
   const path = section.dataset.path ?? '';
   const envKey = section.dataset.envKey ?? '';

@@ -4,8 +4,6 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { scheduleTerminalFocus } from './terminalFocus';
 
-// scheduleTerminalFocus touches window only inside its body, never at module
-// scope, so a per-test shim is enough to drive the real function.
 let rafQueue: (() => void)[] = [];
 
 function installWindow(): void {
@@ -64,11 +62,6 @@ test('focus is restored when the window is already active', () => {
   assert.equal(h.count(), 3, 'all three attempts should focus an active window');
 });
 
-// #1338: a tab respawn fires whenever a session drops -- on every env stop,
-// idle-stop and pod replacement -- and it calls this. Focusing a DOM element in
-// a Wails webview raises the native window, so an unguarded restore pulled the
-// desktop in front of whatever the operator was actually using. This must fail
-// against the unguarded `this.terminal?.focus()` it replaces.
 test('focus is never taken while another application is frontmost', () => {
   const h = harness(() => false);
   vi.advanceTimersByTime(0);
@@ -77,8 +70,6 @@ test('focus is never taken while another application is frontmost', () => {
   assert.equal(h.count(), 0, 'an inactive window must never pull focus');
 });
 
-// The later attempts exist to land after a re-render, so the guard has to be
-// re-read each time rather than sampled once when the work was scheduled.
 test('the guard is re-checked, so focus leaving the window mid-sequence stops it', () => {
   let active = true;
   const h = harness(() => active);
@@ -90,11 +81,6 @@ test('the guard is re-checked, so focus leaving the window mid-sequence stops it
   assert.equal(h.count(), 1, 'attempts after focus left the window must stand down');
 });
 
-// The other half of #1338, and the one document.hasFocus() cannot see: the
-// window IS active, so nothing crosses an application boundary, but the user
-// has deliberately clicked into another control. A restore exists to undo focus
-// an action destroyed, not to overrule a live choice -- yanking the caret back
-// to the terminal reads as the app stealing focus just the same.
 test('focus is never taken off a control the user deliberately focused', () => {
   const h = harness(
     () => true,
@@ -114,7 +100,6 @@ test('a restore still happens when nothing else holds focus', () => {
   );
   vi.advanceTimersByTime(0);
   assert.equal(h.count(), 1, 'a dialog close leaves focus free, so the restore must run');
-  // The user clicks into something before the trailing attempts land.
   free = false;
   flushRaf();
   vi.advanceTimersByTime(80);

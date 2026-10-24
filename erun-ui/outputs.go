@@ -6,11 +6,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -22,36 +25,33 @@ func quietOutputsContext() core.Context {
 	}
 }
 
-func listAgentOutputsViaRuntime(result config.OpenResult, params jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error) {
-	req := eruncommon.ShellLaunchParamsFromResult(result)
+func listAgentOutputsViaRuntime(result config.OpenResult, params model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error) {
+	req := cloud.ShellLaunchParamsFromResult(result)
 	return jobs.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
-func downloadAgentOutputViaRuntime(result config.OpenResult, params jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error) {
-	req := eruncommon.ShellLaunchParamsFromResult(result)
+func downloadAgentOutputViaRuntime(result config.OpenResult, params model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error) {
+	req := cloud.ShellLaunchParamsFromResult(result)
 	return jobs.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
-func (a *App) ListAgentOutputs(selection uiSelection) (jobs.RuntimeOutputsListResult, error) {
+func (a *App) ListAgentOutputs(selection uiSelection) (model.RuntimeOutputsListResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
-		return jobs.RuntimeOutputsListResult{}, err
+		return model.RuntimeOutputsListResult{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return jobs.RuntimeOutputsListResult{}, err
+		return model.RuntimeOutputsListResult{}, err
 	}
-	return a.deps.listAgentOutputs(result, jobs.RuntimeOutputsParams{})
+	return a.deps.listAgentOutputs(result, model.RuntimeOutputsParams{})
 }
 
-// DownloadAgentOutput downloads one entry from the selected env's runtime pod
-// and saves it through a native Save dialog. It returns the saved local path,
-// or an empty string when the operator cancels the dialog. A folder downloads
-// as a <name>.tar.gz archive.
+// DownloadAgentOutput saves one runtime output via a Save dialog; "" means cancelled.
 func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
@@ -63,14 +63,14 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
 		return "", err
 	}
-	out, err := a.deps.downloadAgentOutput(result, jobs.RuntimeOutputDownloadParams{Name: name})
+	out, err := a.deps.downloadAgentOutput(result, model.RuntimeOutputDownloadParams{Name: name})
 	if err != nil {
 		return "", err
 	}
@@ -87,16 +87,12 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
 		return "", err
 	}
-	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
+	a.reportHostArtifactSigning(codesign.SignHostArtifact(dest))
 	return dest, nil
 }
 
-// reportHostArtifactSigning tells the operator what ad-hoc signing did to an
-// artifact that just landed here. Success is worth one line because the file was
-// modified on its way in; a failure is worth one because the alternative is the
-// silent SIGKILL macOS answers an unsigned binary with. Both go through the
-// notification surface so the message survives the dialog that started it.
-func (a *App) reportHostArtifactSigning(signing eruncommon.HostArtifactSigning) {
+// reportHostArtifactSigning surfaces ad-hoc signing, since macOS SIGKILLs unsigned binaries silently.
+func (a *App) reportHostArtifactSigning(signing model.HostArtifactSigning) {
 	note := signing.Describe()
 	if note == "" {
 		return

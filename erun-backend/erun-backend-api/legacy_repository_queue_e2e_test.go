@@ -11,19 +11,10 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// A tenant that already had reviews when the platform started recording a
-// repository has two populations in one target branch's queue: rows created
-// before carry no repository at all, rows created after carry the canonical
-// identity. "No repository recorded" is the absence of an answer, not a second
-// answer, so grouping the queue must not read it as a repository of its own —
-// see AGENTS.md "Merge Queue".
-//
-// These gates drive the real API against a real migrated PostgreSQL, the same
-// way merge_queue_e2e_test.go does (internal/testpg).
+// Rows created before the platform recorded a repository carry none; "no
+// repository" is unknown, not a repository of its own (AGENTS.md "Merge Queue").
 
-// e2eOpenReviewInRepository creates a review naming a repository, the form
-// every erun client sends. An empty repository recreates a legacy row: one
-// created before the platform recorded a repository.
+// An empty repository recreates a legacy row.
 func e2eOpenReviewInRepository(t *testing.T, baseURL, name, repository, targetBranch, sourceBranch string) string {
 	t.Helper()
 	body := map[string]any{
@@ -43,9 +34,7 @@ func e2eOpenReviewInRepository(t *testing.T, baseURL, name, repository, targetBr
 	return review.ReviewID
 }
 
-// e2eAdvanceMergeQueue posts a promotion. An empty repository is the unfiltered
-// promotion — a target branch alone, which is what a caller holding no
-// repository identity sends.
+// An empty repository is the unfiltered promotion.
 func e2eAdvanceMergeQueue(t *testing.T, baseURL, repository, targetBranch string) (int, string) {
 	t.Helper()
 	body := map[string]any{"targetBranch": targetBranch}
@@ -55,9 +44,6 @@ func e2eAdvanceMergeQueue(t *testing.T, baseURL, repository, targetBranch string
 	return e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/merge-queue/advance", body)
 }
 
-// e2eRequeueToReady returns a review holding MERGE to READY at the tail of its
-// target branch queue — the documented missed-merge-window path, and the
-// ordinary way a row is left waiting in a queue.
 func e2eRequeueToReady(t *testing.T, baseURL, reviewID string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{
@@ -68,10 +54,7 @@ func e2eRequeueToReady(t *testing.T, baseURL, reviewID string) {
 	}
 }
 
-// e2eReportMergedWithoutBuildID is report-merged's documented shape for work
-// that landed without the queue: no buildId at all. It is a separate helper
-// from e2eReportMerged because the absent field, not an empty string, is the
-// thing under test.
+// The absent buildId field, not an empty string, is what is under test.
 func e2eReportMergedWithoutBuildID(t *testing.T, baseURL, reviewID, remoteURL string) (int, string) {
 	t.Helper()
 	return e2eRequest(t, baseURL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{
@@ -80,11 +63,8 @@ func e2eReportMergedWithoutBuildID(t *testing.T, baseURL, reviewID, remoteURL st
 	})
 }
 
-// legacyQueueState builds the reported state: one target branch holding a
-// review that records a repository and one that records none, both waiting at
-// READY in the queue. Each is promoted to MERGE by its own successful build
-// (the queue for the repository it names was empty), then returned to READY —
-// which is how a review sits waiting in a queue.
+// legacyQueueState leaves one review with a repository and one without, both at
+// READY on the same target branch.
 func legacyQueueState(t *testing.T, baseURL string, remote mergeQueueRemote) (legacyReviewID, namedReviewID string) {
 	t.Helper()
 	legacyBranch := uniqueBranchName(t, "legacy")
@@ -92,15 +72,12 @@ func legacyQueueState(t *testing.T, baseURL string, remote mergeQueueRemote) (le
 	remote.branch(t, legacyBranch, "legacy.txt")
 	remote.branch(t, namedBranch, "named.txt")
 
-	// The legacy row first: it is promoted by the unfiltered queue, which is
-	// empty at this point.
 	legacyReviewID = e2eOpenReviewInRepository(t, baseURL, "legacy-repository-e2e", "", remote.main, legacyBranch)
 	e2eReportGreenBuild(t, baseURL, legacyReviewID)
 	if review := readMergeReview(t, baseURL, legacyReviewID); review.Status != model.ReviewStatusMerge {
 		t.Fatalf("legacy review status = %s, want MERGE", review.Status)
 	}
-	// The named row's own repository's queue is a separate, empty one, so it
-	// promotes itself too — the split queue the empty repository causes.
+	// The named row's repository queue is separate and empty, so it promotes itself too.
 	namedReviewID = e2eOpenReviewInRepository(t, baseURL, "legacy-repository-e2e", remote.url, remote.main, namedBranch)
 	e2eReportGreenBuild(t, baseURL, namedReviewID)
 	if review := readMergeReview(t, baseURL, namedReviewID); review.Status != model.ReviewStatusMerge {
@@ -112,10 +89,6 @@ func legacyQueueState(t *testing.T, baseURL string, remote mergeQueueRemote) (le
 	return legacyReviewID, namedReviewID
 }
 
-// TestMergeQueueTreatsNoRecordedRepositoryAsUnknown is the reproduction of
-// the reported failure: one repository's queue holding a review that records the
-// repository plus a legacy review that records none. That is one repository,
-// not two, so the unfiltered promotion must not refuse.
 func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -129,8 +102,7 @@ func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("advance: HTTP %d (want 200): %s", code, body)
 	}
-	// Reachability, not just non-refusal: the legacy row is the queue head, so
-	// it is the one that gets promoted rather than being skipped over.
+	// The legacy row is the queue head, so it is the one promoted.
 	var promoted struct {
 		ReviewID string `json:"reviewId"`
 	}
@@ -141,11 +113,8 @@ func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
 	}
 }
 
-// e2eRemoteOnBranch builds a second remote whose target branch carries the
-// same name as the first's. newMergeQueueRemote gives every remote a unique
-// main so no test's gated-tip bookkeeping is read as another's; two remotes
-// sharing a branch name is exactly the state this test needs, so it builds its
-// own.
+// e2eRemoteOnBranch builds a remote reusing another's branch name, which
+// newMergeQueueRemote deliberately avoids.
 func e2eRemoteOnBranch(t *testing.T, main string) mergeQueueRemote {
 	t.Helper()
 	bare := t.TempDir()
@@ -158,10 +127,6 @@ func e2eRemoteOnBranch(t *testing.T, main string) mergeQueueRemote {
 	return mergeQueueRemote{url: "file://" + bare, main: main}
 }
 
-// TestMergeQueueStillRefusesGenuinelyDifferentRepositories is the other half:
-// the fix must not collapse real repositories together. Two repositories the
-// tenant serves each waiting on the same target branch is exactly what the
-// refusal is for.
 func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -178,18 +143,9 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 
 	firstID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", remote.url, remote.main, firstBranch)
 	secondID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", second.url, second.main, secondBranch)
-	// A third row recording no repository, which genuinely belongs to neither
-	// of the named repositories as far as the platform can tell.
 	legacyID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", "", remote.main, legacyBranch)
-	// Every build is reported before any review is read back, and the read-back
-	// sweeps all three rather than only the one just reported. A build reported
-	// for one review can promote a *different* one to MERGE, and the legacy row
-	// here promotes across every repository at once (an empty repository filter
-	// means "every repository's queue"), so a report can leave a review this
-	// loop already looked at holding MERGE. Interleaving the two — report,
-	// read back the same review, move on — missed exactly that, and left a
-	// review at MERGE for the advance below to refuse as OCCUPIED instead of
-	// AMBIGUOUS: a test that passed or failed on the map iteration order.
+	// Report every build before reading any back: a report can promote a different
+	// review (the legacy row spans every repository's queue).
 	toRequeue := []struct{ label, reviewID string }{
 		{"first", firstID}, {"second", secondID}, {"legacy", legacyID},
 	}
@@ -203,9 +159,6 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 			t.Fatalf("report green build for the %s review %s: HTTP %d: %s", review.label, review.reviewID, code, buildBody)
 		}
 	}
-	// A review promoted to MERGE goes back to READY; one whose promotion was
-	// blocked by a slot already held elsewhere in the queue is already waiting
-	// where it belongs.
 	for _, review := range toRequeue {
 		if readMergeReview(t, srv.URL, review.reviewID).Status != model.ReviewStatusMerge {
 			continue
@@ -220,8 +173,6 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	if !containsAll(body, "MERGE_QUEUE_AMBIGUOUS", remote.url, second.url) {
 		t.Fatalf("refusal did not name both repositories: %s", body)
 	}
-	// The row that belongs to neither is named by id, so the operator is not
-	// left to infer which waiting review is the unattributable one.
 	if !strings.Contains(body, legacyID) {
 		t.Fatalf("refusal did not name the queued review %s that records no repository: %s", legacyID, body)
 	}
@@ -230,10 +181,6 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	}
 }
 
-// TestLegacyReviewAdoptsTheRepositoryItReportsMergedInto covers the other half
-// of the same failure: a legacy row's work that landed without the queue must still
-// be reportable, without a buildId, and adopting the repository the report
-// names.
 func TestLegacyReviewAdoptsTheRepositoryItReportsMergedInto(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -243,7 +190,6 @@ func TestLegacyReviewAdoptsTheRepositoryItReportsMergedInto(t *testing.T) {
 
 	reviewID := e2eOpenReviewInRepository(t, srv.URL, "legacy-landed-e2e", "", remote.main, sourceBranch)
 
-	// The work lands without the queue: squash-merged straight onto the target.
 	remote.merge(t, remote.main, sourceBranch, "squash "+sourceBranch)
 
 	code, body := e2eReportMergedWithoutBuildID(t, srv.URL, reviewID, remote.url)

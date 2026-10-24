@@ -4,19 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/spf13/cobra"
 )
 
-// NewOrchestratorCmd groups the CLI's writers for host-side orchestrator
-// definitions -- the config-file counterpart to the desktop's Edit
-// orchestrator dialog, so config.yaml is not the only way to set a field the
-// desktop already lets an operator set.
-func NewOrchestratorCmd(store orchestrator.OrchestratorRoleStore) *cobra.Command {
+// NewOrchestratorCmd groups the CLI writers for orchestrator definitions, mirroring the desktop's Edit dialog.
+func NewOrchestratorCmd(store seam.OrchestratorRoleStore) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "orchestrator",
 		Short: "Manage host-side AI orchestrator definitions",
@@ -29,12 +27,10 @@ func NewOrchestratorCmd(store orchestrator.OrchestratorRoleStore) *cobra.Command
 	return cmd
 }
 
-// orchestratorLaunchSettingStorage is the tail every launch-setting writer's
-// help shares: where the value lives, where it is read back, and when it applies.
 const orchestratorLaunchSettingStorage = "Stored on the orchestrator's entry in config.yaml and read " +
 	"back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted."
 
-func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetGatewayCmd(store seam.OrchestratorAliasStore) *cobra.Command {
 	var gateway string
 	cmd := &cobra.Command{
 		Use:   "set-gateway ORCHESTRATOR_ID",
@@ -55,7 +51,7 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetGatewayCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorGatewayParams{
+			return runOrchestratorSetGatewayCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorGatewayParams{
 				OrchestratorID: args[0],
 				UseGateway:     useGateway,
 			})
@@ -65,11 +61,11 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 	if err := cmd.MarkFlagRequired("gateway"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runOrchestratorSetGatewayCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorGatewayParams) error {
+func runOrchestratorSetGatewayCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) error {
 	if _, err := orchestrator.SetOrchestratorGateway(ctx, store, params); err != nil {
 		return err
 	}
@@ -86,7 +82,7 @@ func runOrchestratorSetGatewayCommand(ctx core.Context, store orchestrator.Orche
 	return err
 }
 
-func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetModelCmd(store seam.OrchestratorAliasStore) *cobra.Command {
 	var model string
 	cmd := &cobra.Command{
 		Use:   "set-model ORCHESTRATOR_ID",
@@ -107,7 +103,7 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetModelCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorModelParams{
+			return runOrchestratorSetModelCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorModelParams{
 				OrchestratorID: args[0],
 				Model:          parsedModel,
 			})
@@ -117,11 +113,11 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	if err := cmd.MarkFlagRequired("model"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runOrchestratorSetModelCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorModelParams) error {
+func runOrchestratorSetModelCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) error {
 	if _, err := orchestrator.SetOrchestratorModel(ctx, store, params); err != nil {
 		return err
 	}
@@ -134,7 +130,7 @@ func runOrchestratorSetModelCommand(ctx core.Context, store orchestrator.Orchest
 	return err
 }
 
-func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetEffortCmd(store seam.OrchestratorAliasStore) *cobra.Command {
 	var effort string
 	levels := strings.Join(ai.ClaudeEffortLevels(), ", ")
 	cmd := &cobra.Command{
@@ -153,7 +149,7 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetEffortCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorEffortParams{
+			return runOrchestratorSetEffortCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorEffortParams{
 				OrchestratorID: args[0],
 				Effort:         parsedEffort,
 			})
@@ -163,11 +159,11 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 	if err := cmd.MarkFlagRequired("effort"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runOrchestratorSetEffortCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorEffortParams) error {
+func runOrchestratorSetEffortCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) error {
 	if _, err := orchestrator.SetOrchestratorEffort(ctx, store, params); err != nil {
 		return err
 	}
@@ -180,8 +176,7 @@ func runOrchestratorSetEffortCommand(ctx core.Context, store orchestrator.Orches
 	return err
 }
 
-// orchestratorLaunchSettingLabel names a cleared model or effort by the token
-// that cleared it, so the confirmation reads back what the operator typed.
+// orchestratorLaunchSettingLabel names a cleared value by the token that cleared it.
 func orchestratorLaunchSettingLabel(value string) string {
 	if value == "" {
 		return orchestrator.OrchestratorLaunchSettingDefault
@@ -189,7 +184,7 @@ func orchestratorLaunchSettingLabel(value string) string {
 	return value
 }
 
-func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetAliasCmd(store seam.OrchestratorAliasStore) *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
 		Use:   "set-alias ORCHESTRATOR_ID",
@@ -211,7 +206,7 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetAliasCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorAliasParams{
+			return runOrchestratorSetAliasCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorAliasParams{
 				OrchestratorID: args[0],
 				Alias:          parsedAlias,
 			})
@@ -221,11 +216,11 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	if err := cmd.MarkFlagRequired("alias"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runOrchestratorSetAliasCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorAliasParams) error {
+func runOrchestratorSetAliasCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorAliasParams) error {
 	if _, err := orchestrator.SetOrchestratorAlias(ctx, store, params); err != nil {
 		return err
 	}
@@ -242,7 +237,7 @@ func runOrchestratorSetAliasCommand(ctx core.Context, store orchestrator.Orchest
 	return err
 }
 
-func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.Command {
+func newOrchestratorSetRoleCmd(store seam.OrchestratorRoleStore) *cobra.Command {
 	var role string
 	cmd := &cobra.Command{
 		Use:   "set-role ORCHESTRATOR_ID TENANT ENVIRONMENT",
@@ -266,7 +261,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetRoleCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorEnvRoleParams{
+			return runOrchestratorSetRoleCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorEnvRoleParams{
 				OrchestratorID: args[0],
 				Tenant:         args[1],
 				Environment:    args[2],
@@ -275,15 +270,15 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "", fmt.Sprintf("Role to set: %q, %q, %q, or %q for undeclared",
-		config.OrchestratorEnvRoleCode, config.OrchestratorEnvRoleBuild, config.OrchestratorEnvRoleRuntime, orchestrator.OrchestratorEnvRoleNone))
+		modelpkg.OrchestratorEnvRoleCode, modelpkg.OrchestratorEnvRoleBuild, modelpkg.OrchestratorEnvRoleRuntime, orchestrator.OrchestratorEnvRoleNone))
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runOrchestratorSetRoleCommand(ctx core.Context, store orchestrator.OrchestratorRoleStore, params orchestrator.SetOrchestratorEnvRoleParams) error {
+func runOrchestratorSetRoleCommand(ctx core.Context, store seam.OrchestratorRoleStore, params modelpkg.SetOrchestratorEnvRoleParams) error {
 	if _, err := orchestrator.SetOrchestratorEnvRole(ctx, store, params); err != nil {
 		return err
 	}

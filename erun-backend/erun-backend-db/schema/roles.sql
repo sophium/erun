@@ -24,13 +24,9 @@ GRANT SELECT, INSERT, REFERENCES
   ON audit_events, usage_events
   TO erun_tenant, erun_operations;
 
--- platform_rate_limits is a root, platform-scoped singleton like tenants: any
--- authenticated tenant reads the current window (GET /v1/config), only an
--- operations caller changes it.
+-- Platform-scoped singleton: any tenant reads it, only operations changes it.
 GRANT SELECT ON platform_rate_limits TO erun_tenant;
 GRANT SELECT, INSERT, UPDATE, REFERENCES ON platform_rate_limits TO erun_operations;
 
--- retention_runs is a platform-wide operational log, not tenant data -- only
--- the retention sweep (running as erun_operations) writes it, and only an
--- operations caller has any reason to read it.
+-- Platform-wide operational log, written only by the retention sweep.
 GRANT SELECT, INSERT ON retention_runs TO erun_operations;

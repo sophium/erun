@@ -3,73 +3,60 @@ package doctor
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-)
-
-type (
-	DoctorAction string
-)
-
-const (
-	DoctorActionPruneImages     DoctorAction = "prune_images"
-	DoctorActionPruneBuildCache DoctorAction = "prune_build_cache"
-	DoctorActionPruneContainers DoctorAction = "prune_containers"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 )
 
 type DoctorInspectionResult struct {
-	Daemon DoctorDockerDaemon
+	Daemon model.DoctorDockerDaemon
 	Stdout string
 	Stderr string
 }
 
-func DoctorActions() []DoctorAction {
-	return []DoctorAction{
-		DoctorActionPruneImages,
-		DoctorActionPruneBuildCache,
-		DoctorActionPruneContainers,
+func DoctorActions() []model.DoctorAction {
+	return []model.DoctorAction{
+		model.DoctorActionPruneImages,
+		model.DoctorActionPruneBuildCache,
+		model.DoctorActionPruneContainers,
 	}
 }
 
-func DoctorActionPromptLabel(action DoctorAction, result config.OpenResult) string {
+func DoctorActionPromptLabel(action model.DoctorAction, result config.OpenResult) string {
 	target := result.Tenant + "/" + result.Environment
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		return fmt.Sprintf("Prune unused Docker images in %s?", target)
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		return fmt.Sprintf("Prune unused BuildKit cache in %s?", target)
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		return fmt.Sprintf("Prune stopped Docker containers in %s?", target)
 	default:
 		return fmt.Sprintf("Run doctor action %q in %s?", action, target)
 	}
 }
 
-func DoctorActionDescription(action DoctorAction) string {
+func DoctorActionDescription(action model.DoctorAction) string {
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		return "Remove unused Docker images"
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		return "Remove unused BuildKit cache"
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		return "Remove stopped Docker containers"
 	default:
 		return string(action)
 	}
 }
 
-// RunDoctorInspection reads the environment's docker storage: disk and inode
-// usage at the daemon's root, and what the daemon's own stores reclaim. The
-// daemon is resolved from the environment (ResolveDoctorDockerDaemon) and is
-// named in the result, so the caller can say which daemon every figure below it
-// came from; an environment with no daemon holding build images refuses with
-// DoctorDockerDaemonUnavailableError rather than reading whatever daemon
-// happens to be reachable.
-func RunDoctorInspection(ctx core.Context, runner eruncommon.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
+// RunDoctorInspection reads docker storage on the environment's build daemon,
+// refusing with DoctorDockerDaemonUnavailableError when there is none.
+func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
-		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
+		return DoctorInspectionResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
 	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
 		return DoctorInspectionResult{Daemon: daemon}, err
@@ -78,15 +65,12 @@ func RunDoctorInspection(ctx core.Context, runner eruncommon.RuntimeContainerCom
 	return DoctorInspectionResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-// RunDoctorAction prunes the daemon that actually holds this environment's
-// build images, through the transport that daemon is reachable by. It returns
-// the daemon beside the output so the caller can name it, and the store
-// readings taken around the prune so a prune that freed nothing can be reported
-// as that instead of as a success.
-func RunDoctorAction(ctx core.Context, runner eruncommon.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+// RunDoctorAction prunes the environment's build daemon, with store readings
+// around the prune so a no-op prune is reported as one.
+func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action model.DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
-		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
+		return DoctorDockerResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
 	steps, err := doctorActionSteps(action)
 	if err != nil {
@@ -98,14 +82,10 @@ func RunDoctorAction(ctx core.Context, runner eruncommon.RuntimeContainerCommand
 	return runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-"+string(action), steps)
 }
 
-// waitForDoctorDaemon waits for the pod a pod-hosted daemon lives in to be
-// available before exec'ing into it. A daemon this process reaches directly
-// (the host kind) needs no wait and no cluster: waiting on a deployment a host
-// environment does not have would fail the read for a reason that is not about
-// the daemon at all.
-func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon DoctorDockerDaemon) error {
-	if daemon.Kind == DoctorDockerDaemonHost {
+// waitForDoctorDaemon waits for a pod-hosted daemon; a host daemon needs no cluster.
+func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon) error {
+	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return nil
 	}
-	return eruncommon.TraceAndWaitForRuntime(ctx, req)
+	return cloud.TraceAndWaitForRuntime(ctx, req)
 }

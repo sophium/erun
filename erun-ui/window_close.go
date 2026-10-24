@@ -1,21 +1,12 @@
 package main
 
-// uiCloseGate is what the frontend receives when the operator tries to close
-// the window. Blocked names the build/deploy/release work that is actually
-// in flight right now, so the confirmation the operator sees is concrete
-// rather than a generic warning.
 type uiCloseGate struct {
 	Blocked bool                 `json:"blocked"`
 	Running []activityQueueEntry `json:"running,omitempty"`
 }
 
-// runningActivityEntries returns the activity queue entries that are
-// currently executing — the work a SIGKILL-on-close would tear down mid-flight.
-// Waiting (queued but not yet started) entries are excluded: nothing has run
-// for them yet, so closing loses no partial work. So is a terminal tab still
-// being established: an established tab never blocks the close, and every
-// launch establishes the selected environment's tabs, so counting their setup
-// would prompt on the idle path just after launch.
+// runningActivityEntries excludes queued entries and tabs still being
+// established, which would otherwise prompt on the idle path after launch.
 func (a *App) runningActivityEntries() []activityQueueEntry {
 	if a.activityQueue == nil {
 		return nil
@@ -29,13 +20,8 @@ func (a *App) runningActivityEntries() []activityQueueEntry {
 	return running
 }
 
-// PrepareWindowClose evaluates whether the window may close right now. It is
-// the same decision beforeClose applies to the native OS close button,
-// exposed as its own bound method so the confirmation flow — and
-// ConfirmWindowClose's re-check — exercise one code path, and so the flow is
-// reachable from the headless Playwright harness, which has no real window to
-// close. When work is running it also posts the gate as an event so a
-// re-open of the dialog (e.g. a second close attempt) sees the current list.
+// PrepareWindowClose is the same decision beforeClose applies, bound so the
+// headless Playwright harness can reach it.
 func (a *App) PrepareWindowClose() uiCloseGate {
 	gate := uiCloseGate{Running: a.runningActivityEntries()}
 	gate.Blocked = len(gate.Running) > 0
@@ -45,15 +31,8 @@ func (a *App) PrepareWindowClose() uiCloseGate {
 	return gate
 }
 
-// ConfirmWindowClose is the operator's explicit choice, from the close
-// confirmation, to close despite the running work PrepareWindowClose named.
-// It records what is being interrupted before anything is killed — the
-// SIGKILL that follows destroys the process and the in-memory activity queue
-// in the same instant, so the record has to land first — then asks Wails to
-// quit, which drives beforeClose/shutdown down the normal path. A failure to
-// persist the record is reported but never blocks the close the operator
-// already confirmed: the record is a best-effort courtesy to the next
-// launch, not a precondition for honoring "close anyway".
+// ConfirmWindowClose persists the interrupted-work record before the quit's
+// SIGKILL; a write failure is returned but never blocks the close.
 func (a *App) ConfirmWindowClose() error {
 	running := a.runningActivityEntries()
 	writeErr := writeInterruptedActivityRecord(a.deps.interruptedActivityPath, running)
@@ -66,20 +45,14 @@ func (a *App) ConfirmWindowClose() error {
 	return writeErr
 }
 
-// markCloseConfirmed latches the "close despite the running work" decision
-// that lets the Quit-triggered beforeClose pass through instead of being
-// cancelled by the running-work gate. Two callers make that decision: the
-// operator's own confirmation, and a restart, which has already relaunched its
-// successor and so must not be cancelled on its way out (see RestartApp).
+// markCloseConfirmed lets the next beforeClose pass the running-work gate.
 func (a *App) markCloseConfirmed() {
 	a.mu.Lock()
 	a.closeConfirmed = true
 	a.mu.Unlock()
 }
 
-// consumeCloseConfirmed reports and clears the operator's prior "close
-// anyway" choice, so a single confirmation lets the Quit-triggered
-// beforeClose pass through exactly once rather than prompting again.
+// consumeCloseConfirmed is one-shot.
 func (a *App) consumeCloseConfirmed() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()

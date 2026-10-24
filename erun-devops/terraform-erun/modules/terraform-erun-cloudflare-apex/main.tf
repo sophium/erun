@@ -1,17 +1,9 @@
-# Manages A records for the platform's own apex domain and (optionally) its
-# "www" host, directly in the zone Cloudflare is already authoritative for —
-# erun-zitadel's auth host and erun-console's console host both already live
-# in this same apex zone (see their charts' "Cloudflare-managed apex zone, not
-# the delegated services zone" notes), but until this module existed nothing
-# declared those records: an operator added them by hand. This module does not
-# create the zone itself (unlike terraform-erun-cloudflare-services, which
-# creates a *new* delegated child zone) — the apex zone already exists by the
-# time a platform delegates a services subzone out of it.
+# Writes into the existing apex zone; unlike terraform-erun-cloudflare-services,
+# it never creates the zone.
 locals {
   zone_id = var.parent_zone_id != "" ? var.parent_zone_id : try(data.cloudflare_zone.apex[0].zone_id, "")
 }
 
-# Look up the existing apex zone only when no id was supplied.
 data "cloudflare_zone" "apex" {
   count = var.parent_zone_id == "" ? 1 : 0
 

@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// TestSessionRunningFollowsHeartbeatNotStreamSilence locks both directions of
-// the live/stale reconciliation the desktop was missing.
-//
-// The bug: the AI tab's running state was a pure function of stream traffic, so
-// a session that stopped printing read as finished even while its program kept
-// running in the pod — which is how the pane could show a frozen spinner beside
-// a truthful "still running" claim. The fix drives the state from an observed
-// heartbeat instead, so silence never decides on its own.
 func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -47,8 +39,7 @@ func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 				key:        "ai\x00petios\x00local",
 				serial:     3,
 				appSession: "ai",
-				// Latched busy, and silent for longer than the idle threshold —
-				// exactly the state the old rule would have cleared.
+				// Busy and silent past the idle threshold.
 				aiBusyEmitted: true,
 				aiLastOutput:  time.Now().Add(-time.Minute),
 			}
@@ -68,9 +59,6 @@ func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 	}
 }
 
-// TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished pins the release
-// path: once the silence timer has declined to clear a still-running session,
-// the heartbeat is the only thing left that can, so it must.
 func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) {
 	emits := newCapturedEmits()
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
@@ -86,8 +74,7 @@ func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) 
 		serial:        4,
 		appSession:    "ai",
 		aiBusyEmitted: true,
-		// Still printing: only the pod's answer may end this, not silence.
-		aiLastOutput: time.Now(),
+		aiLastOutput:  time.Now(),
 	}
 	app.sessions[managed.key] = managed
 
@@ -111,9 +98,6 @@ func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) 
 	}
 }
 
-// TestHeartbeatObservationExpires guards the safety valve: an observation the
-// desktop can no longer refresh (env stopped, pod replaced, cluster
-// unreachable) must stop holding a session open forever.
 func TestHeartbeatObservationExpires(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	app := &App{
@@ -135,10 +119,6 @@ func TestHeartbeatObservationExpires(t *testing.T) {
 	}
 }
 
-// TestRuntimeActivityCountMatchesRunningSessions is the "number and animation
-// cannot disagree" contract: the rendered count and the per-session
-// running state are read from one probe, so a socket without a live program is
-// absent from both.
 func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
 	probe := "erun-session\tai\t900\tclaude\n" +
 		"erun-session\topen-0\t901\tbash\n" +
@@ -162,9 +142,6 @@ func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
 	}
 }
 
-// TestSelectionsWithPodSessionsSkipsSessionsWithoutAPodSession keeps the poller
-// off environments it has nothing to observe — the Local shell has no pod
-// session, so probing its env would exec into a pod that may not exist.
 func TestSelectionsWithPodSessionsSkipsSessionsWithoutAPodSession(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	app.sessions["local"] = &managedTerminal{kind: sessionKindLocal, selection: uiSelection{Tenant: "petios", Environment: "local"}}
@@ -189,9 +166,6 @@ func heartbeatFor(running bool) sessionHeartbeat {
 	return heartbeat
 }
 
-// TestReclaimRuntimeResourcesRunsTheNamedActionOnly pins the read-only-by-
-// default contract: nothing is reclaimed unless the operator names an action,
-// and an unknown action is refused rather than guessed at.
 func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
 	var ran []string
 	app := NewApp(erunUIDeps{
@@ -221,15 +195,7 @@ func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
 	}
 }
 
-// TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks the first half of
-// the fix: orchestratorInfo carries Busy directly, so a snapshot taken
-// after the state changed reflects it even when the ai-activity event that
-// announced the change was never observed. That is the path a frontend
-// remount, a window reopen, or a listener that attached a beat late actually
-// takes in production — none of them re-run the transition, they just ask for
-// the current state, so the assertion here deliberately never looks at the
-// emitted events, only at what a fresh ListOrchestrators/runningOrchestratorInfo
-// call reports.
+// Deliberately ignores emitted events: a remount only reads the snapshot.
 func TestOrchestratorSnapshotRendersBusyWithoutTheEvent(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -259,12 +225,6 @@ func TestOrchestratorSnapshotRendersBusyWithoutTheEvent(t *testing.T) {
 	}
 }
 
-// TestReconcileOrchestratorActivityReEmitsEveryTick locks the second half of
-// the fix: the busy signal is republished on every tick regardless of
-// whether it changed, so a dropped or mistimed ai-activity event self-heals
-// within one tick instead of staying wrong until the busy state itself next
-// changes. The old code's `if busy == r.busy { continue }` would have emitted
-// once here, not three times.
 func TestReconcileOrchestratorActivityReEmitsEveryTick(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -297,14 +257,6 @@ func TestReconcileOrchestratorActivityReEmitsEveryTick(t *testing.T) {
 	}
 }
 
-// TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent is the shell-report
-// half of the same busy-snapshot treatment: orchestratorInfo carries
-// ShellRunning directly, so a snapshot taken after the state changed reflects
-// it even when the orchestrator-shell-activity event that announced the
-// change was never observed — the same remount/reopen/late-listener path
-// TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks for the turn's own
-// busy signal, but for a fact that is independent of it: a shell can be
-// running while the turn itself already reads idle.
 func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -336,15 +288,7 @@ func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
 	}
 }
 
-// TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness is the
-// #1274 regression: an orchestrator id is reused across restarts, so
-// sessionAlive alone (computed per id, from whichever session is live for
-// that id right now) is not enough to trust a "running" report — the report
-// itself has to name the session that wrote it, and that name has to match
-// the session the desktop currently has recorded as live for this id.
-// Without that check, a report a dead session left behind reads as running
-// for as long as ITS SUCCESSOR keeps the id alive, which in practice is
-// indefinitely.
+// Orchestrator ids are reused across restarts, so a shell report must name its own session.
 func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -357,8 +301,6 @@ func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *tes
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
 
-	// The session that started the shell has since been replaced: the report
-	// names an id that is not this orchestrator's own derived conversation.
 	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
 		Running: true, Command: "sleep 300", TaskID: "task-1", SessionID: "dead-session", AtUnix: time.Now().Unix(),
 	})
@@ -371,10 +313,6 @@ func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *tes
 	}
 }
 
-// TestReconcileOrchestratorActivityReEmitsShellStateEveryTick is the shell-report
-// half of the busy-signal re-emit lock: the shell signal is republished every
-// tick regardless of whether it changed, so a dropped or mistimed
-// orchestrator-shell-activity event self-heals within one tick.
 func TestReconcileOrchestratorActivityReEmitsShellStateEveryTick(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())

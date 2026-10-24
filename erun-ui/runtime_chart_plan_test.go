@@ -6,15 +6,9 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// The Runtime tab has to answer "which chart would this version install?" before
-// the operator commits to a rollout, and answer it the way the deploy itself
-// resolves the chart: the env's stated chart, else the tenant's published umbrella,
-// else the canonical chart. The case that matters most is the fourth -- a version
-// naming an image on the project's own line has no chart at all, and saying so
-// first is the difference between a named fix and a failed deploy.
 func TestResolveRuntimeChartPlan(t *testing.T) {
 	const snapshot = "9.9.9-snapshot-20260101010101"
 	envs := map[string]config.EnvConfig{
@@ -76,9 +70,6 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			},
 		},
 		{
-			// A private or unreachable registry must not block a deploy that would
-			// have worked: the operator is told nothing rather than told something
-			// false.
 			name:        "a registry that cannot be read is unknown, never missing",
 			environment: "plain",
 			listErr:     errors.New("unauthorized"),
@@ -101,14 +92,14 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			app := NewApp(erunUIDeps{
 				store: stubUIStore{
-					tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},
+					tenants: map[string]model.TenantConfig{"acme": {Name: "acme"}},
 					envs:    envs,
 				},
-				resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+				resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 					if testCase.listErr != nil {
-						return registry.RuntimeRegistryVersions{}, testCase.listErr
+						return model.RuntimeRegistryVersions{}, testCase.listErr
 					}
-					return registry.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
+					return model.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
 				},
 			})
 			got := app.resolveRuntimeChartPlan("acme", testCase.environment, snapshot, testCase.localChart)

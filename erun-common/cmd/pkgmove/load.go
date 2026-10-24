@@ -14,13 +14,11 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// targetOSes are the platforms every file is type-checked under, so a file
-// built only on one of them is still seen.
+// targetOSes are type-checked so platform-specific files are seen.
 var targetOSes = []string{"darwin", "linux", "windows"}
 
-// world is everything the module and its importers say about the module's
-// declarations, merged across platforms. An object is keyed by where it is
-// declared, which is the same in every load.
+// world merges what every load says about the module's declarations, keyed
+// by declaration position.
 type world struct {
 	module  string
 	rootDir string
@@ -29,17 +27,14 @@ type world struct {
 	sites   map[siteKey]site
 	links   map[string]string
 	goos    string
-	// declared lists, per package directory, the package-level names already
-	// declared there, filled the first time a copy is considered.
+	// declared is filled lazily, per package, when a copy is considered.
 	declared map[string]map[string]bool
-	// twins maps a package-level name to the first declaration seen for it:
-	// files built for different platforms declare one name once each, and a
-	// rename has to reach every one of them.
+	// twins maps a name to its first declaration, so a rename reaches every
+	// platform's declaration of it.
 	twins map[string]string
 }
 
-// object is a declaration of the module that other code can refer to by name:
-// a package-level identifier, or a field or method.
+// object is a module declaration referable by name.
 type object struct {
 	key      string
 	name     string
@@ -48,30 +43,24 @@ type object struct {
 	method   bool
 	owner    string
 	embedded string
-	// oses are the platforms the declaration is compiled on; two declarations
-	// share a name only if they are compiled together somewhere.
+	// oses: two declarations collide only if compiled together.
 	oses map[string]bool
 }
 
-// sourceFile is one Go file seen in any load.
 type sourceFile struct {
-	path     string
-	rel      string
-	inModule bool
-	pkgPath  string
-	fset     *token.FileSet
-	ast      *ast.File
-	src      []byte
-	names    map[string]bool
-	imports  map[string]bool
-	// importNames is the name each imported path is referred to by, which is
-	// the package's own name unless the import renames it.
+	path        string
+	rel         string
+	inModule    bool
+	pkgPath     string
+	fset        *token.FileSet
+	ast         *ast.File
+	src         []byte
+	names       map[string]bool
+	imports     map[string]bool
 	importNames map[string]string
-	// docs maps a declared name's offset to the offset of the doc comment
-	// that describes it, so a rename can update a comment that leads with it.
+	// docs maps a name's offset to its doc comment's, so renames update the comment.
 	docs map[int]int
-	// pkgRefs holds the offset of every identifier that names an imported
-	// package, so a local that shadows an import's name is not read as a use.
+	// pkgRefs lets a local that shadows an import name not count as a use.
 	pkgRefs map[int]bool
 }
 
@@ -80,9 +69,8 @@ type siteKey struct {
 	start int
 }
 
-// site is one identifier that names a module object. For a qualified
-// reference (pkg.Name), start covers the qualifier and qualPath is the
-// package it names.
+// site is one identifier naming a module object; for pkg.Name, start covers
+// the qualifier and qualPath is its package.
 type site struct {
 	file     string
 	start    int
@@ -108,8 +96,7 @@ func (w *world) inModulePath(pkgPath string) bool {
 	return pkgPath == w.module || strings.HasPrefix(pkgPath, w.module+"/")
 }
 
-// load type-checks the packages matched by patterns in dir on every target
-// platform, tests included, and records what they refer to in the module.
+// load type-checks patterns in dir, tests included, on every target OS.
 func (w *world) load(dir string, patterns []string) error {
 	for _, goos := range targetOSes {
 		w.goos = goos
@@ -201,8 +188,6 @@ func (w *world) registerFile(pkg *packages.Package, file *ast.File, inModule boo
 	return sf
 }
 
-// recordDocs notes the doc comment of every declared name in a file: a
-// function's, a type's, a value's, a field's.
 func recordDocs(sf *sourceFile) {
 	note := func(names []*ast.Ident, doc *ast.CommentGroup) {
 		if doc == nil {
@@ -268,8 +253,6 @@ func (w *world) collectFile(pkg *packages.Package, sf *sourceFile) {
 	}
 }
 
-// collectImportNames records the name each of a file's imports is referred
-// to by.
 func collectImportNames(pkg *packages.Package, file *ast.File, sf *sourceFile) {
 	for _, spec := range file.Imports {
 		p, _ := strconv.Unquote(spec.Path.Value)
@@ -296,9 +279,8 @@ func (w *world) sameFile(pkg *packages.Package, id *ast.Ident, sf *sourceFile) b
 	return pkg.Fset.Position(id.Pos()).Filename == sf.path
 }
 
-// qualifiedSelectors maps the Sel of every pkg.Name expression to the whole
-// expression, so a reference rewritten to another package replaces its
-// qualifier too.
+// qualifiedSelectors maps each pkg.Name's Sel to the whole selector, so a
+// rewrite replaces the qualifier too.
 func qualifiedSelectors(file *ast.File, info *types.Info) map[*ast.Ident]*ast.SelectorExpr {
 	out := map[*ast.Ident]*ast.SelectorExpr{}
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -337,20 +319,29 @@ func (w *world) recordUse(pkg *packages.Package, id *ast.Ident, obj types.Object
 	pos := pkg.Fset.Position(id.Pos())
 	s := site{file: pos.Filename, start: pos.Offset, end: pos.Offset + len(id.Name), objKey: o.key}
 	if sel, ok := qualified[id]; ok && !o.member {
-		x := sel.X.(*ast.Ident)
-		s.start = pkg.Fset.Position(x.Pos()).Offset
-		s.qualPath = pkg.TypesInfo.Uses[x].(*types.PkgName).Imported().Path()
+		if x, pkgName, ok := selectorQualifier(pkg, sel); ok {
+			s.start = pkg.Fset.Position(x.Pos()).Offset
+			s.qualPath = pkgName.Imported().Path()
+		}
 	}
 	w.addSite(s)
+}
+
+func selectorQualifier(pkg *packages.Package, sel *ast.SelectorExpr) (*ast.Ident, *types.PkgName, bool) {
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	pkgName, ok := pkg.TypesInfo.Uses[x].(*types.PkgName)
+	return x, pkgName, ok
 }
 
 func (w *world) addSite(s site) {
 	w.sites[siteKey{file: s.file, start: s.start}] = s
 }
 
-// objectFor returns the module object obj declares, registering it on first
-// sight, or nil for anything rewriting never touches: local identifiers,
-// other modules' declarations, package names and labels.
+// objectFor returns obj's module object, registering it on first sight, or
+// nil for anything rewriting never touches.
 func (w *world) objectFor(fset *token.FileSet, obj types.Object) *object {
 	if obj == nil || obj.Pkg() == nil || !w.inModulePath(obj.Pkg().Path()) || !obj.Pos().IsValid() {
 		return nil
@@ -358,21 +349,29 @@ func (w *world) objectFor(fset *token.FileSet, obj types.Object) *object {
 	key := objKey(fset, obj)
 	o, ok := w.objects[key]
 	if !ok {
-		if o = describe(fset, obj, key); o == nil {
+		if o = w.register(fset, obj, key); o == nil {
 			return nil
-		}
-		o.oses = map[string]bool{}
-		w.objects[key] = o
-		if !o.member {
-			twin := obj.Pkg().Path() + "." + o.name
-			if first, ok := w.twins[twin]; ok {
-				w.union(first, key)
-			} else {
-				w.twins[twin] = key
-			}
 		}
 	}
 	o.oses[w.goos] = true
+	return o
+}
+
+func (w *world) register(fset *token.FileSet, obj types.Object, key string) *object {
+	o := describe(fset, obj, key)
+	if o == nil {
+		return nil
+	}
+	o.oses = map[string]bool{}
+	w.objects[key] = o
+	if !o.member {
+		twin := obj.Pkg().Path() + "." + o.name
+		if first, ok := w.twins[twin]; ok {
+			w.union(first, key)
+		} else {
+			w.twins[twin] = key
+		}
+	}
 	return o
 }
 
@@ -447,8 +446,7 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// recordFieldOwners notes the named type every module struct field belongs
-// to, so a field's new name can be checked against the type's other members.
+// recordFieldOwners lets a renamed field be checked against its type's other members.
 func (w *world) recordFieldOwners(fset *token.FileSet, named []*types.TypeName) {
 	for _, tn := range named {
 		st, ok := tn.Type().Underlying().(*types.Struct)

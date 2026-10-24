@@ -77,10 +77,6 @@ interface ExposeServiceArgs {
   input: UIExposeServiceInput;
 }
 
-// Split out of the main endpoints map to keep it within its line budget: the
-// node-capacity reading, this environment's own usage/sizing/activity
-// readings, and the reclaim/resize actions that act on them all belong
-// together as "what the Runtime tab shows and does".
 function runtimeTabEndpoints(builder: EnvironmentApiBuilder) {
   return {
     getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
@@ -95,56 +91,41 @@ function runtimeTabEndpoints(builder: EnvironmentApiBuilder) {
       ),
       providesTags: ['RuntimeResourceStatus'],
     }),
-    // Whether the environment's runtime is running, stopped, or not deployed —
-    // the state Stop has to consult before it offers the action, since pressing
-    // it on an already-stopped runtime is a correct no-op that otherwise reads
-    // as a broken button. Separate from getRuntimeUsage: this is one kubectl
-    // get against the Deployment, not an exec into the pod, so it is cheap
-    // enough to answer before anything is asked of the environment.
+    // Read before offering Stop, so stopping a stopped runtime is not a silent no-op.
+    // One Deployment get, unlike the pod exec getRuntimeUsage needs.
     getRuntimeRunState: builder.query<UIRuntimeRunState, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIRuntimeRunState>((selection) =>
         LoadRuntimeRunState(selection),
       ),
       providesTags: ['RuntimeRunState'],
     }),
-    // What the runtime pod is running right now: sessions and the processes
-    // holding memory. Read-only — nothing here reclaims anything.
     getRuntimeActivity: builder.query<UIRuntimeActivity, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIRuntimeActivity>((selection) =>
         LoadRuntimeActivity(selection),
       ),
       providesTags: ['RuntimeActivity'],
     }),
-    // A reclaim changes both what the pod holds and what the node has free, so
-    // it invalidates the activity reading and the capacity figures together —
-    // the operator must be able to see the effect of what they just did.
+    // Invalidates activity and capacity together so the effect is visible.
     reclaimRuntimeResources: builder.mutation<UIRuntimeReclaimResult, UIRuntimeReclaimInput>({
       queryFn: wailsQueryFn<UIRuntimeReclaimInput, UIRuntimeReclaimResult>((input) =>
         ReclaimRuntimeResources(input),
       ),
       invalidatesTags: ['RuntimeActivity', 'RuntimeResourceStatus'],
     }),
-    // This environment's own CPU, memory and disk usage against its cgroup
-    // limits — the reading that turns the sliders above from a guess into a
-    // decision.
     getRuntimeUsage: builder.query<UIRuntimeUsage, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIRuntimeUsage>((selection) =>
         LoadRuntimeUsage(selection),
       ),
       providesTags: ['RuntimeUsage'],
     }),
-    // The environment's own opinion of its size — read inside the pod (see
-    // LoadRuntimeSizing's comment for why this cannot be a host-side read the
-    // way getRuntimeUsage is).
+    // Read inside the pod (see LoadRuntimeSizing).
     getRuntimeSizing: builder.query<UIRuntimeSizingRecommendation, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIRuntimeSizingRecommendation>((selection) =>
         LoadRuntimeSizing(selection),
       ),
       providesTags: ['RuntimeSizing'],
     }),
-    // Applies the standing recommendation for real. Rolls the pod, so it
-    // invalidates the same tags a redeploy would; the sizing reading itself is
-    // also re-fetched since a successful resize changes what it reports.
+    // Rolls the pod, so it invalidates what a redeploy would, plus the sizing.
     resizeRuntimeToRecommendation: builder.mutation<
       UIRuntimeSizingRecommendation,
       { selection: UISelection; overrideLease: boolean }
@@ -198,18 +179,11 @@ export const environmentApi = wailsApi.injectEndpoints({
       ),
       providesTags: ['VersionSuggestions'],
     }),
-    // Probes erun's hosted container registry (registry.erunpaas.com), so the
-    // new-environment dialog can gate "Use erun's hosted registry" on a real
-    // check instead of offering it unconditionally.
+    // Gates the hosted-registry option on a real check.
     getHostedRegistry: builder.query<UIHostedRegistryStatus, NoValue>({
       queryFn: wailsQueryFn<NoValue, UIHostedRegistryStatus>(() => LoadHostedRegistry()),
     }),
-    // Stopping frees the env's runtime and dind limits, so the node capacity
-    // the Runtime tab offers every other env changes the moment it lands —
-    // invalidate the resource status rather than leaving stale maxima on screen.
-    // The run state is invalidated with it: it is what the Stop control itself
-    // reads, so a stop that lands has to re-answer its own question rather than
-    // leave the panel showing the state the operator just acted on.
+    // Stopping frees node capacity and changes the run state Stop reads.
     stopEnvironment: builder.mutation<UIEnvironmentStopResult, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentStopResult>((selection) =>
         StopEnvironment(selection),
@@ -227,18 +201,13 @@ export const environmentApi = wailsApi.injectEndpoints({
         CheckEnvironmentHealth(selection),
       ),
     }),
-    // The Ports tab's exposure list. A mutation (not a query) like
-    // checkEnvironmentHealth: it re-reads the cluster each time it is
-    // dispatched rather than caching against a key, since exposing or
-    // un-exposing invalidates it immediately below.
+    // A mutation so it re-reads the cluster on every dispatch.
     listEnvironmentExposures: builder.mutation<UIExposureList, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIExposureList>((selection) =>
         ListEnvironmentExposures(selection),
       ),
     }),
-    // The Ports tab's service picker. A mutation for the same reason the
-    // exposure list is one: it re-reads the namespace each time rather than
-    // caching, since exposing something changes the answer immediately.
+    // A mutation so it re-reads the namespace on every dispatch.
     listEnvironmentServices: builder.mutation<UIEnvironmentServiceList, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentServiceList>((selection) =>
         ListEnvironmentServices(selection),

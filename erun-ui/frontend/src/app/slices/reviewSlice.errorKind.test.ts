@@ -4,11 +4,8 @@ import { test } from 'vitest';
 
 import reviewReducer, { emptyEnvDiffState, type ReviewState, setEnvDiffError } from './reviewSlice';
 
-// #1230: errorKind is the discriminator the review panel branches its copy
-// on (informational "not-open" vs a fault "stale-forward"). This is a
-// separate file from reviewSlice.test.ts (the #1244 characterization spec for
-// this slice) rather than an edit to it, per the mandate to leave that file
-// untouched.
+// errorKind is the discriminator the review panel branches its copy on
+// (informational "not-open" vs a fault "stale-forward").
 
 function initial(): ReviewState {
   return reviewReducer(undefined, { type: '@@INIT' });

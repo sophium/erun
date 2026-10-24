@@ -8,9 +8,6 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// See tenant-dashboard-audit-log.spec.ts for why this stages a throwaway env
-// with an apiUrl and stubs the RPC rather than using the seeded baseline or a
-// real backend.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -22,9 +19,7 @@ interface StubbedResponse {
   error?: string;
 }
 
-// Routes LoadTenantDashboard through a mutable holder so a test can change
-// what the "server" returns between the initial load and a later Refresh
-// click, and count how many times the RPC actually fired.
+// Mutable holder so a test can change the answer before Refresh and count calls.
 function stubLoadTenantDashboard(
   page: import('@playwright/test').Page,
   initial: StubbedResponse,
@@ -76,8 +71,7 @@ test.describe('tenant dashboard — refresh (#1213)', () => {
       await expect(app.tenantDashboard.activePanel()).toContainText('build-1');
       expect(stub.calls()).toBe(1);
 
-      // The server-side state changes after the initial load. A real refresh
-      // must observe this; a cached replay would keep showing build-1.
+      // A cached replay would keep showing build-1.
       stub.respondWith({
         data: {
           tenant: SEED_TENANT,
@@ -119,15 +113,9 @@ test.describe('tenant dashboard — refresh (#1213)', () => {
       stub.respondWith({ error: 'backend unreachable' });
       await app.tenantDashboard.clickRefresh();
 
-      // Wait for the failure to actually surface before checking for the
-      // toast's absence, so the check lands at a fixed point (once the
-      // error's own dispatch has landed) instead of racing the success
-      // toast's auto-dismiss timer. On the cached-replay bug this text never
-      // appears at all, since the mocked failure is never actually fetched.
+      // Wait for the error before asserting no toast, rather than racing auto-dismiss.
       await expect(page.getByText('backend unreachable')).toBeVisible();
 
-      // A success confirmation is a message centre icon, not a
-      // pill with visible text -- assert the absence there instead.
       await expect(app.titlebar.messageCenterIcon('success')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);

@@ -27,8 +27,7 @@ function rowKey(item: UIUpgradePlanItem): string {
   return selectionKey({ tenant: item.tenant, environment: item.environment });
 }
 
-// Gates the high-blast-radius cross-env "Upgrade all" deploy behind an explicit
-// confirmation preview (Nielsen #1 visibility of system status, #5 error prevention).
+// UpgradeAllDialog confirms the cross-env upgrade with a preview first.
 export function UpgradeAllDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const { open, loading, error, items, choices } = useAppSelector((state) => state.upgradeAll);
@@ -283,8 +282,6 @@ function UpgradePlanRowStatus({
     );
   }
   if (state === 'pick') {
-    // Amber + icon (non-color-only, WCAG) so an un-picked env honestly reads as
-    // "nothing happens yet", not success.
     if (chosen.trim() !== '') {
       return (
         <span className="text-[11px] font-medium whitespace-nowrap text-primary">will upgrade</span>
@@ -298,9 +295,7 @@ function UpgradePlanRowStatus({
     );
   }
   if (state === 'unresolved') {
-    // Deliberately distinct from "up to date" so a failed latest-lookup never
-    // reads as success. Amber + icon (non-color-only, WCAG); mirrors the CLI's
-    // "(target unresolved)" and surfaces the same reason (e.g. a registry 403) inline.
+    // Distinct from "up to date" so a failed lookup never reads as success.
     return (
       <span className="inline-flex flex-col items-end gap-0.5">
         <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-700 dark:text-amber-400">
@@ -320,9 +315,7 @@ function UpgradePlanRowStatus({
 
 type UpgradeRowState = 'lagging' | 'pick' | 'upToDate' | 'unresolved';
 
-// Mirrors the outcomes the CLI's `erun upgrade` renders, plus a desktop-only
-// "pick" state. The unresolved and pick states must not collapse into "up to
-// date": that would mislabel a failed lookup or an un-picked env as success.
+// Unresolved and pick must not collapse into "up to date".
 function upgradeRowState(item: UIUpgradePlanItem): UpgradeRowState {
   if (item.lagging) {
     return 'lagging';

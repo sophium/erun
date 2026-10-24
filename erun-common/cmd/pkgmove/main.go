@@ -1,15 +1,5 @@
-// Command pkgmove moves erun-common's declarations between packages according
-// to a map, rewriting every reference in the module and in the modules that
-// import it.
-//
-//	pkgmove plan  -map packages.map
-//	pkgmove apply -map packages.map -importers ../erun-cli,../erun-mcp,...
-//	pkgmove dump  -map packages.map > refs.tsv
-//
-// plan simulates the map: the import graph it would produce, every cycle with
-// the references that hold it, and the names it would collide. apply rewrites
-// the tree when plan has nothing to report. dump writes every reference
-// between top-level declarations as tab-separated rows, for designing a map.
+// Command pkgmove moves erun-common declarations between packages according
+// to a map, rewriting references in the module and its importers.
 package main
 
 import (
@@ -38,6 +28,8 @@ type options struct {
 	dir       string
 	importers []string
 	limit     int
+	// timingEnv names the timing seam for a module with no base/core.
+	timingEnv string
 }
 
 func run(args []string, out io.Writer) error {
@@ -77,6 +69,7 @@ func parseOptions(args []string) (options, error) {
 	fs.StringVar(&opts.dir, "dir", ".", "module directory")
 	fs.StringVar(&importers, "importers", "", "comma-separated directories of importing modules")
 	fs.IntVar(&opts.limit, "limit", 20, "references printed per cycle edge")
+	fs.StringVar(&opts.timingEnv, "timing-env", "", "timing seam a generated suite redirects, when -dir has no base/core declaring it")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}

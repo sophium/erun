@@ -7,8 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CloudProviderAliasRepository stores a tenant's BYO-cloud credentials that the
-// provisioning executor resolves to reach the tenant's cloud; they are encrypted at rest.
+// CloudProviderAliasRepository stores a tenant's BYO-cloud credentials, encrypted at rest.
 type CloudProviderAliasRepository struct {
 	txs    *TxManager
 	cipher *secrets.Cipher
@@ -18,14 +17,14 @@ func NewCloudProviderAliasRepository(txs *TxManager, cipher *secrets.Cipher) *Cl
 	return &CloudProviderAliasRepository{txs: txs, cipher: cipher}
 }
 
-// ResolvedCloudProviderAlias is a decrypted alias holding the plaintext credentials the provisioning executor uses to reach the tenant's cloud.
+// ResolvedCloudProviderAlias is a decrypted alias with plaintext credentials.
 type ResolvedCloudProviderAlias struct {
 	Alias       string
 	Provider    string
 	Credentials string
 }
 
-// Set upserts the tenant's alias. tenant_id is supplied by the RLS default, so it is omitted from the write.
+// Set upserts the tenant's alias; tenant_id comes from the RLS default.
 func (r *CloudProviderAliasRepository) Set(ctx context.Context, alias, provider, credentials string) error {
 	encrypted, err := r.cipher.Encrypt([]byte(credentials))
 	if err != nil {
@@ -43,7 +42,7 @@ func (r *CloudProviderAliasRepository) Set(ctx context.Context, alias, provider,
 	})
 }
 
-// Get resolves a tenant's alias, returning ErrNotFound for an unknown alias. RLS scopes the read to the caller's tenant.
+// Get resolves a tenant's alias, or ErrNotFound.
 func (r *CloudProviderAliasRepository) Get(ctx context.Context, alias string) (ResolvedCloudProviderAlias, error) {
 	var row struct {
 		Provider             string `bun:"provider"`

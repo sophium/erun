@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// writeKubectlStub points ERUN_KUBECTL_BIN at a script that prints stderr and
-// exits non-zero (or exits 0 with no output when stderr is empty), so a test
-// can drive checkKubernetesDeploymentWithContext's classification without a
-// real cluster.
+// writeKubectlStub points ERUN_KUBECTL_BIN at a script that prints stderr and exits with exitCode.
 func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()

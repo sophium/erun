@@ -8,13 +8,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// displayShapedStateNames are the strings a tenant and an environment take on
-// when they are rendered for a human instead of joined into a path: the pair,
-// and the pair with the port an operator sees beside it. Directories named this
-// way accumulated under the state root, empty, one per pair somebody had seen
-// displayed.
+// displayShapedStateNames are tenant/env pairs as rendered for humans, which
+// once leaked into the state root as directory names.
 var displayShapedStateNames = []string{
 	"erun ux",
 	"erun build",
@@ -25,11 +23,7 @@ var displayShapedStateNames = []string{
 	"petios rihards-review",
 }
 
-// TestBootstrapDryRunTracesNoWriteItWouldRefuse keeps the dry-run trace honest:
-// a bootstrap dry run reports the mkdir and write-yaml the real run would
-// perform, so a name the real save refuses must produce neither. Tracing it
-// anyway would show the operator a plan that cannot run -- and, for the shape
-// this guards, a path with a space in it.
+// A name the real save refuses must not appear in the dry-run trace.
 func TestBootstrapDryRunTracesNoWriteItWouldRefuse(t *testing.T) {
 	redirectConfigHomeForTest(t)
 
@@ -42,7 +36,7 @@ func TestBootstrapDryRunTracesNoWriteItWouldRefuse(t *testing.T) {
 			if err := store.SaveEnvConfig("frs", config.EnvConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveEnvConfig environment %q = %v, want ErrUnusableStateName", name, err)
 			}
-			if err := store.SaveTenantConfig(config.TenantConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
+			if err := store.SaveTenantConfig(model.TenantConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveTenantConfig %q = %v, want ErrUnusableStateName", name, err)
 			}
 			traced := stdout.String() + stderr.String()

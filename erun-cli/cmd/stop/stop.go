@@ -4,16 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
 
-func NewStopCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
-	target := common.OpenParams{}
+func NewStopCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
+	target := model.OpenParams{}
 	cmd := &cobra.Command{
 		Use:   "stop [TENANT] [ENVIRONMENT]",
 		Short: "Stop an environment's runtime and return its capacity to the node",
@@ -39,21 +40,18 @@ func NewStopCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStopCommand(shared.CommandContext(cmd), args, target, resolveOpen, saveEnvConfig)
+			return runStopCommand(clicmd.CommandContext(cmd), args, target, resolveOpen, saveEnvConfig)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Stop a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Stop a specific environment")
 	return cmd
 }
 
-// runStopCommand deliberately does not run the cloud-context preflight every
-// other cluster-touching command wires: that preflight starts a stopped cloud
-// context, and starting a machine in order to stop a pod on it is the opposite
-// of what the operator asked for.
-func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
-	params, err := shared.ResolveOpenParams(ctx.Command, args, overrides)
+// runStopCommand skips the cloud-context preflight, which would start a stopped machine just to stop a pod.
+func runStopCommand(ctx core.Context, args []string, overrides model.OpenParams, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
+	params, err := opentarget.ResolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err
 	}
@@ -62,7 +60,7 @@ func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams
 		return err
 	}
 
-	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	ctx.Trace(fmt.Sprintf("stop: tenant=%s environment=%s kubernetes-context=%s release=%s namespace=%s",
 		result.Tenant, result.Environment, result.EnvConfig.KubernetesContext,
@@ -78,22 +76,15 @@ func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun && ctx.Output != core.OutputJSON {
+	if !ctx.DryRun && ctx.Output != model.OutputJSON {
 		_, _ = fmt.Fprintf(ctx.Stdout, "%s\n", stopCommandSummary(stopResult))
 	}
 	return ctx.WriteResult(stopResult)
 }
 
-// stopCommandSummary names the ended sessions as well as the recovery: an
-// operator whose desktop tabs go dark a second after the stop should read that
-// as their own command doing what it said, not as the environment breaking.
-//
-// It also names the platform components the stop leaves running, on both
-// outcomes. Those pods are the ones still visible after a stop, and a leftover
-// pod with no explanation is read as a failed stop; on an already-stopped
-// environment they are the whole explanation for why pressing Stop changed
-// nothing.
-func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
+// stopCommandSummary names the ended sessions and the components left running, so
+// neither reads as a failed stop.
+func stopCommandSummary(result model.StopEnvironmentResult) string {
 	kept := stopCommandKeptComponents(result)
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped%s", result.Tenant, result.Environment, kept)
@@ -105,10 +96,8 @@ func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
 	return fmt.Sprintf("stopped %s/%s%s%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, sessions, kept, result.Tenant, result.Environment)
 }
 
-// stopCommandKeptComponents renders the components a stop left running, or an
-// empty string when the environment deploys none — a stop on a runtime-only
-// environment has nothing to explain and must not gain a line saying so.
-func stopCommandKeptComponents(result lifecycle.StopEnvironmentResult) string {
+// stopCommandKeptComponents renders the components left running, or "" when there are none.
+func stopCommandKeptComponents(result model.StopEnvironmentResult) string {
 	if len(result.RemainingComponents) == 0 {
 		return ""
 	}

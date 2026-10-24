@@ -8,18 +8,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// A platform refusal reaches the operator beside the control they just used,
-// so it has to read as a reason they can act on rather than as the exchange
-// that produced it. The client already distinguishes the refusals that mean
-// something distinct, so the mapping is on those; anything else keeps its
-// original text, which is better than a sentence that guesses wrong.
-//
-// The wire form is not discarded, only moved: it is logged, where a diagnosis
-// needs it, instead of shown, where it only tells the operator that software
-// was involved.
+// Platform refusals are mapped to actionable sentences; the wire form is
+// logged rather than shown. Unrecognised errors keep their text.
 
-// platformAction names the attempt in the sentence the operator reads. It is
-// a verb phrase completing "You do not have permission to ...".
+// platformAction completes "You do not have permission to ...".
 type platformAction string
 
 const (
@@ -34,8 +26,7 @@ const (
 	actionRemoveReviewer       platformAction = "remove this reviewer"
 )
 
-// operatorPlatformError turns a platform failure into what the operator needs
-// to know. Anything unrecognised is returned unchanged.
+// operatorPlatformError returns err unchanged when it cannot classify it.
 func operatorPlatformError(action platformAction, err error) error {
 	if err == nil {
 		return nil
@@ -54,8 +45,7 @@ func operatorPlatformError(action platformAction, err error) error {
 			sentence = "That review no longer exists. Refresh to see the current list."
 		}
 	case errors.Is(err, platformclient.ErrPlatformConflict):
-		// A conflict is the one refusal that is usually transient and usually
-		// somebody else's write, so it says what to do rather than what broke.
+		// A conflict is usually transient and someone else's write.
 		sentence = fmt.Sprintf("Someone else changed this while you were working, so erun did not %s. Refresh and try again.", action)
 	case errors.Is(err, platformclient.ErrPlatformNotImplemented):
 		sentence = fmt.Sprintf("This control plane cannot %s.", action)
@@ -67,16 +57,9 @@ func operatorPlatformError(action platformAction, err error) error {
 	return errors.New(sentence)
 }
 
-// enrollERunPlatformUserError classifies EnrollERunPlatformUser's refusal the
-// same way tenantDashboardIdentityFailure already classifies the read path's
-// identity failure (tenant_dashboard.go), not operatorPlatformError above:
-// every other write it classifies runs only after the dashboard's own
-// identity resolution already succeeded, so ErrPlatformUnauthorized there
-// means a session that aged out mid-write ("sign in again"). Enrollment runs
-// exactly when that resolution has NOT succeeded, so a 401 here means the
-// platform's own auth middleware refused the caller's identity outright, for
-// one of three reasons its {code, message} envelope distinguishes -- and
-// "sign in again" would be wrong advice for any of them.
+// enrollERunPlatformUserError classifies enrollment refusals. Unlike other
+// writes, a 401 here means the identity is not enrolled, so "sign in again" is
+// wrong advice.
 func enrollERunPlatformUserError(err error) error {
 	if err == nil {
 		return nil
@@ -88,8 +71,6 @@ func enrollERunPlatformUserError(err error) error {
 	case errors.Is(err, platformclient.ErrPlatformUnauthorized):
 		switch platformclient.PlatformAuthErrorCode(err) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
-			// Neither is an enrollment answer -- the wire form stays primary,
-			// same as tenantDashboardIdentityFailure's own fall-through.
 			return err
 		}
 		log.Printf("erun-app: enroll self refused: %v", err)
@@ -99,10 +80,7 @@ func enrollERunPlatformUserError(err error) error {
 	}
 }
 
-// enrollmentHandoffError is the administrator hand-off a refused
-// self-enrollment shows. It is a sentence the operator reads beside the control
-// they used, not an error string to be wrapped, so it is capitalised and
-// punctuated as one.
+// enrollmentHandoffError is shown as an operator-facing sentence, not wrapped.
 type enrollmentHandoffError struct{}
 
 func (enrollmentHandoffError) Error() string {

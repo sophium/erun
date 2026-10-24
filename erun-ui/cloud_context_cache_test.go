@@ -4,50 +4,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// TestCloudContextCacheSmoothsATransientUnknown locks in the deliberate grace
-// period: a single failed describe-instances call must not blank a
-// known-good status the moment it comes in.
 func TestCloudContextCacheSmoothsATransientUnknown(t *testing.T) {
 	app := &App{}
-	app.applyCloudContextStatusesToCache([]config.CloudContextStatus{
-		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusRunning},
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
+		{CloudContextConfig: model.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusRunning},
 	})
-	app.applyCloudContextStatusesToCache([]config.CloudContextStatus{
-		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusUnknown},
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
+		{CloudContextConfig: model.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusUnknown},
 	})
 	if got := app.cloudContextStatus("ctx"); got != cloud.CloudContextStatusRunning {
 		t.Fatalf("a single transient Unknown must not blank a known-good status: got %q", got)
 	}
 }
 
-// TestCloudContextCacheHonoursUnknownPastTTL is the regression for erun#1216:
-// a sustained AWS failure must downgrade the cache to Unknown rather than
-// serve a "running" that may be an hour stale — the case that let the Stop
-// button be offered against state the app could no longer verify.
 func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{
 			"ctx": {status: cloud.CloudContextStatusRunning, confirmedAt: time.Now().Add(-2 * cloudContextStatusTTL)},
 		},
 	}
-	app.applyCloudContextStatusesToCache([]config.CloudContextStatus{
-		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusUnknown},
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
+		{CloudContextConfig: model.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusUnknown},
 	})
 	if got := app.cloudContextStatus("ctx"); got != cloud.CloudContextStatusUnknown {
 		t.Fatalf("a stale known-good status must downgrade to Unknown once its confirmation TTL has passed: got %q", got)
 	}
 }
 
-// TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll covers the case
-// where the poller itself stops producing results entirely (e.g.
-// RefreshCloudContextStatuses fails at the list-contexts step, before any
-// per-context Unknown is even produced): the read path must age the
-// observation out on its own, mirroring session_heartbeat.go's
-// heartbeatSaysRunning.
+// The read path must age out the observation even when the poller produces nothing.
 func TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{
@@ -59,17 +47,14 @@ func TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll(t *testing.T) {
 	}
 }
 
-// TestCloudContextCacheRecoversImmediatelyOnAGoodReading guards against
-// over-correcting: once AWS answers again, the cache must reflect it right
-// away rather than waiting out any grace period.
 func TestCloudContextCacheRecoversImmediatelyOnAGoodReading(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{
 			"ctx": {status: cloud.CloudContextStatusUnknown, confirmedAt: time.Now().Add(-2 * cloudContextStatusTTL)},
 		},
 	}
-	app.applyCloudContextStatusesToCache([]config.CloudContextStatus{
-		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusRunning},
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
+		{CloudContextConfig: model.CloudContextConfig{Name: "ctx"}, Status: cloud.CloudContextStatusRunning},
 	})
 	if got := app.cloudContextStatus("ctx"); got != cloud.CloudContextStatusRunning {
 		t.Fatalf("a fresh good reading must apply immediately: got %q", got)

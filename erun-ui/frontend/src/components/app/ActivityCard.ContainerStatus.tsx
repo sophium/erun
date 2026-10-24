@@ -69,7 +69,6 @@ function ContainerStatusRow({
 }): React.ReactElement {
   const failing = containerIsFailing(container);
   const [expanded, setExpanded] = React.useState<boolean>(failing);
-  // Failing containers default to expanded so the user sees the cause without a click.
   React.useEffect(() => {
     setExpanded(failing);
   }, [failing]);
@@ -202,8 +201,7 @@ interface RecoveryAction {
   action: () => Promise<void>;
 }
 
-// The common recoverable failure is a registry miss: the chart bumped an image
-// tag without publishing it, so a force rebuild-and-push makes the tag available.
+// A registry miss (tag bumped but never pushed) is fixed by a force rebuild-and-push.
 function recoveryActionForContainer(
   container: ActivityQueueContainerStatus,
   deploy: ActivityQueueEntry,

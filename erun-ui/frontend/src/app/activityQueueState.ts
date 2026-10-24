@@ -62,25 +62,17 @@ export interface ActivityQueueEntry {
   lastUpdated: string;
   containers?: ActivityQueueContainerStatus[];
   error?: string;
-  // The underlying helm/kubectl/docker error behind a failed entry; empty for non-failed entries.
+  // The underlying tool error; empty unless failed.
   detail?: string;
   source?: ActivityQueueSource;
   sessionId?: string;
   actionKind?: string;
   enqueuedAt?: string;
   startedRunningAt?: string;
-  // origin distinguishes a synthetic, desktop-pushed entry from the normal
-  // cluster/host-observed ones this queue is otherwise built from -- absent
-  // (== 'cluster') for every existing entry. A new discriminant rather than
-  // reusing `source` above: `source` already carries a different vocabulary
-  // (which trace/RPC produced a *cluster* entry) that shouldShowHelmRecovery/
-  // RecoveryActionRow read, and overloading it here would make those checks
-  // (`entry.source === 'shell'`, `entry.source !== 'helm'`) silently start
-  // seeing a value they were never written to expect.
+  // origin marks synthetic desktop entries; absent means 'cluster'. Separate from
+  // `source`, whose values recovery checks compare against.
   origin?: 'cluster' | 'invite-approval';
-  // message/inviteLink back an 'invite-approval' entry's own render: most
-  // cluster-only fields above (release/namespace/containers/
-  // kubernetesContext) are simply absent for it.
+  // Cluster-only fields are absent on 'invite-approval' entries.
   message?: string;
   inviteLink?: string;
 }
@@ -98,7 +90,7 @@ export interface ActivityLockEvent {
 const selectActivityEntries = (state: RootState) => state.activity.entries;
 const selectLocksBySession = (state: RootState) => state.activity.locksBySession;
 
-// Redux state must stay serializable, so locks are stored as a Record and adapted to the Map callers expect.
+// Locks are a Record for serializability, adapted to a Map for callers.
 const selectLocksMap = createSelector([selectLocksBySession], (locks) => {
   const map = new Map<number, ActivityLockEvent>();
   for (const [key, value] of Object.entries(locks)) {
@@ -191,8 +183,7 @@ export function useTerminalActivityLockState(): Map<number, ActivityLockEvent> {
   return useAppSelector(selectLocksMap);
 }
 
-// formatElapsed humanizes elapsed time (e.g. "1m12s"), space-padded to a fixed
-// 6-char width so the right-aligned column doesn't flicker as it ticks.
+// formatElapsed pads to a fixed width so the column does not flicker.
 export function formatElapsed(startedAt: string, now: number = Date.now()): string {
   const start = Date.parse(startedAt);
   if (Number.isNaN(start)) {
@@ -216,13 +207,8 @@ export function formatElapsed(startedAt: string, now: number = Date.now()): stri
   return raw.padStart(6, ' ');
 }
 
-// pushInviteApprovalActivityEntry appends a durable, in-memory record of an
-// invite-request approval -- a synthetic entry, not sourced from a
-// cluster/host read, which is a deliberate, explicitly-scoped
-// extension of a queue whose own doc comment says it "is rebuilt from live
-// cluster and host state on every launch and never persists across
-// restarts": there is no cluster/host state to rebuild this one from, so it
-// simply does not survive a restart, same as everything else here.
+// pushInviteApprovalActivityEntry adds a synthetic in-memory entry; it has no
+// cluster state to rebuild from, so it does not survive a restart.
 export const pushInviteApprovalActivityEntry =
   (params: {
     tenant: string;

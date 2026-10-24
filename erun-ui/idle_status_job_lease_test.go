@@ -5,16 +5,13 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// The banner that names an occupancy can only offer to stop it if it knows
-// which job is behind the lease -- and must not offer that for a lease held by
-// anything else.
 func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
 	now := time.Unix(1700000100, 0)
-	out := environmentLeasesToUI([]activity.EnvironmentActivityLease{
+	out := environmentLeasesToUI([]model.EnvironmentActivityLease{
 		{ID: "job-gate-1", Name: "repo gate", StartedAt: time.Unix(1700000000, 0)},
 		{ID: "orchestrator-erun", Name: "erun", StartedAt: time.Unix(1700000000, 0)},
 	}, now)
@@ -33,21 +30,13 @@ func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
 	}
 }
 
-// TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt is the regression test for
-// a lease taken by hand with a name that happens to start with "job-" (the
-// CLI's own --help example is literally `--name job-fix-1245`, and no --id)
-// producing a lease id that is shape-identical to a real job's presence
-// lease, so environmentLeasesToUI's id-shape match alone reported a JobID for
-// it. The occupancy banner then rendered a "View jobs" button for a job that
-// never existed, and the Jobs tab it linked to reported "No jobs yet".
-// Without the fix this test fails because the hand-lease's candidate JobID
-// survives unverified.
+// The CLI's own --help example (`--name job-fix-1245`) yields a job-shaped id.
 func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 	isolateJobsCache(t)
 	const tenant = "erun"
 	const environment = "ux"
 
-	if _, err := jobs.AttachEnvironmentJob(core.Context{}, jobs.AttachEnvironmentJobParams{
+	if _, err := jobs.AttachEnvironmentJob(core.Context{}, model.AttachEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          "gate-9",
@@ -69,9 +58,6 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 
 	leases := []uiEnvironmentLease{
 		{Name: "repo gate", JobID: "gate-9"},
-		// Shape-identical candidate id ("visual-demo" strips cleanly off
-		// "job-"), but no job record exists for it -- exactly the hand-taken
-		// lease from the issue's reproduction.
 		{Name: "job-visual-demo", JobID: "visual-demo"},
 	}
 	app.verifyLeaseJobIDs(tenant, environment, leases)

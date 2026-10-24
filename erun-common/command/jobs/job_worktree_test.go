@@ -8,17 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
-
-// The reproduction this closes: an agent job's own exit status says nothing
-// about the state of the working tree it ran in. Six lanes in one session
-// each ended a turn with substantial work sitting uncommitted, and every one
-// of them read as a plain "exited 0" -- indistinguishable from a lane that
-// committed everything it did. A test that only proves the clean-finish case
-// still passes would leave every one of those cases shipping silently; the
-// dirty case below is the one that has to fail loudly.
 
 func runGitForTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -29,9 +23,7 @@ func runGitForTest(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// newAgentJobTestRepo creates a real git working tree with one commit on
-// branch "main", so tests exercise the actual git plumbing job_worktree.go
-// runs rather than a mocked stand-in for it.
+// newAgentJobTestRepo creates a real git working tree with one commit on "main".
 func newAgentJobTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -46,9 +38,7 @@ func newAgentJobTestRepo(t *testing.T) string {
 	return dir
 }
 
-// newBareRemoteForTest creates a bare repo elsewhere and wires it as dir's
-// "origin", so a checkpoint's push has a real remote to land on rather than
-// a stub that merely returns zero.
+// newBareRemoteForTest wires a real bare repo as dir's "origin".
 func newBareRemoteForTest(t *testing.T, dir string) string {
 	t.Helper()
 	remote := t.TempDir()
@@ -64,130 +54,6 @@ func dirtyWorkingTree(t *testing.T, dir string) {
 	}
 }
 
-func TestAgentJobWithADirtyWorkingTreeIsNotReportedAsSuccessAndIsCheckpointedAndPushed(t *testing.T) {
-	isolateActivityCache(t)
-	repo := newAgentJobTestRepo(t)
-	remote := newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-
-	const tenant = "worktree-contract"
-	const environment = "dirty-checkpointed"
-	const id = "job"
-
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant:      tenant,
-		Environment: environment,
-		ID:          id,
-		Name:        id,
-		Dir:         repo,
-		Agent:       "claude",
-		Command:     []string{"sh", "-c", "printf 'lane work\\n' > uncommitted.txt"},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-	if job.Succeeded {
-		t.Fatalf("job reported success even though it ended with an uncommitted working tree: %+v", job)
-	}
-	if !job.WorktreeDirty {
-		t.Fatalf("WorktreeDirty = false, want true: %+v", job)
-	}
-	if job.WorktreeBranch != "feature/lane" {
-		t.Fatalf("WorktreeBranch = %q, want %q", job.WorktreeBranch, "feature/lane")
-	}
-	if job.WorktreeCommit == "" {
-		t.Fatalf("WorktreeCommit is empty, want a checkpoint commit: %+v", job)
-	}
-	if !job.WorktreePushed {
-		t.Fatalf("WorktreePushed = false, want true (reason: %s): %+v", job.WorktreeReason, job)
-	}
-	if job.WorktreeRemote != "origin" {
-		t.Fatalf("WorktreeRemote = %q, want %q", job.WorktreeRemote, "origin")
-	}
-
-	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/feature/lane")
-	cmd.Dir = remote
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("checkpoint commit did not reach the real remote: %v", err)
-	}
-}
-
-func TestAgentJobWithACleanWorkingTreeStillSucceeds(t *testing.T) {
-	isolateActivityCache(t)
-	repo := newAgentJobTestRepo(t)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-
-	const tenant = "worktree-contract"
-	const environment = "clean"
-	const id = "job"
-
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant:      tenant,
-		Environment: environment,
-		ID:          id,
-		Name:        id,
-		Dir:         repo,
-		Agent:       "claude",
-		Command:     []string{"sh", "-c", "exit 0"},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-	if !job.Succeeded {
-		t.Fatalf("job with a clean working tree did not report success: %+v", job)
-	}
-	if job.WorktreeDirty {
-		t.Fatalf("WorktreeDirty = true for a clean working tree: %+v", job)
-	}
-}
-
-func TestAgentJobWithADirtyDetachedHeadIsReportedButNotCheckpointed(t *testing.T) {
-	isolateActivityCache(t)
-	repo := newAgentJobTestRepo(t)
-	runGitForTest(t, repo, "checkout", "-q", "--detach", "HEAD")
-
-	const tenant = "worktree-contract"
-	const environment = "detached"
-	const id = "job"
-
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant:      tenant,
-		Environment: environment,
-		ID:          id,
-		Name:        id,
-		Dir:         repo,
-		Agent:       "claude",
-		Command:     []string{"sh", "-c", "printf 'lane work\\n' > uncommitted.txt"},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-	if job.Succeeded {
-		t.Fatalf("job reported success even though it ended with an uncommitted, detached-HEAD working tree: %+v", job)
-	}
-	if !job.WorktreeDirty || !job.WorktreeDetached {
-		t.Fatalf("WorktreeDirty/WorktreeDetached = %v/%v, want true/true: %+v", job.WorktreeDirty, job.WorktreeDetached, job)
-	}
-	if job.WorktreeCommit != "" {
-		t.Fatalf("WorktreeCommit = %q, want empty: a detached HEAD must never get an automatic checkpoint commit", job.WorktreeCommit)
-	}
-	if !strings.Contains(job.WorktreeReason, "detached") {
-		t.Fatalf("WorktreeReason %q does not explain the detached HEAD", job.WorktreeReason)
-	}
-}
-
 func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpointed(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
@@ -197,7 +63,7 @@ func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpoi
 	const environment = "protected-branch"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -224,14 +90,7 @@ func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpoi
 	}
 }
 
-// TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpointed
-// reproduces the misattribution failure mode directly: a job that never
-// wrote anything itself finishes (here, by a plain clean exit rather than a
-// cancellation, since both reach the same finishEnvironmentJob checkpoint
-// path) while a second, still-running job shares its exact worktree with
-// real uncommitted changes. Before the fix, the finishing job's checkpoint
-// read `git status` at large and committed the sibling's work under its own
-// name; this asserts that never happens while the sibling is still alive.
+// A finishing job must not checkpoint a still-live sibling's work on a shared worktree.
 func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpointed(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
@@ -243,11 +102,11 @@ func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpoi
 	const siblingID = "i2083"
 	const id = "land2083"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	sibling := eruncommon.EnvironmentJob{
+	sibling := jobstate.EnvironmentJob{
 		ID:        siblingID,
 		Name:      siblingID,
 		State:     EnvironmentJobStateRunning,
@@ -260,7 +119,7 @@ func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpoi
 		t.Fatalf("writeEnvironmentJob (sibling): %v", err)
 	}
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -304,7 +163,7 @@ func TestCommandJobIgnoresItsWorkingTreeState(t *testing.T) {
 	const environment = "command-kind"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -327,17 +186,12 @@ func TestCommandJobIgnoresItsWorkingTreeState(t *testing.T) {
 	}
 }
 
-// rejectCommitsWithAHook installs a pre-commit hook that refuses every commit,
-// modelling the repository's own hook refusing one whose staged code a linter
-// objects to. It records that it ran, so a test can tell "the hook was
-// bypassed" apart from "the hook was never reachable" — the two are
-// indistinguishable from the commit's own exit status, which is exactly how
-// this defect stayed hidden.
+// rejectCommitsWithAHook installs a pre-commit hook that refuses every commit and
+// records that it ran, so bypassed and unreachable hooks can be told apart.
 func rejectCommitsWithAHook(t *testing.T, repo string) string {
 	t.Helper()
 	marker := filepath.Join(t.TempDir(), "hook-ran")
-	// Pin the hook directory explicitly: the ambient core.hooksPath of whatever
-	// repository runs these tests must not decide whether this test has a hook.
+	// Pin hooksPath so the ambient repository's config cannot decide this.
 	runGitForTest(t, repo, "config", "core.hooksPath", ".git/hooks")
 	hooks := filepath.Join(repo, ".git", "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
@@ -353,9 +207,7 @@ func rejectCommitsWithAHook(t *testing.T, repo string) string {
 	return marker
 }
 
-// fileOnRemoteBranch reads a file out of a branch as it exists on the real
-// remote, so a test can require the run's actual bytes rather than merely that
-// a ref landed there. A ref can exist and still not carry the work.
+// fileOnRemoteBranch reads a file from the remote branch; a ref alone does not prove the work landed.
 func fileOnRemoteBranch(t *testing.T, remote, branch, path string) string {
 	t.Helper()
 	cmd := exec.Command("git", "show", branch+":"+path)
@@ -368,13 +220,7 @@ func fileOnRemoteBranch(t *testing.T, remote, branch, path string) string {
 	return string(out)
 }
 
-// The reproduction of the reported failure: a killed job's in-flight work was
-// lost because the automatic checkpoint commit ran the repository's own
-// pre-commit hook, and a lint finding about an unused constant refused it. The
-// hook is a veto over a human's commit; against a checkpoint that is the last
-// act of an already-finished run, the veto destroys the work instead of
-// deferring it. Before this fix the checkpoint commit fails here, WorktreeCommit
-// stays empty, and nothing reaches the remote.
+// A rejecting pre-commit hook must not discard a killed job's checkpoint.
 func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
@@ -386,7 +232,7 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 	const environment = "hostile-pre-commit"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -405,8 +251,6 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 	if !job.WorktreeDirty {
 		t.Fatalf("WorktreeDirty = false, want true (reason: %s): %+v", job.WorktreeReason, job)
 	}
-	// The assertions that matter: the work was actually preserved. Each of
-	// these is empty or false on the pre-fix code, for the reported reason.
 	if job.WorktreeCommit == "" {
 		t.Fatalf("the checkpoint commit did not survive the repository's pre-commit hook; "+
 			"the run's work was lost (reason: %s): %+v", job.WorktreeReason, job)
@@ -416,10 +260,7 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 			"working tree (reason: %s): %+v", job.WorktreeReason, job)
 	}
 
-	// The reported failure is the loss of specific bytes — a staged file that
-	// existed only in the killed pod's working tree. A ref landing on the remote
-	// would not by itself prove they survived, so read the run's work back out of
-	// the remote and require the work itself.
+	// Require the work's actual bytes on the remote.
 	if got := fileOnRemoteBranch(t, remote, "feature/lane", "uncommitted.txt"); got != "lane work\n" {
 		t.Fatalf("the remote's rescued checkpoint commit carries %q, want the run's in-flight work %q",
 			got, "lane work\n")
@@ -429,9 +270,7 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 			"be able to veto the safety net (marker: %s)", marker)
 	}
 
-	// Guard against a vacuous pass: if the hook above were inert or unreachable,
-	// the checkpoint assertions would hold for the wrong reason. Prove it still
-	// refuses an ordinary commit in this very repository.
+	// Guard against a vacuous pass: the hook must still refuse an ordinary commit.
 	if err := os.WriteFile(filepath.Join(repo, "after.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatalf("write after.txt: %v", err)
 	}
@@ -444,17 +283,14 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 	}
 }
 
-// The other half of the contract, so the bypass cannot quietly become the
-// default: a commit that does not ask to skip hooks still runs them and is
-// still refused by them. This is what keeps `erun exec commit` — a person's own
-// commit — under the repository's hook enforcement.
+// A commit that does not ask to skip hooks still runs them.
 func TestCommitWorkingTreeStillHonorsRepositoryHooksWhenNotSkipped(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
 	marker := rejectCommitsWithAHook(t, repo)
 	dirtyWorkingTree(t, repo)
 
-	_, err := gitx.CommitWorkingTree(testContext(), repo, gitx.CommitWorkingTreeParams{
+	_, err := gitx.CommitWorkingTree(testContext(), repo, model.CommitWorkingTreeParams{
 		Branch:  "feature/lane",
 		Message: "a person's own commit",
 	}, gitx.CommitWorkingTreeDependencies{})

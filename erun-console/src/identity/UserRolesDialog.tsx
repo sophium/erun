@@ -97,11 +97,7 @@ function GrantRoleForm({
   );
 }
 
-// UserRolesDialog is the grant/revoke surface for one enrolled user: which
-// roles they hold today, a way to revoke one, and a picker for any tenant
-// role they do not yet hold. Revoking the tenant's last
-// grant-capable role is refused server-side (the lockout guard) and surfaces
-// here as an ordinary action error, the same as any other failed mutation.
+// Revoking the last grant-capable role is refused server-side and shows as an action error.
 export function UserRolesDialog({
   username,
   userId,

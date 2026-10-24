@@ -21,14 +21,8 @@ interface ResizeHandleProps {
   onStep: (delta: number) => void;
 }
 
-// role="slider" (rather than the visually-closer "separator") is what lets
-// this carry aria-valuenow/min/max/orientation and mouse+keyboard handlers on
-// a plain element without a native form control -- a resize handle is, after
-// all, a one-dimensional control over a pixel value with a min and a max. A
-// vertical handle is a vertical divider line: it separates panes side-by-side,
-// so its keyboard axis is left/right. A horizontal handle stacks panes
-// top/bottom, so its axis is up/down. In both cases the "positive" arrow
-// (Right/Down) increases the value this handle reports.
+// role="slider" allows aria-value* on a plain element. Vertical handles use Left/Right,
+// horizontal Up/Down; Right/Down increase the value.
 export function ResizeHandle({
   className,
   orientation,

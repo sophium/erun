@@ -1,8 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// GatewayRedeployDialog POM — offered after an ERun settings save when running
-// environments still route Claude Code the way they were deployed, which only a
-// redeploy changes.
+// Offered after a settings save when running envs still route Claude Code the old way.
 export class GatewayRedeployDialog {
   constructor(public readonly page: Page) {}
 

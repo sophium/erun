@@ -21,9 +21,6 @@ import type { AppThunk } from './store';
 import { TRANSIENT_DISMISS_MS } from './transientDismissDuration';
 import { scheduleTransientDismiss } from './transientDismissTimer';
 
-// notificationIdCounter mints a unique id per queued notification within this
-// session so a specific entry's auto-dismiss timer or explicit dismiss click
-// can target it without disturbing sibling entries queued before or after it.
 let notificationIdCounter = 0;
 function nextNotificationId(): string {
   notificationIdCounter += 1;
@@ -42,15 +39,8 @@ export const showTerminalMessage =
     dispatch(setRetrySelection(null));
   };
 
-// showTerminalFailure's copyOutput is taken exactly as given: empty means the
-// caller has no captured command output to offer, and the titlebar renders
-// no Copy action for it. A bare validation/precondition message — "tenant is
-// required" and its kin — already says everything there is to say once it
-// names the operation and the recovery, so re-copying that same sentence as
-// fake "output" earns the operator nothing (root AGENTS.md "Smooth,
-// Seamless, No Dead Ends" — an affordance that does nothing is worse than no
-// affordance). A caller that genuinely captured command output (a failed IDE
-// launch, a delete's namespace-cleanup warning) passes it explicitly.
+// showTerminalFailure: empty copyOutput means no Copy action; never copy the
+// message itself as fake output.
 export const showTerminalFailure =
   (
     message: string,
@@ -74,15 +64,7 @@ export const showTerminalFailure =
     dispatch(setRetrySelection(action === 'wait-longer' ? retrySelection : null));
   };
 
-// showTerminalError is the one-argument shorthand for the common
-// `catch (error) { dispatch(showTerminalError(readError(error))) }` shape.
-// Dozens of catch blocks used to call showTerminalMessage (kind: 'info',
-// unconditional) with the caught error's text, so failures rendered as a
-// neutral grey pill — polite aria-live, no role="alert", and no Copy action
-// (the terminal copy buffer only gets set by showTerminalFailure). This
-// wraps showTerminalFailure with the defaults that shape needs: no detail
-// beyond the message, no captured output to copy (the message is already
-// fully visible in the pill/popover), and no retry action.
+// showTerminalError renders a caught error as an error, with nothing to copy.
 export const showTerminalError =
   (message: string): AppThunk =>
   (dispatch) => {
@@ -145,27 +127,20 @@ export const showNotification =
       }),
     );
     if (kind === 'success' || kind === 'info') {
-      // Bound to this entry's own id, not a shared timer: a second toast
-      // queued before this one auto-dismisses must not have its timer
-      // clobbered (and must not, in turn, dismiss this one early).
+      // Per-entry timer so queued toasts do not dismiss each other.
       scheduleTransientDismiss(TRANSIENT_DISMISS_MS, () => {
         dispatch(dismissNotificationAction(id));
       });
     }
   };
 
-// dismissNotification marks one history entry read by id. It never removes
-// the entry -- see AppNotification's own doc comment -- so the message
-// centre dialog keeps showing it for the rest of the session.
+// dismissNotification marks read; history keeps the entry.
 export const dismissNotification =
   (id: string): AppThunk =>
   (dispatch) => {
     dispatch(dismissNotificationAction(id));
   };
 
-// markAllNotificationsRead is dismissNotification's bulk counterpart, scoped
-// by filter -- 'all' marks every class, a specific kind marks only that
-// class. Same semantics: marks read, never removes.
 export const markAllNotificationsRead =
   (filter: NotificationFilter): AppThunk =>
   (dispatch) => {

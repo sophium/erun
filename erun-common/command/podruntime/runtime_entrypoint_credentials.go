@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,11 +26,8 @@ func describeRuntimeRegistryCredential(boot runtimeBoot) string {
 	return "add the registries " + boot.registryCredentialPath + " carries to " + boot.dockerConfigPath() + " where it has none"
 }
 
-// syncRuntimeRegistryCredential merges the docker config `erun init` minted into
-// a Secret (mounted by the chart) into ~/.docker/config.json, adding only the
-// registry hosts the pod does not already carry: the pod's own `docker login`, or
-// a gh-driven push recovery, is more current than what erun resolved on the
-// operator's host at init time.
+// syncRuntimeRegistryCredential adds only registry hosts the pod lacks: the pod's own
+// login is more current than what init resolved on the host.
 func syncRuntimeRegistryCredential(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	provisioned, err := readRuntimeJSONObject(boot.registryCredentialPath)
 	if err != nil {
@@ -67,18 +65,17 @@ func syncRuntimeRegistryCredential(_ core.Context, boot runtimeBoot, _ *runtimeS
 	return writeRuntimeJSON(dest, existing)
 }
 
-// readRuntimeJSONObject reads a JSON object; a file that is not one reads as
-// empty, so a corrupt config is replaced rather than blocking the merge.
+// A file that is not a JSON object reads as empty so a corrupt config is replaced.
 func readRuntimeJSONObject(path string) (map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	object := map[string]json.RawMessage{}
-	if json.Unmarshal(data, &object) != nil || object == nil {
-		return map[string]json.RawMessage{}, nil
+	if json.Unmarshal(data, &object) == nil && object != nil {
+		return object, nil
 	}
-	return object, nil
+	return map[string]json.RawMessage{}, nil
 }
 
 func runtimeJSONObjectField(object map[string]json.RawMessage, key string) map[string]json.RawMessage {
@@ -106,69 +103,61 @@ func writeRuntimeJSON(path string, value any) error {
 }
 
 func (b runtimeBoot) platformAliasEntryPath() string {
-	return filepath.Join(b.platformAliasDir, eruncommon.PlatformAliasEntryKey)
+	return filepath.Join(b.platformAliasDir, deploy.PlatformAliasEntryKey)
 }
 
 func describeRuntimePlatformAlias(boot runtimeBoot) string {
 	if _, err := os.Stat(boot.platformAliasEntryPath()); err != nil {
 		return ""
 	}
-	return "add the platform alias in " + boot.platformAliasDir + " to " + eruncommon.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
+	return "add the platform alias in " + boot.platformAliasDir + " to " + config.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
 }
 
-// syncRuntimePlatformAlias seeds the pod's own erun cloud config from the Secret
-// `erun init` minted for the environment's platform identity, so an unattended
-// environment can call the platform API without an interactive login it could
-// never complete. The alias joins the root config's cloudproviders list through
-// the config model, so it can never open a second cloudproviders key beside the
-// infrastructure provider's. An alias, or a token file, the pod already carries
-// is kept.
+// syncRuntimePlatformAlias seeds the platform alias `erun init` minted so an unattended
+// pod can call the platform API. Existing aliases and token files are kept.
 func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	providers, err := readRuntimePlatformAliasEntry(boot.platformAliasEntryPath())
 	if err != nil {
 		return err
 	}
 	configHome := boot.configHome()
-	root, _, err := eruncommon.LoadRuntimeRootConfigForSync(configHome)
+	root, _, err := config.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = config.ERunConfig{}
 	}
 	changed := false
 	for _, provider := range providers {
-		if _, found := eruncommon.FindCloudProvider(root.CloudProviders, provider.Alias); found {
+		if _, found := config.FindCloudProvider(root.CloudProviders, provider.Alias); found {
 			continue
 		}
 		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
 		changed = true
 	}
 	if changed {
-		if err := writeRuntimeBootYAML(eruncommon.RuntimeRootConfigPath(configHome), root); err != nil {
+		if err := writeRuntimeBootYAML(config.RuntimeRootConfigPath(configHome), root); err != nil {
 			return err
 		}
 	}
 	return seedRuntimePlatformAliasToken(boot, configHome)
 }
 
-func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, error) {
+func readRuntimePlatformAliasEntry(path string) ([]model.CloudProviderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var providers []config.CloudProviderConfig
+	var providers []model.CloudProviderConfig
 	if err := yaml.Unmarshal(data, &providers); err != nil {
 		return nil, fmt.Errorf("read the platform alias entry %s: %w", path, err)
 	}
 	return providers, nil
 }
 
-// seedRuntimePlatformAliasToken writes the alias's refresh token where the file
-// secret store resolves its ref. The file name was computed by `erun init` with
-// the store's own function and ships beside the token, so nothing here re-derives
-// it.
+// The token file name ships from `erun init`, so nothing here re-derives it.
 func seedRuntimePlatformAliasToken(boot runtimeBoot, configHome string) error {
-	nameData, nameErr := os.ReadFile(filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretFileKey))
-	token, tokenErr := os.ReadFile(filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretTokenKey))
-	if nameErr != nil || tokenErr != nil {
+	nameData, nameOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey))
+	token, tokenOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey))
+	if !nameOK || !tokenOK {
 		return nil
 	}
 	name := strings.TrimSpace(string(nameData))

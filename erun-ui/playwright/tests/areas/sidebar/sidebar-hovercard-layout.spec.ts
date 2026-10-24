@@ -17,23 +17,10 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// #1901 unified the env hover card to one row layout with a spacing
-// hierarchy (Sidebar.HoverCardRow.tsx): a fixed label column shared by every
-// row regardless of which conditional rows are present, and two zones
-// (stable identity vs live state) separated by a hairline so a conditional
-// row changes only its own zone's height. This spec locks the layout
-// contract computationally, mirroring sidebar-hovercard-type-scale.spec.ts's
-// approach for the type contract.
+// Locks the env hover card layout: a fixed label column shared by every row, and two zones split by
+// a hairline.
 
-// measureLabelColumnWidth reads a label `dt`'s own rendered width -- which,
-// since HOVER_CARD_GRID_CLASS's grid items stretch to fill their column by
-// default, equals the resolved width of the fixed label column itself -- and
-// pairs it with a same-font, same-document `10ch` probe rather than a
-// hard-coded pixel constant, since `ch` resolves against the element's own
-// font metrics. Unlike a rendered-size read, this is unaffected by the
-// popover's entrance transform (`transform` never changes a grid track's
-// resolved size), but callers still disable it for consistency with the
-// other bounding-rect reads in this file.
+// The dt stretches to fill the label column; compared against a same-font `10ch` probe.
 async function measureLabelColumnWidth(label: Locator): Promise<{ actual: number; tenCh: number }> {
   return label.evaluate(
     (el) => {
@@ -70,12 +57,8 @@ async function emitEnvUsage(
     };
     memory: { available: boolean; current?: string; limit?: string; unlimited?: boolean };
   },
-  // carriesSidecar distinguishes the two states an absent `dind` covers, and
-  // they are not the same reading: an environment that carries no erun-dind
-  // sidecar at all (the default, matching the runtime envs the baseline seeds)
-  // and an environment that carries one whose exec into it failed. The second
-  // is what `excludesBuilds` marks, and it is absent from the payload entirely
-  // for the first.
+  // An absent `dind` means either no sidecar or a failed exec into one; only the latter sets
+  // excludesBuilds.
   carriesSidecar = dind !== undefined,
 ): Promise<void> {
   await page.evaluate(
@@ -107,11 +90,7 @@ async function emitEnvUsage(
             percentOfLimit: 25,
             oomKills: 0,
           },
-          // Absent unless a case asks for it: a runtime-only environment must
-          // keep rendering exactly the two rows it always did. A case that
-          // carries the sidecar but supplies no reading emits it with no
-          // `dind` at all, which is the state the reader produces when its
-          // exec into the sidecar fails.
+          // A sidecar with no reading is what a failed exec produces.
           ...(hasSidecar
             ? { excludesBuilds: true, ...(sidecar === undefined ? {} : { dind: sidecar }) }
             : {}),
@@ -128,11 +107,6 @@ async function emitStaleEnvUsage(page: Page, tenant: string, environment: string
   await emitEnvUsage(page, tenant, environment, 600, 90);
 }
 
-// emitFreshEnvUsage reports a reading that has not outlived its own sweep
-// interval, so UsageState's caption always renders "As of ... ago" rather
-// than the stale branch -- the fresh-branch counterpart of emitStaleEnvUsage,
-// used to check the #1979 "excludes builds" caveat on the branch it renders
-// most often.
 async function emitFreshEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
   await emitEnvUsage(page, tenant, environment, 5, 90);
 }
@@ -143,11 +117,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     page,
   }) => {
     await disablePopoverEntranceAnimation(page);
-    // Hover and every read live inside one retryable block: a re-render
-    // (e.g. the boot-time auto-open of SEED_ENV_ALPHA, or the periodic
-    // activity/usage sweep on either row) can drop the card while the
-    // pointer still rests on it (erun-ui/playwright/AGENTS.md's hover-card
-    // bullet).
+    // A re-render can drop the card mid-read, so hover and reads retry together.
     let plainLabelWidth = 0;
     await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
       await expect(card).toBeVisible({ timeout: 1_000 });
@@ -175,8 +145,6 @@ test.describe('sidebar env hover card layout (#1901)', () => {
           .evaluate((el) => el.getBoundingClientRect().width, undefined, { timeout: 1_000 });
       });
 
-      // Same fixed ch-based column (HOVER_CARD_GRID_CLASS) regardless of which
-      // conditional rows this particular card happens to render.
       expect(mismatchLabelWidth).toBeCloseTo(plainLabelWidth, 0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
@@ -186,14 +154,10 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   test('the card renders two zones, separated by a visible boundary', async ({ app }) => {
     let secondZoneBorder = '';
     let firstZoneBorder = '';
-    // Hover and every read live inside one retryable block; see the
-    // preceding test for why.
     await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
       await expect(card).toBeVisible({ timeout: 1_000 });
 
-      // Zone 1 (Version .. Working on) and zone 2 (Activity .. Cloud node) are
-      // two separate `dl`s sharing the same grid template -- not one `dl` with
-      // a spanning divider row -- so the count itself is part of the contract.
+      // The zones are two `dl`s, so the count is part of the contract.
       const zones = card.locator('dl');
       await expect(zones).toHaveCount(2, { timeout: 1_000 });
 
@@ -208,16 +172,8 @@ test.describe('sidebar env hover card layout (#1901)', () => {
           timeout: 1_000,
         });
 
-      // Live-state rows live in the second zone; identity rows -- Version,
-      // Working on -- live in the first. The live-state zone's exact rows are
-      // deliberately not asserted here: both of its conditional rows depend on
-      // live state this test does not drive. The usage rows are `CPU`/`Memory`
-      // once a reading is cached but the single degraded `Usage` row before
-      // that (SEED_ENV_ALPHA is shared and another spec can leave a reading on
-      // it), and the Cloud node row is omitted outright when there is no node.
-      // Their own specs own those shapes -- sidebar-environment-usage.spec.ts
-      // and sidebar-env-hover.spec.ts -- so this test stays on the two-zone
-      // boundary it is named for.
+      // Zone 2's conditional rows depend on live state this test doesn't drive; their shapes are
+      // covered elsewhere.
       await expect(zones.nth(0)).toContainText('Version', { timeout: 1_000 });
       await expect(zones.nth(0)).toContainText('Working on', { timeout: 1_000 });
       await expect(zones.nth(1)).toContainText('Activity', { timeout: 1_000 });
@@ -233,26 +189,9 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     page,
   }) => {
     await disablePopoverEntranceAnimation(page);
-    // Both sides are freshly-seeded, uniquely-named envs rather than the
-    // shared SEED_ENV_ALPHA baseline row. SEED_ENV_ALPHA's zone 2 (Activity,
-    // Usage, Cloud node) is not reset between specs -- another spec earlier
-    // in the same worker (e.g. sidebar-environment-usage.spec.ts) can leave a
-    // real Usage reading cached on it, stacking an age caption under the
-    // headline that a pristine env's zone 2 never renders. Comparing against
-    // that shared, mutable row made this assertion depend on suite ordering
-    // instead of on the fixed layout it's meant to lock down.
-    //
-    // The comparison below is over zone 2's ROWS, not its height. UsageState
-    // renders one line while the environment-usage sweep has no reading for
-    // the env and two (headline + age caption) once it does, and a fresh env
-    // starts unobserved -- the sweep runs on a 90s ticker and its first
-    // reading for a freshly seeded env can therefore land between the two
-    // reads below. That is a change of a value's line count, not of the
-    // zone's row set, so it is not what this test is about: a height
-    // comparison measures sweep timing as much as layout, and reported the
-    // conditional row as "changing zone 2" when only the reading's arrival
-    // had. What the Line mismatch row must not do is add, remove or move a
-    // row in zone 2, which comparing the rows states directly.
+    // Fresh envs, since SEED_ENV_ALPHA's zone 2 may carry a reading from another spec.
+    // Compare zone 2's rows, not its height: a sweep reading can land between reads and add a
+    // caption line.
     const plainEnvironment = uniqueEnvironmentName('line-mismatch-zone-plain');
     seedEnvironment(SEED_TENANT, plainEnvironment);
     const environment = uniqueEnvironmentName('line-mismatch-zone');
@@ -276,9 +215,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
         await expect(card.getByText('Line mismatch', { exact: true })).toBeVisible({
           timeout: 1_000,
         });
-        // The conditional row belongs to zone 1, not zone 2 -- read both so a
-        // row that landed in the wrong zone cannot pass by being present
-        // somewhere in the card.
+        // Read both zones so a row in the wrong zone can't pass.
         await expect(card.locator('dl').nth(0)).toContainText('Line mismatch', {
           timeout: 1_000,
         });
@@ -292,29 +229,19 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     }
   });
 
-  // A stale usage reading is degraded (muted, reduced opacity), never amber:
-  // nothing the operator did caused it and no action follows from it, so it
-  // must not look more alarming than an unmeasured number actually is (also
-  // relevant to #1805 -- the percentage itself is not authoritative for a
-  // build-capable environment).
+  // A stale reading must not look more alarming than it is.
   test('a stale usage reading renders degraded, not as an amber warning', async ({ app, page }) => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    // The CPU row, not the single `Usage` row: a cached reading renders CPU and
-    // Memory as separate rows, and a stale reading is still a reading.
+    // A cached reading renders CPU and Memory rows, not a single Usage row.
     const usageValue = card.locator('dt:text-is("CPU") + dd');
     let color = '';
-    // Every read -- including the two that used to run after this block --
-    // lives inside the one retryable attempt: the ongoing usage sweep can
-    // re-emit and re-render the row between the card converging and a
-    // subsequent un-retried read, dropping the card the same way a bare
-    // sequence of asserts after a single hover would.
+    // The usage sweep can re-render mid-read, so all reads stay in one retry.
     await expect(async () => {
       await emitStaleEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA);
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
       await expect(card).toContainText('Stale', { timeout: 1_000 });
-      // No alert icon -- a stale reading is not a warning.
       await expect(usageValue.locator('svg')).toHaveCount(0, { timeout: 1_000 });
       color = await usageValue
         .locator('span')
@@ -322,24 +249,17 @@ test.describe('sidebar env hover card layout (#1901)', () => {
         .evaluate((el) => window.getComputedStyle(el).color, undefined, { timeout: 1_000 });
     }).toPass();
 
-    // amber-700/amber-400 both render with a non-trivial red/green gap from
-    // blue; the degraded muted-foreground token is a desaturated grey. Assert
-    // the absence of amber rather than a hard-coded token, so a theme edit
-    // that keeps the token desaturated does not need to update this test.
+    // Assert the absence of amber rather than a specific token.
     const components = color.match(/\d+(\.\d+)?/g)?.map(Number) ?? [0, 0, 0];
     const r = components[0] ?? 0;
     const g = components[1] ?? 0;
     const b = components[2] ?? 0;
-    // Amber requires BOTH gaps at once; asserting each gap alone (rather than
-    // combining them into one boolean) keeps this test free of a conditional.
     expect(r - b, `expected a desaturated colour, got ${color}`).toBeLessThanOrEqual(40);
     expect(g - b, `expected a desaturated colour, got ${color}`).toBeLessThanOrEqual(10);
   });
 });
 
-// #1958 narrowed HOVER_CARD_GRID_CLASS's shared label column from 13ch to
-// 10ch. Both cards render through the one shared constant (Sidebar.HoverCardRow.tsx),
-// so both are asserted here rather than just the env card.
+// Both cards share the 10ch label column, so both are asserted.
 test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => {
   test('the env card label column resolves to 10ch, not the old 13ch', async ({ app, page }) => {
     await disablePopoverEntranceAnimation(page);
@@ -362,16 +282,8 @@ test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => 
   });
 });
 
-// The Usage figures are read from the runtime container's own cgroup, which
-// is never where a build runs -- every build executes in the erun-dind
-// sidecar instead, so the reading can look idle while that sidecar saturates
-// the node (#1979). A build-capable environment's caption says so on every
-// reading, not only while a build happens to be running -- there is no
-// reliable "a build is running" signal that covers every way one can start
-// (desktop, CLI, an MCP-driven orchestrator). A runtime-type environment has
-// no dind sidecar at all (erun-devops/k8s/erun-devops/templates/service.yaml,
-// `$dindEnabled`), so its reading is the whole story and must not carry the
-// caveat.
+// Usage comes from the runtime container's cgroup while builds run in the erun-dind sidecar, so
+// build-capable envs always carry the caveat; runtime envs have no sidecar.
 test.describe('sidebar env hover card usage caveat for build-capable environments (#1979)', () => {
   test('usage caption for a build-capable environment says it excludes builds', async ({
     app,
@@ -383,10 +295,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
-      // The caption names the rows the caveat applies to rather than standing
-      // alone: a Builds row of the sidecar's own now sits under CPU and Memory,
-      // and a bare "excludes builds" beside it would read as qualifying that
-      // row instead of them.
+      // The caption names its rows so it can't be read as qualifying the Builds row.
       await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
     }).toPass();
   });
@@ -414,23 +323,14 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
     }
   });
 
-  // The reported defect, on the surface it was reported against: the popover
-  // showed a build environment "Busy — holding: release 1.0.302" beside a CPU
-  // of 0.2%, because the figure was the runtime container's own cgroup. The
-  // work runs in the erun-dind sidecar, and the reader has always acquired that
-  // second reading — so a card that draws only the runtime container's number
-  // cannot tell a healthy build from a wedged one.
+  // The runtime container's CPU can't tell a healthy build from a wedged one, so the sidecar gets
+  // its own row.
   test('a build-capable environment renders the sidecar as its own Builds row', async ({
     app,
     page,
   }) => {
-    // The toPass retry nests hoverEnvironmentRow's own retry inside it, so a
-    // single slow hover attempt under contention can consume most of the
-    // default 30s test budget before the outer retry gets a second chance —
-    // same reason sidebar-environment-usage.spec.ts's driven-hover cases widen
-    // theirs. The outer retry is bare so that this declared budget is the one
-    // it spends: a cap of its own would take
-    // `min(this deadline, now + cap)` and make the widening below inert.
+    // Nested hover retries need more than the 30s default; the outer retry is uncapped so this
+    // budget applies.
     test.setTimeout(60_000);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(async () => {
@@ -441,30 +341,20 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
-      // The number that answers "is my build working", labelled so it cannot be
-      // confused with the runtime container's 12.0% two rows above it.
       await expect(card.getByText('Builds', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(card).toContainText('91.5%', { timeout: 1_000 });
       await expect(card).toContainText('erun-dind sidecar · 19.4Gi of 20.0Gi', {
         timeout: 1_000,
       });
-      // The caveat still applies to CPU and Memory, which is what it is for.
       await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
     }).toPass();
   });
 
-  // A sidecar with no cpu.max quota cannot report a percentage, and reporting
-  // nothing would put the operator back where they started — a build-capable
-  // environment whose only visible CPU figure is the runtime container's
-  // near-zero. The cumulative counter is a real measurement and is stated as
-  // CPU-seconds, with no decile strip: there is no ceiling to be a fraction of,
-  // and an empty strip would read as "measured 0%".
+  // Without a cpu.max quota there is no percentage, so show CPU-seconds and no strip.
   test('a sidecar with no CPU quota renders its cumulative CPU-seconds and no strip', async ({
     app,
     page,
   }) => {
-    // The preceding case's comment applies here too: the nested hover retries
-    // need more than the default test budget under contention.
     test.setTimeout(60_000);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(async () => {
@@ -485,29 +375,19 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       await expect(card).toContainText('erun-dind sidecar · 512Mi (no limit)', {
         timeout: 1_000,
       });
-      // Two strips — CPU and Memory — and none for the sidecar, whose reading
-      // has no ceiling to be a fraction of.
       await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     }).toPass();
   });
 
-  // The reported defect. An absent sidecar reading is a real state — an older
-  // runtime image, a sidecar mid-restart — and not the same as an environment
-  // that carries no sidecar. Both used to render as nothing, which left the
-  // card showing the runtime container's near-idle CPU and memory qualified
-  // only by the "excludes builds" caveat: a figure that reads as idle beside an
-  // Activity line saying a build is running. The not-read state gets the row,
-  // naming the container it could not reach.
+  // An unread sidecar is not the same as no sidecar, so the row says it couldn't be read.
   test('a build-capable environment whose sidecar could not be read says so instead of showing no Builds row', async ({
     app,
     page,
   }) => {
-    // The same nested-hover budget the cases above widen for.
     test.setTimeout(60_000);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(async () => {
-      // No reading supplied, but the environment carries the sidecar: exactly
-      // what the reader emits when its exec into the sidecar fails.
+      // The sidecar is present but unread, as after a failed exec.
       await emitEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA, 5, 90, undefined, true);
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
@@ -515,8 +395,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       await expect(card.getByText('Builds', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(card).toContainText('erun-dind sidecar', { timeout: 1_000 });
       await expect(card).toContainText('the sidecar could not be read', { timeout: 1_000 });
-      // Not-read is not a reading: no strip for it, unlike the measured CPU and
-      // memory above — and still not the zero the card must never fabricate.
+      // No strip for an unread value.
       await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     }).toPass();
   });

@@ -11,13 +11,10 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// pushNoticeStore is the smallest CloudReadStore the notice needs: a config
-// that either has an erun platform alias or has none at all, which is the
-// distinction that decides whether the check runs.
 type pushNoticeStore struct {
 	config configpkg.ERunConfig
 }
@@ -26,10 +23,7 @@ func (s pushNoticeStore) LoadERunConfig() (configpkg.ERunConfig, string, error) 
 	return s.config, "", nil
 }
 
-// pushNoticeSecrets is a CloudSecretStore holding one alias's cached access
-// token, so the lookup reaches the test server without minting anything: a
-// cached, unexpired token is what resolveERunAccessToken returns before it
-// ever considers a refresh grant.
+// A cached unexpired token is returned before any refresh grant is considered.
 type pushNoticeSecrets struct {
 	secrets map[string]string
 }
@@ -48,14 +42,13 @@ func (s pushNoticeSecrets) DeleteCloudSecret(ref string) error { delete(s.secret
 const pushNoticeAlias = "dev@erun"
 
 func pushNoticeStoreWithAlias(apiURL string) pushNoticeStore {
-	return pushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	return pushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    pushNoticeAlias,
 		Provider: configpkg.CloudProviderERun,
-		ERun:     &configpkg.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
+		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
 	}}}}
 }
 
-// pushNoticeDeps wires the cached token the lookup will authenticate with.
 func pushNoticeDeps(t *testing.T) cloud.CloudDependencies {
 	t.Helper()
 	cached, err := json.Marshal(cloud.ErunAccessTokenCache{
@@ -70,26 +63,19 @@ func pushNoticeDeps(t *testing.T) cloud.CloudDependencies {
 	}}
 }
 
-// pushNoticeContext is the CLI's own wiring: a push's diagnostics reach the
-// operator on stderr, so both of the logger's writers point at the one buffer
-// the test reads -- which is exactly where the warning is asserted to land.
+// pushNoticeContext points both logger writers at one buffer, as the CLI
+// sends push diagnostics to stderr.
 func pushNoticeContext(out *bytes.Buffer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out)}
 }
 
-func pushNoticeParams(branch string) PushedBranchReviewNoticeParams {
-	return PushedBranchReviewNoticeParams{Branch: branch, Remote: "origin"}
+func pushNoticeParams(branch string) model.PushedBranchReviewNoticeParams {
+	return model.PushedBranchReviewNoticeParams{Branch: branch, Remote: "origin"}
 }
 
-// pushNoticeWarningNeedle is the phrase only the warning carries, so a test
-// can assert on the warning alone rather than on the whole stream -- which
-// also holds the trace lines the same command legitimately prints.
+// pushNoticeWarningNeedle separates the warning from the command's trace lines.
 const pushNoticeWarningNeedle = "no review references it"
 
-// TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch is the
-// reproduction of the reported failure: a branch is pushed, the platform holds
-// no review for it, and nothing said so. The warning must name the branch and
-// the command that queues it.
 func TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch(t *testing.T) {
 	var requestedQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +83,7 @@ func TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch(t *te
 			t.Errorf("Authorization = %q, want the cached bearer token", r.Header.Get("Authorization"))
 		}
 		requestedQuery = r.URL.RawQuery
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{})
 	}))
 	defer srv.Close()
 
@@ -108,21 +94,16 @@ func TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch(t *te
 	if got := out.String(); !strings.HasSuffix(got, want) {
 		t.Fatalf("stderr = %q, want it to end with %q", got, want)
 	}
-	// The branch is matched by asking the platform for the review that
-	// references it, not by inferring one from the branch name.
 	if !strings.Contains(requestedQuery, "sourceBranch=feature%2F2204-orphan") {
 		t.Fatalf("query = %q, want it narrowed to the pushed branch's source branch", requestedQuery)
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch is the
-// other half of the same state: a queued branch must never be reported as an
-// orphan, whatever queue state its review is in.
 func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *testing.T) {
 	for _, status := range []string{"OPEN", "READY", "MERGE", "MERGED", "FAILED"} {
 		t.Run(status, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
+				_ = json.NewEncoder(w).Encode([]model.PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
 			}))
 			defer srv.Close()
 
@@ -135,12 +116,9 @@ func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *te
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview pins the one
-// state that is not a reference: a closed review queues nothing, so the branch
-// is an orphan again.
 func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
 	}))
 	defer srv.Close()
 
@@ -151,12 +129,10 @@ func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewMatchesTheSourceBranch guards against a
-// plane that answers with reviews for other branches -- reviews are named
-// after the eventual squash message, so only sourceBranch identifies one.
+// Reviews are named after the squash message, so only sourceBranch identifies one.
 func TestWarnPushedBranchWithoutReviewMatchesTheSourceBranch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{
 			{ReviewID: "r1", Name: "feature/2204-orphan", SourceBranch: "feature/2204-other", Status: "OPEN"},
 		})
 	}))
@@ -169,9 +145,6 @@ func TestWarnPushedBranchWithoutReviewMatchesTheSourceBranch(t *testing.T) {
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewSkipsTheRemoteDefaultBranch pins that
-// pushing the branch work targets is not an orphan: the check must not even
-// ask, since no review can reference it as a source.
 func TestWarnPushedBranchWithoutReviewSkipsTheRemoteDefaultBranch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the check queried the platform for the default branch: %s", r.URL.String())
@@ -185,9 +158,7 @@ func TestWarnPushedBranchWithoutReviewSkipsTheRemoteDefaultBranch(t *testing.T) 
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewSilentWithoutAnAlias is the contract that
-// keeps every machine with no platform configured on exactly today's push:
-// no network call, no output at all, not even a trace line.
+// No alias means no network call and no output at all, not even a trace line.
 func TestWarnPushedBranchWithoutReviewSilentWithoutAnAlias(t *testing.T) {
 	out := &bytes.Buffer{}
 	WarnPushedBranchWithoutReview(pushNoticeContext(out), pushNoticeStore{}, cloud.CloudDependencies{}, pushNoticeParams("feature/2204-orphan"))
@@ -196,10 +167,7 @@ func TestWarnPushedBranchWithoutReviewSilentWithoutAnAlias(t *testing.T) {
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewGivesUpQuietlyWhenThePlaneFails pins the
-// best-effort contract against the flakiness that motivated it: an unreachable
-// or failing plane must leave the push exactly as it was, with a trace line
-// and no warning, because a notice is never worth breaking a push that landed.
+// A failing plane leaves a trace line and no warning.
 func TestWarnPushedBranchWithoutReviewGivesUpQuietlyWhenThePlaneFails(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -228,9 +196,6 @@ func TestWarnPushedBranchWithoutReviewGivesUpQuietlyWhenThePlaneFails(t *testing
 	}
 }
 
-// TestWarnPushedBranchWithoutReviewTracesWithoutQueryingUnderDryRun keeps the
-// dry-run contract: the check is traced as the call it would make, and nothing
-// is sent.
 func TestWarnPushedBranchWithoutReviewTracesWithoutQueryingUnderDryRun(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("a dry run queried the platform: %s", r.URL.String())

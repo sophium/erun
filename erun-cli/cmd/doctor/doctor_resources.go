@@ -5,52 +5,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
-// doctorResourceInterval is the CPU sample window the resources section reads
-// over. Utilisation is a rate, so the reader has to elapse a window between two
-// reads of cpu.stat; one second is `erun usage`'s own default, and it keeps the
-// cost this section adds to every doctor run to a second.
+// doctorResourceInterval is the CPU sample window; utilisation is a rate.
 const doctorResourceInterval = time.Second
 
-// reportDoctorResources prints the environment's live CPU and memory pressure
-// together with the standing sizing verdict that answers it. Both already
-// existed -- `erun usage` computes them from the same cgroup counters -- and
-// doctor, the command an operator reaches for when an environment misbehaves,
-// reported neither: an environment pinned at 100% of its memory limit with real
-// OOM kills diagnosed as a disk question.
-//
-// The body is `erun usage`'s own renderer over the same paired report (one
-// reading, one recommendation), so the two commands cannot disagree about the
-// figure or about the remedy.
-//
-// It reports and never repairs. Applying the verdict rolls the runtime pod
-// (Recreate strategy) and kills whatever is running in it, so the command that
-// would apply it, with its values spelled out, is named and left for the
-// operator to run.
-//
-// A reading carrying no counters is reported as "not observed", never as a
-// healthy environment: an environment whose pod was just replaced has no
-// retained history to reason from, and one whose counters cannot be read at all
-// is exactly the case where saying nothing would read as saying it is fine.
-func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+// reportDoctorResources prints live CPU/memory pressure and the sizing verdict via
+// `erun usage`'s renderer. It never resizes: that rolls the pod and kills its work.
+func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis model.DeployDiagnosisResult) error {
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
-	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, podruntime.RuntimeUsageParams{Interval: doctorResourceInterval})
+	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, model.RuntimeUsageParams{Interval: doctorResourceInterval})
 	if err != nil {
 		return reportPodUnreachable(ctx, "Resources", err)
 	}
 	if ctx.DryRun {
-		// The read is already in the trace -- RunRuntimeUsage traces its exec
-		// and its script -- which is what a dry run owes for a check whose whole
-		// output is that read's result. Printing the figures here would print
-		// the zero reading a dry run returns.
+		// The read is already traced; a dry run's figures would be zero.
 		return nil
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "== Resources =="); err != nil {
@@ -60,18 +36,14 @@ func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, resul
 		return writeDoctorResourcesNotObserved(ctx, usage)
 	}
 	report := podruntime.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
-	if err := shared.WriteUsageResult(ctx, report); err != nil {
+	if err := usageview.WriteUsageResult(ctx, report); err != nil {
 		return err
 	}
 	return writeDoctorResizeNextAction(ctx, result, report.Sizing)
 }
 
-// writeDoctorResourcesNotObserved reports a reading that carries no counters at
-// all. The distinction it exists for is the one `erun usage` already draws for
-// its own unavailable fields: "nothing was observed" is not "nothing is wrong",
-// and a doctor section that stays silent here reads as a clean bill of health
-// for the one environment least able to say otherwise.
-func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage) error {
+// writeDoctorResourcesNotObserved reports missing counters as not observed, never as healthy.
+func writeDoctorResourcesNotObserved(ctx core.Context, usage model.RuntimeUsage) error {
 	reason := strings.TrimSpace(usage.Memory.Unavailable)
 	if reason == "" {
 		reason = strings.TrimSpace(usage.CPU.Unavailable)
@@ -86,24 +58,15 @@ func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage
 	return err
 }
 
-// writeDoctorResizeNextAction names the command that would apply the verdict,
-// with the values spelled out. Doctor never runs it: a resize rolls the runtime
-// pod and kills any live agent session inside it, so an environment silently
-// resized mid-run would be a worse failure than the pressure this reports. The
-// explicit values are the ones that work from anywhere -- `erun resize
-// --apply-recommendation` re-derives the verdict from the environment's
-// retained usage history, which is readable only from inside its own runtime
-// pod. A verdict that suggests nothing ("hold", or insufficient evidence) gets
-// no next action, because there is nothing to apply.
-func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *common.RuntimeSizingRecommendation) error {
+// writeDoctorResizeNextAction names the resize command with explicit values, which
+// work from anywhere (--apply-recommendation only works in-pod).
+func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *model.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}
 	flags := make([]string, 0, 2)
 	for _, verdict := range sizing.Verdicts {
-		switch verdict.Action {
-		case common.RuntimeSizingRaise, common.RuntimeSizingLower:
-		default:
+		if verdict.Action != model.RuntimeSizingRaise && verdict.Action != model.RuntimeSizingLower {
 			continue
 		}
 		switch verdict.Resource {

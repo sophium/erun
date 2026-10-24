@@ -1,8 +1,5 @@
-// OrchestratorShellActivityPayload drives the sidebar's "shell running"
-// indicator: a background shell an orchestrator started can outlive
-// the turn that started it, so this is independent of AIActivityPayload's
-// busy signal, not a variant of it. StartedAtUnix is only meaningful while
-// running is true.
+// OrchestratorShellActivityPayload is independent of AI busy: a background shell
+// can outlive its turn. StartedAtUnix is meaningful only while running.
 export interface OrchestratorShellActivityPayload {
   sessionId: number;
   running: boolean;

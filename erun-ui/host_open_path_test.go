@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
@@ -128,7 +128,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, eruncommon.DefaultRuntimeOutputsDir+"/erun-app.exe")
+	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, core.DefaultRuntimeOutputsDir+"/erun-app.exe")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "artifact" {
 		t.Fatalf("expected kind artifact, got %+v", resolution)
@@ -138,10 +138,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	}
 }
 
-// The regression #1354 exists to prevent: a pod path that happens to share a
-// name with a real host file (/etc/hosts is the canonical example) must never
-// resolve to that host file just because it falls outside the recognized pod
-// directories.
+// /etc/hosts must never resolve to the host file.
 func TestResolveEnvironmentHostPathNeverResolvesArbitraryPodPathToHost(t *testing.T) {
 	local := t.TempDir()
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})

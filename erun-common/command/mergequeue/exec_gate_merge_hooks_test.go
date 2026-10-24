@@ -4,14 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestGateMergeLandsTheSourceTreeEvenWhenAPreCommitHookRewritesIt is the
-// reproduction of the reported failure: the repository's pre-commit hook
-// reformatted a staged Go file under the host's newer toolchain while
-// gate-merge committed the squash, so the merge commit's tree differed from
-// the source branch that had been reviewed and built, and its build failed a
-// lint the source had passed. The landed tree must be the source's tree.
 func TestGateMergeLandsTheSourceTreeEvenWhenAPreCommitHookRewritesIt(t *testing.T) {
 	repo, _ := newRepoWithBareRemote(t)
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
@@ -28,8 +24,8 @@ func TestGateMergeLandsTheSourceTreeEvenWhenAPreCommitHookRewritesIt(t *testing.
 	}
 	runGitForTest(t, repo, "config", "core.hooksPath", hooks)
 
-	result, err := GateMergeWorkingTree(testTraceContext(false), repo, GateMergeWorkingTreeParams{
-		Sources:      []GateMergeSource{{Branch: "feature", Message: "Add the widget"}},
+	result, err := GateMergeWorkingTree(testTraceContext(false), repo, model.GateMergeWorkingTreeParams{
+		Sources:      []model.GateMergeSource{{Branch: "feature", Message: "Add the widget"}},
 		TargetBranch: "main",
 	}, GateMergeWorkingTreeDependencies{})
 	if err != nil {

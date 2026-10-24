@@ -7,45 +7,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/cmd/shared/desktop"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// staleAppBuiltAt and freshAppBuiltAt are the two modification times the
-// reported machine showed for its desktop app copies: one left beside the CLI
-// by an earlier build, and one ./erun-ui/build.sh had just written into the
-// checkout. Naming them keeps the freshness decisions below readable.
 var (
 	staleAppBuiltAt = time.Date(2026, 9, 20, 10, 43, 40, 0, time.UTC)
 	freshAppBuiltAt = time.Date(2026, 9, 20, 23, 48, 58, 0, time.UTC)
 )
 
-// cliBinDir is where the CLI binary sits in the build tree these tests model.
 func cliBinDir(root string) string { return filepath.Join(root, "erun-cli", "bin") }
 
-// checkoutBinDir is where a local ./erun-ui/build.sh writes its rebuild, and
-// so the second layout resolveAppExecutableNear derives from the CLI's own
-// location.
 func checkoutBinDir(root string) string { return filepath.Join(root, "erun-ui", "bin") }
 
-// appCopyPath is the path a launch has to name for a copy staged in dir: on
-// macOS the enclosing .app bundle, elsewhere the binary itself.
-func appCopyPath(dir string, hostOS core.HostOS, executableName string) string {
-	if hostOS == core.HostOSDarwin {
-		return filepath.Join(dir, shared.DesktopAppBundleName)
+// appCopyPath is the .app bundle on macOS, the binary elsewhere.
+func appCopyPath(dir string, hostOS model.HostOS, executableName string) string {
+	if hostOS == model.HostOSDarwin {
+		return filepath.Join(dir, desktop.DesktopAppBundleName)
 	}
 	return filepath.Join(dir, executableName)
 }
 
-// bundleExecutablePath is the executable inside a staged macOS bundle, the
-// one a rebuild that does not recreate the bundle replaces in place.
 func bundleExecutablePath(bundle, executableName string) string {
 	return filepath.Join(bundle, "Contents", "MacOS", executableName)
 }
 
-// cliExecutable writes the CLI binary the resolution starts from. Only its
-// directory decides anything, but writing it keeps the staged tree the same
-// shape as the one being modelled.
 func cliExecutable(t *testing.T, root string) string {
 	t.Helper()
 	path := filepath.Join(cliBinDir(root), "erun")
@@ -58,30 +44,38 @@ func cliExecutable(t *testing.T, root string) string {
 	return path
 }
 
-// stageAppCopy writes one desktop app copy into dir in the shape hostOS
-// launches, stamped with builtAt so a test controls which copy looks fresher.
-func stageAppCopy(t *testing.T, dir string, hostOS core.HostOS, executableName string, builtAt time.Time) string {
+func stageAppCopy(t *testing.T, dir string, hostOS model.HostOS, executableName string, builtAt time.Time) string {
 	t.Helper()
 	launch := appCopyPath(dir, hostOS, executableName)
-	if hostOS == core.HostOSDarwin {
-		binary := bundleExecutablePath(launch, executableName)
-		if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
-			t.Fatalf("create app bundle %s: %v", launch, err)
-		}
-		if err := os.WriteFile(binary, []byte("desktop app"), 0o755); err != nil {
-			t.Fatalf("write %s: %v", binary, err)
-		}
-		setAppModTime(t, binary, builtAt)
+	if hostOS == model.HostOSDarwin {
+		stageAppBundleExecutable(t, launch, executableName, builtAt)
 	} else {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create %s: %v", dir, err)
-		}
-		if err := os.WriteFile(launch, []byte("desktop app"), 0o755); err != nil {
-			t.Fatalf("write %s: %v", launch, err)
-		}
+		stagePlainAppExecutable(t, dir, launch)
 	}
 	setAppModTime(t, launch, builtAt)
 	return launch
+}
+
+func stageAppBundleExecutable(t *testing.T, launch, executableName string, builtAt time.Time) {
+	t.Helper()
+	binary := bundleExecutablePath(launch, executableName)
+	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+		t.Fatalf("create app bundle %s: %v", launch, err)
+	}
+	if err := os.WriteFile(binary, []byte("desktop app"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", binary, err)
+	}
+	setAppModTime(t, binary, builtAt)
+}
+
+func stagePlainAppExecutable(t *testing.T, dir, launch string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create %s: %v", dir, err)
+	}
+	if err := os.WriteFile(launch, []byte("desktop app"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", launch, err)
+	}
 }
 
 func setAppModTime(t *testing.T, path string, at time.Time) {
@@ -91,26 +85,20 @@ func setAppModTime(t *testing.T, path string, at time.Time) {
 	}
 }
 
-// TestResolveAppExecutableNearLaunchesTheFreshRebuildOverTheStaleCopy is the
-// reproduction of the reported relaunch-a-stale-bundle failure: with a copy
-// left beside the CLI and a newer rebuild in erun-ui/bin, both real
-// directories, the launch has to pick the rebuild. Taking the first copy that
-// exists picked the stale one instead, so the desktop silently kept running an
-// old build and every restart after it relaunched that same copy, because a
-// desktop restarts from the copy it is running from.
+// A desktop restarts from the copy it runs, so picking the stale copy would stick.
 func TestResolveAppExecutableNearLaunchesTheFreshRebuildOverTheStaleCopy(t *testing.T) {
 	t.Parallel()
 
 	const executableName = "erun-app"
 
-	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux} {
+	for _, hostOS := range []model.HostOS{model.HostOSDarwin, model.HostOSLinux} {
 		t.Run(string(hostOS), func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			staleCopy := stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			freshCopy := stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, freshAppBuiltAt)
 
-			chosen, trace := shared.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
+			chosen, trace := desktop.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
 
 			if chosen != freshCopy {
 				t.Errorf("resolved %q, want the fresh rebuild %q (the stale copy beside the CLI was %q)", chosen, freshCopy, staleCopy)
@@ -125,8 +113,6 @@ func TestResolveAppExecutableNearLaunchesTheFreshRebuildOverTheStaleCopy(t *test
 	}
 }
 
-// copyLocation names which of the two layouts a resolution is expected to
-// launch.
 type copyLocation int
 
 const (
@@ -135,21 +121,18 @@ const (
 	inCheckout
 )
 
-// desktopAppCopyCase is one freshness decision, staged as the two layouts a
-// build tree can hold at once.
 type desktopAppCopyCase struct {
 	name string
-	// darwinOnly marks a case staged in the .app bundle shape alone, where a
-	// rebuild can replace the bundle's executable without recreating it.
+	// darwinOnly: a rebuild can replace the bundle's executable without recreating it.
 	darwinOnly bool
-	stage      func(t *testing.T, root string, hostOS core.HostOS, executableName string)
+	stage      func(t *testing.T, root string, hostOS model.HostOS, executableName string)
 	want       copyLocation
 }
 
 var desktopAppCopyCases = []desktopAppCopyCase{
 	{
 		name: "a_newer_copy_beside_the_cli_wins",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, freshAppBuiltAt)
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
@@ -158,7 +141,7 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	{
 		name:       "a_rebuild_that_replaces_the_bundle_executable_in_place_wins",
 		darwinOnly: true,
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			bundle := stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			setAppModTime(t, bundleExecutablePath(bundle, executableName), freshAppBuiltAt)
@@ -167,7 +150,7 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 	{
 		name: "equal_timestamps_keep_the_copy_nearest_the_cli",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
@@ -175,40 +158,36 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 	{
 		name: "only_the_checkout_rebuild_present",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, freshAppBuiltAt)
 		},
 		want: inCheckout,
 	},
 	{
 		name: "only_the_copy_beside_the_cli_present",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
 		want: besideCLI,
 	},
 	{
 		name:  "no_copy_anywhere_resolves_nothing",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {},
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {},
 		want:  noCopy,
 	},
 	{
-		// A file where a bundle belongs on macOS, and a directory where a
-		// binary belongs elsewhere: neither is a copy any launch can start.
 		name: "a_layout_of_the_wrong_shape_is_not_a_copy",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			path := appCopyPath(cliBinDir(root), hostOS, executableName)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("create %s: %v", filepath.Dir(path), err)
 			}
-			if hostOS == core.HostOSDarwin {
-				// A bare file named ERun.app is not a bundle.
+			if hostOS == model.HostOSDarwin {
 				if err := os.WriteFile(path, []byte("placeholder"), 0o644); err != nil {
 					t.Fatalf("stage %s: %v", path, err)
 				}
 				return
 			}
-			// A directory does not stand in for the binary.
 			if err := os.Mkdir(path, 0o755); err != nil {
 				t.Fatalf("stage %s: %v", path, err)
 			}
@@ -217,20 +196,27 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 }
 
-// TestResolveAppExecutableNearChoosesAmongCopies covers the rest of the
-// freshness rule: the inverse of the reported shadowing, the case where the
-// rebuild replaced the bundle's executable in place, what a tie does, and what
-// is not a copy at all.
+func expectedAppCopyPath(root string, hostOS model.HostOS, executableName string, location copyLocation) string {
+	switch location {
+	case besideCLI:
+		return appCopyPath(cliBinDir(root), hostOS, executableName)
+	case inCheckout:
+		return appCopyPath(checkoutBinDir(root), hostOS, executableName)
+	case noCopy:
+	}
+	return ""
+}
+
 func TestResolveAppExecutableNearChoosesAmongCopies(t *testing.T) {
 	t.Parallel()
 
 	const executableName = "erun-app"
 
-	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux} {
+	for _, hostOS := range []model.HostOS{model.HostOSDarwin, model.HostOSLinux} {
 		t.Run(string(hostOS), func(t *testing.T) {
 			t.Parallel()
 			for _, tc := range desktopAppCopyCases {
-				if tc.darwinOnly && hostOS != core.HostOSDarwin {
+				if tc.darwinOnly && hostOS != model.HostOSDarwin {
 					continue
 				}
 				t.Run(tc.name, func(t *testing.T) {
@@ -238,14 +224,8 @@ func TestResolveAppExecutableNearChoosesAmongCopies(t *testing.T) {
 					root := t.TempDir()
 					tc.stage(t, root, hostOS, executableName)
 
-					want := ""
-					switch tc.want {
-					case besideCLI:
-						want = appCopyPath(cliBinDir(root), hostOS, executableName)
-					case inCheckout:
-						want = appCopyPath(checkoutBinDir(root), hostOS, executableName)
-					}
-					chosen, trace := shared.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
+					want := expectedAppCopyPath(root, hostOS, executableName, tc.want)
+					chosen, trace := desktop.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
 					if chosen != want {
 						t.Fatalf("resolved %q, want %q", chosen, want)
 					}

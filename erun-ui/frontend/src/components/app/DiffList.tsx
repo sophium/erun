@@ -20,9 +20,7 @@ export function DiffList(): React.ReactElement {
   if (targets.length === 0) {
     return <ReviewStatus>No environment selected</ReviewStatus>;
   }
-  // One section per environment, in the orchestrator's configured order. A
-  // single environment renders exactly as before -- no header, no chrome -- so
-  // the env-tab case is visually unchanged (#1178).
+  // A single environment renders without section chrome.
   const multi = targets.length > 1;
   return (
     <>
@@ -33,16 +31,8 @@ export function DiffList(): React.ReactElement {
   );
 }
 
-// DiffEnvSection renders one target's section -- its header, and its own
-// loading, error and empty states -- owning those states per target. That
-// containment is the load-bearing part: the single-slot panel cleared one
-// shared diff on any failure, so one stopped environment blanked every other
-// linked env's diff -- and an orchestrator's environments are rarely all
-// running at once, so that was the everyday state.
-//
-// The header lives in DiffList.EnvSectionHeader.tsx, split off for the shared
-// function-size and complexity budget (eslint.config.mjs) as much as for the
-// file's own line budget.
+// DiffEnvSection owns loading, error and empty states per target, so one
+// stopped environment does not blank the others.
 function DiffEnvSection({
   target,
   showHeader,
@@ -78,9 +68,6 @@ function DiffEnvSection({
   );
 }
 
-// DiffEnvSectionBody is DiffEnvSection's own body, split out so the
-// loading/error/empty/populated branching doesn't grow DiffEnvSection itself
-// past the shared function-size and complexity budget (eslint.config.mjs).
 function DiffEnvSectionBody({
   target,
   slot,
@@ -95,12 +82,7 @@ function DiffEnvSectionBody({
   selectedDiffPath: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // The line whose comment affordance the reader has revealed. It lives here,
-  // not in the row, because the row is not what the reveal belongs to: the
-  // panel re-reads the diff on its own timer and an answer that renders the
-  // change differently moves that row. Held by the line's own identity it
-  // survives the re-read; this is the nearest owner that stays mounted across
-  // one, since the rows below it are re-keyed by content and can remount.
+  // Held here by line identity, since re-reads can remount the rows below.
   const [revealedLine, setRevealedLine] = React.useState('');
   useRevealTracking(setRevealedLine);
   if (slot.loading) {
@@ -130,10 +112,7 @@ function DiffEnvSectionBody({
       />
     );
   }
-  // Keep the diff panel's files and their order matching the changed-files
-  // tree's visible subset; diff.files is already ordered to match the tree.
-  // Collapsed dirs are env-keyed, so one env's collapsed directory cannot
-  // hide a same-named directory in another.
+  // Collapsed dirs are env-keyed, so one env cannot hide another's same-named dir.
   const collapsedForEnv = new Set(
     collapsedDiffDirs
       .filter((entry) => entry.startsWith(`${target.envKey}:`))
@@ -162,15 +141,8 @@ function DiffEnvSectionBody({
   );
 }
 
-// useRevealTracking keeps the revealed line following the reader's pointer, and
-// only the reader's pointer. It listens for pointer *movement* rather than for
-// the boundary events of the row the pointer is over, because a re-read that
-// renders the change differently moves that row out from under a stationary
-// pointer and the browser synthesises pointerout/pointerover for it while no
-// pointermove ever fires. Releasing on those boundary events is exactly the
-// loss this state exists to prevent, so the reveal outlives them; the next
-// genuine movement re-derives it from whatever is under the pointer, which is
-// the line the native hover is showing too.
+// useRevealTracking listens for pointermove, not boundary events: a re-read
+// moving the row under a stationary pointer fires pointerout/over without moving.
 function useRevealTracking(setRevealedLine: (key: string) => void): void {
   React.useEffect(() => {
     const track = (event: PointerEvent): void => {
@@ -185,18 +157,12 @@ function useRevealTracking(setRevealedLine: (key: string) => void): void {
   }, [setRevealedLine]);
 }
 
-// targetTenant is the tenant a target's platform affordances anchor to, and "" for
-// a directory -- which has none -- so the diff renderer can leave a tenant-scoped
-// affordance out rather than render one that could only fail.
+// targetTenant is "" for a directory, which has no platform affordances.
 function targetTenant(target: ReviewTarget): string {
   return target.kind === 'env' ? target.tenant : '';
 }
 
-// reconnectActionFor is the error alert's reconnect action, and it exists only
-// for a target that has an environment to reconnect: reconnecting re-establishes
-// that environment's MCP forward, and a directory has no environment and no edge,
-// so the action would have nothing to re-establish. The alert takes it as
-// optional, so a directory's alert renders without one.
+// A directory has no environment to reconnect, so it gets no action.
 function reconnectActionFor(
   target: ReviewTarget,
   kind: ReachabilityKind,
@@ -210,10 +176,7 @@ function reconnectActionFor(
   };
 }
 
-// resolveDiffCommitHash is the commit a new diff-line thread anchors to: the
-// specific commit when one is selected, otherwise the newest commit the
-// diff's own range covers. Empty when the range covers only uncommitted
-// worktree changes, which have no commit id to anchor a comment to yet.
+// resolveDiffCommitHash is empty when the range covers only uncommitted changes.
 function resolveDiffCommitHash(diff: DiffResult | null | undefined): string {
   const selected = diff?.selectedCommit?.trim();
   if (selected) {
@@ -223,9 +186,6 @@ function resolveDiffCommitHash(diff: DiffResult | null | undefined): string {
   return commits[commits.length - 1]?.hash ?? '';
 }
 
-// diffErrorCopy resolves the title/body/technical-detail text and whether this
-// is the informational not-running case, as one pure step so DiffErrorAlert
-// itself only has layout branching left (#1230 pushed the complexity here).
 function diffErrorCopy(
   message: string,
   reconnectable: boolean | undefined,
@@ -254,9 +214,7 @@ export function DiffErrorAlert({
   onRetry: () => void;
   onReconnect?: () => void;
 }): React.ReactElement {
-  // A stopped/never-opened environment is the ordinary resting state, not a
-  // fault -- it renders as an informational status, not a red alert, with
-  // "Open" as the primary action instead of "Reconnect…" (#1230).
+  // A stopped environment is the normal resting state: informational, with "Open".
   const { notRunning, title, body, technicalMessage, action } = diffErrorCopy(
     message,
     reconnectable,
@@ -415,9 +373,7 @@ function DiffFileView({
     <section
       className="diff-file scroll-mt-4"
       data-path={file.path}
-      // Lets keyboard navigation resolve which section a focused hunk belongs
-      // to (reviewDiffKeyboardNav's startReviewForFocusedEnv) without threading
-      // envKey through every hunk element individually.
+      // Lets reviewDiffKeyboardNav map a focused hunk to its section.
       data-env-key={envKey}
       data-selected={selected || undefined}
     >
@@ -497,15 +453,8 @@ export function ReviewStatus({ children }: { children: React.ReactNode }): React
   return <div className="px-3 py-3.5 text-sm leading-[1.4] text-muted-foreground">{children}</div>;
 }
 
-// DiffEmptyState is the diff panel's (and the changed-files tree's) shared
-// empty-state render. The "current" scope only ever diffs uncommitted local
-// edits, so a clean worktree with commits ahead of the review base reads as
-// a flat "No changes" even though there is history waiting to be reviewed
-// under a different scope -- the result object already carries those commits
-// (DiffResult.reviewCommits), so asserting "no changes" without looking at
-// them would be exactly the confident-but-wrong empty state this component
-// exists to avoid. Other scopes ("all", "commit") have nothing further back
-// to point at, so they keep the plain message.
+// DiffEmptyState points the "current" scope at commits awaiting review
+// (DiffResult.reviewCommits) instead of a flat "No changes".
 export function DiffEmptyState({
   envKey,
   scope,

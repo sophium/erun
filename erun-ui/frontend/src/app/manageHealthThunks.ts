@@ -6,10 +6,7 @@ import { showTerminalError } from './notificationThunks';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppThunk } from './store';
 
-// checkManageEnvironmentHealth runs the out-of-pod "Check environment"
-// diagnostics for the managed env and stores the result on the dialog. It is an
-// explicit user action (never implicit on open) and side-effect-free — it only
-// reads config and queries the cluster.
+// checkManageEnvironmentHealth is read-only and runs only on explicit request.
 export const checkManageEnvironmentHealth =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const dialog = getState().manageDialog;
@@ -36,17 +33,11 @@ export const checkManageEnvironmentHealth =
     }
   };
 
-// deployFromHealthCheck is the "runtime not deployed" recovery: it triggers the
-// same deploy flow the pending-redeploy banner uses (build→push→deploy for a
-// local-agent env, deploy for a runtime env), closing the dialog so the deploy's
-// progress surfaces through the activity queue.
+// deployFromHealthCheck closes the dialog so progress shows in the activity queue.
 export const deployFromHealthCheck = (): AppThunk<Promise<void>> => async (dispatch) => {
   await dispatch(submitManageDeploy());
 };
 
-// focusRegistryFieldFromHealthCheck is the "no registry" recovery: it moves the
-// operator to the General tab's Container registries editor so they can add one
-// (recognition over recall — the fix is a named jump to the right control).
 export const focusRegistryFieldFromHealthCheck = (): AppThunk => (dispatch) => {
   dispatch(setManageTab('general'));
   window.setTimeout(() => {

@@ -13,9 +13,7 @@ import {
 import { useCopyAction, useStickToBottom } from './DebugPanel.hooks';
 import { CopyButton } from './DebugPanel.shared';
 
-// The UI trace buffer lives outside Redux (see uiTraceBuffer.ts), so this
-// pane polls it instead of subscribing to a selector. It is context-agnostic
-// and stays available in every DiagnosticsContext.
+// The UI trace lives outside Redux, so this pane polls it.
 export function UITracePane(): React.ReactElement {
   const [entries, setEntries] = React.useState<UITraceEntry[]>(() => uiTraceEntries());
   const generationRef = React.useRef(uiTraceGeneration());
@@ -37,8 +35,6 @@ export function UITracePane(): React.ReactElement {
   const { outputRef, handleScroll } = useStickToBottom(text);
   const { copyStatus, copy } = useCopyAction(text);
 
-  // Actions are pinned outside the scroll region — same rationale as the
-  // erun trace toolbar.
   return (
     <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
       <div className="flex items-center justify-end gap-1 px-3 pt-1.5 pb-1">

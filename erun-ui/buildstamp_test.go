@@ -7,13 +7,10 @@ import (
 	"testing"
 )
 
-// desktopModulePath is erun-app's module path, which is exactly what a -X target
-// for these vars must NOT be — see the guard below.
+// desktopModulePath is what a -X target must NOT use as its prefix.
 const desktopModulePath = "github.com/sophium/erun/erun-ui"
 
-// stampTargets are the linker-settable build vars. Referencing each var here is
-// deliberate: renaming one without updating this map stops compiling, so the
-// guard cannot quietly start checking a name nothing declares.
+// Referencing each var makes a rename fail to compile rather than go unchecked.
 var stampTargets = map[string]*string{
 	"buildVersion":      &buildVersion,
 	"buildCommit":       &buildCommit,
@@ -22,9 +19,7 @@ var stampTargets = map[string]*string{
 	"buildAgentsSource": &buildAgentsSource,
 }
 
-// buildScriptsProducingTheDesktop is every script that builds erun-app,
-// package-manager formulae included: a stamp only the module's own scripts get
-// right still leaves every installed desktop unstamped.
+// buildScriptsProducingTheDesktop includes package-manager formulae.
 var buildScriptsProducingTheDesktop = []string{
 	"build.sh",
 	"build.ps1",
@@ -32,12 +27,7 @@ var buildScriptsProducingTheDesktop = []string{
 	filepath.Join("..", "bucket", "erun.json"),
 }
 
-// TestBuildScriptsStampSymbolsThisPackageDeclares guards the one failure mode a
-// linker stamp has: -X addresses a symbol by package path, and a path no package
-// declares is dropped in silence rather than refused. These vars live in package
-// main — whose symbols are named `main.x` whatever the module is called — so a
-// module-path prefix builds a binary that looks correctly stamped and carries
-// nothing, which is how the desktop shipped a skills source it never had.
+// -X silently drops an unknown symbol path; package main symbols are `main.x`, not module-prefixed.
 func TestBuildScriptsStampSymbolsThisPackageDeclares(t *testing.T) {
 	for _, script := range buildScriptsProducingTheDesktop {
 		body := readBuildScript(t, script)
@@ -52,12 +42,7 @@ func TestBuildScriptsStampSymbolsThisPackageDeclares(t *testing.T) {
 	}
 }
 
-// TestDesktopBuildScriptsStampTheSkillsSource keeps the resolution the desktop
-// depends on wired at both ends. The stamp is the only thing that names this
-// build's skills once the bundle has been copied out of its checkout, so a
-// script that drops it silently returns the desktop to installing nothing. Only
-// the module's own scripts: a package-manager build runs in a source tree it
-// then deletes, so a path stamped there would name nothing on the target.
+// Only the module's own scripts: package-manager builds delete their source tree afterwards.
 func TestDesktopBuildScriptsStampTheSkillsSource(t *testing.T) {
 	for _, script := range []string{"build.sh", "build.ps1"} {
 		if !strings.Contains(readBuildScript(t, script), "main.buildSkillsSource=") {
@@ -66,11 +51,6 @@ func TestDesktopBuildScriptsStampTheSkillsSource(t *testing.T) {
 	}
 }
 
-// TestDesktopBuildScriptsStampTheAgentsSource is
-// TestDesktopBuildScriptsStampTheSkillsSource's counterpart for the reusable
-// agent definitions (erun-builder/erun-reviewer): a script that drops this
-// stamp silently returns the desktop to installing no agents once it runs
-// outside its checkout.
 func TestDesktopBuildScriptsStampTheAgentsSource(t *testing.T) {
 	for _, script := range []string{"build.sh", "build.ps1"} {
 		if !strings.Contains(readBuildScript(t, script), "main.buildAgentsSource=") {

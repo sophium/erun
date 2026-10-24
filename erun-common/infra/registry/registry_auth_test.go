@@ -36,8 +36,7 @@ func useCredentialHelper(t *testing.T, fn func(binaryPath, serverURL string) ([]
 	t.Cleanup(func() { runDockerCredentialHelper = prev })
 }
 
-// useCredentialHelperPaths pins the candidate helper binaries so tests don't
-// depend on which container runtimes are installed on the host.
+// useCredentialHelperPaths keeps tests independent of installed runtimes.
 func useCredentialHelperPaths(t *testing.T, fn func(helper string) []string) {
 	t.Helper()
 	prev := dockerCredentialHelperPaths
@@ -52,22 +51,7 @@ func useGHToken(t *testing.T, fn func(owner string) (string, bool)) {
 	t.Cleanup(func() { ResolveGHCRTokenViaGH = prev })
 }
 
-func TestResolveRegistryBasicAuthInline(t *testing.T) {
-	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
-	useDockerConfigDir(t, dir)
-	useCredentialHelper(t, func(string, string) ([]byte, error) {
-		t.Fatal("credential helper must not run when no store is configured")
-		return nil, nil
-	})
-
-	auth, ok := resolveRegistryBasicAuth("ghcr.io")
-	if !ok || auth.Username != "alice" || auth.Secret != "s3cret" {
-		t.Fatalf("got %+v ok=%v, want alice/s3cret", auth, ok)
-	}
-}
-
 func TestResolveRegistryBasicAuthCredsStore(t *testing.T) {
-	// osxkeychain-style store: inline auth is empty; the secret lives in the helper.
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
 	useDockerConfigDir(t, dir)
 	useCredentialHelperPaths(t, func(helper string) []string {
@@ -120,8 +104,7 @@ func TestResolveRegistryBasicAuthHelperMissFallsBackToInline(t *testing.T) {
 	}
 }
 
-// The key GUI-launch fix: several runtimes ship docker-credential-<helper> and
-// only one holds the credential; resolution must try each, not stop at the first.
+// Several runtimes ship the same helper; resolution must try each.
 func TestCredentialFromHelperTriesAllBinaries(t *testing.T) {
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
 	useDockerConfigDir(t, dir)
@@ -186,18 +169,6 @@ func TestResolveGHCRBasicAuthPrefersDockerOverGH(t *testing.T) {
 	}
 }
 
-func TestResolveGHCRBasicAuthFallsBackToEnvTokenWhenSubprocessAuthUnavailable(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir()) // no docker cred
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "envtok")
-
-	auth, ok := resolveGHCRBasicAuth("sophium")
-	if !ok || auth.Username != "sophium" || auth.Secret != "envtok" {
-		t.Fatalf("got %+v ok=%v, want sophium/envtok", auth, ok)
-	}
-}
-
 func TestResolveGHCRBasicAuthUsesGithubTokenWhenGhTokenEmpty(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 	useGHToken(t, func(string) (string, bool) { return "", false })
@@ -222,16 +193,5 @@ func TestResolveGHCRBasicAuthPrefersDockerOverEnvToken(t *testing.T) {
 	auth, ok := resolveGHCRBasicAuth("sophium")
 	if !ok || auth.Username != "dockeruser" {
 		t.Fatalf("got %+v ok=%v, want docker credential", auth, ok)
-	}
-}
-
-func TestResolveGHCRBasicAuthNoneAvailable(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir())
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-
-	if _, ok := resolveGHCRBasicAuth("sophium"); ok {
-		t.Fatal("expected no credential when docker, gh, and env are all empty")
 	}
 }

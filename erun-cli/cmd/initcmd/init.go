@@ -6,12 +6,14 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +22,8 @@ const (
 	enterKubernetesContextManuallyOption = "Enter Kubernetes context manually"
 )
 
-func NewInitCmd(runInit func(core.Context, common.BootstrapInitParams) error) *cobra.Command {
-	params := common.BootstrapInitParams{}
+func NewInitCmd(runInit func(core.Context, open.BootstrapInitParams) error) *cobra.Command {
+	params := open.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
 	clusterRegistry := false
@@ -39,7 +41,7 @@ func NewInitCmd(runInit func(core.Context, common.BootstrapInitParams) error) *c
 			if err != nil {
 				return err
 			}
-			return runInit(shared.CommandContext(cmd), runParams)
+			return runInit(clicmd.CommandContext(cmd), runParams)
 		},
 	}
 
@@ -71,24 +73,24 @@ func NewInitCmd(runInit func(core.Context, common.BootstrapInitParams) error) *c
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
 	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Save this as the env's default deploy component selection — what a later erun deploy rolls out with no --components flag of its own. Pass an empty string to clear a saved selection and return the env to its repo k8s.deployments plan")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry bool, envType string, components []string) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params open.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry bool, envType string, components []string) (open.BootstrapInitParams, error) {
 	runParams := params
 	applyPositionalInitArgs(&runParams, args)
 	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
-		return common.BootstrapInitParams{}, err
+		return open.BootstrapInitParams{}, err
 	}
 	if err := applyErunRegistryFlag(&runParams, erunRegistry, clusterRegistry); err != nil {
-		return common.BootstrapInitParams{}, err
+		return open.BootstrapInitParams{}, err
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
-		return common.BootstrapInitParams{}, err
+		return open.BootstrapInitParams{}, err
 	}
 	if err := validateInitRunParams(runParams); err != nil {
-		return common.BootstrapInitParams{}, err
+		return open.BootstrapInitParams{}, err
 	}
 	if cmd.Flags().Changed("set-default-tenant") {
 		runParams.ConfirmTenant = &setDefaultTenant
@@ -102,7 +104,7 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 	return runParams, nil
 }
 
-func applyPositionalInitArgs(runParams *common.BootstrapInitParams, args []string) {
+func applyPositionalInitArgs(runParams *open.BootstrapInitParams, args []string) {
 	if runParams.Tenant == "" && len(args) > 0 {
 		runParams.Tenant = args[0]
 	}
@@ -111,20 +113,19 @@ func applyPositionalInitArgs(runParams *common.BootstrapInitParams, args []strin
 	}
 }
 
-func applyClusterRegistryFlag(runParams *common.BootstrapInitParams, clusterRegistry bool) error {
+func applyClusterRegistryFlag(runParams *open.BootstrapInitParams, clusterRegistry bool) error {
 	if !clusterRegistry {
 		return nil
 	}
 	if strings.TrimSpace(runParams.ContainerRegistry) != "" {
 		return fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
 	}
-	// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
-	// rest (service/namespace/port) fill from the erun-registry convention.
+	// The in-cluster erun-registry is plain HTTP.
 	runParams.ClusterRegistry = &config.ClusterRegistry{Insecure: true}
 	return nil
 }
 
-func applyErunRegistryFlag(runParams *common.BootstrapInitParams, erunRegistry, clusterRegistry bool) error {
+func applyErunRegistryFlag(runParams *open.BootstrapInitParams, erunRegistry, clusterRegistry bool) error {
 	if !erunRegistry {
 		return nil
 	}
@@ -138,7 +139,7 @@ func applyErunRegistryFlag(runParams *common.BootstrapInitParams, erunRegistry, 
 	return nil
 }
 
-func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {
+func applyInitTypeFlag(cmd *cobra.Command, runParams *open.BootstrapInitParams, envType string) error {
 	envType = strings.TrimSpace(envType)
 	if envType == "" {
 		return nil
@@ -147,11 +148,8 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams
 	if !parsed.IsValid() {
 		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
-	// The deprecated --remote bool models "not local-agent" for exactly the
-	// two legacy types it predates; deriving it from RemoteWorktree (rather
-	// than repeating "!= local-agent" here) keeps host correctly reporting
-	// false instead of inheriting the old exclusion's wrong answer for it.
-	expectedRemote := (common.BootstrapInitParams{Type: parsed}).RemoteWorktree()
+	// Derived from RemoteWorktree so host reports false.
+	expectedRemote := (open.BootstrapInitParams{Type: parsed}).RemoteWorktree()
 	remoteFlag := cmd.Flags().Lookup("remote")
 	remoteChanged := remoteFlag != nil && remoteFlag.Changed
 	if remoteChanged && runParams.Remote != expectedRemote {
@@ -162,7 +160,7 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams
 	return nil
 }
 
-func validateInitRunParams(params common.BootstrapInitParams) error {
+func validateInitRunParams(params open.BootstrapInitParams) error {
 	if params.RemoteWorktree() && params.Tenant == "" {
 		return fmt.Errorf("tenant is required for non-local-agent envs")
 	}
@@ -172,7 +170,7 @@ func validateInitRunParams(params common.BootstrapInitParams) error {
 	return nil
 }
 
-func ContainerRegistryPrompt(run shared.PromptRunner, label string) (string, error) {
+func ContainerRegistryPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label:   label,
 		Default: config.DefaultContainerRegistry,
@@ -196,7 +194,7 @@ func ContainerRegistryPrompt(run shared.PromptRunner, label string) (string, err
 	return result, nil
 }
 
-func RemoteRepositoryURLPrompt(run shared.PromptRunner, label string) (string, error) {
+func RemoteRepositoryURLPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -214,7 +212,7 @@ func RemoteRepositoryURLPrompt(run shared.PromptRunner, label string) (string, e
 	return strings.TrimSpace(result), nil
 }
 
-func CodeCommitSSHKeyIDPrompt(run shared.PromptRunner, label string) (string, error) {
+func CodeCommitSSHKeyIDPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -232,27 +230,33 @@ func CodeCommitSSHKeyIDPrompt(run shared.PromptRunner, label string) (string, er
 	return strings.TrimSpace(result), nil
 }
 
-func KubernetesContextPrompt(run shared.PromptRunner, selectRun shared.SelectRunner, list shared.KubernetesContextsLister, label string) (string, error) {
-	if list != nil {
-		contexts, err := list()
-		if err == nil {
-			contexts = normalizeKubernetesContexts(contexts)
-			if len(contexts) > 0 && selectRun != nil {
-				selected, manual, err := selectKubernetesContextPrompt(selectRun, label, contexts)
-				if err != nil {
-					return "", err
-				}
-				if !manual {
-					return selected, nil
-				}
-			}
+func KubernetesContextPrompt(run promptpkg.PromptRunner, selectRun promptpkg.SelectRunner, list promptpkg.KubernetesContextsLister, label string) (string, error) {
+	contexts := listedKubernetesContexts(list)
+	if len(contexts) > 0 && selectRun != nil {
+		selected, manual, err := selectKubernetesContextPrompt(selectRun, label, contexts)
+		if err != nil {
+			return "", err
+		}
+		if !manual {
+			return selected, nil
 		}
 	}
 
 	return manualKubernetesContextPrompt(run, label)
 }
 
-func manualKubernetesContextPrompt(run shared.PromptRunner, label string) (string, error) {
+func listedKubernetesContexts(list promptpkg.KubernetesContextsLister) []string {
+	if list == nil {
+		return nil
+	}
+	contexts, err := list()
+	if err != nil {
+		return nil
+	}
+	return normalizeKubernetesContexts(contexts)
+}
+
+func manualKubernetesContextPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -281,7 +285,7 @@ func manualKubernetesContextPrompt(run shared.PromptRunner, label string) (strin
 	return result, nil
 }
 
-func selectKubernetesContextPrompt(run shared.SelectRunner, label string, contexts []string) (string, bool, error) {
+func selectKubernetesContextPrompt(run promptpkg.SelectRunner, label string, contexts []string) (string, bool, error) {
 	items := append(append([]string{}, contexts...), enterKubernetesContextManuallyOption)
 
 	prompt := promptui.Select{
@@ -359,24 +363,18 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
-// tenantPromptHasAnswer reports whether a non-terminal stdin carries an answer
-// to read. Piped input must keep driving the plain select exactly as it always
-// has, so this peeks rather than declaring every non-terminal stdin unanswerable:
-// only an exhausted stdin (the "< /dev/null" case) is.
+// tenantPromptHasAnswer peeks so piped answers still work; only an exhausted stdin is unanswerable.
 var tenantPromptHasAnswer = func() bool {
-	_, err := shared.PlainPromptInput().Peek(1)
+	_, err := promptpkg.PlainPromptInput().Peek(1)
 	return err == nil
 }
 
-// TenantSelectionUnavailable reports whether this run has no way to ask which
-// tenant to use, and so must not print a menu it cannot read an answer to. A
-// piped answer still counts as a way to ask -- the plain prompt reads it -- so
-// only an exhausted stdin is unanswerable.
+// TenantSelectionUnavailable reports whether stdin cannot answer a tenant prompt.
 func TenantSelectionUnavailable() bool {
-	return !shared.StdinIsTerminal() && !tenantPromptHasAnswer()
+	return !promptpkg.StdinIsTerminal() && !tenantPromptHasAnswer()
 }
 
-func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
+func SelectTenantPrompt(run promptpkg.SelectRunner, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)
@@ -391,17 +389,17 @@ func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) 
 	_, result, err := run(prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
-			return common.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
+			return model.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return common.TenantSelectionResult{}, nil
+			return model.TenantSelectionResult{}, nil
 		}
-		return common.TenantSelectionResult{}, err
+		return model.TenantSelectionResult{}, err
 	}
 
 	if result == initializeCurrentProjectOption {
-		return common.TenantSelectionResult{Initialize: true}, nil
+		return model.TenantSelectionResult{Initialize: true}, nil
 	}
 
-	return common.TenantSelectionResult{Tenant: result}, nil
+	return model.TenantSelectionResult{Tenant: result}, nil
 }

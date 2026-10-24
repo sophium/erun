@@ -7,11 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// runtimeShellHook is sourced by every shell in the pod. It records CLI activity
-// at each prompt, so an operator typing in a shell keeps the environment awake,
-// and signals a dark terminal so libraries that honour COLORFGBG skip the OSC 11
-// background-color query, whose reply would otherwise leak into the shell's stdin
-// through the desktop's PTY.
+// runtimeShellHook records CLI activity at each prompt and sets COLORFGBG so libraries skip
+// the OSC 11 query, whose reply would leak into stdin through the desktop's PTY.
 const runtimeShellHook = `# Written by erun runtime-init at every container boot; edits are replaced.
 export COLORFGBG='15;0'
 
@@ -36,10 +33,7 @@ func describeRuntimeShellHook(boot runtimeBoot) string {
 	return "write " + boot.path(".erun-shell-hook.bashrc") + " and source it from " + strings.Join(boot.runtimeShellProfiles(), ", ")
 }
 
-// runtimeShellProfiles are the startup files that source the hook: ~/.bashrc for
-// interactive shells, ~/.profile for login shells (every `sh -lc` remote exec),
-// and ~/.bash_profile only when one exists, since creating it would stop bash
-// reading ~/.profile.
+// ~/.bash_profile is used only when it exists: creating it would stop bash reading ~/.profile.
 func (b runtimeBoot) runtimeShellProfiles() []string {
 	profiles := []string{b.path(".bashrc"), b.path(".profile")}
 	if _, err := os.Stat(b.path(".bash_profile")); err == nil {
@@ -62,8 +56,6 @@ func installRuntimeShellHook(_ core.Context, boot runtimeBoot, _ *runtimeSupervi
 	return nil
 }
 
-// upsertRuntimeShellHookBlock replaces erun's managed block in a startup file,
-// keeping every other line, and appends it when absent.
 func upsertRuntimeShellHookBlock(path, block string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {

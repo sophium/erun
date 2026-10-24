@@ -25,7 +25,6 @@ export function cloudRegionLabel(region: string): string {
   return name ? `${region} (${name})` : region;
 }
 
-// Labels stay in user language, not the CLI token, per the Professional UX rules.
 export function cloudProviderTypeLabel(provider: string): string {
   switch (provider.trim().toLowerCase()) {
     case 'aws':
@@ -44,9 +43,7 @@ export function cloudProviderSummary(provider: {
   username?: string;
   accountId?: string;
 }): string {
-  // erun's alias always carries the fixed username "erun" (InitERunCloudProvider
-  // names it before any sign-in exists) — repeating it after the platform host
-  // would read as noise, so show just the host that identifies the platform.
+  // erun aliases always carry the username "erun", so show only the host.
   if (provider.provider.trim().toLowerCase() === CloudProviderERun) {
     return provider.accountId ? `Hosted platform at ${provider.accountId}` : 'Hosted erun platform';
   }

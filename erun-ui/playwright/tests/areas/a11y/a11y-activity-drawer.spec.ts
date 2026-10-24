@@ -2,15 +2,6 @@ import AxeBuilder from '@axe-core/playwright';
 
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
-// The activity drawer was a plain <div> toggling `aria-hidden` and a
-// CSS transform, so it was never a real dialog -- Escape did nothing, closing
-// it left every control (including Kill, which can terminate a running
-// deploy) sitting focusable inside an aria-hidden subtree, and one aria-live
-// region wrapped the whole card list, re-announcing each card's per-second
-// elapsed clock. It now renders on Radix's Dialog primitive, which gives focus
-// trap, Escape-to-close, and focus restoration for free, plus a narrow
-// announcer that only fires on a real status transition.
-
 async function emitActivity(
   page: import('@playwright/test').Page,
   entry: Record<string, unknown>,
@@ -44,9 +35,6 @@ test.describe('activity drawer accessibility', () => {
   }) => {
     await app.activityDrawer.open();
     await expect(app.activityDrawer.locator()).toBeVisible();
-    // Radix's focus trap puts initial focus inside the dialog on open.
-    // withTestBudget, not expect's 10s default: the trap focus is the app's
-    // own reaction to the open, and this test declared 30s for it.
     await expect
       .poll(
         () => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null),
@@ -56,8 +44,6 @@ test.describe('activity drawer accessibility', () => {
 
     await page.keyboard.press('Escape');
 
-    // The unmount and the focus restoration are both state transitions the
-    // app drives, so they converge on this test's budget too.
     await expect(app.activityDrawer.locator()).toHaveCount(0, withTestBudget());
     await expect(app.activityDrawer.launcher()).toBeFocused(withTestBudget());
   });
@@ -85,8 +71,7 @@ test.describe('activity drawer accessibility', () => {
       .locator()
       .locator('article')
       .filter({ hasText: 'rihards-review' });
-    // waitFor (not expect) converges against the enclosing test's own budget
-    // rather than the staged event's render racing expect's fixed one.
+    // waitFor defers to the enclosing test's budget.
     await card.getByText('Running', { exact: true }).waitFor({ state: 'visible' });
     await expect(card.getByText('Running', { exact: true })).toBeVisible();
   });
@@ -98,23 +83,16 @@ test.describe('activity drawer accessibility', () => {
     await emitActivity(page, runningEntry('a11y-status-2'));
     await app.activityDrawer.open();
 
-    // Scoped to the sr-only announcer only (not the header's "N now/next"
-    // count, which is also a live region but never carries an elapsed clock).
+    // The sr-only announcer, not the header count live region.
     const announcer = app.activityDrawer.locator().locator('.sr-only[role="status"]');
     await emitActivity(page, { ...runningEntry('a11y-status-2'), status: 'succeeded' });
 
-    // The announcer's text follows the second staged event, so it converges on
-    // this test's own budget rather than expect's 10s default.
     await expect(announcer).toContainText('petios/rihards-review Succeeded', withTestBudget());
-    // The elapsed clock renders as e.g. "3s" / "1m4s" -- the announcer's text
-    // must never take that shape, or a screen reader is back to hearing a tick.
+    // The announcer must never read like the elapsed clock ("3s", "1m4s").
     await expect(announcer).not.toHaveText(/^\d+s$|^\d+m\d+s$/);
   });
 
-  // Scoped to the one rule the old always-mounted-and-aria-hidden drawer
-  // violated (Kill and friends stayed focusable behind aria-hidden while
-  // "closed"); a whole-page scan would also flag unrelated, pre-existing
-  // findings elsewhere in the app that this issue doesn't cover.
+  // Scoped to one rule; a whole-page scan would flag unrelated findings.
   test('axe reports no aria-hidden-focus violations with the drawer open', async ({
     app,
     page,

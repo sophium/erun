@@ -17,7 +17,6 @@ var suiteMainTemplate string
 
 const suiteMainFile = "suite_main_test.go"
 
-// coreDir is the package that declares the timing seam a suite isolates.
 const coreDir = "base/core"
 
 var (
@@ -26,12 +25,12 @@ var (
 	timingSeam      = regexp.MustCompile(`\bTimingRecordDirEnv\s*=\s*"([^"]+)"`)
 )
 
-// writeSuiteMains gives every package the split created that has tests but
-// no TestMain one generated from suite_main_test.go.tmpl, so its tests are
-// isolated from the machine as the root package's are. It only runs in a
-// module whose base/core declares the timing seam the suite redirects.
-func writeSuiteMains(rootDir string) (int, error) {
-	timingEnv := timingSeamValue(filepath.Join(rootDir, filepath.FromSlash(coreDir)))
+// writeSuiteMains adds a generated TestMain to every tested package lacking
+// one, when the timing seam is known.
+func writeSuiteMains(rootDir, timingEnv string) (int, error) {
+	if timingEnv == "" {
+		timingEnv = timingSeamValue(filepath.Join(rootDir, filepath.FromSlash(coreDir)))
+	}
 	if timingEnv == "" {
 		return 0, nil
 	}
@@ -61,9 +60,7 @@ func writeSuiteMains(rootDir string) (int, error) {
 	return written, err
 }
 
-// skipsSuite says whether a directory, and everything under it, is left
-// alone: the tools under cmd/ have their own mains, and fixtures and hidden
-// directories are not packages of the module.
+// skipsSuite skips cmd/ tools, fixtures and hidden directories.
 func skipsSuite(rel, name string) bool {
 	return rel == "cmd" || strings.HasPrefix(rel, "cmd/") || name == "testdata" || strings.HasPrefix(name, ".")
 }
@@ -85,8 +82,6 @@ func writeSuiteMain(tmpl *template.Template, dir, timingEnv string) (bool, error
 	return true, os.WriteFile(filepath.Join(dir, suiteMainFile), src, 0o644)
 }
 
-// scanPackageTests reads a directory's Go files for its package name, whether
-// it has tests, and whether one of them already declares TestMain.
 func scanPackageTests(dir string) (pkg string, hasTests, hasMain bool, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -111,8 +106,6 @@ func scanPackageTests(dir string) (pkg string, hasTests, hasMain bool, err error
 	return pkg, hasTests, hasMain, nil
 }
 
-// timingSeamValue is the value base/core gives TimingRecordDirEnv, or empty
-// when the module has no such seam.
 func timingSeamValue(dir string) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -1,17 +1,6 @@
 #!/usr/bin/env node
-// Establish and save a browser login session (Playwright storageState) for a
-// host whose org blocks API tokens and admin-gates OAuth.
-//
-// Opens a REAL browser window; YOU log in interactively (SSO + MFA and all),
-// then press Enter to save the session cookies. No password is ever read or
-// stored — only the resulting session. Host-parameterized: the login URL comes
-// from ERUN_REST_LOGIN_URL or --login; the session file from ERUN_REST_SESSION
-// or --session (default ./session.json). See SKILL.md, including why the login
-// is intentionally manual (SSO-DOM automation is brittle and secret-leaky).
-//
-// Usage:
-//   ERUN_REST_LOGIN_URL=https://host/login node save-session.mjs
-//   node save-session.mjs --login https://host/login --session ./session.json
+// Saves an interactive browser login as Playwright storageState. Login is manual
+// by design and no password is read; see SKILL.md.
 import { chromium } from 'playwright';
 import { argv, env, exit, stdin, stdout } from 'node:process';
 import { createInterface } from 'node:readline';

@@ -17,8 +17,7 @@ type stubMachineIdentityProvisioner struct {
 	calls int
 	gotID string
 	err   error
-	// already is what the provisioner reports for the identity's second
-	// provisioning.
+	// already marks a repeat provisioning.
 	already bool
 }
 
@@ -54,9 +53,6 @@ func postMachineIdentity(t *testing.T, provisioner MachineIdentityProvisioner, e
 	return rec
 }
 
-// TestProvisionMachineIdentityReturnsTheCredentialForANewIdentity is the
-// ordinary call: the environment had no identity, so one was minted and 201
-// says so.
 func TestProvisionMachineIdentityReturnsTheCredentialForANewIdentity(t *testing.T) {
 	provisioner := &stubMachineIdentityProvisioner{}
 	rec := postMachineIdentity(t, provisioner, "env-1")
@@ -79,9 +75,6 @@ func TestProvisionMachineIdentityReturnsTheCredentialForANewIdentity(t *testing.
 	}
 }
 
-// TestProvisionMachineIdentityReportsAnExistingIdentityAsAlreadyEnrolled is
-// the idempotence visible at the surface: a second call is 200 with the
-// identity that already exists, not 201 with a second one.
 func TestProvisionMachineIdentityReportsAnExistingIdentityAsAlreadyEnrolled(t *testing.T) {
 	provisioner := &stubMachineIdentityProvisioner{already: true}
 	rec := postMachineIdentity(t, provisioner, "env-1")
@@ -98,10 +91,7 @@ func TestProvisionMachineIdentityReportsAnExistingIdentityAsAlreadyEnrolled(t *t
 	}
 }
 
-// TestProvisionMachineIdentityRefusesAnUnconfiguredControlPlane: the route is
-// registered even with no identity provider, and answers an actionable 501
-// rather than 404 -- a caller told the route does not exist cannot tell a
-// deployment gap from a typo.
+// 501, not 404, so a deployment gap is distinguishable from a typo.
 func TestProvisionMachineIdentityRefusesAnUnconfiguredControlPlane(t *testing.T) {
 	rec := postMachineIdentity(t, stubMachineIdentityUnconfigured{}, "env-1")
 
@@ -117,18 +107,12 @@ func TestProvisionMachineIdentityRefusesAnUnconfiguredControlPlane(t *testing.T)
 	}
 }
 
-// stubMachineIdentityUnconfigured is the provisioner of a control plane with
-// no identity provider it administers.
 type stubMachineIdentityUnconfigured struct{}
 
 func (stubMachineIdentityUnconfigured) Provision(context.Context, string) (service.MachineIdentityResult, error) {
 	return service.MachineIdentityResult{}, service.ErrMachineIdentityProviderUnavailable
 }
 
-// TestProvisionMachineIdentityRefusesATenantItCannotServeAsAConflict: the
-// tenant's own issuer mapping is the obstacle, not the control plane's
-// configuration and not the caller's request, so it is a 409 naming the
-// tenant's state rather than a 501.
 func TestProvisionMachineIdentityRefusesATenantItCannotServeAsAConflict(t *testing.T) {
 	provisioner := &stubMachineIdentityProvisioner{
 		err: fmt.Errorf("%w: every issuer it resolves by is single-tenant", service.ErrMachineIdentityUnavailable),
@@ -147,10 +131,6 @@ func TestProvisionMachineIdentityRefusesATenantItCannotServeAsAConflict(t *testi
 	}
 }
 
-// TestProvisionMachineIdentityReportsAnUnknownEnvironmentAsNotFound: an
-// environment id the caller's tenant does not have is a 404, the same answer
-// every other environment-scoped route gives, rather than a 500 the provider
-// never saw.
 func TestProvisionMachineIdentityReportsAnUnknownEnvironmentAsNotFound(t *testing.T) {
 	provisioner := &stubMachineIdentityProvisioner{err: repository.ErrNotFound}
 	rec := postMachineIdentity(t, provisioner, "env-missing")

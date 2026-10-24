@@ -25,11 +25,7 @@ type ManageDialog = AppState['manageDialog'];
 
 const PAIRED_LABEL = 'Published with the deployed version';
 
-// RuntimeChartField states the second deploy coordinate: which chart this
-// environment's runtime is installed from, independent of the version being
-// deployed (which names the image). The paired default is a named choice rather
-// than an empty field, so the common case is discoverable and the operator can
-// always get back to it.
+// RuntimeChartField names the chart the runtime is installed from, independent of the deployed version.
 export function RuntimeChartField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const [open, setOpen] = React.useState(false);

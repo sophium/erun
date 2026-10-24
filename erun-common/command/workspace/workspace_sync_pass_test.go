@@ -16,10 +16,8 @@ import (
 	"time"
 )
 
-// The host mirror deletes exactly what the pod's remote listing omits, so these
-// tests drive a whole sync pass against a stub `ssh` — the level the mirror
-// actually failed at. A helper-level test cannot see it: the delete helper was
-// always correct, and the listing it was handed was not.
+// These tests drive a whole pass against a stub `ssh`, since the defect was in the listing
+// the delete step was handed.
 
 const (
 	workspaceSyncSSHStubEnv           = "ERUN_COMMON_TEST_SSH_STUB"
@@ -40,10 +38,7 @@ func init() {
 		if os.Getenv(workspaceSyncSSHStubEnv) == "" {
 			return 0, false
 		}
-		// The test executable is copied onto a PATH the pass sees, and
-		// re-entering it with the stub env var set answers the remote commands
-		// instead of running the suite. Compiling the stub from the test binary
-		// keeps it executable on every host, which a shell script is not.
+		// Re-exec the test binary as the stub; a shell script is not executable on every host.
 		return runWorkspaceSyncSSHStub(os.Args), true
 	})
 }
@@ -54,13 +49,11 @@ func runWorkspaceSyncSSHStub(args []string) int {
 		script = args[len(args)-1]
 	}
 	switch {
-	// The fingerprint listing pipes the index listing into stat, so it has to be
-	// matched before the plain index listing it contains.
+	// The fingerprint listing contains the index listing, so match it first.
 	case strings.Contains(script, "stat -c"):
 		_, _ = os.Stdout.WriteString(os.Getenv(workspaceSyncStubStatEnv))
 		return 0
 	case strings.Contains(script, "git ls-files -coz"):
-		// The index listing, which is what a worktree deletion does not change.
 		writeNULList(os.Getenv(workspaceSyncStubIndexEnv))
 		return 0
 	case strings.Contains(script, "git ls-files -dz"):
@@ -78,13 +71,8 @@ func runWorkspaceSyncSSHStub(args []string) int {
 	return 1
 }
 
-// runWorkspaceSyncSSHStubOutputsHash answers the outputs content-hash call:
-// the requested paths arrive NUL-delimited on stdin (mirroring the real
-// `xargs -0`), and the stub hashes each path's real bytes out of the prepared
-// archive (workspaceSyncStubArchiveEnv) so a test can prove the hash is
-// content-derived, not name-derived — a path missing from the archive falls
-// back to hashing its own name, which is deterministic but never equal to a
-// real content hash, so it never spuriously reads as "unchanged".
+// runWorkspaceSyncSSHStubOutputsHash hashes real archive bytes so tests prove the hash is
+// content-derived; a missing path hashes its name, which never equals a content hash.
 func runWorkspaceSyncSSHStubOutputsHash() int {
 	stdin, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -108,9 +96,6 @@ func runWorkspaceSyncSSHStubOutputsHash() int {
 	return 0
 }
 
-// readStubArchiveContents reads the plain tar writeWorkspaceSyncArchive built
-// into a name->bytes map. An empty path (no archive configured) yields an
-// empty map.
 func readStubArchiveContents(path string) map[string][]byte {
 	contents := make(map[string][]byte)
 	if path == "" {
@@ -138,13 +123,8 @@ func readStubArchiveContents(path string) map[string][]byte {
 	return contents
 }
 
-// runWorkspaceSyncSSHStubOutputsListing answers the outputs-dir `find`
-// listing. workspaceSyncStubOutputsExitEnv overrides the exit code outright,
-// letting a test simulate the ssh connection itself failing (255) or `find`
-// failing once inside the dir (any other non-zero, non-sentinel code) --
-// otherwise an empty workspaceSyncStubOutputsEnv reports the script's own
-// "confirmed absent" sentinel (remoteOutputsDirAbsentExitCode), matching a
-// `cd` into a not-yet-created outputs dir.
+// runWorkspaceSyncSSHStubOutputsListing: workspaceSyncStubOutputsExitEnv overrides the exit
+// code; an empty listing reports the absent sentinel.
 func runWorkspaceSyncSSHStubOutputsListing() int {
 	if code := strings.TrimSpace(os.Getenv(workspaceSyncStubOutputsExitEnv)); code != "" {
 		n, convErr := strconv.Atoi(code)
@@ -164,10 +144,7 @@ func runWorkspaceSyncSSHStubOutputsListing() int {
 	return 0
 }
 
-// streamWorkspaceSyncStubArchive plays back a prepared archive so a pass reaches
-// its extract step for real. The gate and truncate knobs place a pass at a
-// chosen point — mid-transfer, or dead mid-transfer — which is where a mirror
-// that published in place handed out a prefix.
+// streamWorkspaceSyncStubArchive's gate and truncate knobs park a pass mid-transfer or kill it there.
 func streamWorkspaceSyncStubArchive() int {
 	if marker := os.Getenv(workspaceSyncStubFetchMarkerEnv); marker != "" {
 		_ = os.WriteFile(marker, []byte("fetched"), 0o644)
@@ -196,8 +173,6 @@ func streamWorkspaceSyncStubArchive() int {
 	if _, err := os.Stdout.Write(body[:half]); err != nil {
 		return 1
 	}
-	// Announce only once the bytes are with the extractor, then hold until the
-	// test has finished looking at the mirror.
 	_ = os.WriteFile(gate+".reached", []byte("reached"), 0o644)
 	if !awaitWorkspaceSyncStubGate(gate) {
 		return 1
@@ -206,9 +181,7 @@ func streamWorkspaceSyncStubArchive() int {
 	return 0
 }
 
-// awaitWorkspaceSyncStubGate blocks until the test opens the gate. The interval
-// is backoff, not synchronisation: the stub proceeds on the file existing, never
-// on elapsed time.
+// The interval is backoff; the stub proceeds on the gate file existing.
 func awaitWorkspaceSyncStubGate(gate string) bool {
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
@@ -266,15 +239,10 @@ func seedWorkspaceMirror(t *testing.T, root string, files ...string) {
 	}
 }
 
-// TestSyncWorkspaceOncePropagatesAnUnstagedWorktreeDeletion is the regression:
-// `git ls-files -c` reports the pod's index, so a file removed with a plain `rm`
-// keeps appearing as a remote file and the mirror kept it indefinitely. The pass
-// must reconcile against the worktree, and must do so even when the fetch step
-// fails — a stranded fetch must never stall deletions.
+// Deletions must propagate from the worktree, not the index, even when the fetch fails.
 func TestSyncWorkspaceOncePropagatesAnUnstagedWorktreeDeletion(t *testing.T) {
 	mirror := t.TempDir()
 	seedWorkspaceMirror(t, mirror, "app/keep.go", "app/gone.go")
-	// gone.go is still in the pod's index and no longer in its worktree.
 	stubWorkspaceSyncSSH(t, []string{"app/keep.go", "app/gone.go"}, []string{"app/gone.go"})
 
 	result, err := SyncWorkspaceOnce(context.Background(), WorkspaceSyncParams{
@@ -296,8 +264,6 @@ func TestSyncWorkspaceOncePropagatesAnUnstagedWorktreeDeletion(t *testing.T) {
 	}
 }
 
-// A file present in both the index and the worktree is never deleted, so the
-// worktree reconciliation cannot turn into a mirror that empties itself.
 func TestSyncWorkspaceOnceKeepsFilesThePodStillHas(t *testing.T) {
 	mirror := t.TempDir()
 	seedWorkspaceMirror(t, mirror, "app/keep.go")

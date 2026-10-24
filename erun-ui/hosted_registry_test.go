@@ -7,9 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestLoadHostedRegistryDelegatesToDeps locks down that the Wails-exported
-// method is a thin pass-through to the injected probe, mirroring how
-// LoadClusterRegistry defers to deps.loadClusterRegistry.
 func TestLoadHostedRegistryDelegatesToDeps(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
@@ -34,12 +31,8 @@ func TestLoadHostedRegistryDelegatesToDeps(t *testing.T) {
 	}
 }
 
-// TestHostedRegistryProbeOverridePinsTheAnswer locks down the seam the
-// headless Playwright harness depends on: page.route can stub the Wails
-// method a spec calls, but not the outbound HTTP call the real probe would
-// make underneath it, so an unstubbed spec needs a deterministic answer with
-// no network access at all. ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE must win
-// regardless of what a real probe would have found.
+// The headless Playwright harness cannot stub the probe's outbound HTTP, so
+// the override must win.
 func TestHostedRegistryProbeOverridePinsTheAnswer(t *testing.T) {
 	t.Setenv("ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE", "1")
 	deps := withDefaultRuntimeDeps(erunUIDeps{})
@@ -53,9 +46,6 @@ func TestHostedRegistryProbeOverridePinsTheAnswer(t *testing.T) {
 	}
 }
 
-// TestHostedRegistryProbeOverrideUnsetFallsBackToRealProbe pins that the
-// override is opt-in: with no env var set, the default dep still resolves to
-// a real probe rather than a fixed answer (production behavior unchanged).
 func TestHostedRegistryProbeOverrideUnsetFallsBackToRealProbe(t *testing.T) {
 	deps := withDefaultRuntimeDeps(erunUIDeps{})
 
@@ -70,13 +60,7 @@ func TestHostedRegistryProbeOverrideUnsetFallsBackToRealProbe(t *testing.T) {
 	}
 }
 
-// TestLoadHostedRegistryDefaultMapsAnUnreachableProbe locks down the negative
-// this whole change exists for: an unreachable hosted registry must resolve
-// to available=false with a reason and recovery a caller can show, not to a
-// Go error the App method would otherwise have to swallow or misreport as
-// "available". An already-canceled context forces the probe to fail without
-// depending on real DNS behavior, so the test is deterministic regardless of
-// whether this host happens to resolve on the machine running it.
+// A canceled context fails the probe without depending on DNS.
 func TestLoadHostedRegistryDefaultMapsAnUnreachableProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -1,6 +1,4 @@
-// Package env builds an isolated execution environment for a single erun
-// integration scenario, so subprocesses see deterministic paths and don't
-// collide with each other or with the developer's real config.
+// Package env builds an isolated environment for one erun integration scenario.
 package env
 
 import (
@@ -13,23 +11,11 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// shellUtilities are the POSIX utilities the suite's own stub scripts invoke
-// (counters, marker files, heredocs). They are forwarded into every scenario's
-// PATH because a stub runs as a child of the binary under test and inherits its
-// PATH; everything else the host has installed stays unreachable. Adding a name
-// here is a deliberate act: it must be a utility a stub script needs, never a
-// tool erun itself invokes.
+// shellUtilities are forwarded onto PATH for the suite's stub scripts only; never add a tool erun itself invokes.
 var shellUtilities = []string{"cat", "dirname", "mkdir", "sleep", "touch", "tr", "wc"}
 
-// hostTools are the host executables erun itself may resolve, forwarded through
-// their declared ERUN_<NAME>_BIN seam rather than through PATH. Both entries are
-// irreducible host dependencies: the fixtures build real repositories with git
-// and the release/diff/exec scenarios read real git state, and the workspace
-// mirror's fetch lane extracts a real archive with tar — a stub can answer a
-// listing but cannot extract, so without a real tar the lane that publishes
-// files into the mirror is unreachable from the binary. Both ship in the
-// golang image the build gate runs in. A scenario that wants a scripted tool
-// appends its own ERUN_<NAME>_BIN after Env() (the later duplicate wins).
+// hostTools are real host executables erun needs (git for real repos, tar for the mirror fetch lane),
+// routed through ERUN_<NAME>_BIN rather than PATH. A later duplicate ERUN_<NAME>_BIN wins.
 var hostTools = []string{"git", "tar"}
 
 // Setup is the resolved environment for a single subprocess invocation.
@@ -39,85 +25,44 @@ type Setup struct {
 	CacheHome  string
 	DataHome   string
 	Cwd        string
-	// PathDir is the scenario's entire PATH: the host's PATH is deliberately
-	// not inherited, so a command can only reach an external binary the
-	// scenario declared. See scrubbedPathDir.
-	PathDir string
-	// toolBins routes hostTools to their absolute host paths.
+	// PathDir is the scenario's entire PATH; the host PATH is not inherited.
+	PathDir  string
 	toolBins []string
 	// stubShell is the absolute POSIX shell the Windows stub runner needs.
 	stubShell string
 }
 
-// Env returns the subprocess environment as a fresh slice each call, so
-// callers can append scenario-specific vars.
+// Env returns a fresh slice each call so callers can append; a later duplicate var wins.
 func (s Setup) Env() []string {
 	return append([]string{
 		"HOME=" + s.Home,
 		"XDG_CONFIG_HOME=" + s.ConfigHome,
 		"XDG_CACHE_HOME=" + s.CacheHome,
 		"XDG_DATA_HOME=" + s.DataHome,
-		// Windows home resolution reads %USERPROFILE%/%LOCALAPPDATA%, not HOME/XDG,
-		// so isolate them too — otherwise erun resolves the real user profile (e.g.
-		// the trace-log path fails with "%userprofile% is not defined"). Inert on
-		// Unix, where erun ignores these, so macOS/Linux goldens are unaffected.
+		// Windows resolves home from these, not HOME/XDG; inert on Unix.
 		"USERPROFILE=" + s.Home,
 		"LOCALAPPDATA=" + s.ConfigHome,
 		"APPDATA=" + s.ConfigHome,
-		// The scenario's PATH holds nothing but the utility forwarders in
-		// scrubbedPathDir. A command under test therefore behaves the same on a
-		// laptop, in the agent pod, and in the runtime image's test stage — none
-		// of which agree about what is installed — and a scenario that needs
-		// kubectl/helm/docker/aws must declare a stub for it.
+		// Only the forwarders, so behavior matches across hosts; external tools must be stubbed.
 		"PATH=" + s.PathDir,
-		// LANG is required by some path-handling code that calls into glibc.
 		"LANG=C.UTF-8",
-		// Prevent the subprocess from picking up the developer's terminal
-		// config and accidentally writing colored output that destabilizes
-		// goldens.
 		"TERM=dumb",
 		"NO_COLOR=1",
-		// Point the agent-skills seam at a non-existent path so a host that
-		// bakes skills into its image can't leak them into doctor output and
-		// drift the in_runtime_* goldens. Scenarios that exercise the skills
-		// row append their own ERUN_SKILLS_DIR after Env() (the later
-		// duplicate wins).
+		// Keeps skills baked into a host image out of doctor output.
 		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
-		// Answer the published-runtime-chart existence probe from a static list
-		// so deploy never reaches a real registry and drifts a golden by whatever
-		// charts happen to be published there. The default marks only the shared
-		// erun-devops chart published, at any version -- the realistic baseline,
-		// since a real deploy only ever runs against a version erun has already
-		// released -- while a tenant's own umbrella (e.g. team-devops) stays
-		// unpublished by default, which is what most scenarios want to
-		// distinguish. Scenarios that exercise a narrower shape (a specific
-		// registry, a specific version, "nothing is published at all") append
-		// their own ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later
-		// duplicate wins).
+		// Deploy never probes a real registry: only erun-devops is published, at any version.
 		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
-		// Answer the "does the live release already have MCP auth enabled?" probe
-		// as unknown, so a deploy that resolves no MCP auth never reads helm and
-		// no scenario depends on a real release (or consumes a helm stub call).
-		// Scenarios that exercise the downgrade guard append their own
-		// ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE after Env() (the later duplicate wins).
+		// The live MCP-auth probe reads as unknown, so deploy never reads helm.
 		"ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=",
-		// The shell the Windows stub runner launches a stub's script body with.
-		// A stub inherits the scrubbed PATH, so it cannot find one there; this is
-		// the same absolute-path routing hostTools uses for git. Empty when the
-		// host has no POSIX shell, which only matters on Windows.
+		// A stub cannot find a shell on the scrubbed PATH; empty without a POSIX shell (Windows only).
 		"ERUN_STUB_SH=" + s.stubShell,
 	}, s.toolBins...)
 }
 
-// New creates a fresh Setup rooted at a per-test temp directory.
 func New(t testing.TB) Setup {
 	t.Helper()
 	root := t.TempDir()
-	// Canonicalize to the physical path: macOS $TMPDIR lives under
-	// /var/folders, a symlink into /private/var, while the binary under test
-	// always reports physical paths. Without this, path-equality checks (e.g.
-	// tenant projectroot matching) flake on whichever TMPDIR spelling the
-	// invoking shell used.
+	// macOS $TMPDIR is a symlink, while the binary reports physical paths.
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
@@ -131,9 +76,7 @@ func New(t testing.TB) Setup {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
-	// The CLI under test runs git with this HOME, so this is its global config:
-	// automatic maintenance off, for the reason harnessexec gives for the
-	// harness's own git children.
+	// This is git's global config for the CLI under test: automatic maintenance off.
 	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(harnessexec.MaintenanceOffGitConfig), 0o644); err != nil {
 		t.Fatalf("write scenario git config: %v", err)
 	}
@@ -149,12 +92,7 @@ func New(t testing.TB) Setup {
 	}
 }
 
-// stubShellPath resolves the POSIX shell a stub script body runs under. On Unix
-// it is whatever `sh` the host has. On Windows the shell is not on the scenario
-// PATH and Windows cannot execute a shebang script at all, so the stub runner
-// needs an absolute path to one — and Git for Windows ships it beside the git
-// the suite already requires, which is why deriving it from the resolved git is
-// enough rather than adding a second host prerequisite.
+// stubShellPath resolves sh, falling back on Windows to the one Git for Windows ships beside git.
 func stubShellPath(t testing.TB) string {
 	t.Helper()
 	if path, err := osexec.LookPath("sh"); err == nil {
@@ -176,12 +114,8 @@ func stubShellPath(t testing.TB) string {
 	return ""
 }
 
-// scrubbedPathDir builds the one directory a scenario's PATH points at: a
-// forwarder per shellUtilities entry, and nothing else. Forwarders rather than
-// the host's own bin directories, because those also hold whatever tools the
-// developer installed — the ambient kubectl that made a golden depend on the
-// recording machine. Forwarders rather than symlinks, because Windows hosts
-// cannot create them without elevation.
+// scrubbedPathDir holds one forwarder per shellUtilities entry, keeping ambient host tools off PATH.
+// Forwarders, not symlinks, because Windows needs elevation to create symlinks.
 func scrubbedPathDir(t testing.TB, dir string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -197,9 +131,6 @@ func scrubbedPathDir(t testing.TB, dir string) string {
 	return dir
 }
 
-// hostToolBins routes each hostTools entry to its absolute host path through the
-// ERUN_<NAME>_BIN seam production already honors, so the tool stays reachable
-// with the PATH scrubbed.
 func hostToolBins(t testing.TB) []string {
 	t.Helper()
 	out := make([]string, 0, len(hostTools))

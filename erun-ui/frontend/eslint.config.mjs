@@ -6,19 +6,8 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// Frontend lint config. Mirrors the Go side's golangci.yml rigor and goes
-// further: cyclop:10 + funlen:100/50 on the Go side ⇒ complexity:10 +
-// max-lines-per-function:100 here; staticcheck + govet + errcheck ⇒
-// strictTypeChecked + stylisticTypeChecked. Every rule here is `error`;
-// inline disables and rule downgrades are not allowed (see
-// ~/.claude/projects/<this-repo>/memory/feedback_lint_no_disable.md).
-//
-// approaching-max-lines aliases the builtin max-lines implementation under a
-// second rule id so it can run at 'warn' with its own, lower threshold
-// alongside the 'error'-level max-lines below — the same counting rule ESLint
-// itself uses, just fired earlier, so a change that crosses 450 lines says so
-// in its own lint output instead of the next unrelated PR hitting the 500 cap
-// blind (#1302).
+// Every rule is `error`; inline disables and downgrades are not allowed.
+// approaching-max-lines aliases max-lines at 'warn' with a lower cap as an early warning.
 const approachingMaxLines = builtinRules.get('max-lines');
 
 export default tseslint.config(
@@ -61,8 +50,6 @@ export default tseslint.config(
           IIFEs: true,
         },
       ],
-      // Per-file size complements the per-function budget: a file of
-      // many small functions is fine; a 1500-line module is not.
       'max-lines': [
         'error',
         {
@@ -71,8 +58,6 @@ export default tseslint.config(
           skipComments: true,
         },
       ],
-      // Warning band ahead of the error cap above: fires 50 lines earlier so
-      // a change entering the last stretch says so in its own output.
       'lines-budget/approaching-max-lines': [
         'warn',
         {
@@ -89,11 +74,8 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
-      // A scrollable content region has no ARIA role that jsx-a11y classifies
-      // as interactive, yet WCAG 2.1.1 / axe's scrollable-region-focusable
-      // require it to be in the tab order (there is no native control for
-      // "scrollable div"). role="region" + tabIndex is the accepted pattern;
-      // scope the exception to that one role rather than loosening the rule.
+      // WCAG 2.1.1 needs scrollable regions focusable and no ARIA role marks them
+      // interactive, so allow tabIndex only on role="region".
       'jsx-a11y/no-noninteractive-tabindex': ['error', { roles: ['region'] }],
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
@@ -103,16 +85,14 @@ export default tseslint.config(
     },
   },
   {
-    // Test/spec files: relax complexity + length budgets and the type-aware
-    // rules that fire on Playwright's helper patterns.
+    // Type-aware rules misfire on Playwright helper patterns.
     files: ['**/*.{test,spec}.{ts,tsx}', 'playwright/**'],
     rules: {
       complexity: 'off',
       'max-lines-per-function': 'off',
       'max-lines': 'off',
       'lines-budget/approaching-max-lines': 'off',
-      // node:test top-level `test(...)` calls are fire-and-forget by design —
-      // the runner collects and awaits them — so they are not floating promises.
+      // The node:test runner awaits top-level test() calls itself.
       '@typescript-eslint/no-floating-promises': 'off',
     },
   },

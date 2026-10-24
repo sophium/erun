@@ -62,8 +62,6 @@ func TestDesktopMCPConventions(t *testing.T) {
 	if got := MCPTokenAudience(" acme ", " prod "); got != "erun-mcp:acme/prod" {
 		t.Fatalf("MCPTokenAudience() = %q", got)
 	}
-	// The per-env audience distinguishes environments of the same tenant, so a
-	// token minted for one env cannot satisfy another's expected audience.
 	if MCPTokenAudience("acme", "prod") == MCPTokenAudience("acme", "dev") {
 		t.Fatal("expected distinct per-env audiences")
 	}
@@ -97,8 +95,7 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	t.Run("tampered signature", func(t *testing.T) {
 		token := signTestToken(t, priv, good)
 		segments := strings.Split(token, ".")
-		// A flipped base64url char can change only padding bits; mutate a decoded
-		// byte instead so the signature is guaranteed to differ.
+		// A flipped base64url char may change only padding bits, so mutate a decoded byte.
 		sig, err := base64.RawURLEncoding.DecodeString(segments[2])
 		if err != nil {
 			t.Fatalf("decode signature: %v", err)
@@ -143,8 +140,6 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 
 	t.Run("alg confusion rejected", func(t *testing.T) {
-		// A verifier that honoured the header's alg would accept an alg=none
-		// token; ours must reject it.
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 		payload, _ := json.Marshal(good)
 		forged := header + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
@@ -161,8 +156,6 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 }
 
-// TestVerifyMCPTokenOIDCDispatch locks that VerifyMCPToken routes on the trusted
-// issuer's scheme: https:// verifies via OIDC/JWKS, file:// keeps the Ed25519 path.
 func TestVerifyMCPTokenOIDCDispatch(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	now := time.Now()

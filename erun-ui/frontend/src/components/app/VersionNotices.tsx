@@ -4,9 +4,7 @@ import * as React from 'react';
 import { versionNoticeMessage } from '@/app/versionSuggestions';
 import type { UIVersionSuggestionNotice } from '@/types';
 
-// VersionNotices renders, below the version choices, why a runtime-image source
-// contributed none — so a private or unreachable image reads as an actionable
-// state rather than a silently empty list (visibility of system status).
+// VersionNotices explains why a runtime-image source contributed no versions.
 export function VersionNotices({
   notices,
 }: {

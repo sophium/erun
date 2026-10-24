@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// Replacement substitutes a regex match with a fixed token. Order matters
-// because earlier rules consume input before later ones see it.
+// Replacement substitutes a regex match with Token. Rules run in order, so
+// earlier rules consume input before later ones see it.
 type Replacement struct {
 	Pattern *regexp.Regexp
 	Token   string
@@ -19,113 +19,54 @@ type Replacement struct {
 var defaultRules = []Replacement{
 	// First, so later rules never see escape codes.
 	{regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`), ""},
-	// A minted MCP bearer signs a live timestamp, so its token can never be
-	// stable in a golden; the claims are asserted from the parsed payload
-	// instead. Early, so no later rule chews on a JWT segment.
+	// A minted MCP bearer signs a live timestamp; early, before rules chew on JWT
+	// segments.
 	{regexp.MustCompile(`"token": "[A-Za-z0-9_.\-]+"`), `"token": "<TOKEN>"`},
-	// Loopback IP — emit a stable token before the version rule so its
-	// dotted-numeric form isn't trimmed (RE2 has no negative lookahead, so
-	// the version regex would otherwise eat "127.0.0" and leave a dangling
-	// ".1" suffix in the golden).
+	// Before the version rule, which would otherwise eat "127.0.0".
 	{regexp.MustCompile(`\b127\.0\.0\.1\b`), "<LOOPBACK>"},
-	// The leading-'v' alternation is required: a bare \b refuses to match when
-	// a git tag's 'v' is the word char immediately before the digits.
+	// The 'v' alternation: \b fails between a tag's 'v' and its digits.
 	{regexp.MustCompile(`(?:\bv|\b)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
-	// Go's zero instant gets its own token, before the general timestamp rule
-	// below would swallow it. A field that was never set is not a field set at
-	// some time, and collapsing the two into one <TS> is what let the suite
-	// keep passing while `--output json` rendered every never-set timestamp as
-	// `0001-01-01T00:00:00Z`: the payload was wrong and the golden agreed with
-	// it. With a distinct token, a payload that starts (or stops) emitting the
-	// zero instant shows up as a visible golden change instead of nothing.
+	// Go's zero instant gets its own token so a never-set timestamp stays visible
+	// in goldens.
 	{regexp.MustCompile(`\b0001-01-01T00:00:00(?:\.0+)?Z\b`), "<ZERO-TS>"},
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`), "<TS>"},
-	// An activity lease's remaining seconds are measured against the wall clock
-	// at print time, so they land a second either side of the ttl depending on
-	// how long the subprocess took to start.
+	// Lease remaining seconds and alive-beat age depend on wall clock.
 	{regexp.MustCompile(`expires in \d+s`), "expires in <REMAINING>"},
-	// A job's alive-beat age is milliseconds since the supervisor's last ~1s
-	// heartbeat, measured against the wall clock at print time — inherently as
-	// variable as the remaining-lease seconds above.
 	{regexp.MustCompile(`last beat \d+ms ago`), "last beat <ALIVE_AGE>ms ago"},
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
-	// The Terraform durable work dir (local-backend state + TF_DATA_DIR) lives
-	// under the test HOME temp dir. Collapse just its temp-path prefix to a stable
-	// token — before the generic <TMP> rule below would swallow the whole path — so
-	// goldens still show that state lives off the (project <TMP>) playbook tree.
+	// Terraform work dir under the test HOME; before <TMP> so goldens still show
+	// state lives outside the project tree.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*?/\.erun/terraform`), "<STATE_ROOT>"},
-	// The desktop identity resolves through os.UserConfigDir(), which no test
-	// seam can pin: darwin puts it under "Library/Application Support" and Linux
-	// under the XDG dir. The generic rule below stops at the space, so the same
-	// scenario left a different remainder on each OS and its golden could only be
-	// green on whichever one recorded it. Collapse the whole path first.
+	// os.UserConfigDir differs by OS and darwin's contains a space the generic
+	// <TMP> rule stops at, so collapse the whole path first.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.key`), "<DESKTOP_IDENTITY>"},
-	// Same reasoning for the public half, which a deploy refusal names as the key
-	// to re-supply. Scenarios that must prove the concrete path reached the
-	// message assert it against the un-normalized capture.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.pub`), "<DESKTOP_IDENTITY_PUBLIC>"},
-	// Desktop restart markers share the macOS config path's embedded space.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktop-control\.json`), "<TMP>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
-	// A separate rule for temp paths whose separators are percent-escaped,
-	// which the plain-path rule above cannot match.
+	// Percent-escaped temp paths.
 	{regexp.MustCompile(`%2F(?:private%2F)?(?:var%2Ffolders|var%2Ftmp|tmp)%2F[A-Za-z0-9._%+-]*`), "<TMP>"},
-	// Windows path roots (either separator): t.TempDir() lands under
-	// <drive>:\Users\<user>\AppData\Local\Temp\<test>. Mirror the Unix rules —
-	// STATE_ROOT terraform variant first, then the generic temp dir — so a golden
-	// recorded on either OS normalizes to the same token. Inert on Unix output
-	// (no drive letter), so existing macOS/Linux goldens are unaffected.
+	// Windows temp roots, mirroring the Unix rules; inert on Unix.
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
-	// A local-agent env's host worktree renders through the WSL2 mount view of a
-	// Windows temp dir (C:\...\Temp\... -> /mnt/<drive>/.../Temp/...). Collapse it
-	// here, before the /Users and /home rules below would carve the drive prefix
-	// off. Inert on macOS/Linux output, which carries no /mnt/<drive> worktree.
+	// WSL2 mount view of a Windows temp dir; before the /Users and /home rules.
 	{regexp.MustCompile(`(?i)/mnt/[a-z]/(?:[^/\s'"]+/)*?temp/[^\s'"]*`), "<TMP>"},
-	// Windows home dir. Before the Unix /Users rule below, so C:/Users/<user>
-	// (after backslash canonicalization) collapses whole rather than leaving the
-	// drive prefix. Inert on Unix output.
+	// Windows home; before the Unix /Users rule.
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
-	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs) on
-	// purpose; both shapes are opaque tokens, so no coverage signal is lost.
+	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs).
 	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
-	// Requires the leading "in "/"after " so the timeout literal "2m0s" stays
-	// stable in goldens instead of being swept up as elapsed time.
+	// The "in "/"after " prefix keeps timeout literals like "2m0s" intact.
 	{regexp.MustCompile(` (in|after) \d+(?:[hm]\d+)*s\b`), " $1 <ELAPSED>"},
 	{regexp.MustCompile(`elapsed: \d+(?:\.\d+)?[a-zµμ]+(?:\d+(?:\.\d+)?[a-zµμ]+)*\b`), "elapsed: <ELAPSED>"},
-	// The step-timing table (timing.go) wraps every duration in brackets —
-	// `<label> [<duration>]` — specifically so this rule can redact real,
-	// sub-second wall-clock measurements without also sweeping up an unrelated
-	// bare "5m" in help text or a --rollout-timeout example.
+	// Step-timing durations are bracketed so only they are redacted.
 	{regexp.MustCompile(`\[\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s)(?:\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s))*\]`), "[<ELAPSED>]"},
-	// A step-timing "(unaccounted)"/"(ran concurrently, overlap)" row's very
-	// presence — not just its duration — is decided by wall clock: it appears
-	// only when a parent step's own time and its children's summed time differ
-	// by at least timingOrderNoiseFloor (100ms), and a stubbed subprocess in a
-	// real-run scenario costs a different amount of that 100ms budget on every
-	// host. Run after the bracket-duration rule above so it matches the
-	// already-normalized "[<ELAPSED>]", and drop the whole line (indentation
-	// through the trailing newline) rather than just the duration, since a
-	// present-here-absent-there row would still fail the comparison otherwise.
+	// A synthetic timing row's presence depends on wall clock, so drop the whole
+	// line. Must run after the bracket-duration rule.
 	{regexp.MustCompile(`(?m)^[ ]*\((?:unaccounted|ran concurrently, overlap)\) \[<ELAPSED>\]\n`), ""},
-	// The hash covers per-test temp-dir paths, so it differs across runs
-	// despite looking like a stable digest.
+	// The hash covers per-test temp paths.
 	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},
 	{regexp.MustCompile(`pid=\d+`), "pid=<PID>"},
-	// The same value in a structured result, where it is a bare JSON field
-	// rather than a trace fragment. A pid is what the kernel happened to hand
-	// out on this run, never part of what a golden locks.
 	{regexp.MustCompile(`"pid": \d+`), `"pid": <PID>`},
-	// A job reports the process it is reconciled against and the group a cancel
-	// signals. Both are real OS pids, so they differ on every run; the contract a
-	// golden locks is that the job names a recorded process at all, never which
-	// number the kernel handed out.
 	{regexp.MustCompile(`\bpid \d+`), "pid <PID>"},
-	// The port-forward adopt/replace traces name the process holding a local
-	// port. A scenario that wants erun to actually stop that holder has to
-	// present its real PID — production kills what the probe names — so the
-	// number is whatever the kernel handed out on this run. Which process it
-	// was is asserted from the rewritten state file, not from the trace.
 	{regexp.MustCompile(`\(PID \d+\)`), "(PID <PID>)"},
 	{regexp.MustCompile(`\bprocess group \d+`), "process group <PGID>"},
 	{regexp.MustCompile(`\b(supervisor|process) \d+ is gone`), "$1 <PID> is gone"},
@@ -133,74 +74,35 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},
 	{regexp.MustCompile(`\bcommit = [0-9a-f]{7,12}\b`), "commit = <SHORTSHA>"},
-	// A job's dirty-working-tree checkpoint names the real commit it made,
-	// which is content-derived and differs per run of the same fixture repo.
 	{regexp.MustCompile(`\bcheckpointed as [0-9a-f]{7,12}\b`), "checkpointed as <SHORTSHA>"},
-	// Real git output in a real-run scenario: `git commit` prints
-	// `[<branch> <sha>]` and `git push` prints an indented `<old>..<new>` range
-	// per ref. Both carry the commit the fixture repo happened to produce on
-	// this run. The range rule is anchored to the start of a push status line so
-	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
+	// Real git output. The range rule is anchored to push status lines so a diff's
+	// stable `index <blob>..<blob>` survives.
 	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
 	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
-	// A fast-forward merge prints its own short shas on an unindented
-	// "Updating <old>..<new>" line, so the indented range rule above never sees it.
 	{regexp.MustCompile(`(?m)^Updating [0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "Updating <SHORTSHA>..<SHORTSHA>"},
-	// A forced ref update (`git push --force`/`--force-with-lease`, as the
-	// release tag's repoint-after-rebase does) prints a three-dot range, not
-	// the fast-forward push status line's two-dot range above, and
-	// `git tag -f` separately prints the commit it moved the tag away from.
-	// Both carry a commit the fixture repo happened to produce on this run.
+	// Forced ref updates print a three-dot range; `git tag -f` prints "(was <sha>)".
 	{regexp.MustCompile(`(?m)^(\s*\+ )[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>...<SHORTSHA>"},
 	{regexp.MustCompile(`\(was [0-9a-f]{7,40}\)`), "(was <SHORTSHA>)"},
-	// Safety net for a real home path that leaks despite the test HOME override.
+	// Safety net for a real home path leaking past the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
-	// Drop the Windows executable suffix from a launched erun binary so the trace
-	// matches the Unix golden (erun-app.exe -> erun-app). Anchored to line start
-	// (optionally after the command-quote a -vv trace adds) because that is where
-	// erun prints the executable it invokes — resolveAppExecutable is the only
-	// place erun appends a host .exe. A ".exe" anywhere else on a line is literal
-	// data that must survive: a Scoop manifest's `"erun.exe"` bin entries and its
-	// `\erun.exe` build path, or a `bin must include erun-app.exe` validation
-	// message, are identical on every host and are not host-suffix noise. Inert on
-	// Unix output, which has no .exe.
+	// Strip .exe only from a launched erun binary at line start; .exe elsewhere is
+	// literal data (e.g. Scoop manifests) that must survive.
 	{regexp.MustCompile(`(?m)^('?)(erun-app|erun|emcp|eapi)\.exe\b`), "${1}${2}"},
-	// A failed exec of a missing path reads differently per platform — Unix
-	// `fork/exec <TMP> no such file or directory`, Windows `exec: "<TMP>":
-	// executable file not found in %PATH%` — so collapse either whole message to
-	// one token (the path is already <TMP>) for an OS-invariant golden.
+	// Missing-binary exec errors differ per OS.
 	{regexp.MustCompile(`(?:fork/exec|exec:)[^\n]*<TMP>[^\n]*`), "<EXEC_ERROR>"},
-	// The build CPU-cap cgroup path is keyed by the running machine's own
-	// hostname (buildContainerCPUCapCgroupParent), so it differs per host and
-	// per test run rather than being a stable value a golden can pin.
+	// Keyed by the machine's hostname.
 	{regexp.MustCompile(`/docker/erun-build-cpu-cap-\S+`), "/docker/erun-build-cpu-cap-<POD>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
-// windowsDrivePath matches a drive-letter-rooted Windows path (C:\...), the only
-// unambiguous Windows path shape: it starts with a drive letter and colon, so it
-// can never match a shell escape sequence (\n, \033, \,) that also uses
-// backslashes. Its separators are forward-slashed for golden parity. Paths
-// without a drive letter (a Linux path erun mangled via filepath) are fixed at
-// the source instead — the normalizer must not touch bare backslashes, which are
-// escapes far more often than separators.
+// windowsDrivePath matches drive-letter Windows paths only; bare backslashes are
+// far more often escapes than separators.
 var windowsDrivePath = regexp.MustCompile(`[A-Za-z]:\\[^\s'"]*`)
 
-// PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
-// readline repaints the confirm line an unpredictable number of times, so the
-// prompt render is not a stable contract; this drops every repaint frame that
-// still shows the [Y/n] prompt or the █ cursor and dedups the rest, leaving the
-// one settled render (label plus the typed answer) and the deterministic
-// remainder. Runs the default rules first, so use it in place of Apply, not
-// alongside it.
-//
-// This relies on the confirm owning its output stream: a second writer racing
-// the same stream (as the open alias flow's stdout eval-script write once did)
-// interleaves mid-redraw and leaves marker-less corrupted fragments this cannot
-// recognize. Prompts that share a stream with other output must route the
-// confirm elsewhere at the source (see cmd.confirmPromptTo) rather than lean on
-// this to reconstruct the race.
+// PromptConfirm is Apply plus collapsing promptui "[Y/n]" repaint frames to the
+// settled render. It assumes the confirm owns its output stream; a racing
+// writer corrupts frames beyond recognition.
 func PromptConfirm(s string) string {
 	s = applyBackspaces(strings.ReplaceAll(Apply(s), "\r", ""))
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
@@ -217,13 +119,9 @@ func PromptConfirm(s string) string {
 	return strings.Join(out, "\n") + "\n"
 }
 
-// Apply runs the default rule set over the output. Extra rules run after the
-// defaults, so a caller can override or further normalize the result.
+// Apply runs the default rules, then extra.
 func Apply(s string, extra ...Replacement) string {
-	// Windows-only: forward-slash path separators BEFORE the token rules so a
-	// path like `\home\erun\git\team` becomes `/home/erun/git/team` and the
-	// /home, /Users, temp rules can collapse it to a token. Gated on GOOS so
-	// macOS/Linux output — already canonical — is provably untouched.
+	// Before the token rules, which match forward-slash paths.
 	if runtime.GOOS == "windows" {
 		s = forwardSlashWindowsPaths(s)
 	}
@@ -232,104 +130,36 @@ func Apply(s string, extra ...Replacement) string {
 	for _, r := range rules {
 		s = r.Pattern.ReplaceAllString(s, r.Token)
 	}
-	// Runs after the bracket-duration rule above, on the same reasoning as
-	// the synthetic-row drop above it: a step-timing row's real duration is
-	// already redacted to "[<ELAPSED>]", so sibling order is the one
-	// remaining wall-clock-derived signal in the block, and it is exactly as
-	// host/run-dependent as the duration it was sorted by.
+	// Sibling order is the last wall-clock-derived signal in a timing block.
 	s = canonicalizeStepTimingOrder(s)
-	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
 }
 
-// timingLinePattern matches an already-redacted step-timing row: leading
-// indentation (always an even number of spaces — renderStepTimingRows in
-// erun-common/timing.go indents each depth by two), then a label, then the
-// "[<ELAPSED>]" token the bracket-duration rule above just produced, then an
-// optional status suffix — a failed row appends " — <error>" (or "— exit
-// status N") after its duration. The bracket shape is deliberately unique to
-// the timing table (see that rule's own comment), so any line matching this is
-// a timing row and nothing else.
-//
-// The suffix has to be part of the pattern rather than the row ending at the
-// bracket: a failed row is a timing row like any other and must still be
-// recognized, sorted among its siblings, and carry its suffix through
-// unchanged. Without it a failed row is not recognized at all, and because
-// canonicalizeStepTimingOrder ends a run at the first line it cannot parse,
-// one unrecognized row silently disables the canonicalization for the whole
-// tree it sits in — leaving exactly the wall-clock sibling order this is here
-// to remove, and reparenting the rows after it under the wrong step. That is
-// invisible on an idle machine (every sibling ties inside the production
-// noise floor, so the recorded order already is name order) and only shows up
-// where the timings actually diverge, which is why it read as a
-// venue-specific failure. TestGoldenTimingBlocksAreOrderInvariant is what
-// keeps a future row shape from reopening the same hole silently.
+// timingLinePattern matches a redacted step-timing row: even indentation, label,
+// "[<ELAPSED>]", optional failure suffix. TestGoldenTimingBlocksAreOrderInvariant
+// guards new row shapes.
 var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$`)
 
-// canonicalizeStepTimingOrder reorders each step-timing block's sibling rows
-// by name instead of leaving them in the real wall-clock order they were
-// recorded in. orderedTimingRows (erun-common/timing.go) already breaks a
-// same-process tie within its noise floor by name for exactly this
-// determinism reason, but a subprocess integration test measures real
-// wall-clock time with no fake clock to inject — the timing root lives
-// inside the compiled binary the test runs, not the test process — so two
-// steps intended to tie (or, against an already-warm fingerprint cache where
-// even "publish" itself does no real image build, three or more steps) can
-// drift past that floor on one run of a loaded machine and not the next,
-// flipping which regime (name order vs. duration order) applies and
-// therefore the reported order, between otherwise-identical runs.
-// Canonicalizing every level to name order here removes that remaining
-// variance the same way the synthetic-row drop above removes the variance in
-// whether a gap row appears at all.
-//
-// Sibling order is duration order at *every* level, the shallowest included:
-// a run of same-depth rows are siblings that happen to tie, not independent
-// trees, so sorting only a recognized root's descendants would leave exactly
-// the closest-run steps — the ones most likely to cross the noise floor and
-// swap — in wall-clock order.
-//
-// The tree to sort is the one the block's header and footer delimit, not the
-// one a contiguous run of rows describes: stderr from a step's own child
-// lands inside the table at a position the scheduler chooses, so a run
-// boundary drawn at the first such line makes the forest a function of that
-// position and splits one tree into fragments that are each sorted on their
-// own. TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput asserts that
-// invariance directly.
+// canonicalizeStepTimingOrder sorts every level of each step-timing tree by
+// name, since subprocess wall-clock times can swap sibling order between runs.
+// A block spans header to footer, so interleaved child stderr cannot split it.
 func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); {
-		// A block is delimited by the header reportStepTiming prints above the
-		// table and the footer it prints below it, so the whole table is one
-		// forest no matter what lands between its rows. Bounding a run by the
-		// first line that is not a row instead -- the rule this replaces --
-		// made the forest a function of where a concurrent child's stderr
-		// happened to interleave: every landing split the same tree into
-		// different fragments, each sorted on its own, and the concatenation
-		// differed between two runs of the same scenario. That is invisible on
-		// an idle machine, where the recorded order already is name order.
 		if strings.TrimSpace(lines[i]) == timingBlockHeader {
 			if body := timingBlockBodyEnd(lines, i+1); body >= 0 {
 				rows, foreign := splitTimingBlockBody(lines[i+1 : body])
 				out = append(out, lines[i])
 				out = append(out, sortedTimingForest(rows)...)
-				// Foreign lines are emitted verbatim, together, after the
-				// table: their own position among the rows is the scheduling
-				// artifact this canonicalizer exists to remove, so pinning
-				// them anywhere the capture chose would leave the block
-				// capture-dependent. Their relative order is preserved, which
-				// for the single writer that produces them is their real
-				// order.
+				// Foreign lines go after the table: their position is a scheduling artifact.
 				out = append(out, foreign...)
 				out = append(out, lines[body])
 				i = body + 1
 				continue
 			}
-			// No footer: the block's extent is genuinely unknown (the footer
-			// write failed), so fall through to the per-run rule rather than
-			// running to EOF and claiming whatever follows as part of the
-			// table.
+			// No footer: fall back to the per-run rule rather than running to EOF.
 		}
 		if _, ok := timingLineDepth(lines[i]); ok {
 			end := timingRunEnd(lines, i)
@@ -343,19 +173,11 @@ func canonicalizeStepTimingOrder(s string) string {
 	return strings.Join(out, "\n")
 }
 
-// timingBlockHeader is the line reportStepTiming prints above the ordered
-// table, and the only anchor that says a table follows.
 const timingBlockHeader = "step timing (ordered by duration):"
 
-// timingBlockFooter prefixes the line reportStepTiming prints once the
-// machine-readable record is written, closing the table.
 const timingBlockFooter = "timing record written to "
 
-// timingBlockBodyEnd returns the index of the footer line closing the block
-// whose body starts at bodyStart, or -1 when no footer follows. The footer is
-// written by erun itself immediately after the table, so it is the block's own
-// declared end -- unlike "the first line that is not indented", which is
-// wherever unrelated concurrent output happened to land.
+// timingBlockBodyEnd returns the footer index after bodyStart, or -1.
 func timingBlockBodyEnd(lines []string, bodyStart int) int {
 	for i := bodyStart; i < len(lines); i++ {
 		if strings.HasPrefix(lines[i], timingBlockFooter) {
@@ -365,10 +187,8 @@ func timingBlockBodyEnd(lines []string, bodyStart int) int {
 	return -1
 }
 
-// timingRunEnd returns the end of the maximal run of timing rows starting at
-// start, plus the indented continuation lines belonging to them. It is the
-// fallback boundary for a table with no footer, and the only boundary for
-// timing rows that appear with no header above them at all.
+// timingRunEnd returns the end of the run of timing rows and continuation lines
+// at start; used when there is no header or footer.
 func timingRunEnd(lines []string, start int) int {
 	end := start
 	for end < len(lines) {
@@ -376,9 +196,6 @@ func timingRunEnd(lines []string, start int) int {
 			end++
 			continue
 		}
-		// An indented non-timing line is a row's own wrapped error message,
-		// part of this run; anything else (the footer, an unindented
-		// interleaved message) ends it.
 		if !timingContinuationLine(lines[end]) {
 			break
 		}
@@ -387,16 +204,8 @@ func timingRunEnd(lines []string, start int) int {
 	return end
 }
 
-// splitTimingBlockBody separates a block body into the lines that belong to
-// the table's rows (the rows themselves, plus the indented continuation lines
-// carrying a row's own multi-line message) and the foreign lines that do not.
-//
-// reportStepTiming indents every line of a row, so an unindented line inside a
-// delimited block cannot be part of the table: it is output from somewhere
-// else that landed there. That is what makes this separable at all -- while a
-// row's own message was emitted at column zero the two were genuinely
-// indistinguishable, and no rule could both keep a row's message with its row
-// and be invariant to where unrelated output landed.
+// splitTimingBlockBody separates a block body into row lines (rows plus
+// indented continuations) and unindented foreign output.
 func splitTimingBlockBody(body []string) (rows, foreign []string) {
 	for _, line := range body {
 		if _, ok := timingLineDepth(line); ok {
@@ -412,11 +221,8 @@ func splitTimingBlockBody(body []string) (rows, foreign []string) {
 	return rows, foreign
 }
 
-// timingLineDepth reports a timing row's nesting depth (an offset from the
-// row's real depth in erun-common/timing.go by the constant amount
-// reportStepTiming's own extra indent adds — irrelevant here, since only
-// relative depth, to build the tree, matters) and whether line is a timing
-// row at all.
+// timingLineDepth reports a row's relative nesting depth, and whether line is a
+// timing row.
 func timingLineDepth(line string) (int, bool) {
 	m := timingLinePattern.FindStringSubmatch(line)
 	if m == nil {
@@ -425,24 +231,13 @@ func timingLineDepth(line string) (int, bool) {
 	return len(m[1]) / 2, true
 }
 
-// timingContinuationLine reports whether line is the second or later line of a
-// row's error message rather than a row of its own. A failed step renders its
-// error after the duration, and an error can be several lines long (the
-// missing-binfmt refusal ends with a command to run on its own line), so those
-// lines have to travel with the row they belong to when siblings are
-// reordered. Every line of the table is indented — reportStepTiming prefixes
-// each row, and a wrapped error keeps its own leading whitespace — while the
-// "timing record written to ..." line that closes the block, and anything
-// printed after it, is not. Indentation is therefore what separates a
-// continuation from the end of the table.
+// timingContinuationLine reports whether line continues a row's multi-line
+// error; every table line is indented, the footer is not.
 func timingContinuationLine(line string) bool {
 	return strings.HasPrefix(line, "  ")
 }
 
-// timingNode is one row of a step-timing tree, parsed from its serialized
-// (depth-indented, DFS pre-order) text form so its children can be sorted
-// and the tree re-serialized. extra holds the row's own error-message
-// continuation lines, kept beside the row so sorting moves them together.
+// timingNode is a parsed timing row; extra holds its continuation lines.
 type timingNode struct {
 	line     string
 	depth    int
@@ -450,11 +245,8 @@ type timingNode struct {
 	children []*timingNode
 }
 
-// sortedTimingForest parses one contiguous run of timing rows into the forest
-// their depths describe — a row deeper than the one above it is that row's
-// child, and a row at the same or shallower depth closes that subtree and
-// starts a sibling — and returns it re-serialized with every level, the roots
-// included, sorted by name.
+// sortedTimingForest parses rows into a tree by depth and re-serializes it with
+// every level sorted by name.
 func sortedTimingForest(lines []string) []string {
 	if len(lines) == 0 {
 		return nil
@@ -464,9 +256,7 @@ func sortedTimingForest(lines []string) []string {
 	for _, line := range lines {
 		depth, ok := timingLineDepth(line)
 		if !ok {
-			// A non-timing line inside the run is the current row's own wrapped
-			// error message (canonicalizeStepTimingOrder only includes indented
-			// ones), so it travels with that row rather than becoming a node.
+			// A continuation line travels with the current row.
 			if len(stack) > 0 {
 				top := stack[len(stack)-1]
 				top.extra = append(top.extra, line)
@@ -513,36 +303,22 @@ func appendTimingNode(out *[]string, node *timingNode) {
 	}
 }
 
-// forwardSlashWindowsPaths rewrites backslash separators in drive-letter Windows
-// paths (C:\...) to forward slashes so the downstream token rules — recorded in
-// the Unix goldens' forward-slash shape — match. It deliberately touches only
-// drive-rooted paths: a bare backslash is an escape sequence (\n, \033, \,) in a
-// traced script body far more often than a separator, and quoting parity is
-// handled at the tracer instead (isShellSafe treats backslash as safe, matching
-// Unix's bare forward-slash args). Exported-free so the cross-OS unit test can
-// drive it on any host.
+// forwardSlashWindowsPaths forward-slashes drive-letter paths so Unix-shaped
+// token rules match.
 func forwardSlashWindowsPaths(s string) string {
 	return windowsDrivePath.ReplaceAllStringFunc(s, func(m string) string {
 		m = strings.ReplaceAll(m, `\`, "/")
-		// A %q-quoted path arrives with escaped separators (C:\\Users\\...), which
-		// become // here; collapse runs to a single slash so the path matches the
-		// Unix golden. Safe within a drive path — it contains no :// URL.
+		// %q-quoted paths arrive with doubled separators.
 		return multiSlash.ReplaceAllString(m, "/")
 	})
 }
 
 var multiSlash = regexp.MustCompile(`/{2,}`)
 
-// backspacePair matches a printable character immediately followed by a
-// backspace, the byte pair a terminal renders as "erase the previous glyph".
 var backspacePair = regexp.MustCompile("[^\n\x08]\x08")
 
-// applyBackspaces resolves ASCII backspaces (\x08) the way a terminal would, so
-// a confirm repaint that readline draws as "<answer>\b<label>…" collapses to the
-// clean "<label>…" it leaves on screen. Windows readline emits these erase
-// sequences where the unix build does not, and they leak into the piped capture
-// as a spurious "<answer>…" fragment line; resolving them here keeps PromptConfirm
-// deterministic across hosts instead of locking one terminal's repaint bytes.
+// applyBackspaces resolves \x08 like a terminal; Windows readline emits erase
+// sequences the unix build does not.
 func applyBackspaces(s string) string {
 	if !strings.ContainsRune(s, '\x08') {
 		return s
@@ -550,7 +326,6 @@ func applyBackspaces(s string) string {
 	for {
 		next := backspacePair.ReplaceAllString(s, "")
 		if next == s {
-			// Any backspace with nothing left to erase is itself dropped.
 			return strings.ReplaceAll(next, "\x08", "")
 		}
 		s = next

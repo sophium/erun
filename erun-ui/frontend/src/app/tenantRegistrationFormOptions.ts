@@ -1,6 +1,4 @@
-// Plain constants/helpers for the Registration tab's forms, kept in a
-// non-component module so TenantDashboardPanels.RegistrationForms.tsx can
-// stay component-only (react-refresh/only-export-components).
+// Kept out of the component module for react-refresh/only-export-components.
 import type { UITenantDashboard } from '@/types';
 
 export const ENV_TYPE_OPTIONS = [
@@ -9,9 +7,7 @@ export const ENV_TYPE_OPTIONS = [
   { value: 'local-agent', label: 'local-agent' },
 ];
 
-// NO_CONTEXT is a Radix Select sentinel: it cannot carry an empty-string
-// item value, so "deploy onto a bare kubernetes context instead" needs a
-// value distinct from every real contextId.
+// NO_CONTEXT stands in for "no context": Radix Select items cannot use ''.
 export const NO_CONTEXT = '__none__';
 
 export function contextOptions(

@@ -19,14 +19,11 @@ type fakeReconcilerEnvironments struct {
 	environments []model.Environment
 	listErr      error
 	claims       []claimCall
-	// claimResults maps environmentID -> whether ClaimDelete should report a
-	// successful claim; missing entries default to true (claimed).
+	// claimResults defaults to claimed for missing entries.
 	claimResults map[string]bool
 	claimErr     error
-	// blocked records MarkDeleteBlocked calls: environmentID -> reason. This
-	// is what proves a claimed row is never left stranded in `deleting`.
-	blocked    map[string]string
-	blockedErr error
+	blocked      map[string]string
+	blockedErr   error
 }
 
 func (f *fakeReconcilerEnvironments) MarkDeleteBlocked(_ context.Context, _ string, environmentID, reason string) error {
@@ -68,10 +65,7 @@ func (f *fakeReconcilerTenants) List(_ context.Context) ([]model.Tenant, error) 
 type fakeReconcilerContexts struct {
 	contexts map[string]model.Context
 	err      error
-	// askedTenants records the owning tenant each Get was asked for. The
-	// reconciler runs with an empty TenantID in its security context, so the
-	// owner can only come from the environment row it found — a Get with no
-	// tenant is the shape that lets an id name somebody else's context.
+	// askedTenants records the tenant each Get was asked for; it must come from the row.
 	askedTenants []string
 }
 
@@ -97,9 +91,6 @@ func testReconciler(environments *fakeReconcilerEnvironments, tenants *fakeRecon
 	return &EnvDeleteReconciler{environments: environments, tenants: tenants, contexts: contexts, deleter: deleter}
 }
 
-// TestReconcileRestartsAMidTeardownEnvironment pins the core contract of
-// #1140: an environment stuck deleting or deletion-blocked converges on its
-// own, without an operator noticing and re-issuing the delete.
 func TestReconcileRestartsAMidTeardownEnvironment(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "prod", Status: model.EnvironmentStatusDeletionBlocked, DeployedVersion: "1.2.3"},
@@ -128,8 +119,6 @@ func TestReconcileRestartsAMidTeardownEnvironment(t *testing.T) {
 	}
 }
 
-// TestReconcileLeavesAFreshInFlightDeleteAlone: a `deleting` row whose own
-// attempt has not had time to finish yet must not be raced by the reconciler.
 func TestReconcileLeavesAFreshInFlightDeleteAlone(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{
 		environments: []model.Environment{{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "prod", Status: model.EnvironmentStatusDeleting}},
@@ -154,9 +143,6 @@ func TestReconcileLeavesAFreshInFlightDeleteAlone(t *testing.T) {
 	}
 }
 
-// TestReconcileResolvesPlacementForARemoteContext: an environment placed on a
-// registered context must have its delete retried against that same cluster,
-// not the platform's own (#1112 interaction).
 func TestReconcileResolvesPlacementForARemoteContext(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "prod", ContextID: "ctx-1", Status: model.EnvironmentStatusDeletionBlocked, RuntimeVersion: "1.0.0"},
@@ -177,8 +163,6 @@ func TestReconcileResolvesPlacementForARemoteContext(t *testing.T) {
 	}
 }
 
-// TestReconcileSkipsAnEnvironmentWithNoTenantMatch: a lookup failure for one
-// environment must not stop the reconciler from restarting every other one.
 func TestReconcileContinuesPastOneFailure(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{EnvironmentID: "env-1", TenantID: "missing-tenant", Name: "prod", Status: model.EnvironmentStatusDeletionBlocked},
@@ -226,12 +210,6 @@ func TestReconcilePropagatesAListError(t *testing.T) {
 	}
 }
 
-// TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart is the regression
-// test for #1166's worst path. The claim has already moved the row to
-// `deleting`, so a failure between the claim and the workflow starting used to
-// leave the row claiming an in-flight delete that did not exist -- strictly
-// less information than before the tick ran, which is exactly the misreporting
-// #1140 was about.
 func TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -274,9 +252,6 @@ func TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart(t *testing.T) {
 	}
 }
 
-// TestReconcileStopsReAttemptingPastTheAttemptCap: a teardown that has failed
-// MaxDeleteAttempts times is not going to succeed on its own, and re-attempting
-// it forever buries that under identical ticks instead of surfacing it.
 func TestReconcileStopsReAttemptingPastTheAttemptCap(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{
@@ -305,12 +280,7 @@ func TestReconcileStopsReAttemptingPastTheAttemptCap(t *testing.T) {
 	}
 }
 
-// TestReconcileHoldsABlockedRowThroughItsBackoff: without a backoff every
-// blocked row was re-attempted on every tick, which for a namespace wedged on
-// an unsatisfiable finalizer is pure load with no chance of progress.
 func TestReconcileHoldsABlockedRowThroughItsBackoff(t *testing.T) {
-	// One attempt already made, updated a moment ago: its 5-minute backoff has
-	// not elapsed.
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{
 			EnvironmentID: "env-waiting", TenantID: "tenant-1", Status: model.EnvironmentStatusDeletionBlocked,
@@ -328,7 +298,6 @@ func TestReconcileHoldsABlockedRowThroughItsBackoff(t *testing.T) {
 		t.Fatalf("a row inside its backoff was re-attempted: restarted=%d claims=%v", restarted, environments.claims)
 	}
 
-	// Past the backoff it is attempted again.
 	environments.environments[0].UpdatedAt = time.Now().Add(-10 * time.Minute)
 	environments.claims = nil
 	restarted, err = testReconciler(environments, tenants, &fakeReconcilerContexts{}, deleter).reconcile(context.Background())
@@ -340,9 +309,6 @@ func TestReconcileHoldsABlockedRowThroughItsBackoff(t *testing.T) {
 	}
 }
 
-// TestReconcileDoesNotBackOffAStaleDeletingRow: a stale `deleting` row means the
-// attempt behind it can no longer be live, so holding it back would just leave a
-// dead attempt sitting. Only `deletion-blocked` rows wait.
 func TestReconcileDoesNotBackOffAStaleDeletingRow(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{
@@ -362,8 +328,6 @@ func TestReconcileDoesNotBackOffAStaleDeletingRow(t *testing.T) {
 	}
 }
 
-// TestDeleteRetryBackoffGrowsAndCaps pins the schedule itself, so a change to
-// it is a deliberate edit rather than an accident.
 func TestDeleteRetryBackoffGrowsAndCaps(t *testing.T) {
 	if got := deleteRetryBackoff(0); got != 0 {
 		t.Fatalf("backoff(0) = %v, want 0 — a never-attempted row waits for nothing", got)

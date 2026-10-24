@@ -75,15 +75,12 @@ func TestClaudeResumeArgsPassesExplicitModesThrough(t *testing.T) {
 			t.Errorf("%s: got %q, want it unchanged", arg, got)
 		}
 	}
-	// A background agent's id addresses that agent, never this directory's
-	// most recent conversation.
 	logs := []string{"logs", "9f2c"}
 	if got := claudeResumeArgs(logs, "/home/erun", "/w", conversation); !reflect.DeepEqual(got, logs) {
 		t.Fatalf("got %q, want %q", got, logs)
 	}
 }
 
-// A flag given as --name=value picks its mode as surely as --name value;
 // --session-id beside a prepended --continue makes Claude Code refuse to start.
 func TestClaudeResumeArgsPassesExplicitModesWithInlineValuesThrough(t *testing.T) {
 	conversation := func(string) bool { return true }
@@ -100,16 +97,13 @@ func TestClaudeResumeArgsPassesExplicitModesWithInlineValuesThrough(t *testing.T
 			t.Errorf("%q: got %q, want it unchanged", args, got)
 		}
 	}
-	// A prompt that merely contains = is not a flag.
 	prompt := []string{"--model", "opus", "set resume=true in the config"}
 	if got := claudeResumeArgs(prompt, "/home/erun", "/w", conversation); !reflect.DeepEqual(got, append([]string{"--continue"}, prompt...)) {
 		t.Fatalf("prompt with '=': got %q, want --continue prepended", got)
 	}
 }
 
-// The expected keys are what Claude Code's own function returns for each path
-// (string replace of [^a-zA-Z0-9] with '-', and past 200 characters the
-// prefix plus the base-36 absolute value of the path's 32-bit string hash).
+// Expected keys are what Claude Code's own function returns for each path.
 func TestClaudeProjectKeyMatchesClaudeCode(t *testing.T) {
 	long := "/home/erun/git/" + strings.Repeat("a_very.long directory-name/", 9) + "repo"
 	longKey := "-home-erun-git-" + strings.Repeat("a-very-long-directory-name-", 6) + "a-very-long-directory-n"
@@ -141,26 +135,24 @@ func TestClaudeResumeArgsFindsTheConversationByClaudeCodesKey(t *testing.T) {
 	}
 }
 
-// Claude Code keys a conversation by the resolved working directory, so a
-// shell standing in a symlinked path still resumes it.
 func TestRunClaudeKeysTheResolvedWorkingDirectory(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(root, "real_repo")
-	if err := os.Mkdir(real, 0o755); err != nil {
+	target := filepath.Join(root, "real_repo")
+	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
 	prefix := filepath.Join(root, "usr", "local")
 	claudeTestPackage(t, prefix, `{"bin": {"claude": "bin/claude.exe"}}`)
 	host := claudeTestHost(map[string]string{"NPM_CONFIG_PREFIX": prefix, "HOME": "/home/erun"})
 	host.getwd = func() (string, error) { return link, nil }
-	host.isDir = func(path string) bool { return path == "/home/erun/.claude/projects/"+claudeProjectKey(real) }
+	host.isDir = func(path string) bool { return path == "/home/erun/.claude/projects/"+claudeProjectKey(target) }
 	var gotArgv []string
 	host.exec = func(_ string, argv, _ []string) error {
 		gotArgv = argv
@@ -185,8 +177,6 @@ func TestClaudeResumeArgsNoResumeStartsFreshAndIsNotPassedOn(t *testing.T) {
 	}
 }
 
-// claudeTestPackage lays out an npm global install of Claude Code under
-// prefix and returns the binary its package.json declares.
 func claudeTestPackage(t *testing.T, prefix, bin string) string {
 	t.Helper()
 	pkg := filepath.Join(prefix, "lib", "node_modules", "@anthropic-ai", "claude-code")
@@ -219,7 +209,6 @@ func TestResolveRealClaudeFindsTheNPMPackageBinary(t *testing.T) {
 		t.Fatalf("map bin: got %q, %v, want %q", got, err, mapped)
 	}
 
-	// The prefix node runs from, with the bin declared as a single path.
 	single := claudeTestPackage(t, filepath.Join(root, "node"), `{"bin": "bin/claude.exe"}`)
 	host = claudeTestHost(nil)
 	host.lookPath = func(name string) (string, error) {
@@ -253,7 +242,6 @@ func TestResolveRealClaudeFailsClearly(t *testing.T) {
 		t.Fatalf("missing override: got %v", err)
 	}
 
-	// The claude link itself, or anything resolving to erun, would exec in a loop.
 	erun := filepath.Join(root, "erun")
 	writeAssetFile(t, erun, "#!/bin/true\n")
 	if err := os.Chmod(erun, 0o755); err != nil {
@@ -270,8 +258,6 @@ func TestResolveRealClaudeFailsClearly(t *testing.T) {
 	}
 }
 
-// What erun execs is what idle stop must find: the binary inside the npm
-// package, running as claude.
 func TestRunClaudeExecsTheRealBinaryIdleStopMatches(t *testing.T) {
 	prefix := filepath.Join(t.TempDir(), "usr", "local")
 	want := claudeTestPackage(t, prefix, `{"bin": {"claude": "bin/claude.exe"}}`)

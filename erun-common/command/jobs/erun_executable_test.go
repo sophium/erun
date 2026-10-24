@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// The shipped desktop runs from inside a macOS .app bundle, so the erun it needs
-// sits three levels above its own directory rather than beside it. Missing that
-// layout is what left an orchestrator session with none of its environment
-// tools, so every layout the resolver must handle is pinned here.
 func TestErunExecutableNear(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
@@ -35,8 +31,6 @@ func TestErunExecutableNear(t *testing.T) {
 	}
 }
 
-// A bundle-shaped path is only recognized as one when every level matches, so an
-// ordinary directory named MacOS cannot pull the search outside its own tree.
 func TestMacOSBundleContainerIgnoresNonBundleLayouts(t *testing.T) {
 	for _, dir := range []string{
 		filepath.FromSlash("/opt/erun/bin"),

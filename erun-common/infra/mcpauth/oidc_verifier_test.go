@@ -14,8 +14,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// mockOIDCProvider stands in for a real Zitadel/AWS issuer without a network
-// dependency. Mirrored by the erun-mcp dispatch tests.
+// mockOIDCProvider stands in for a real issuer without network access.
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -58,8 +57,7 @@ func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
 	return signWithKey(t, p.key, p.keyID, claims)
 }
 
-// signWithKey lets a test forge a token whose signature does NOT match the
-// provider's published JWKS.
+// signWithKey forges a token whose signature does not match the published JWKS.
 func signWithKey(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[string]any) string {
 	t.Helper()
 	signer, err := jose.NewSigner(
@@ -78,7 +76,9 @@ func signWithKey(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[str
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func standardClaims(issuer string, now time.Time) map[string]any {

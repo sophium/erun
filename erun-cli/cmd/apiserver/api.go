@@ -9,16 +9,17 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
 )
 
 const defaultAPIHost = "127.0.0.1"
 
-func NewAPICmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchAPI shared.APILauncher) *cobra.Command {
+func NewAPICmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchAPI APILauncher) *cobra.Command {
 	host := defaultAPIHost
 	port := config.APIServicePort
 	databaseURL := ""
@@ -31,8 +32,8 @@ func NewAPICmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), r
 		Short: "Run ERun backend API over HTTP",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			result, _, err := shared.ResolveOpenWithInitRetry(ctx, args, shared.ShouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
+			ctx := clicmd.CommandContext(cmd)
+			result, _, err := opentarget.ResolveOpenWithInitRetry(ctx, args, opentarget.ShouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
 			if err != nil {
 				return err
 			}
@@ -51,7 +52,7 @@ func NewAPICmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), r
 		},
 	}
 
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&host, "host", defaultAPIHost, "Host interface to bind the backend API HTTP server to")
 	cmd.Flags().IntVar(&port, "port", config.APIServicePort, "Port to bind the backend API HTTP server to")
 	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Backend PostgreSQL database URL; defaults to ERUN_DATABASE_URL")

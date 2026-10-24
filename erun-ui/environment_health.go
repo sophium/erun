@@ -11,12 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// CheckEnvironmentHealth runs the out-of-pod diagnostics the Manage dialog's
-// "Check environment" action surfaces: whether an effective container registry
-// is configured, and whether the runtime is actually deployed to the env's
-// Kubernetes context. Both are checked from the host (config resolution +
-// kubectl), not in-pod — `erun doctor` execs into the runtime container and so
-// cannot report the "not deployed" case this covers.
+// CheckEnvironmentHealth checks registry config and runtime deployment from the
+// host, since `erun doctor` runs in-pod and cannot see an undeployed env.
 func (a *App) CheckEnvironmentHealth(selection uiSelection) (uiEnvironmentHealth, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
@@ -44,9 +40,6 @@ func healthChecksAllOK(checks []uiEnvironmentHealthCheck) bool {
 	return true
 }
 
-// registryHealthCheck reports whether the env resolves to any effective
-// container registry, using the same resolution the editor and the build/deploy
-// resolvers use.
 func (a *App) registryHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
 	list, inherited := a.effectiveEnvironmentContainerRegistries(tenant, environment, config)
 	check := uiEnvironmentHealthCheck{ID: healthCheckIDRegistry, Title: "Container registry"}
@@ -61,9 +54,6 @@ func (a *App) registryHealthCheck(tenant, environment string, config configpkg.E
 	return check
 }
 
-// registryHealthDetail names the registry the environment will act on in plain
-// language, so a passing check still tells the operator which registry is in
-// effect (and whether it is inherited from the project).
 func registryHealthDetail(list configpkg.ContainerRegistries, inherited bool) string {
 	target := "a configured registry"
 	if cluster, ok := list.ClusterEntry(); ok {
@@ -79,9 +69,6 @@ func registryHealthDetail(list configpkg.ContainerRegistries, inherited bool) st
 	return fmt.Sprintf("Using %s.", target)
 }
 
-// runtimeDeployedHealthCheck reports whether the env's runtime is deployed to
-// its Kubernetes context. It is deliberately out-of-pod: `erun doctor` runs
-// inside the runtime container and so cannot observe an undeployed env.
 func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
 	check := uiEnvironmentHealthCheck{ID: healthCheckIDRuntime, Title: "Runtime deployment"}
 	kubeContext := strings.TrimSpace(config.KubernetesContext)
@@ -111,27 +98,15 @@ func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config conf
 	return check
 }
 
-// checkRuntimeDeployed reports whether a pod running the erun-devops runtime
-// container exists in the env's namespace on the given context. kubectl exits
-// non-zero both when the namespace is genuinely absent (the not-deployed
-// state, mirroring the convention loadClusterRegistry uses for a missing
-// Service) and when the probe itself could not be answered — a VPN down, a
-// rotated token, an unreachable API server. Collapsing both to a plain "not
-// deployed" hands the operator a Deploy button that will fail identically,
-// and the health check's own honest "could not check" branch
-// (runtimeDeployedHealthCheck's healthCheckStatusUnknown) never fires. Only a
-// genuine NotFound is a negative answer; anything else is propagated as an
-// error.
+// checkRuntimeDeployed treats only a genuine NotFound as not deployed; any other
+// kubectl failure is an error so the check reports "could not check".
 func checkRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
 	namespace := configpkg.KubernetesNamespaceName(tenant, environment)
 	output, err := kubectlJSON(ctx, kubeContext,
 		"get", "pods", "-n", namespace,
 		"-o", `jsonpath={range .items[*]}{range .spec.containers[*]}{.name}{"\n"}{end}{end}`)
 	if err != nil {
-		// A missing kubectl binary reads as "not found" text too (`exec:
-		// "kubectl": executable file not found in $PATH`), which would
-		// otherwise be misclassified as an absent namespace rather than the
-		// "could not check" it actually is.
+		// A missing kubectl binary also prints "not found".
 		if !errors.Is(err, exec.ErrNotFound) && kube.KubernetesResourceNotFound(err.Error()) {
 			return false, nil
 		}

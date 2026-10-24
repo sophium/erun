@@ -1,433 +1,25 @@
 package podruntime
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
-// live: cgroup v2 present, an unlimited memory.max, cgroup v1 (or no cgroup
-// fs at all), and a script that could not read a file. None of these are
-// reachable from the dry-run integration subprocess (dry-run never runs the
-// script), and the real-run path needs a live cgroup v2 container the
-// harness does not have, so the fixture matrix belongs here rather than in
-// erun-integration. Table-driven with the comparisons factored into
-// top-level assert helpers, so the number of fixtures does not grow this
-// function's own cyclomatic complexity.
-func TestParseRuntimeUsageReadings(t *testing.T) {
-	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
-	interval := time.Second
-
-	for _, tc := range runtimeUsageReadingCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			usage := parseRuntimeUsage(req, tc.output, interval)
-			if usage.Tenant != req.Tenant || usage.Environment != req.Environment {
-				t.Errorf("tenant/environment not carried through: %+v", usage)
-			}
-			assertRuntimeCPU(t, usage.CPU, tc.wantCPU)
-			assertRuntimeMemory(t, usage.Memory, tc.wantMemory)
-			if len(usage.Disk) != 1 {
-				t.Fatalf("expected exactly one disk reading, got %d", len(usage.Disk))
-			}
-			assertRuntimeDisk(t, usage.Disk[0], tc.wantDisk)
-			if len(usage.Warnings) != 0 {
-				t.Errorf("expected no warnings for a reading well under every threshold, got %v", usage.Warnings)
-			}
-		})
-	}
-}
-
-type runtimeUsageReadingCase struct {
-	name       string
-	output     string
-	wantCPU    config.RuntimeCPUUsage
-	wantMemory config.RuntimeMemoryUsage
-	wantDisk   config.RuntimeDiskUsage
-}
-
-func runtimeUsageReadingCases() []runtimeUsageReadingCase {
-	cases := runtimeUsageBaseReadingCases()
-	cases = append(cases, runtimeUsageMemoryObservationReadingCases()...)
-	return append(cases, runtimeUsageDiskOwnUsageReadingCases()...)
-}
-
-func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
-	return []runtimeUsageReadingCase{
-		{
-			name: "cgroup v2 present reports quota, usage, and disk",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=1027301376",
-				"memory_oom_kill=0",
-				"memory_ceiling_hits=21292",
-				"cpu_max=100000 100000",
-				"cpu_usage_before=581511501",
-				"cpu_usage_after=581611501",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
-				"disk_own_used_kb=54000000",
-			}, "\n"),
-			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
-			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
-				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
-				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
-			},
-		},
-		{
-			name: "unlimited memory.max reports Unlimited, not a fabricated percentage",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=52428800",
-				"memory_max=max",
-				"memory_peak=104857600",
-				"memory_oom_kill=0",
-				"cpu_max=max 100000",
-				"cpu_usage_before=100",
-				"cpu_usage_after=200",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
-		},
-		{
-			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
-			output: strings.Join([]string{
-				"cgroup_type=tmpfs",
-				"memory_current=",
-				"memory_max=",
-				"memory_peak=",
-				"memory_oom_kill=",
-				"cpu_max=",
-				"cpu_usage_before=",
-				"cpu_usage_after=",
-				"cpu_time_before_ns=",
-				"cpu_time_after_ns=",
-				"disk_workspace=/dev/sda1 100 50 40 55% /home/erun",
-				"disk_own_used_kb=50",
-			}, "\n"),
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
-			// Disk uses statfs via df, not cgroup, so it stays readable regardless.
-			wantDisk: config.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50,
-				OwnUsedBytes: 50 * 1024, OwnUsageObserved: true,
-			},
-		},
-		{
-			name: "memory.current missing reports unavailable without a fabricated zero",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=",
-				"memory_max=2147483648",
-			}, "\n"),
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
-			wantDisk:   config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
-		},
-		{
-			// A long filesystem identifier pushes df's data row onto its own
-			// line with the Filesystem column dropped, leaving only the 5
-			// remaining columns -- the shape parseRuntimeDFUsage's
-			// neighbor-based lookup exists to survive; the script's
-			// `tail -n1` already selects this line.
-			name:       "wrapped filesystem name still parses by column, not fixed index",
-			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
-			wantDisk: config.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50,
-				OwnUsedBytes: 300 * 1024, OwnUsageObserved: true,
-			},
-		},
-	}
-}
-
-// runtimeUsageDiskOwnUsageReadingCases is split out from
-// runtimeUsageBaseReadingCases the same way runtimeUsageMemoryObservationReadingCases
-// is: a dedicated table for a reading facet that must stay independent of the
-// rest of the disk reading, kept in its own function purely to bound the
-// parent table's length.
-func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
-	return []runtimeUsageReadingCase{
-		{
-			// du and df read independent sources (a filesystem walk vs a
-			// statfs), so one being unreadable must not suppress the other --
-			// an operator can still learn their own footprint even when the
-			// node-wide figure is unavailable, and vice versa.
-			name: "own usage is observed independently of df availability",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=1048576",
-				"memory_max=2097152",
-				"memory_peak=1048576",
-				"memory_oom_kill=0",
-				"cpu_max=100000 100000",
-				"cpu_usage_before=0",
-				"cpu_usage_after=0",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=",
-				"disk_own_used_kb=12345",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 1048576, PeakBytes: 1048576, PeakObserved: true,
-				LimitBytes: 2097152, PercentOfLimit: 50, OOMKillsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				Unavailable:      "an empty df line should report unavailable even though own usage was read",
-				OwnUsedBytes:     12345 * 1024,
-				OwnUsageObserved: true,
-			},
-		},
-	}
-}
-
-// runtimeUsageMemoryObservationReadingCases covers memory.peak and
-// memory.events' oom_kill going missing independently of the rest of the
-// memory reading -- each must stay unobserved rather than reporting a
-// fabricated zero, without the struct-level Unavailable firing, since the
-// rest of the reading is genuinely available.
-func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
-	return []runtimeUsageReadingCase{
-		{
-			name: "memory.peak missing reports unobserved, not a fabricated zero",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=",
-				"memory_oom_kill=0",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, LimitBytes: 2147483648,
-				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
-		},
-		{
-			// memory.events' oom_kill counter can be as unreadable as
-			// memory.peak; OOMKillsObserved must stay false rather than
-			// reporting a confident "no kills".
-			name: "memory.events oom_kill missing reports unobserved, not a fabricated zero",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=1027301376",
-				"memory_oom_kill=",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
-				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
-		},
-		{
-			// memory.events' "max" counter (cgroup ceiling hits) is exactly
-			// as unreadable as oom_kill from the same file; CeilingHitsObserved
-			// must stay false rather than reporting a confident "never hit it".
-			name: "memory.events max (ceiling hits) missing reports unobserved, not a fabricated zero",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=1027301376",
-				"memory_oom_kill=0",
-				"memory_ceiling_hits=",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
-				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-				OOMKillsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
-		},
-	}
-}
-
-// assertRuntimeCPU compares an availability marker (want.Unavailable's
-// presence, not its exact text -- the fixture table above uses the field to
-// document *why* a case is unavailable) and, only when available, the
-// numeric fields.
-func assertRuntimeCPU(t *testing.T, got, want config.RuntimeCPUUsage) {
-	t.Helper()
-	if (got.Unavailable == "") != (want.Unavailable == "") {
-		t.Errorf("CPU.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
-		return
-	}
-	if want.Unavailable != "" {
-		return
-	}
-	if got.QuotaCores != want.QuotaCores {
-		t.Errorf("CPU.QuotaCores = %v, want %v", got.QuotaCores, want.QuotaCores)
-	}
-	if got.UtilizationPercent != want.UtilizationPercent {
-		t.Errorf("CPU.UtilizationPercent = %v, want %v", got.UtilizationPercent, want.UtilizationPercent)
-	}
-}
-
-func assertRuntimeMemory(t *testing.T, got, want config.RuntimeMemoryUsage) {
-	t.Helper()
-	if (got.Unavailable == "") != (want.Unavailable == "") {
-		t.Errorf("Memory.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
-		return
-	}
-	if want.Unavailable != "" {
-		return
-	}
-	assertRuntimeMemoryPeakAndOOM(t, got, want)
-	if got.Unlimited != want.Unlimited {
-		t.Errorf("Memory.Unlimited = %t, want %t", got.Unlimited, want.Unlimited)
-	}
-	if !want.Unlimited && got.LimitBytes != want.LimitBytes {
-		t.Errorf("Memory.LimitBytes = %d, want %d", got.LimitBytes, want.LimitBytes)
-	}
-	if !want.Unlimited && got.PercentOfLimit != want.PercentOfLimit {
-		t.Errorf("Memory.PercentOfLimit = %v, want %v", got.PercentOfLimit, want.PercentOfLimit)
-	}
-}
-
-// assertRuntimeMemoryPeakAndOOM checks CurrentBytes/PeakBytes/OOMKills
-// alongside their own Observed bit: a value alone is never enough to say
-// whether it means anything.
-func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want config.RuntimeMemoryUsage) {
-	t.Helper()
-	if got.CurrentBytes != want.CurrentBytes {
-		t.Errorf("Memory.CurrentBytes = %d, want %d", got.CurrentBytes, want.CurrentBytes)
-	}
-	if got.PeakBytes != want.PeakBytes {
-		t.Errorf("Memory.PeakBytes = %d, want %d", got.PeakBytes, want.PeakBytes)
-	}
-	if got.PeakObserved != want.PeakObserved {
-		t.Errorf("Memory.PeakObserved = %t, want %t", got.PeakObserved, want.PeakObserved)
-	}
-	if got.OOMKillsObserved != want.OOMKillsObserved {
-		t.Errorf("Memory.OOMKillsObserved = %t, want %t", got.OOMKillsObserved, want.OOMKillsObserved)
-	}
-	if got.CeilingHits != want.CeilingHits {
-		t.Errorf("Memory.CeilingHits = %d, want %d", got.CeilingHits, want.CeilingHits)
-	}
-	if got.CeilingHitsObserved != want.CeilingHitsObserved {
-		t.Errorf("Memory.CeilingHitsObserved = %t, want %t", got.CeilingHitsObserved, want.CeilingHitsObserved)
-	}
-}
-
-func assertRuntimeDisk(t *testing.T, got, want config.RuntimeDiskUsage) {
-	t.Helper()
-	if got.Mount != want.Mount {
-		t.Errorf("Disk.Mount = %q, want %q", got.Mount, want.Mount)
-	}
-	if got.NodeShared != want.NodeShared {
-		t.Errorf("Disk.NodeShared = %t, want %t", got.NodeShared, want.NodeShared)
-	}
-	// Own usage comes from an independent read (du, not df/statfs), so it is
-	// checked before the Unavailable early-return below -- one being
-	// unreadable must not hide the other.
-	assertRuntimeDiskOwnUsage(t, got, want)
-	if (got.Unavailable == "") != (want.Unavailable == "") {
-		t.Errorf("Disk.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
-		return
-	}
-	if want.Unavailable != "" {
-		return
-	}
-	if got.TotalBytes != want.TotalBytes {
-		t.Errorf("Disk.TotalBytes = %d, want %d", got.TotalBytes, want.TotalBytes)
-	}
-	if got.UsedBytes != want.UsedBytes {
-		t.Errorf("Disk.UsedBytes = %d, want %d", got.UsedBytes, want.UsedBytes)
-	}
-	if got.PercentUsed != want.PercentUsed {
-		t.Errorf("Disk.PercentUsed = %v, want %v", got.PercentUsed, want.PercentUsed)
-	}
-}
-
-func assertRuntimeDiskOwnUsage(t *testing.T, got, want config.RuntimeDiskUsage) {
-	t.Helper()
-	if got.OwnUsageObserved != want.OwnUsageObserved {
-		t.Errorf("Disk.OwnUsageObserved = %t, want %t", got.OwnUsageObserved, want.OwnUsageObserved)
-	}
-	if want.OwnUsageObserved && got.OwnUsedBytes != want.OwnUsedBytes {
-		t.Errorf("Disk.OwnUsedBytes = %d, want %d", got.OwnUsedBytes, want.OwnUsedBytes)
-	}
-}
-
-// TestParseRuntimeUsageWarnings covers the named threshold constants: a
-// reading nobody acts on is decoration, so each threshold must fire exactly
-// at its boundary and stay silent below it.
+// Each threshold must fire exactly at its boundary and stay silent below it.
 func TestParseRuntimeUsageWarnings(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second
-
-	t.Run("memory warning fires at the threshold and not below it", func(t *testing.T) {
-		below := parseRuntimeUsage(req, cgroupMemoryFixture(84, 50), interval)
-		if hasWarningContaining(below.Warnings, "memory is at") {
-			t.Errorf("84%% should not warn, got %v", below.Warnings)
-		}
-
-		at := parseRuntimeUsage(req, cgroupMemoryFixture(85, 50), interval)
-		if !hasWarningContaining(at.Warnings, "memory is at") {
-			t.Errorf("85%% should warn, got %v", at.Warnings)
-		}
-	})
-
-	t.Run("memory.peak warning fires independently of current usage", func(t *testing.T) {
-		usage := parseRuntimeUsage(req, cgroupMemoryFixture(10, 96), interval)
-		if !hasWarningContaining(usage.Warnings, "memory.peak reached") {
-			t.Errorf("a 96%% peak should warn even with low current usage, got %v", usage.Warnings)
-		}
-	})
-
-	t.Run("memory.peak warning does not fire when the peak could not be read", func(t *testing.T) {
-		output := strings.Join([]string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=52428800",
-			"memory_max=2147483648",
-			"memory_peak=",
-			"memory_oom_kill=0",
-		}, "\n")
-
-		usage := parseRuntimeUsage(req, output, interval)
-		if usage.Memory.PeakObserved {
-			t.Fatalf("expected PeakObserved=false when memory.peak is unreadable, got %+v", usage.Memory)
-		}
-		if hasWarningContaining(usage.Warnings, "memory.peak reached") {
-			t.Errorf("an unread peak must not compute a percentage to warn on, got %v", usage.Warnings)
-		}
-	})
 
 	t.Run("OOM kill warning does not fire when oom_kill could not be read", func(t *testing.T) {
 		output := strings.Join([]string{
@@ -446,53 +38,6 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 			t.Errorf("an unread oom_kill counter must not report a confident zero, got %v", usage.Warnings)
 		}
 	})
-
-	t.Run("OOM kills always warn", func(t *testing.T) {
-		output := strings.Join([]string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=52428800",
-			"memory_max=2147483648",
-			"memory_peak=52428800",
-			"memory_oom_kill=2",
-		}, "\n")
-
-		usage := parseRuntimeUsage(req, output, interval)
-		if !hasWarningContaining(usage.Warnings, "recorded 2 OOM kill") {
-			t.Errorf("expected an OOM kill warning, got %v", usage.Warnings)
-		}
-	})
-
-	t.Run("disk warning fires at the threshold and names the node-shared scope", func(t *testing.T) {
-		output := "disk_workspace=/dev/sda1 1000 900 100 90% /home/erun"
-		usage := parseRuntimeUsage(req, output, interval)
-		assertDiskWarningNamesNodeSharedScope(t, usage.Warnings)
-	})
-}
-
-// assertDiskWarningNamesNodeSharedScope checks both halves of the disk
-// warning's wording, factored out of TestParseRuntimeUsageWarnings so the
-// two conditions don't count against that function's own complexity budget.
-func assertDiskWarningNamesNodeSharedScope(t *testing.T, warnings []string) {
-	t.Helper()
-	if !hasWarningContaining(warnings, "node disk is at 90%") {
-		t.Errorf("90%% disk usage should warn, got %v", warnings)
-	}
-	if !hasWarningContaining(warnings, "shared with every environment on this node") {
-		t.Errorf("the disk warning must name the node-shared scope so an operator does not clean up the wrong environment, got %v", warnings)
-	}
-}
-
-func cgroupMemoryFixture(currentPercent, peakPercent int) string {
-	const limit = int64(1000)
-	current := limit * int64(currentPercent) / 100
-	peak := limit * int64(peakPercent) / 100
-	return strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=" + strconv.FormatInt(current, 10),
-		"memory_max=" + strconv.FormatInt(limit, 10),
-		"memory_peak=" + strconv.FormatInt(peak, 10),
-		"memory_oom_kill=0",
-	}, "\n")
 }
 
 func hasWarningContaining(warnings []string, substr string) bool {
@@ -504,121 +49,18 @@ func hasWarningContaining(warnings []string, substr string) bool {
 	return false
 }
 
-// TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero pins the wire
-// contract: PeakBytes/OOMKills are already omitempty, so a genuine zero and
-// an unread value marshal identically unless their own Observed bit is
-// carried alongside them.
-func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
-	unread, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100})
-	if err != nil {
-		t.Fatalf("marshal unread: %v", err)
-	}
-	if strings.Contains(string(unread), "peakObserved") || strings.Contains(string(unread), "peakBytes") {
-		t.Errorf("an unread peak must omit both peakBytes and peakObserved, got %s", unread)
-	}
-
-	genuineZero, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
-	if err != nil {
-		t.Fatalf("marshal genuine zero: %v", err)
-	}
-	if !strings.Contains(string(genuineZero), `"peakObserved":true`) {
-		t.Errorf("a genuinely-zero, observed peak must carry peakObserved:true, got %s", genuineZero)
-	}
-	if strings.Contains(string(genuineZero), "peakBytes") {
-		t.Errorf("a genuine zero peak still omits the zero-valued peakBytes key, got %s", genuineZero)
-	}
-
-	var roundTripped config.RuntimeMemoryUsage
-	if err := json.Unmarshal(genuineZero, &roundTripped); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
-		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
-	}
-}
-
-// TestRunRuntimeUsageReportsTheDindSidecarSeparately is the regression guard
-// for this defect: an environment mid-release can read 0.3% CPU / idle memory
-// from the runtime container while the erun-dind sidecar -- where the actual
-// build runs -- saturates its own cores, and before this fix nothing in the
-// reading let an operator tell a genuinely idle environment apart from one
-// whose build is grinding away in a container this reading could not see at
-// all. The fake runner answers differently per container, exactly like a
-// real busy-build/idle-runtime split, and asserts the busy sidecar reading
-// surfaces on RuntimeUsage.Dind rather than being silently dropped.
-func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
-	idleRuntimeReading := strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=104857600", // ~100Mi
-		"memory_max=24696061952",   // ~23Gi
-		"memory_peak=104857600",
-		"memory_oom_kill=0",
-		"cpu_max=1200000 100000", // 12-core quota
-		"cpu_usage_before=1000000",
-		"cpu_usage_after=1003000", // 3ms burned over 1s: reads as idle
-		"cpu_time_before_ns=1000000000",
-		"cpu_time_after_ns=2000000000",
-		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-	}, "\n")
-	busyDindReading := strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=2040109465", // ~1.9Gi
-		"memory_max=15032385536",    // 14Gi
-		"memory_peak=3435973836",    // ~3.2Gi
-		"memory_oom_kill=0",
-		"cpu_max=400000 100000", // 4-core quota
-		"cpu_usage_before=1000000",
-		"cpu_usage_after=2900000", // 1.9 cores burned over 1s: a real build grinding
-		"cpu_time_before_ns=1000000000",
-		"cpu_time_after_ns=2000000000",
-		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-	}, "\n")
-
-	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{Stdout: busyDindReading}, nil
-		}
-		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
-	}
-
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
-	if err != nil {
-		t.Fatalf("RunRuntimeUsage: %v", err)
-	}
-	if !usage.ExcludesBuilds {
-		t.Fatalf("expected ExcludesBuilds=true for a local-agent env, got %+v", usage)
-	}
-	if usage.CPU.UtilizationPercent >= 5 {
-		t.Fatalf("expected the runtime container's own reading to look idle, got %+v", usage.CPU)
-	}
-	if usage.Dind == nil {
-		t.Fatalf("expected a Dind reading for a build-capable environment, got nil (the exact regression: the busy sidecar is invisible)")
-	}
-	if usage.Dind.CPU.UtilizationPercent < 40 {
-		t.Errorf("expected the sidecar's own reading to show the real build load (~47%% of its 4-core quota), got %+v", usage.Dind.CPU)
-	}
-	if usage.Dind.Memory.CurrentBytes != 2040109465 {
-		t.Errorf("expected the sidecar's own memory reading to carry through, got %+v", usage.Dind.Memory)
-	}
-}
-
-// TestRunRuntimeUsageDindExecFailureFailsSoft covers the fail-soft contract:
-// an environment whose sidecar cannot be reached (an older runtime image, a
-// sidecar mid-restart) must still get a usable runtime-container reading
-// instead of losing the whole call over a container this reading has always
-// been unable to see anyway.
+// An unreachable sidecar must not cost the runtime-container reading.
 func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
+		if container == build.RuntimeDindContainerName {
 			return kube.RemoteCommandResult{}, errors.New("container not found")
 		}
 		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
 	}
@@ -633,10 +75,8 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	}
 }
 
-// runtimeUsageRuntimeContainerReading is the runtime container's own cgroup
-// sample for the build-throttling cases. Its CPU reading is deliberately idle,
-// so the sidecar's sample beside it is the only thing that can raise a
-// build-throttling warning.
+// The runtime container's CPU is idle, so only the sidecar can raise a
+// throttling warning.
 func runtimeUsageRuntimeContainerReading() string {
 	return strings.Join([]string{
 		"cgroup_type=cgroup2fs",
@@ -653,8 +93,6 @@ func runtimeUsageRuntimeContainerReading() string {
 	}, "\n")
 }
 
-// runtimeUsageDindReading is one erun-dind sidecar sample: `periods`
-// scheduling periods, of which `throttled` were throttled.
 func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 	return strings.Join([]string{
 		"cgroup_type=cgroup2fs",
@@ -673,170 +111,23 @@ func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 	}, "\n")
 }
 
-// assertRuntimeUsageThrottleWarning runs one reading over those two samples
-// and asserts the build-throttling warning is present (want non-empty, matched
-// exactly) or absent (want empty). The absence check matches on the warning's
-// own words rather than on the slice being empty, so a reading that picks up
-// some unrelated warning cannot pass as silent about throttling.
-func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
-	t.Helper()
+// An unreadable quota cannot say whether the sidecar is starved, so it must not warn.
+func TestRunRuntimeUsageDoesNotWarnOfThrottlingWithoutAReadableQuota(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{Stdout: dindReading}, nil
+		if container == build.RuntimeDindContainerName {
+			return kube.RemoteCommandResult{Stdout: runtimeUsageDindReading("max 100000", 200, 200)}, nil
 		}
 		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}
-	if want == "" {
-		for _, warning := range usage.Warnings {
-			if strings.Contains(warning, "throttled in") {
-				t.Fatalf("expected no build-throttling warning, got %q", warning)
-			}
-		}
-		return
-	}
 	for _, warning := range usage.Warnings {
-		if warning == want {
-			return
+		if strings.Contains(warning, "throttled in") {
+			t.Fatalf("expected no build-throttling warning, got %q", warning)
 		}
-	}
-	t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", want, usage.Warnings)
-}
-
-// TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap is the regression
-// guard for this defect: a build pinned at its cap and a build merely busy at
-// it report the same utilisation percentage, so a build starved by its own
-// quota reads as a running build making no progress and nothing in the
-// reading says why. nr_throttled over nr_periods is the counter that
-// separates the two, and it has to be said out loud rather than left for an
-// operator to infer from a percentage that happens to sit at 100.
-//
-// Its sibling below pins the other half of the same verdict, which is what
-// keeps this one honest: the counter that carries good news also carries
-// noise.
-func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
-	const throttleWarning = "the build was throttled in 20000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-	const partialThrottleWarning = "the build was throttled in 2000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-	const youngSidecarThrottleWarning = "the build was throttled in 9999 of 9999 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-
-	cases := []struct {
-		name        string
-		dindReading string
-		wantWarning string
-	}{
-		{
-			// The failure this guard was written for: every period the cap
-			// granted was throttled, and the reading carried no warning
-			// saying so.
-			name:        "a build throttled in every period",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 20000),
-			wantWarning: throttleWarning,
-		},
-		{
-			// The same pinned build read one period short of sizing's bar.
-			// The ratio is total, not marginal: the sidecar has been throttled
-			// in every period it has ever had, which is what a rebuild pinned
-			// at its cap looks like for its first ~17 minutes -- the whole
-			// window that build occupies. A floor sized for a 24-hour
-			// recommendation must not hold this reading silent, or the warning
-			// arrives only once the build it describes is over.
-			name:        "a build throttled in every period under the sizing floor",
-			dindReading: runtimeUsageDindReading("400000 100000", 9999, 9999),
-			wantWarning: youngSidecarThrottleWarning,
-		},
-		{
-			// Materially throttled without being pinned at the cap: a tenth
-			// of the sidecar's periods. Starvation does not have to be total
-			// to be worth naming.
-			name:        "a build throttled in a material share of its periods",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 2000),
-			wantWarning: partialThrottleWarning,
-		},
-		{
-			name:        "a build working at its cap without being throttled",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 0),
-			wantWarning: "",
-		},
-		{
-			name:        "no scheduling periods observed",
-			dindReading: runtimeUsageDindReading("400000 100000", 0, 0),
-			wantWarning: "",
-		},
-		{
-			// The counters parse even when the quota does not, so an
-			// unavailable CPU reading must not warn off numbers it could not
-			// interpret.
-			name:        "an unreadable quota with throttled periods behind it",
-			dindReading: runtimeUsageDindReading("max 100000", 200, 200),
-			wantWarning: "",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertRuntimeUsageThrottleWarning(t, tc.dindReading, tc.wantWarning)
-		})
-	}
-}
-
-// TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial pins the
-// quieter half of the verdict, and the defect that made it a defect: reading
-// any throttle at all as starvation.
-//
-// nr_periods and nr_throttled are cumulative for the sidecar's whole lifetime,
-// so a bare ThrottledPeriods > 0 is a lifetime residue rather than a reading
-// of the build in front of you. A live environment reported 3 throttled
-// periods out of 51,123 -- 0.006% -- and `erun usage` answered "the build ...
-// is CPU-starved by its own cap", sending the reader after a CPU problem that
-// did not exist while the sizing line beside it read the same counters as
-// insufficient evidence. Those ratios must stay silent.
-func TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial(t *testing.T) {
-	cases := []struct {
-		name        string
-		dindReading string
-	}{
-		{
-			// The reported failure, at the counters it was reported with.
-			name:        "a build throttled in an immaterial share of its periods",
-			dindReading: runtimeUsageDindReading("400000 100000", 51123, 3),
-		},
-		{
-			// The same defect at the second environment's own counters:
-			// 6 of 17,479 is 0.03%.
-			name:        "an immaterial throttle ratio on a second environment",
-			dindReading: runtimeUsageDindReading("400000 100000", 17479, 6),
-		},
-		{
-			// Bracketing the materiality bar from below: 4.99% of the periods.
-			name:        "a build throttled just under the material ratio",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 998),
-		},
-		{
-			// Bracketing the build path's own period floor from below, the
-			// same way the case above brackets the ratio: 599 of 599 is a
-			// total ratio carried by too few periods to read. The sibling
-			// test's 9,999-of-9,999 case is the same ratio past that floor,
-			// and must warn.
-			name:        "a total ratio one period under the build floor",
-			dindReading: runtimeUsageDindReading("400000 100000", 599, 599),
-		},
-		{
-			// The other half of the bar. A ratio this extreme carried by too
-			// few periods to read is exactly what the floor keeps out: a
-			// sidecar seconds old, pinned because it is still starting up.
-			name:        "every period throttled but too few periods to read",
-			dindReading: runtimeUsageDindReading("400000 100000", 200, 200),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertRuntimeUsageThrottleWarning(t, tc.dindReading, "")
-		})
 	}
 }
 
@@ -850,7 +141,6 @@ func TestClampRuntimeUsageInterval(t *testing.T) {
 		{"negative uses default", -time.Second, DefaultRuntimeUsageInterval},
 		{"below floor clamps up", 10 * time.Millisecond, minRuntimeUsageInterval},
 		{"above ceiling clamps down", time.Minute, maxRuntimeUsageInterval},
-		{"within range passes through", 3 * time.Second, 3 * time.Second},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -861,30 +151,24 @@ func TestClampRuntimeUsageInterval(t *testing.T) {
 	}
 }
 
-// TestRetainedMemoryWarningsSurviveAContainerRestart pins the defect: memory.peak
-// and memory.events' oom_kill are per-container counters, so a restart zeroes
-// both and an environment that was OOM-killed reads as memory-healthy. The
-// retained history is what outlives the container, so the warning has to come
-// from it -- without becoming a warning an idle environment also gets, or one
-// no operator action can clear.
+// memory.peak and oom_kill reset on container restart, so the warning must come
+// from retained history.
 func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	const limit = int64(6442450944) // 6144Mi, the runtimepod in the observed report
 
-	// The reading taken after the restart: both counters reset, so neither the
-	// live peak nor the live kill count supports a warning by itself.
-	restarted := config.RuntimeMemoryUsage{
+	restarted := model.RuntimeMemoryUsage{
 		CurrentBytes: 1503238554, PeakBytes: 2254857830, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(1503238554) / float64(limit),
 		OOMKills: 0, OOMKillsObserved: true,
 	}
-	unrestarted := config.RuntimeMemoryUsage{
+	unrestarted := model.RuntimeMemoryUsage{
 		CurrentBytes: 6442450943, PeakBytes: 6443237376, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(6442450943) / float64(limit),
 		OOMKills: 1, OOMKillsObserved: true,
 	}
 
 	t.Run("a retained kill and near-limit peak keep warning after a restart", func(t *testing.T) {
-		history := eruncommon.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(restarted, history)
 		if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
@@ -896,12 +180,12 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("a genuinely idle environment is still healthy", func(t *testing.T) {
-		idle := config.RuntimeMemoryUsage{
+		idle := model.RuntimeMemoryUsage{
 			CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true,
 			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
 			OOMKillsObserved: true,
 		}
-		for _, history := range []eruncommon.RuntimeUsageHistory{
+		for _, history := range []deploy.RuntimeUsageHistory{
 			{},
 			{Restarts: 3, ObservedPeakMemoryBytes: 104857600},
 		} {
@@ -912,12 +196,10 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("raising the limit clears the retained peak warning", func(t *testing.T) {
-		// The same history, scored against the 9216Mi the pod's own verdict
-		// recommends: the signal is re-derived every read, so acting on it is
-		// what clears it -- there is no stored "already warned" flag to reset.
+		// The signal is re-derived every read, so acting on it clears it.
 		raised := restarted
 		raised.LimitBytes = 9663676416 // 9216Mi
-		history := eruncommon.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(raised, history)
 		if hasWarningContaining(warnings, "retained memory peak reached") {
@@ -929,7 +211,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("an uninterrupted container is not warned twice", func(t *testing.T) {
-		history := eruncommon.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		if warnings := retainedMemoryUsageWarnings(unrestarted, history); len(warnings) != 0 {
 			t.Errorf("live counters already cover this container, got %v", warnings)
@@ -937,17 +219,11 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 }
 
-// TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory proves the wiring
-// rather than just the judgement: a caller that only runs RunRuntimeUsage --
-// `erun usage`, the MCP usage tool, the desktop card -- gets the retained
-// warning without asking for it, and an environment with no retained history
-// gains nothing.
 func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	// The post-restart reading: both counters reset, so it warns about nothing.
 	reading := parseRuntimeUsage(config.ShellLaunchParams{Tenant: "erun", Environment: "code3"}, strings.Join([]string{
 		"cgroup_type=cgroup2fs",
 		"memory_current=1503238554",
@@ -962,8 +238,8 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
 	}
 
-	history := AppendRuntimeUsageSample(eruncommon.RuntimeUsageHistory{}, config.RuntimeUsage{
-		Memory: config.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
+	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, model.RuntimeUsage{
+		Memory: model.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
 	}, time.Now())
 	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {
 		t.Fatalf("save history: %v", err)

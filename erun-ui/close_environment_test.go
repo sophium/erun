@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// TestCloseEnvironmentSessionsClosesEveryMatchingSession is the
-// regression: the sidebar's "close env" dot must
-// tear down every PTY bound to (tenant, env) — Local + ERun + AI
-// + any extra terminals the user spawned — not just one. The
-// returned slice must list the serial IDs that were closed so the
-// frontend can drop them from tabsByEnv in one round-trip.
 func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	target := uiSelection{Tenant: "erun", Environment: "local"}
@@ -36,9 +30,6 @@ func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
 	}
 }
 
-// TestCloseEnvironmentSessionsLeavesOtherEnvsAlone guards against a
-// fat-fingered match predicate quietly tearing down a different env
-// (e.g. ignoring tenant, matching only by env name).
 func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	target := uiSelection{Tenant: "erun", Environment: "local"}
@@ -68,11 +59,6 @@ func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
 	}
 }
 
-// TestCloseEnvironmentSessionsSkipsAlreadyClosed guards the
-// idempotency the frontend relies on: clicking the dot a second
-// time after the underlying sessions have already exited (via PTY
-// crash, manual close-tab, etc.) must not return an error and must
-// not double-close a session.
 func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	target := uiSelection{Tenant: "erun", Environment: "local"}
@@ -93,11 +79,6 @@ func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
 	}
 }
 
-// TestCloseEnvironmentSessionsRejectsEmptyTarget keeps the API
-// contract narrow: the desktop must resolve a tenant/env pair
-// before asking the backend to tear down sessions. A bug that
-// passes an empty selection should fail loudly rather than
-// silently iterating over every session.
 func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	if _, err := app.CloseEnvironmentSessions(uiSelection{}); err == nil {
@@ -108,24 +89,14 @@ func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 	}
 }
 
-// TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses guards the fix
-// behind the "sidebar keeps spinning after close" bug. Closing an env must
-// mark each live session closed (and release its idle-stop block) so
-// tryReconnect refuses to respawn it — which is what lets streamSession reach
-// finalizeSessionExit -> finalizeAIActivity and emit AI busy=false, clearing
-// the sidebar spinner. Before the fix CloseEnvironmentSessions closed the PTY
-// without marking closed, so the AI session reconnected the still-live pod
-// session, finalize never ran, and a continuously repainting Claude TUI (never
-// quiet for the 3s idle-clear) left the aiBusy latch — and the row — spinning
-// forever.
+// Closing must mark sessions closed so tryReconnect refuses and the AI busy latch clears.
 func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
 		busyEnvs: make(map[string]int),
 	}
 	target := uiSelection{Tenant: "erun", Environment: "local"}
-	// respawn is non-nil so the ONLY reason tryReconnect can refuse is the
-	// closed flag the fix sets, not a nil respawn.
+	// A non-nil respawn means only the closed flag can make tryReconnect refuse.
 	ai := &managedTerminal{
 		selection:      target,
 		session:        newStubTerminalSession(),

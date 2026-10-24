@@ -9,13 +9,7 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// The Registration tab closes the gap TenantPlatformState.tsx's
-// readiness machine stops short of: an operator authenticated and enrolled
-// still has no desktop path to register a tenant/environment on the hosted
-// platform. Like tenant-dashboard-permissions.spec.ts, this stubs the
-// __erun_invoke RPC boundary rather than a real erun-backend-api, which the
-// inert harness deliberately cannot reach; the Go side that resolves this
-// data is covered by erun-ui/tenant_platform_registration_test.go.
+// The RPC is stubbed because the harness cannot reach erun-backend-api.
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -117,11 +111,7 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // A failed row's reason is the whole payload of that row, and the row used
-  // to render it as a bare destructive line -- role, but no glyph, so the
-  // failure was stated in colour and nothing else (WCAG 1.4.1). The vitest
-  // suite pins the rendered markup; this pins it in the real webview, where
-  // the glyph is what an operator actually gets.
+  // A failure must carry a glyph, not colour alone (WCAG 1.4.1).
   test('a failed row states its reason with a glyph, not colour alone', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('registration-failed-reason');
     try {
@@ -155,12 +145,8 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // The other half of the same contract, and the one this cell is likeliest to
-  // lose: DataCell renders a `truncate` <td>, whose nowrap inherits into the
-  // reason, so a long one is ellipsised out of the row -- taking with it the
-  // URL or identifier that names the way out. Asserted on the computed style,
-  // because a class that never applies is exactly the failure being guarded
-  // against.
+  // DataCell's `truncate` nowrap would ellipsise the reason, so check the
+  // computed style.
   test('a failed row wraps a long reason instead of losing it to the cell', async ({
     app,
     page,
@@ -203,10 +189,8 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // A caller with neither list readable nor either write grantable has
-  // nothing this tab could show, so — exactly like every other panel whose
-  // read is restricted — the tab itself does not render; the missing access
-  // is still named in the shared restricted-access note above the strip.
+  // With nothing readable or writable the tab is hidden; the restricted-access
+  // note still names the gap.
   test('a caller with nothing readable or writable never sees the tab at all', async ({
     app,
     page,
@@ -236,12 +220,8 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // The full path: preview (never a write), then register the environment it
-  // previewed, and see it land in the list — rule #3 (a preview precedes the
-  // register action) plus the round trip that proves the desktop can now do
-  // what used to dead-end at the CLI. Preview and register submit the same
-  // field set (one form, not two), so this also pins that the plan an
-  // operator sees describes exactly the environment register then creates.
+  // Preview and register submit the same fields, so the preview describes exactly
+  // what register creates.
   test('a full registration path: preview, then register the environment', async ({
     app,
     page,
@@ -288,10 +268,7 @@ test.describe('tenant dashboard — Registration tab', () => {
 
       await app.tenantDashboard.envNameInput().fill('new-env');
       await app.tenantDashboard.previewEnvironmentButton().click();
-      // Each poll here waits on a value this spec's own route handler owns, so
-      // it is the read's arrival that decides the step -- and `expect.poll`
-      // carries no timeout of its own, resolving to expect's 10s default
-      // rather than the 30s this test declares. Pointed at that budget.
+      // expect.poll defaults to expect.timeout, not the test deadline.
       await expect.poll(() => previewCalled, withTestBudget()).toBe(true);
       await expect(app.tenantDashboard.activePanel()).toContainText('namespace frs-new-env');
       await expect(app.tenantDashboard.activePanel()).toContainText('Quota ok');
@@ -299,8 +276,7 @@ test.describe('tenant dashboard — Registration tab', () => {
       await app.tenantDashboard.registerEnvironmentButton().click();
       await expect.poll(() => registerCalled, withTestBudget()).toBe(true);
 
-      // The register success re-fetches the dashboard, so the new
-      // environment appears without a manual refresh.
+      // Register success re-fetches the dashboard.
       await expect.poll(() => dashboardLoads, withTestBudget()).toBeGreaterThanOrEqual(2);
       await expect(app.tenantDashboard.environmentRow('new-env')).toContainText('registered');
     } finally {
@@ -308,11 +284,8 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // The register-on-the-row affordance: putting an existing local
-  // environment on the platform prefills its name/type/kubernetes context,
-  // switches the form to adopt mode, and the preview it shows says the
-  // deploy is skipped rather than claiming one will happen — the platform
-  // never receives a runtimeVersion or contextId for this request.
+  // Adopting a local env prefills the form and previews no deploy; no
+  // runtimeVersion or contextId is sent.
   test('putting a local environment on the platform previews and records it without deploying', async ({
     app,
     page,
@@ -366,8 +339,6 @@ test.describe('tenant dashboard — Registration tab', () => {
     await expect(app.tenantDashboard.envAdoptToggle()).toBeChecked();
     await expect(app.tenantDashboard.envKubernetesContextInput()).not.toHaveValue('');
 
-    // Same poll, same route-handler-owned value, same 10s default (see the
-    // registration case above).
     await app.tenantDashboard.previewEnvironmentButton().click();
     await expect.poll(() => previewCalled.adopt, withTestBudget()).toBe(true);
     await expect(app.tenantDashboard.activePanel()).toContainText('deploy: skipped');
@@ -377,8 +348,7 @@ test.describe('tenant dashboard — Registration tab', () => {
     expect(registerCalled.runtimeVersion).toBeFalsy();
   });
 
-  // A quota cap is an expected, actionable outcome, not a fault — it must
-  // read as a recoverable state (rule #5), not a raw error.
+  // A quota cap is an expected outcome and must read as recoverable.
   test('a quota-cap conflict names the recovery instead of failing as an error', async ({
     app,
     page,
@@ -406,16 +376,12 @@ test.describe('tenant dashboard — Registration tab', () => {
       const recoverable = app.tenantDashboard.recoverableNote('environment quota reached');
       await expect(recoverable).toBeVisible();
       await expect(recoverable).toHaveAttribute('role', 'status');
-      // Never rendered as a fault: no alert carries this text.
       await expect(app.tenantDashboard.activePanel().getByRole('alert')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
 
-  // An unrecoverable delete requires typing the object's name to confirm
-  // (root AGENTS.md Design-Language Decision Record), the same boundary
-  // every other destructive dashboard action gets.
   test('deleting an environment requires typing its name to confirm', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('registration-delete-confirm');
     try {
@@ -462,7 +428,6 @@ test.describe('tenant dashboard — Registration tab', () => {
       await confirmInput.fill('prod-env');
       await expect(confirmDelete).toBeEnabled();
 
-      // Cancel backs out without deleting anything.
       await app.tenantDashboard.deleteCancelButtonFor('prod-env').click();
       await expect(confirmInput).toHaveCount(0);
       expect(deleteCalled).toBe(false);
@@ -478,11 +443,7 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // A caller who may read Registration but write neither is exactly who the two
-  // hidden write gates leave stranded: the tab used to show two empty lists and
-  // say nothing about the access it was withholding, while the empty states
-  // still pointed at the absent forms. The read gates on this same tab already
-  // name their access; these two write gates must match.
+  // A read-only caller must be told which write access is missing.
   test('a read-only caller is told which write access is missing, not pointed at absent forms', async ({
     app,
     page,
@@ -507,7 +468,6 @@ test.describe('tenant dashboard — Registration tab', () => {
       await expect(panel).toContainText('registering a cloud context needs additional access');
       await expect(panel).toContainText('registering a hosted environment needs additional access');
 
-      // The controls these sentences used to name are not rendered at all.
       await expect(app.tenantDashboard.previewEnvironmentButton()).toHaveCount(0);
       await expect(app.tenantDashboard.envNameInput()).toHaveCount(0);
       await expect(panel).not.toContainText('Preview a plan above');

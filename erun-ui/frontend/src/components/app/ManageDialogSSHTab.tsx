@@ -56,10 +56,7 @@ export function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.Re
   );
 }
 
-// Workspace sync rides over the SSH connection, but it is a distinct user
-// concept (mirroring a local Git folder into the pod's worktree) from SSH
-// shell access itself, so it gets its own titled section rather than sitting
-// as an unlabeled checkbox inside "SSH access" (recognition over recall).
+// Workspace sync gets its own section: it is distinct from SSH shell access.
 export function WorkspaceSyncSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
@@ -170,11 +167,7 @@ function LocalSyncFolderField({
           <FolderOpen aria-hidden="true" />
         </Button>
       </div>
-      {/* Through the primitive so the field error carries an icon as well as
-          the destructive colour, and wraps rather than widening the row. The
-          id stays on the primitive's own element, which is what the input's
-          aria-describedby points at, and it is derived from the same variable
-          so the two cannot drift apart. */}
+      {/* The id is what the input's aria-describedby points at. */}
       {error && (
         <InlineAlert id="environment-config-sshd-sync-localpath-error">{error}</InlineAlert>
       )}

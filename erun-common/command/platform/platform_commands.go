@@ -9,88 +9,71 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// RunPlatformWhoami resolves the caller's identity against the erun platform.
-func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (platformclient.PlatformWhoami, error) {
+// RunPlatformWhoami resolves the caller's identity.
+func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (model.PlatformWhoami, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformWhoami{}, err
+		return model.PlatformWhoami{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
 	if ctx.DryRun {
-		return platformclient.PlatformWhoami{}, nil
+		return model.PlatformWhoami{}, nil
 	}
 	return client.Whoami(context.Background())
 }
 
-// RunPlatformVersion reports the build actually serving a hosted erun
-// platform's own API, over GET /v1/platform — the same unauthenticated route
-// `erun cloud init erun` already calls to discover the issuer and client ids.
-// It answers erun#2052's gap directly: `whoami` proves the caller is
-// authenticated and reachable, but returns identity, not build, so there was
-// no way to ask a deployed control plane what version it is running.
-// Unauthenticated on purpose: a client has to be able to compare the plane's
-// version before it can even mint a token against it (the same reason
-// PlatformInfo's other discovery fields -- issuer, client ids -- are
-// unauthenticated), and the fields it returns are this instance's own
-// self-description, never tenant data. This still goes through the resolved
-// alias (not a bare --api-url) so the same call keeps working when the
-// alias's cached credentials are stale or expired -- exactly the state a
-// caller troubleshooting a 404/401 on some other route is likely to be in.
-func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (platformclient.PlatformInfo, error) {
+// RunPlatformVersion reports the build serving the platform API. It is
+// unauthenticated so it works before a token can be minted or with stale credentials.
+func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (model.PlatformInfo, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformInfo{}, err
+		return model.PlatformInfo{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/platform")
 	if ctx.DryRun {
-		return platformclient.PlatformInfo{}, nil
+		return model.PlatformInfo{}, nil
 	}
 	return client.Platform(context.Background())
 }
 
-// RunPlatformCreateTenant registers a new tenant. Requires an
-// operations-tenant caller.
-func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateTenantParams, deps cloud.CloudDependencies) (platformclient.PlatformTenant, error) {
+// RunPlatformCreateTenant registers a tenant; requires an operations-tenant caller.
+func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateTenantParams, deps cloud.CloudDependencies) (model.PlatformTenant, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformTenant{}, err
+		return model.PlatformTenant{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/tenants",
 		"name="+params.Name, "type="+params.Type, "issuer="+params.Issuer)
 	if ctx.DryRun {
-		return platformclient.PlatformTenant{}, nil
+		return model.PlatformTenant{}, nil
 	}
 	return client.CreateTenant(context.Background(), params)
 }
 
-// RunPlatformCreateOrg creates an organization on the platform's own IdP —
-// the org an org-scoped tenant mapping needs before CreateTenant can produce
-// one any token will ever resolve to. Requires an operations-tenant caller.
-func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateOrgParams, deps cloud.CloudDependencies) (platformclient.PlatformOrg, error) {
+// RunPlatformCreateOrg creates an org on the platform IdP; requires an operations-tenant caller.
+func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateOrgParams, deps cloud.CloudDependencies) (model.PlatformOrg, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformOrg{}, err
+		return model.PlatformOrg{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/identity/orgs", "name="+params.Name)
 	if ctx.DryRun {
-		return platformclient.PlatformOrg{}, nil
+		return model.PlatformOrg{}, nil
 	}
 	return client.CreateOrg(context.Background(), params)
 }
 
-// RunPlatformRepairTenantIssuerOrgMapping fixes a tenant already stuck with
-// an unresolvable (issuer, org) mapping -- the repair path for a tenant a
-// pre-fix `platform tenant create` produced with no org value, or one whose
-// issuer was converted to org-scoped after it registered. Requires an
-// operations-tenant caller.
-func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformRepairTenantIssuerOrgMappingParams, deps cloud.CloudDependencies) (platformclient.PlatformTenantIssuer, error) {
+// RunPlatformRepairTenantIssuerOrgMapping fixes a tenant with an unresolvable (issuer, org)
+// mapping; requires an operations-tenant caller.
+func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformRepairTenantIssuerOrgMappingParams, deps cloud.CloudDependencies) (model.PlatformTenantIssuer, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformTenantIssuer{}, err
+		return model.PlatformTenantIssuer{}, err
 	}
 	details := []string{"issuer=" + params.Issuer, "orgFieldKey=" + params.OrgFieldKey, "orgFieldValue=" + params.OrgFieldValue}
 	if strings.TrimSpace(params.TenantID) != "" {
@@ -98,13 +81,13 @@ func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.C
 	}
 	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/tenant-issuers", details...)
 	if ctx.DryRun {
-		return platformclient.PlatformTenantIssuer{}, nil
+		return model.PlatformTenantIssuer{}, nil
 	}
 	return client.RepairTenantIssuerOrgMapping(context.Background(), params)
 }
 
 // RunPlatformListTenants lists tenants visible to the caller.
-func RunPlatformListTenants(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformTenant, error) {
+func RunPlatformListTenants(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformTenant, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
@@ -117,10 +100,10 @@ func RunPlatformListTenants(ctx core.Context, store configpkg.CloudReadStore, al
 }
 
 // RunPlatformCreateUser enrolls a user.
-func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateUserParams, deps cloud.CloudDependencies) (platformclient.PlatformUser, error) {
+func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateUserParams, deps cloud.CloudDependencies) (model.PlatformUser, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformUser{}, err
+		return model.PlatformUser{}, err
 	}
 	details := []string{"username=" + params.Username}
 	if len(params.RoleIDs) > 0 {
@@ -128,14 +111,12 @@ func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, ali
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/users", details...)
 	if ctx.DryRun {
-		return platformclient.PlatformUser{}, nil
+		return model.PlatformUser{}, nil
 	}
 	return client.CreateUser(context.Background(), params)
 }
 
-// RunPlatformListRoles lists the caller's tenant's roles and their
-// permissions, the lookup a client needs to turn a missing capability into the
-// role id a grant command takes.
+// RunPlatformListRoles lists the caller's tenant's roles and permissions.
 func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformRole, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -148,9 +129,8 @@ func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alia
 	return client.ListRoles(context.Background())
 }
 
-// RunPlatformGrantUserRole grants one role to one already-enrolled user, the
-// post-enrollment grant `erun platform user enroll` cannot perform.
-func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformGrantUserRoleParams, deps cloud.CloudDependencies) error {
+// RunPlatformGrantUserRole grants one role to an enrolled user.
+func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformGrantUserRoleParams, deps cloud.CloudDependencies) error {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return err
@@ -164,7 +144,7 @@ func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, 
 }
 
 // RunPlatformListUsers lists the target tenant's users.
-func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformListUsersParams, deps cloud.CloudDependencies) ([]platformclient.PlatformUser, error) {
+func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformListUsersParams, deps cloud.CloudDependencies) ([]model.PlatformUser, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
@@ -181,7 +161,7 @@ func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alia
 }
 
 // RunPlatformListEnvironments lists the caller's tenant's environments.
-func RunPlatformListEnvironments(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformEnvironment, error) {
+func RunPlatformListEnvironments(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
@@ -194,41 +174,33 @@ func RunPlatformListEnvironments(ctx core.Context, store configpkg.CloudReadStor
 }
 
 // RunPlatformGetEnvironment fetches one environment by id.
-func RunPlatformGetEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
+func RunPlatformGetEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, err
+		return model.PlatformEnvironment{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
 	if ctx.DryRun {
-		return platformclient.PlatformEnvironment{}, nil
+		return model.PlatformEnvironment{}, nil
 	}
 	return client.GetEnvironment(context.Background(), environmentID)
 }
 
-// RunPlatformRegisterEnvironment registers an environment, optionally
-// starting a server-side deploy (see PlatformClient.CreateEnvironment).
-func RunPlatformRegisterEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateEnvironmentParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
+// RunPlatformRegisterEnvironment registers an environment, optionally deploying it.
+func RunPlatformRegisterEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateEnvironmentParams, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
 	environment, _, err := RunPlatformRegisterEnvironmentWithDefinition(ctx, store, alias, params, nil, deps)
 	return environment, err
 }
 
-// RunPlatformRegisterEnvironmentWithDefinition registers (or adopts) an
-// environment and, when local names a local environment, uploads that
-// environment's portable settings and records its hosted marker in the same
-// step.
-//
-// The two are one call rather than two the caller sequences because recording
-// the marker only after the upload succeeds is what makes the marker mean "the
-// platform holds this revision": a marker written first would claim a sync that
-// never happened.
-func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, EnvDefinitionPushResult, error) {
+// RunPlatformRegisterEnvironmentWithDefinition registers an environment and uploads a
+// local definition. The marker is recorded only after the upload succeeds.
+func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateEnvironmentParams, local *model.EnvDefinitionAdoptParams, deps cloud.CloudDependencies) (model.PlatformEnvironment, EnvDefinitionPushResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
+		return model.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
 	}
 	if err := checkRegistrationDefinitionInput(params, local); err != nil {
-		return platformclient.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
+		return model.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
 	}
 	tracePlatformRegistration(ctx, provider, params)
 	if local != nil {
@@ -237,12 +209,12 @@ func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store config
 			"revision=1", "fields="+strings.Join(populatedPortableFieldsForLocal(*local), ","))
 	}
 	if ctx.DryRun {
-		return platformclient.PlatformEnvironment{}, EnvDefinitionPushResult{}, nil
+		return model.PlatformEnvironment{}, EnvDefinitionPushResult{}, nil
 	}
 
 	environment, err := client.CreateEnvironment(context.Background(), params)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
+		return model.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
 	}
 	if local == nil {
 		return environment, EnvDefinitionPushResult{}, nil
@@ -254,11 +226,8 @@ func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store config
 	return environment, result, nil
 }
 
-// checkAdoptInput mirrors the platform's own adopt contract before the request
-// is sent, so a caller that omitted the context gets the reason rather than a
-// 400 it has to interpret. The platform remains the authority; this is the
-// same early refusal the desktop's registration flow performs.
-func checkAdoptInput(params platformclient.PlatformCreateEnvironmentParams) error {
+// checkAdoptInput mirrors the platform's adopt contract so the caller gets a reason, not a 400.
+func checkAdoptInput(params model.PlatformCreateEnvironmentParams) error {
 	if !params.Adopt {
 		return nil
 	}
@@ -268,11 +237,7 @@ func checkAdoptInput(params platformclient.PlatformCreateEnvironmentParams) erro
 	return nil
 }
 
-// checkRegistrationDefinitionInput runs the two client-side preconditions both
-// halves of a registration share, before anything is sent: adopting records the
-// context the environment already runs against, and uploading a definition is
-// what records this machine as following the row.
-func checkRegistrationDefinitionInput(params platformclient.PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams) error {
+func checkRegistrationDefinitionInput(params model.PlatformCreateEnvironmentParams, local *model.EnvDefinitionAdoptParams) error {
 	if err := checkAdoptInput(params); err != nil {
 		return err
 	}
@@ -282,11 +247,7 @@ func checkRegistrationDefinitionInput(params platformclient.PlatformCreateEnviro
 	return nil
 }
 
-// tracePlatformRegistration traces the registration call itself, shared by the
-// plain and definition-carrying paths so the two cannot drift in what they
-// report. The adopt/tenant/context keys appear only when they carry a value, so
-// an ordinary registration's trace is exactly what it has always been.
-func tracePlatformRegistration(ctx core.Context, provider configpkg.CloudProviderConfig, params platformclient.PlatformCreateEnvironmentParams) {
+func tracePlatformRegistration(ctx core.Context, provider model.CloudProviderConfig, params model.PlatformCreateEnvironmentParams) {
 	details := []string{
 		"name=" + params.Name,
 		"type=" + params.Type,
@@ -305,11 +266,9 @@ func tracePlatformRegistration(ctx core.Context, provider configpkg.CloudProvide
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments", details...)
 }
 
-// populatedPortableFieldsForLocal reports which portable fields a named local
-// environment would upload, for the dry-run trace. A local environment that
-// cannot be read reports nothing rather than failing the whole dry run: the
-// trace is a plan, and the real run is where a missing config is a refusal.
-func populatedPortableFieldsForLocal(local EnvDefinitionAdoptParams) []string {
+// populatedPortableFieldsForLocal reports nothing for an unreadable local environment:
+// the dry run is a plan, the real run refuses.
+func populatedPortableFieldsForLocal(local model.EnvDefinitionAdoptParams) []string {
 	config, _, err := configpkg.ConfigStore{}.LoadEnvConfig(local.Tenant, local.Environment)
 	if err != nil {
 		return nil
@@ -317,14 +276,8 @@ func populatedPortableFieldsForLocal(local EnvDefinitionAdoptParams) []string {
 	return configpkg.PopulatedPortableEnvConfigFields(config)
 }
 
-// RunPlatformPushEnvDefinition uploads a local environment's portable settings
-// to the platform row its hosted marker names.
-//
-// Under --dry-run it traces the resolved local environment, the row the marker
-// names, and the portable fields that would travel — never the fields that
-// would not, so the trace reads as the allowlist itself rather than as an
-// inventory of the config.
-func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPushParams, deps cloud.CloudDependencies) (EnvDefinitionPushResult, error) {
+// RunPlatformPushEnvDefinition uploads a local environment's portable settings to its hosted row.
+func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.EnvDefinitionPushParams, deps cloud.CloudDependencies) (EnvDefinitionPushResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return EnvDefinitionPushResult{}, err
@@ -350,13 +303,8 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	return PushEnvironmentDefinition(context.Background(), configpkg.ConfigStore{}, client, params)
 }
 
-// RunPlatformPullEnvDefinition pulls the platform's stored definition into a
-// local environment, creating it first when it does not exist yet.
-//
-// The confirmation rides in through confirm: a two-sided portable edit is a
-// question for the operator, and a transport with no way to ask (MCP, a
-// non-interactive run) passes nil and gets a refusal carrying the diff instead
-// of a silent overwrite.
+// RunPlatformPullEnvDefinition pulls the stored definition into a local environment.
+// A nil confirm refuses a two-sided edit with the diff instead of overwriting.
 func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(configpkg.EnvDefinitionPlan) (bool, error), deps cloud.CloudDependencies) (EnvDefinitionPullResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -395,53 +343,47 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	return PullEnvironmentDefinition(context.Background(), configpkg.ConfigStore{}, client, params)
 }
 
-// RunPlatformDeployEnvironment starts a server-side deploy of an
-// already-registered runtime environment.
-func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, params platformclient.PlatformDeployEnvironmentParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
+// RunPlatformDeployEnvironment starts a server-side deploy of a registered environment.
+func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, params model.PlatformDeployEnvironmentParams, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, err
+		return model.PlatformEnvironment{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/deploy", "version="+params.Version)
 	if ctx.DryRun {
-		return platformclient.PlatformEnvironment{}, nil
+		return model.PlatformEnvironment{}, nil
 	}
 	return client.DeployEnvironment(context.Background(), environmentID, params)
 }
 
-// RunPlatformStopEnvironment scales a runtime environment's Deployment to
-// zero, the server-side equivalent of `erun stop`.
-func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
+// RunPlatformStopEnvironment scales a runtime environment to zero.
+func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, err
+		return model.PlatformEnvironment{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/stop")
 	if ctx.DryRun {
-		return platformclient.PlatformEnvironment{}, nil
+		return model.PlatformEnvironment{}, nil
 	}
 	return client.StopEnvironment(context.Background(), environmentID)
 }
 
-// RunPlatformDeleteEnvironment starts tearing down a runtime environment's
-// namespace and its row, the server-side equivalent of `erun delete`. See
-// PlatformClient.DeleteEnvironment: the teardown itself runs asynchronously
-// (#1140), so the returned environment reflects the claim (status
-// "deleting"), not a completed removal.
-func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
+// RunPlatformDeleteEnvironment starts an asynchronous teardown; the result reflects the claim.
+func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformEnvironment{}, err
+		return model.PlatformEnvironment{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "DELETE", "/v1/environments/"+environmentID)
 	if ctx.DryRun {
-		return platformclient.PlatformEnvironment{}, nil
+		return model.PlatformEnvironment{}, nil
 	}
 	return client.DeleteEnvironment(context.Background(), environmentID)
 }
 
 // RunPlatformListContexts lists the caller's tenant's cloud contexts.
-func RunPlatformListContexts(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformContext, error) {
+func RunPlatformListContexts(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformContext, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
@@ -454,45 +396,42 @@ func RunPlatformListContexts(ctx core.Context, store configpkg.CloudReadStore, a
 }
 
 // RunPlatformGetContext fetches one cloud context by id.
-func RunPlatformGetContext(ctx core.Context, store configpkg.CloudReadStore, alias, contextID string, deps cloud.CloudDependencies) (platformclient.PlatformContext, error) {
+func RunPlatformGetContext(ctx core.Context, store configpkg.CloudReadStore, alias, contextID string, deps cloud.CloudDependencies) (model.PlatformContext, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformContext{}, err
+		return model.PlatformContext{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/contexts/"+contextID)
 	if ctx.DryRun {
-		return platformclient.PlatformContext{}, nil
+		return model.PlatformContext{}, nil
 	}
 	return client.GetContext(context.Background(), contextID)
 }
 
-// RunPlatformCreateContext registers a cloud context, or — with
-// params.Preview set — only resolves and returns its bootstrap plan. Preview
-// is a server-side dry run (it still reaches the platform); ctx.DryRun is the
-// CLI/MCP-side one and skips the network call entirely.
-func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateContextParams, deps cloud.CloudDependencies) (platformclient.PlatformCreateContextResult, error) {
+// RunPlatformCreateContext registers a cloud context. params.Preview is a server-side dry
+// run; ctx.DryRun skips the network call.
+func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateContextParams, deps cloud.CloudDependencies) (model.PlatformCreateContextResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformCreateContextResult{}, err
+		return model.PlatformCreateContextResult{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/contexts",
 		"name="+params.Name, "alias="+params.CloudProviderAlias, "region="+params.Region, fmt.Sprintf("preview=%t", params.Preview))
 	if ctx.DryRun {
-		return platformclient.PlatformCreateContextResult{}, nil
+		return model.PlatformCreateContextResult{}, nil
 	}
 	return client.CreateContext(context.Background(), params)
 }
 
-// RunPlatformProvision resolves and returns the full ordered plan for
-// provisioning a hosted environment, without executing any of it.
-func RunPlatformProvision(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformProvisionParams, deps cloud.CloudDependencies) (platformclient.PlatformProvisionResult, error) {
+// RunPlatformProvision returns the ordered provisioning plan without executing it.
+func RunPlatformProvision(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformProvisionParams, deps cloud.CloudDependencies) (model.PlatformProvisionResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return platformclient.PlatformProvisionResult{}, err
+		return model.PlatformProvisionResult{}, err
 	}
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/provision", "env="+params.Environment.Name, "type="+params.Environment.Type)
 	if ctx.DryRun {
-		return platformclient.PlatformProvisionResult{}, nil
+		return model.PlatformProvisionResult{}, nil
 	}
 	return client.Provision(context.Background(), params)
 }

@@ -27,8 +27,6 @@ func testContext() core.Context {
 	return core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 }
 
-// writeAndCommit writes name/content into dir and commits it, for building up
-// the exact commit graphs the decision tests below compare against.
 func writeAndCommit(t *testing.T, dir, name, content, message string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {

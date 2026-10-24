@@ -14,27 +14,14 @@ CREATE INDEX reviews_tenant_source_branch_idx
 CREATE INDEX reviews_tenant_repository_idx
   ON reviews (tenant_id, repository);
 
--- A review's name is the squash-merge message, so two changes that land in the
--- same repository must not claim the same one. Scoped by repository: two
--- repositories a tenant serves may each have a "Fix typo" and those are
--- different messages on different branches. A CLOSED review reserves nothing —
--- it never landed, so its name was never used as a merge message, and
--- re-opening work on a rebased branch is an ordinary workflow that would
--- otherwise have to reword its own commit subject.
---
--- NULLS NOT DISTINCT so a review with no recorded repository (created before
--- the platform recorded one) still groups with its peers by name, rather than
--- every such row being unique by virtue of the NULL.
+-- A review's name is its squash-merge message, so it is unique per repository among reviews
+-- that may still land; NULLS NOT DISTINCT groups rows with no recorded repository.
 CREATE UNIQUE INDEX reviews_tenant_repository_name_idx
   ON reviews (tenant_id, repository, name) NULLS NOT DISTINCT
   WHERE status <> 'CLOSED';
 
--- Branch history is unbounded (a recycled branch name may have many closed
--- reviews), but only one review may propose a given source/target pair while
--- it is still live; otherwise a second review's gate could merge a branch the
--- target already contains and mint a second release for one change. Scoped by
--- repository so the same branch name in two repositories a tenant serves are
--- two different proposals.
+-- One live review per source/target pair, or a second gate could re-merge a landed branch
+-- and mint a second release.
 CREATE UNIQUE INDEX reviews_tenant_live_source_target_idx
   ON reviews (tenant_id, repository, source_branch, target_branch) NULLS NOT DISTINCT
   WHERE status NOT IN ('MERGED', 'CLOSED');

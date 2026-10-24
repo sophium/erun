@@ -7,14 +7,20 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
 
-func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newMCPProxyCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -36,16 +42,16 @@ func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPProxyCommand(cmd.Context(), shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runMCPProxyCommand(cmd.Context(), clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addMCPEdgeScopeFlags(cmd, &tenant, &environment)
 	return cmd
 }
 
-func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
+func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
@@ -57,40 +63,30 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 
 	return mcp.RunMCPStdioProxy(ctx, mcp.MCPStdioProxyParams{
 		Endpoint:      target.Endpoint,
-		MintToken:     shared.McpEdgeTokenMinter(target),
+		MintToken:     envcall.McpEdgeTokenMinter(target),
 		ClientVersion: shared.CurrentBuildInfo().Version,
 		In:            commandCtx.Stdin,
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
-		DescribeError: func(err error) string { return shared.McpEdgeError(target, err).Error() },
+		DescribeError: func(err error) string { return envcall.McpEdgeError(target, err).Error() },
 		LocalTools: []mcp.MCPLocalTool{
 			sshdSyncLocalTool(resolveOpen, params),
-			// Deprecated alias for one release (#1186), so an upgrade does not
-			// break a client pinned to the old name. Same handler; only the name
-			// and the description differ.
+			// Deprecated alias for one release.
 			deprecatedAlias(sshdSyncLocalTool(resolveOpen, params), "workspace_sync", "sshd_sync"),
 			inputsUploadLocalTool(resolveOpen, params),
 		},
 	})
 }
 
-// deprecatedAlias returns tool under a retired name, with a description that
-// says so. The rule on this surface is that a tool's name equals its CLI path
-// with "_" for spaces, and this one drifted from `erun sshd sync` (#1186); the
-// alias keeps the retired name callable for one release rather than breaking a
-// pinned client on an upgrade.
+// deprecatedAlias keeps a retired tool name callable, saying so in its description.
 func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCPLocalTool {
 	tool.Name = retired
 	tool.Description = "Deprecated: use " + replacement + ". Retained for one release; this name will be removed."
 	return tool
 }
 
-// inputsUploadLocalTool exposes erun inputs upload over the same MCP an
-// orchestrator already drives the environment through, mirroring
-// workspaceSyncLocalTool: it is served here rather than by the edge because
-// the source file is on this host, and the edge runs in the pod with no path
-// back to it.
-func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+// inputsUploadLocalTool is host-served: the source file is on this host, out of the edge's reach.
+func inputsUploadLocalTool(resolveOpen envscope.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
@@ -112,13 +108,13 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenPa
 			if err != nil {
 				return "", err
 			}
-			req := common.ShellLaunchParamsFromResult(result)
+			req := cloud.ShellLaunchParamsFromResult(result)
 			var trace bytes.Buffer
 			toolCtx := core.Context{
 				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),
 				DryRun: call.Preview,
 			}
-			out, err := common.UploadRuntimeInput(toolCtx, req, common.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, common.RunRemoteCommandWithStdin)
+			out, err := inputs.UploadRuntimeInput(toolCtx, req, model.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, inputs.RunRemoteCommandWithStdin)
 			if err != nil {
 				return "", err
 			}
@@ -130,12 +126,9 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenPa
 	}
 }
 
-// sshdSyncLocalTool exposes the host mirror's refresh over the same MCP an
-// orchestrator already drives the environment through. It is served here rather
-// than by the edge because the mirror is on this host: the edge runs in the pod
-// and has nothing to write to. The environment is resolved per call, so a mirror
-// enabled mid-session is picked up without restarting the session.
-func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+// sshdSyncLocalTool is host-served because the mirror is on this host; the env
+// resolves per call so a mid-session enable is picked up.
+func sshdSyncLocalTool(resolveOpen envscope.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +
@@ -169,7 +162,7 @@ func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params common.OpenParams
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("%s\n%s", shared.SshdSyncSummary(call.Preview, synced), syncParams.RemotePath+" -> "+syncParams.LocalPath), nil
+			return fmt.Sprintf("%s\n%s", sshdlink.SshdSyncSummary(call.Preview, synced), syncParams.RemotePath+" -> "+syncParams.LocalPath), nil
 		},
 	}
 }

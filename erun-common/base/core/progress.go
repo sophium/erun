@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-// Spinner gives interactive users a "still working" signal during long
-// operations like helm install --wait. It is nil when out is not a terminal, so
-// redirected and CI output stay deterministic; the nil receiver's Stop is a safe
-// no-op.
+// Spinner is nil when out is not a terminal; Stop on nil is a no-op.
 type Spinner struct {
 	out      io.Writer
 	message  string
@@ -24,7 +21,7 @@ type Spinner struct {
 
 const spinnerFrames = `|/-\`
 
-// StartSpinner starts a spinner on out, returning nil when out is not a terminal.
+// StartSpinner starts a spinner on out, or returns nil when out is not a terminal.
 func StartSpinner(out io.Writer, message string) *Spinner {
 	if !writerIsTerminalForSpinner(out) {
 		return nil
@@ -63,7 +60,7 @@ func (s *Spinner) draw(frame int) {
 	_, _ = io.WriteString(s.out, line)
 }
 
-// Stop ends the spinner and returns how long it was active. Safe to call on nil.
+// Stop ends the spinner and returns how long it ran.
 func (s *Spinner) Stop() time.Duration {
 	if s == nil {
 		return 0

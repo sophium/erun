@@ -8,11 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// HasAnyErunPlatformAlias reports whether any erun-type cloud alias is
-// configured at all, local config lookup only. It is what keeps a caller
-// with zero configured aliases (the overwhelming majority, and every
-// existing use of expose/unexpose before this change) on the direct pdnsutil
-// path with no behavior change.
+// HasAnyErunPlatformAlias reports whether any erun-type alias is configured; without one,
+// expose/unexpose use pdnsutil directly.
 func HasAnyErunPlatformAlias(cloudStore config.CloudReadStore) bool {
 	providers, err := ListCloudProviders(cloudStore)
 	if err != nil {
@@ -26,11 +23,8 @@ func HasAnyErunPlatformAlias(cloudStore config.CloudReadStore) bool {
 	return false
 }
 
-// ResolvePlatformEnvironmentID finds environment's platform-assigned id by
-// name among the caller's own tenant's environments (row-level security
-// already scopes the list to the caller's tenant), since expose/unexpose
-// only know the environment by its local tenant/name pair, while the
-// hostname route is keyed by the platform's own environment id.
+// ResolvePlatformEnvironmentID maps an environment name to its platform id; RLS
+// scopes the list to the caller's tenant.
 func ResolvePlatformEnvironmentID(ctx context.Context, client *platformclient.PlatformClient, environment string) (string, error) {
 	environments, err := client.ListEnvironments(ctx)
 	if err != nil {

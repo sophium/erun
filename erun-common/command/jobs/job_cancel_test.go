@@ -5,18 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// The mirror image of a false clean exit: a job whose only started work is one it
-// deliberately cancelled must not read as having failed. The inner job runs
-// concurrently with the test (a goroutine, not a real supervisor subprocess
-// -- this package has no built erun binary to re-exec for a real nested
-// `job start`) and records itself as started by the outer job the same way
-// a nested `job start` run from inside the outer's own work would (ERUN_JOB_ID
-// inheritance), set directly here since a goroutine shares this process's
-// env with the test itself.
+// The inner job runs in a goroutine (no erun binary to re-exec) and sets
+// ERUN_JOB_ID directly to mark the outer job as its parent.
 func TestEnvironmentJobDeliberatelyCancelledByItsParentIsNotReportedAsAFailedStartedJob(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process-group signalling is POSIX-only")
@@ -40,15 +35,12 @@ func TestEnvironmentJobDeliberatelyCancelledByItsParentIsNotReportedAsAFailedSta
 	}
 }
 
-// startCancelTestInnerJob starts the "inner" job in a goroutine (long enough
-// to still be alive when the test cancels it) and returns the channel its
-// eventual RunEnvironmentJobSupervisor error lands on.
 func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerID string) <-chan error {
 	t.Helper()
-	t.Setenv(eruncommon.EnvironmentJobIDEnvVar, parentID)
+	t.Setenv(jobstate.EnvironmentJobIDEnvVar, parentID)
 	done := make(chan error, 1)
 	go func() {
-		done <- RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		done <- RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          innerID,
@@ -57,7 +49,7 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 		})
 	}()
 
-	inner, err := pollUntilEnvironmentJob(tenant, environment, innerID, 5*time.Second, func(job eruncommon.EnvironmentJob) bool {
+	inner, err := pollUntilEnvironmentJob(tenant, environment, innerID, 5*time.Second, func(job jobstate.EnvironmentJob) bool {
 		return job.ChildPID > 0
 	})
 	if err != nil {
@@ -69,11 +61,9 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 	return done
 }
 
-// cancelCancelTestInnerJob signals the inner job, waits for its supervisor to
-// finish, and asserts the finished record carries the cancel's provenance.
 func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string, done <-chan error) {
 	t.Helper()
-	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
+	result, err := CancelEnvironmentJob(core.Context{}, model.CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
 	if err != nil {
 		t.Fatalf("CancelEnvironmentJob: %v", err)
 	}
@@ -96,14 +86,11 @@ func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string,
 	}
 }
 
-// runCancelTestOuterJob runs the outer job (a plain, already-finished
-// command) and returns its own loaded record.
-func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) eruncommon.EnvironmentJob {
+func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) jobstate.EnvironmentJob {
 	t.Helper()
-	// The outer job itself was never started by anyone -- clear the env
-	// before running it so its own record does not claim a parent of its own.
-	t.Setenv(eruncommon.EnvironmentJobIDEnvVar, "")
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	// Clear the env so the outer record claims no parent.
+	t.Setenv(jobstate.EnvironmentJobIDEnvVar, "")
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          parentID,

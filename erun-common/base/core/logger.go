@@ -25,9 +25,7 @@ type Logger struct {
 	verbosity int
 	stdout    io.Writer
 	stderr    io.Writer
-	// traceSink captures every loggable line regardless of terminal
-	// verbosity, so the per-env trace log stays complete even for plain
-	// invocations that print little or nothing.
+	// traceSink receives every line regardless of verbosity.
 	traceSink io.Writer
 }
 
@@ -45,34 +43,26 @@ func NewLoggerWithWriters(verbosity int, stdout, stderr io.Writer) Logger {
 
 func (l Logger) Verbosity() int { return l.verbosity }
 
-// WithStdout returns a copy of the logger that writes its stdout lines to w
-// instead of to its own stdout writer. Used to put a build run's heartbeat
-// goroutine and its trace lines on one serialized stream (see
-// serializedWriter); callers that do not know they need that should leave the
-// logger alone.
+// WithStdout returns a copy of the logger whose stdout lines go to w.
 func (l Logger) WithStdout(w io.Writer) Logger {
 	l.stdout = w
 	return l
 }
 
-// WithWriters returns a copy of the logger that writes its stdout and stderr
-// lines to the given writers instead of its own.
+// WithWriters returns a copy of the logger using the given writers.
 func (l Logger) WithWriters(stdout, stderr io.Writer) Logger {
 	l.stdout = stdout
 	l.stderr = stderr
 	return l
 }
 
-// IsUnconfigured reports whether the logger is the zero Logger: no verbosity
-// chosen and no writers, which a caller that was handed no logger replaces.
+// IsUnconfigured reports whether the logger is the zero Logger.
 func (l Logger) IsUnconfigured() bool {
 	return l.verbosity == 0 && l.stdout == nil && l.stderr == nil
 }
 
-// WithTraceSink returns a copy of the logger that mirrors every loggable
-// line into w, including lines terminal verbosity would suppress. Write
-// failures are ignored so a full or rotated trace file can never break the
-// command.
+// WithTraceSink returns a copy of the logger that mirrors every line into w,
+// ignoring write failures so a broken trace file never fails the command.
 func (l Logger) WithTraceSink(w io.Writer) Logger {
 	l.traceSink = w
 	return l

@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewObserveCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func NewObserveCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	var secretChecks []string
 	cmd := &cobra.Command{
@@ -46,18 +48,18 @@ func NewObserveCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runObserveCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), checks)
+			return runObserveCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), checks)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringArrayVar(&secretChecks, "secret", nil, "Check a Secret for a key's presence, as name=key (repeatable); the value is never read")
 	return cmd
 }
 
-func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error) {
-	checks := make([]observe.ObserveSecretCheck, 0, len(raw))
+func parseObserveSecretChecks(raw []string) ([]model.ObserveSecretCheck, error) {
+	checks := make([]model.ObserveSecretCheck, 0, len(raw))
 	for _, entry := range raw {
 		name, key, found := strings.Cut(entry, "=")
 		name = strings.TrimSpace(name)
@@ -65,25 +67,25 @@ func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error
 		if !found || name == "" || key == "" {
 			return nil, fmt.Errorf("--secret must be name=key, got %q", entry)
 		}
-		checks = append(checks, observe.ObserveSecretCheck{Name: name, Key: key})
+		checks = append(checks, model.ObserveSecretCheck{Name: name, Key: key})
 	}
 	return checks, nil
 }
 
-func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, checks []observe.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, checks []model.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	observed, err := observe.RunObservation(ctx, req, observe.ObserveParams{Secrets: checks})
+	req := cloud.ShellLaunchParamsFromResult(result)
+	observed, err := observe.RunObservation(ctx, req, model.ObserveParams{Secrets: checks})
 	if err != nil {
 		return err
 	}
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(observed)
 	}
 	return writeObserveResult(ctx, observed)

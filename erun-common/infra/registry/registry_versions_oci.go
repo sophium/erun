@@ -6,24 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// resolveOCIRuntimeRegistryVersionsAt lists a repository on any registry that
-// speaks the OCI distribution API. Without this, every non-ghcr, non-Hub
-// registry fell through to the Docker Hub resolver, which then looked up a
-// repository named after the registry host and reported the image as
-// unreachable -- so a tenant could never see the versions of its own runtime
-// image in a private registry.
-//
-// Auth is the credential docker itself pulls with, so "if docker can pull it,
-// the picker lists it" holds for private registries too. Basic is sent up front
-// because ECR accepts it directly; a registry that answers with a bearer
-// challenge instead gets the token exchange and a retry.
-func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, host, prefix, repository, baseURL string) (RuntimeRegistryVersions, error) {
+// resolveOCIRuntimeRegistryVersionsAt lists a repository on any OCI registry
+// using docker's own credential. Basic auth goes first because ECR accepts it;
+// a bearer challenge gets a token exchange and retry.
+func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, host, prefix, repository, baseURL string) (model.RuntimeRegistryVersions, error) {
 	host = strings.TrimSpace(host)
 	repository = strings.TrimSpace(repository)
 	if host == "" || repository == "" {
-		return RuntimeRegistryVersions{}, fmt.Errorf("registry host and repository are required")
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("registry host and repository are required")
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -42,7 +36,7 @@ func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clien
 	auth, hasAuth := ResolveOCIRegistryBasicAuth(host)
 	tags, err := collectOCITags(ctx, client, base+"/v2/"+repoPath+"/tags/list", repoPath, auth, hasAuth)
 	if err != nil {
-		return RuntimeRegistryVersions{}, err
+		return model.RuntimeRegistryVersions{}, err
 	}
 
 	image := host
@@ -62,8 +56,6 @@ func collectOCITags(ctx context.Context, client *http.Client, endpoint, repoPath
 		if err != nil {
 			return nil, err
 		}
-		// A registry that wants a bearer token says so once; exchange the same
-		// credential for one and re-read this page rather than giving up.
 		if challenge != "" && bearer == "" {
 			token, tokenErr := fetchOCIPullToken(ctx, client, challenge, repoPath, auth, hasAuth)
 			if tokenErr != nil {
@@ -114,8 +106,7 @@ func fetchOCITagPage(ctx context.Context, client *http.Client, endpoint string, 
 	return page, nextLinkFromHeader(resp, endpoint), "", nil
 }
 
-// fetchOCIPullToken exchanges the registry's bearer challenge for a pull token,
-// scoping it to this repository when the challenge omits a scope.
+// fetchOCIPullToken exchanges a bearer challenge for a pull token.
 func fetchOCIPullToken(ctx context.Context, client *http.Client, challenge, repoPath string, auth RegistryBasicAuth, hasAuth bool) (string, error) {
 	tokenURL, err := bearerTokenURL(challenge, repoPath)
 	if err != nil {
@@ -151,8 +142,7 @@ func fetchOCIPullToken(ctx context.Context, client *http.Client, challenge, repo
 	return payload.AccessToken, nil
 }
 
-// bearerTokenURL builds the token endpoint the challenge points at, scoping the
-// request to this repository when the challenge names no scope of its own.
+// bearerTokenURL scopes the request to this repository when the challenge names no scope.
 func bearerTokenURL(challenge, repoPath string) (string, error) {
 	params := parseBearerChallenge(challenge)
 	realm := strings.TrimSpace(params["realm"])

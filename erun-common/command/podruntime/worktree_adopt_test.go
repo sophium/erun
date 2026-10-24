@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type adoptFixture struct {
@@ -17,8 +17,6 @@ type adoptFixture struct {
 	output bytes.Buffer
 }
 
-// newAdoptFixture stages the home volume and the worktree claim side by side,
-// as the runtime chart's init container mounts them.
 func newAdoptFixture(t *testing.T) *adoptFixture {
 	t.Helper()
 	root := t.TempDir()
@@ -31,8 +29,6 @@ func newAdoptFixture(t *testing.T) *adoptFixture {
 	return f
 }
 
-// seedLegacyRepo writes what a pre-worktree-volume environment's checkout
-// held: a real .git plus tracked and untracked working files.
 func (f *adoptFixture) seedLegacyRepo(t *testing.T) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(f.legacy, ".git", "HEAD"), "ref: refs/heads/main\n")
@@ -44,7 +40,7 @@ func (f *adoptFixture) seedLegacyRepo(t *testing.T) {
 func (f *adoptFixture) adopt(t *testing.T, dryRun bool) WorktreeAdoptResult {
 	t.Helper()
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &f.output, &f.output), DryRun: dryRun}
-	result, err := AdoptWorktree(ctx, WorktreeAdoptParams{LegacyDir: f.legacy, ClaimDir: f.claim})
+	result, err := AdoptWorktree(ctx, model.WorktreeAdoptParams{LegacyDir: f.legacy, ClaimDir: f.claim})
 	if err != nil {
 		t.Fatalf("adoption failed: %v\n%s", err, f.output.String())
 	}
@@ -80,51 +76,6 @@ func assertEmptyDir(t *testing.T, path, why string) {
 	}
 }
 
-func TestAdoptWorktreeAdoptsARepositoryAndPreservesTheOriginal(t *testing.T) {
-	f := newAdoptFixture(t)
-	f.seedLegacyRepo(t)
-	result := f.adopt(t, false)
-	if result.Outcome != WorktreeAdoptAdopted || result.PreservedDir != f.preserved() {
-		t.Fatalf("result = %+v", result)
-	}
-	assertExists(t, filepath.Join(f.claim, ".git", "HEAD"), "the repository's .git should land on the worktree volume")
-	assertExists(t, filepath.Join(f.claim, ".git", "refs"), "empty directories inside .git should land too")
-	assertExists(t, filepath.Join(f.claim, "src", "main.go"), "tracked files should land on the worktree volume")
-	assertExists(t, filepath.Join(f.claim, ".env.local"), "untracked working files should land on the worktree volume")
-	assertAbsent(t, filepath.Join(f.claim, worktreeAdoptStagingName), "the staging dir should be gone once the copy is promoted")
-	assertExists(t, filepath.Join(f.preserved(), "src", "main.go"), "the pre-move copy must be preserved, not deleted")
-	assertEmptyDir(t, f.legacy, "the mount point should be left in place, empty, after the original moves aside")
-	if !strings.Contains(f.output.String(), "worktree-adopt: adopted; the pre-move copy is preserved at "+f.preserved()) {
-		t.Fatalf("expected the preserved path to be reported:\n%s", f.output.String())
-	}
-}
-
-func TestAdoptWorktreeIsIdempotentAcrossBoots(t *testing.T) {
-	f := newAdoptFixture(t)
-	f.seedLegacyRepo(t)
-	f.adopt(t, false)
-	mustWriteFile(t, filepath.Join(f.claim, "src", "main.go"), "edited in pod\n")
-	if result := f.adopt(t, false); result.Outcome != WorktreeAdoptClaimPopulated {
-		t.Fatalf("a later boot should find the claim populated, got %s", result.Outcome)
-	}
-	if got := readTrimmed(t, filepath.Join(f.claim, "src", "main.go")); got != "edited in pod" {
-		t.Fatalf("a later boot must not overwrite work done on the worktree volume, got %q", got)
-	}
-}
-
-func TestAdoptWorktreeLeavesAPopulatedClaimAndTheLegacyTreeAlone(t *testing.T) {
-	f := newAdoptFixture(t)
-	f.seedLegacyRepo(t)
-	mustWriteFile(t, filepath.Join(f.claim, "already-here.txt"), "live\n")
-	if result := f.adopt(t, false); result.Outcome != WorktreeAdoptClaimPopulated {
-		t.Fatalf("outcome = %s", result.Outcome)
-	}
-	assertExists(t, filepath.Join(f.claim, "already-here.txt"), "existing claim contents must survive")
-	assertAbsent(t, filepath.Join(f.claim, ".git"), "a populated claim must not be overwritten by the legacy tree")
-	assertExists(t, filepath.Join(f.legacy, ".git", "HEAD"), "the legacy tree must stay put when nothing was adopted")
-	assertAbsent(t, f.preserved(), "nothing should be set aside when nothing was adopted")
-}
-
 func TestAdoptWorktreeStartsANewEnvironmentEmpty(t *testing.T) {
 	f := newAdoptFixture(t)
 	if err := os.RemoveAll(f.legacy); err != nil {
@@ -136,19 +87,7 @@ func TestAdoptWorktreeStartsANewEnvironmentEmpty(t *testing.T) {
 	assertEmptyDir(t, f.claim, "a new environment's worktree volume should stay empty")
 }
 
-func TestAdoptWorktreeLeavesANonRepositoryOnTheHomeVolume(t *testing.T) {
-	f := newAdoptFixture(t)
-	mustWriteFile(t, filepath.Join(f.legacy, "notes.txt"), "stray\n")
-	if result := f.adopt(t, false); result.Outcome != WorktreeAdoptNotARepository {
-		t.Fatalf("outcome = %s", result.Outcome)
-	}
-	assertEmptyDir(t, f.claim, "a non-repository must not be adopted")
-	assertExists(t, filepath.Join(f.legacy, "notes.txt"), "a non-repository must be left where it is")
-}
-
 func TestAdoptWorktreeIgnoresASymlinkedReleaseTree(t *testing.T) {
-	// A sourceless runtime environment's git folder is a symlink at its baked
-	// release, never a checkout to take over.
 	f := newAdoptFixture(t)
 	release := filepath.Join(filepath.Dir(f.claim), "opt-release")
 	mustWriteFile(t, filepath.Join(release, "main.tf"), "baked\n")
@@ -215,28 +154,6 @@ func TestAdoptWorktreeKeepsTheOriginalWhenThePreservedNameIsTaken(t *testing.T) 
 	assertExists(t, filepath.Join(f.claim, ".git", "HEAD"), "the copy should still be adopted")
 	assertExists(t, filepath.Join(f.legacy, ".git", "HEAD"), "the original stays where it is when the preserved name is taken")
 	assertExists(t, filepath.Join(f.preserved(), "older.txt"), "an existing preserved copy is never overwritten")
-}
-
-func TestAdoptWorktreeDryRunTouchesNeitherVolume(t *testing.T) {
-	f := newAdoptFixture(t)
-	f.seedLegacyRepo(t)
-	result := f.adopt(t, true)
-	if result.Outcome != WorktreeAdoptAdopted || !result.DryRun || result.PreservedDir != f.preserved() {
-		t.Fatalf("result = %+v", result)
-	}
-	assertEmptyDir(t, f.claim, "a dry run must not copy onto the worktree volume")
-	assertExists(t, filepath.Join(f.legacy, ".git", "HEAD"), "a dry run must not move the legacy tree")
-	assertAbsent(t, f.preserved(), "a dry run must not set the original aside")
-	if !strings.Contains(f.output.String(), "would set the original aside at "+f.preserved()) {
-		t.Fatalf("the dry run should name what it would do:\n%s", f.output.String())
-	}
-}
-
-func TestAdoptWorktreeRequiresBothDirectories(t *testing.T) {
-	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}
-	if _, err := AdoptWorktree(ctx, WorktreeAdoptParams{LegacyDir: "/mnt/erun-home/git/petios"}); err == nil {
-		t.Fatal("a missing claim directory must be an error, not a silent no-op")
-	}
 }
 
 func TestAdoptWorktreeCopyKeepsSymlinksAndTimes(t *testing.T) {

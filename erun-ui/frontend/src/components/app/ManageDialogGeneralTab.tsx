@@ -26,8 +26,7 @@ import {
   type UIEnvironmentCloudAlias,
 } from '@/types';
 
-// Radix Select rejects an empty-string item value, so the clear ("— None —")
-// option needs a non-empty sentinel that maps back to "".
+// Radix Select rejects an empty item value, so "None" uses a sentinel.
 const CLOUD_ALIAS_NONE_VALUE = '__none__';
 
 export function GeneralTab(): React.ReactElement {
@@ -42,23 +41,16 @@ export function GeneralTab(): React.ReactElement {
       ]),
     [config.containerRegistries],
   );
-  // Fall back to the effective path so the field is never blank for an env
-  // whose repo path is derived rather than explicitly set.
+  // Fall back to the derived path so the field is never blank.
   const repoPathValue = config.localRepoPath?.trim() ? config.localRepoPath : config.repoPath;
 
-  // One statement of "the editor is not accepting input right now", so each
-  // field does not restate it.
   const fieldsDisabled = dialog.busy || dialog.configLoading;
   const hostedTarget = managedHostedTarget(dialog.selection, config.name);
 
   return (
     <>
       {config.type === 'local-agent' || config.type === 'host' ? (
-        // A local-agent or host env's worktree is a directory on this
-        // machine, so only these get an editable field — letting an operator
-        // repoint a moved repo without hand-editing config.yaml. Remote-agent
-        // (PVC) and runtime (no worktree) repos are not local paths, so they
-        // stay read-only.
+        // Only local-agent and host worktrees are local paths, so only they are editable.
         <LocalRepoPathInput
           id="environment-config-repopath"
           label="Repository path"
@@ -145,8 +137,7 @@ function environmentTypeLabel(type: string | undefined): string {
   }
 }
 
-// The env type drives build/deploy policy but is otherwise only correctable by
-// hand-editing config.yaml, so a mis-set type is fixable here as a selector.
+// Lets a mis-set env type be fixed without hand-editing config.yaml.
 function EnvironmentTypeField({
   value,
   disabled,
@@ -173,10 +164,7 @@ function EnvironmentTypeField({
   );
 }
 
-// Each provider type (e.g. an AWS account and a Cloudflare token) can be linked
-// independently, so the env gets one selector per slot. An older backend that
-// predates slots sends none; a single AWS selector renders as a fallback so the
-// control never disappears.
+// One selector per provider slot; an older backend without slots gets a single AWS selector.
 function CloudAliasSlots({
   config,
   disabled,
@@ -223,8 +211,7 @@ function CloudAliasSlots({
   );
 }
 
-// AWS keeps the historical element id so the long-standing specs that target
-// the AWS selector stay stable.
+// AWS keeps the historical element id that existing specs target.
 function cloudAliasSlotFieldId(provider: string): string {
   const type = provider.trim().toLowerCase();
   return type === '' || type === 'aws'
@@ -383,8 +370,7 @@ function CloudContextField({
   );
 }
 
-// An unlinked context must offer a recovery path, not just show "Not linked":
-// either pick an alias above, or open ERun settings to init a context.
+// Offers recovery: pick an alias above, or init a context in ERun settings.
 function UnlinkedCloudContext({
   cloudProviderAlias,
 }: {
@@ -422,11 +408,7 @@ function UnlinkedCloudContext({
   );
 }
 
-// managedHostedTarget names the environment the hosted-marker panel reads. The
-// dialog's own selection is authoritative when it has one; the loaded config's
-// name is the fallback for the moment before a selection is set, and an empty
-// tenant there is answered by the panel's own guard rather than by a local
-// branch that would count against this component's complexity budget.
+// managedHostedTarget prefers the dialog's selection over the loaded config's name.
 function managedHostedTarget(
   selection: { tenant: string; environment: string } | null,
   configName: string,

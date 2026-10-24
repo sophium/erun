@@ -3,15 +3,8 @@ import type { Request, Route } from '@playwright/test';
 import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// erun-kit's StatusBadge is the one canonical status badge in the product.
-// ManageDialog.fields.tsx used to define a second, same-named component that
-// hand-branched 'running'/'stopped' into raw
-// Tailwind colors and rendered no icon at all, so any other status --
-// including an in-progress one like 'starting' -- fell into its destructive
-// catch-all. Both sites below now render through the canonical component;
-// the always-rendered icon is the visible proof, since a hand-rolled
-// StatusBadge with the exact same text and no icon would otherwise pass a
-// text-only assertion.
+// The always-rendered icon proves the canonical erun-kit StatusBadge is used; a
+// hand-rolled badge with the same text would pass a text-only assertion.
 
 async function mutateInvokeResponse(
   page: import('@playwright/test').Page,
@@ -31,10 +24,7 @@ async function mutateInvokeResponse(
   });
 }
 
-// Applies the app's own class-based light/dark mechanism directly (root
-// AGENTS.md's Design-Language Decision Record: one shared `.dark` class
-// mechanism) rather than clicking the titlebar toggle, which sits behind the
-// manage dialog's own overlay while it is open.
+// The titlebar toggle sits behind the dialog overlay, so apply the `.dark` class directly.
 async function forceDarkTheme(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() => {
     document.documentElement.classList.add('dark');

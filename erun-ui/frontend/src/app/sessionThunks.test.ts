@@ -17,7 +17,6 @@ import type { AppDispatch } from './store';
 import type { TerminalController } from './TerminalController';
 import { thunkExtra } from './thunkExtra';
 
-// Mirrors bootThunks.test.ts's RPC-boundary stub.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -72,9 +71,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void
   }
 }
 
-// A "runtime" env with autoStart unset and a stopped cloud context forces
-// resolveAutoStartGate to await LoadEnvironmentConfig -- the controllable gap
-// this test races through.
+// A runtime env with a stopped cloud context makes resolveAutoStartGate await LoadEnvironmentConfig.
 function runtimeTenant(): UITenant {
   return {
     name: 'acme',
@@ -88,17 +85,6 @@ function stoppedEnvironmentConfig(): UIEnvironmentConfig {
   } as unknown as UIEnvironmentConfig;
 }
 
-// boot()'s own automatic open of the tenant's default-landing environment
-// races an orchestrator session's own focus: the desktop launches,
-// boot() decides to open the default env because nothing else had claimed the
-// terminal *yet*, then while this openSelection call's own auto-start gate is
-// still resolving, an orchestrator session gets focused (or restored) and
-// takes the terminal pane. openSelection must not resume from that await and
-// drag focus back to the stale selection out from under the orchestrator --
-// which is exactly what happened: prepareOpenSelection's unconditional
-// setSelected reasserted the default env, and the selection-sync middleware
-// reconciled state.terminal.sessionId back to it, pruning every other linked
-// environment's diff state out of the orchestrator's review panel.
 test('a stale openSelection call does not reclaim the terminal after an orchestrator session was focused', async () => {
   const pendingConfigCalls: { resolve: (value: UIEnvironmentConfig) => void }[] = [];
   stubWailsBridge({
@@ -121,10 +107,7 @@ test('a stale openSelection call does not reclaim the terminal after an orchestr
     const opened = dispatch(openSelection(selection, { isDefaultLandingOpen: true }));
     await waitFor(() => pendingConfigCalls.length === 1);
 
-    // The orchestrator session claims the terminal while the gate is still
-    // resolving -- the same shape focusOrchestratorSession takes: the
-    // terminal's session moves to the orchestrator's own session and the
-    // sidebar's own selection clears.
+    // Same shape as focusOrchestratorSession.
     store.dispatch(setSessionId(999));
     store.dispatch(setSelected(null));
 
@@ -146,20 +129,7 @@ test('a stale openSelection call does not reclaim the terminal after an orchestr
   }
 });
 
-// A "local-agent" env's resolveAutoStartGate resolves synchronously
-// ('proceed', no LoadEnvironmentConfig round trip), so this races through the
-// gap the test above cannot reach: StartSession itself, awaited inside
-// finishOpenSession. selection.selected never changes here -- an orchestrator
-// session is tracked purely via terminal.sessionId (selectActiveSessionOrchestrator),
-// so the sidebar's own selection legitimately keeps reading as the env this
-// call started opening for as long as it is still selected there. Before this
-// fix, finishOpenSession's isCurrentSelection() only compared
-// selection.selected, so it still read "current" here and went on to
-// reassert terminal.sessionId onto the newly-finished StartSession's result,
-// and (had a review panel been open) collapsed loadReviewDiff's target set
-// down to this one environment -- pruning every other one an orchestrator
-// had linked, which is exactly the shape orchestrator-cross-env-diff.spec.ts
-// flaked on under load.
+// A local-agent env's gate resolves synchronously, so the race lands inside StartSession.
 function localAgentTenant(): UITenant {
   return {
     name: 'acme',
@@ -195,10 +165,7 @@ test('a stale openSelection call does not reclaim the terminal after an orchestr
     const opened = dispatch(openSelection(selection, { isDefaultLandingOpen: true }));
     await waitFor(() => pendingStartSessionCalls.length === 1);
 
-    // The orchestrator session claims the terminal while StartSession is
-    // still in flight. Unlike the test above, the sidebar's own selection is
-    // left untouched -- it still legitimately names "alpha", the same as
-    // this stale call's own target -- so only terminal.sessionId moves.
+    // Only terminal.sessionId moves; the sidebar still names "alpha".
     store.dispatch(setSessionId(999));
 
     pendingStartSessionCalls[0]?.resolve({ sessionId: 42, slot: 0 });
@@ -214,17 +181,6 @@ test('a stale openSelection call does not reclaim the terminal after an orchestr
   }
 });
 
-// The two tests above race an orchestrator session claiming focus *during*
-// openSelection's own execution. This test covers the gap they cannot reach:
-// an orchestrator already owning the terminal *before* openSelection is ever
-// called -- boot()'s decision to call it is made from state.selection.selected,
-// which an orchestrator never touches, so a slow enough preceding await
-// (getInitialState, loadOrchestrators) lets boot() invoke this well after an
-// orchestrator has already claimed the terminal, with nothing having changed
-// "during" the call at all. Before this fix, nothing at the top of
-// openSelection asked whether the terminal was already spoken for, so it went
-// on to dispatch prepareOpenSelection's unconditional setSelected, which the
-// selection-sync middleware reconciled straight back onto this environment.
 test('openSelection is a no-op when an orchestrator session already owns the terminal', async () => {
   let startLocalSessionCalls = 0;
   stubWailsBridge({
@@ -277,12 +233,6 @@ function hostTenant(): UITenant {
   };
 }
 
-// A host env has no pod, so two of the three default tabs have nothing to attach
-// to: `erun open` refuses the env outright ("it has no pod and no cluster to open
-// a shell into"), and an AI tab has no pod to run its harness in. Spawning them
-// would leave a refused tab plus a runtime-ensure warning about an environment
-// that will never have a runtime, so opening a host env yields the Local tab --
-// the same thing resolveAutoStartGate decides.
 test('a host environment spawns only its Local tab, never the pod-shaped ERun tab', async () => {
   let startSessionCalls = 0;
   let startLocalCalls = 0;

@@ -14,14 +14,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// fakeAWS is an HTTP endpoint that speaks the real EC2/IAM query and SSM JSON
-// wire protocols. Pointing the runner's BaseEndpoint at it exercises the whole
-// SDK path — request signing, input serialization, response parsing — without
-// reaching AWS. It models a fresh account: no role, no instance profile, and no
-// instance yet tagged for the context.
+// fakeAWS speaks the real EC2/IAM query and SSM JSON wire protocols for a fresh account.
 type fakeAWS struct {
 	mu       sync.Mutex
 	requests []awsRequest
@@ -49,7 +46,6 @@ func (f *fakeAWS) actions() []string {
 	return names
 }
 
-// find returns the first recorded request for an action.
 func (f *fakeAWS) find(t *testing.T, action string) awsRequest {
 	t.Helper()
 	f.mu.Lock()
@@ -83,7 +79,7 @@ func (f *fakeAWS) serveSSM(w http.ResponseWriter, target string) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeAWSJSON(w, map[string]any{
 		"Parameter": map[string]any{"Name": "ubuntu-ami", "Value": fakeAMI},
 	})
 }
@@ -96,9 +92,7 @@ const (
 	fakeProfileARN = "arn:aws:iam::123456789012:instance-profile/erun-test-host-stop"
 )
 
-// queryResponders maps each action the bootstrap issues to the response the
-// fake returns. An unlisted action is an error, so a call the sequence grows
-// shows up as a failure rather than a silent success.
+// An unlisted action is an error.
 var queryResponders = map[string]func(http.ResponseWriter, url.Values){
 	"CreateSecurityGroup": func(w http.ResponseWriter, _ url.Values) {
 		writeXML(w, `<CreateSecurityGroupResponse><groupId>`+fakeGroupID+`</groupId></CreateSecurityGroupResponse>`)
@@ -106,8 +100,6 @@ var queryResponders = map[string]func(http.ResponseWriter, url.Values){
 	"AuthorizeSecurityGroupIngress": func(w http.ResponseWriter, _ url.Values) {
 		writeXML(w, `<AuthorizeSecurityGroupIngressResponse><return>true</return></AuthorizeSecurityGroupIngressResponse>`)
 	},
-	// A fresh account: neither the role nor the profile exists yet, so the
-	// bootstrap takes the create path a tenant's first provision takes.
 	"GetRole": func(w http.ResponseWriter, _ url.Values) {
 		writeQueryError(w, http.StatusNotFound, "NoSuchEntity", "role not found")
 	},
@@ -142,9 +134,7 @@ func (f *fakeAWS) serveQuery(w http.ResponseWriter, action string, form url.Valu
 	responder(w, form)
 }
 
-// serveDescribeInstances distinguishes the pre-launch idempotency lookup (by
-// tag filter, and empty here) from the post-launch waiter and public-IP reads
-// (by instance id).
+// Pre-launch lookups filter by tag; post-launch reads use the instance id.
 func serveDescribeInstances(w http.ResponseWriter, form url.Values) {
 	if form.Get("InstanceId.1") == "" {
 		writeXML(w, `<DescribeInstancesResponse><reservationSet/></DescribeInstancesResponse>`)
@@ -169,12 +159,15 @@ func writeQueryError(w http.ResponseWriter, status int, code, message string) {
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"__type": code, "message": message})
+	writeAWSJSON(w, map[string]any{"__type": code, "message": message})
 }
 
-// isolateAWSEnvironment keeps the host's own AWS configuration out of the
-// resolved config, so the test proves what the alias supplies rather than what
-// the developer's machine happens to hold.
+func writeAWSJSON(w http.ResponseWriter, value any) {
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func isolateAWSEnvironment(t *testing.T) {
 	t.Helper()
 	missing := t.TempDir() + "/absent"
@@ -184,10 +177,6 @@ func isolateAWSEnvironment(t *testing.T) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 }
 
-// TestInitCloudContextThroughSDKRunner drives the shared bootstrap sequence
-// end-to-end over the SDK runner and asserts the resolved identity it hands
-// back, so the argv-to-SDK translation and the rendering the sequence re-parses
-// are both pinned.
 func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 	isolateAWSEnvironment(t)
 	fake := &fakeAWS{}
@@ -206,7 +195,7 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 			Stderr: io.Discard,
 		},
 		aliasStore{alias: "acme-aws", provider: config.CloudProviderAWS},
-		cloud.InitCloudContextParams{
+		model.InitCloudContextParams{
 			Name:               "erun-test",
 			CloudProviderAlias: "acme-aws",
 			Region:             cloud.DefaultCloudContextRegion,
@@ -237,7 +226,6 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 		t.Errorf("instance profile arn = %q, want %q", status.InstanceProfileARN, fakeProfileARN)
 	}
 
-	// Every call the bootstrap makes must have reached AWS as a real API call.
 	for _, want := range []string{
 		"CreateSecurityGroup", "AuthorizeSecurityGroupIngress",
 		"GetRole", "CreateRole", "PutRolePolicy",
@@ -250,10 +238,6 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 	}
 }
 
-// TestRunInstancesTranslatesShorthandArgs pins the translation of the aws-CLI
-// shorthand the shared sequence emits into typed RunInstances input: getting
-// any of these wrong launches a usable-looking instance with the wrong disk,
-// tags, or IMDS policy.
 func TestRunInstancesTranslatesShorthandArgs(t *testing.T) {
 	isolateAWSEnvironment(t)
 	fake := &fakeAWS{}
@@ -317,9 +301,6 @@ func TestRunInstancesTranslatesShorthandArgs(t *testing.T) {
 	}
 }
 
-// TestRunnerRejectsUnusableCredentials pins the deliberate difference from the
-// aws-CLI path: an alias without keys fails naming that, instead of silently
-// provisioning as whatever ambient identity the control-plane pod holds.
 func TestRunnerRejectsUnusableCredentials(t *testing.T) {
 	for name, credentials := range map[string]string{
 		"not json":        "not-json",
@@ -336,9 +317,6 @@ func TestRunnerRejectsUnusableCredentials(t *testing.T) {
 	}
 }
 
-// TestUnsupportedArgvIsAnError keeps the runner from silently succeeding on an
-// argv it does not understand: a shared sequence that grows a new call must fail
-// loudly here rather than half-provision a tenant.
 func TestUnsupportedArgvIsAnError(t *testing.T) {
 	isolateAWSEnvironment(t)
 	runner, err := newAWSSDKRunner(`{"accessKeyId":"test","secretAccessKey":"test"}`, "http://127.0.0.1:1")
@@ -362,9 +340,6 @@ func TestUnsupportedArgvIsAnError(t *testing.T) {
 	}
 }
 
-// TestParseEC2Filters pins the shorthand the shared sequence uses to find an
-// instance already tagged for a context — the check that keeps a resumed
-// provision from launching a duplicate.
 func TestParseEC2Filters(t *testing.T) {
 	filters := parseEC2Filters([]string{
 		"Name=tag:erun:context,Values=erun-test",

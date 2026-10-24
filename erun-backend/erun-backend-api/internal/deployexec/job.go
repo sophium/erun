@@ -1,12 +1,5 @@
-// Package deployexec runs a hosted environment's deploy server-side. The backend
-// itself has no helm/kubectl, so instead of embedding the deploy tooling it
-// creates a Kubernetes Job that runs `erun deploy` inside the erun-devops
-// runtime image — which already carries erun + helm + kubectl — under a
-// cluster-admin ServiceAccount, and watches that Job to completion. The Job
-// launch, watch and failure read-back are the shared jobexec machinery; this
-// package owns only the deploy's own Job shape. The durable DBOS workflow that
-// moves the environment's status around it lives in the provision package and
-// drives this launcher through the service coordinator.
+// Package deployexec runs a hosted environment's deploy as a Kubernetes Job
+// executing `erun deploy` in the erun-devops runtime image.
 package deployexec
 
 import (
@@ -24,18 +17,12 @@ import (
 )
 
 const (
-	// A deploy that runs longer than this is treated as wedged.
 	jobActiveDeadlineSeconds int64 = 30 * 60
-	// No in-Job retries: the provisioning workflow owns re-runs, so a failed
-	// deploy surfaces as failed rather than silently retrying under a stale spec.
-	jobBackoffLimit int32 = 0
-	// Jobs are cleaned up by the workflow after it reads the outcome; keep them
-	// briefly for status/logs.
+	// No in-Job retries: the provisioning workflow owns re-runs.
+	jobBackoffLimit            int32 = 0
 	jobTTLSecondsAfterFinished int32 = 10 * 60
 )
 
-// Outcome and Result are the shared terminal shapes; deploy callers keep naming
-// them through this package.
 type Outcome = jobexec.Outcome
 
 const (
@@ -45,8 +32,6 @@ const (
 
 type Result = jobexec.Result
 
-// deployContainerName is the Job's single container, named so the log read can
-// address it explicitly.
 const deployContainerName = "deploy"
 
 // DeployJobParams is the input to one hosted-env deploy Job.
@@ -54,91 +39,37 @@ type DeployJobParams struct {
 	Tenant      string
 	Environment string
 	Version     string
-	// Placement names the cluster this deploy targets (#1112). The zero value
-	// keeps the Job targeting its own cluster via its ServiceAccount token,
-	// unchanged from before multi-cluster placement existed.
+	// Placement's zero value targets the Job's own cluster.
 	Placement PlacementParams
-	// DeployID scopes the Job to one deploy attempt. It is carried in the durable
-	// workflow input, so a resumed workflow rebuilds the same Job name and
-	// re-watches its in-flight Job, while a fresh attempt gets its own Job rather
-	// than re-reading the previous attempt's terminal outcome. Empty keeps the
-	// version-scoped name the create path has always used.
-	DeployID string
-	// Namespace the Job runs in (the platform namespace where the backend lives).
+	// DeployID makes a fresh attempt a new Job while a resumed workflow re-watches
+	// the same one; empty keeps the version-scoped name.
+	DeployID  string
 	Namespace string
-	// Image is the erun-devops runtime image carrying erun + helm + kubectl.
-	Image string
-	// ServiceAccount is a cluster-admin SA so the in-Job `erun deploy` can create
-	// the target namespace and install the runtime chart.
+	Image     string
+	// ServiceAccount must be cluster-admin to create the namespace and install the chart.
 	ServiceAccount string
-	// ExposeTargetIP is the platform's ingress IP the per-env wildcard DNS record
-	// points at. Empty (the default, unset ERUN_ENV_EXPOSE_TARGET_IP) leaves the
-	// Job at the plain `erun deploy` it has always run — no attempt to expose,
-	// no new failure mode. Set, the Job chains `erun expose <tenant> <environment>
-	// mcp --ip <ExposeTargetIP> --skip-if-unconfigured` after a successful
-	// deploy: --skip-if-unconfigured makes the chain a no-op success for any
-	// tenant whose own project declares no platform block, so this only ever
-	// wires DNS+Ingress for an actual erunpaas platform deployment.
+	// ExposeTargetIP, when set, chains `erun expose ... mcp --skip-if-unconfigured`
+	// after a successful deploy.
 	ExposeTargetIP string
-	// ExposeServicesZone/ExposePlatformNamespace thread expose's --services-zone/
-	// --platform-namespace: the deploy Job has no git checkout, so `erun expose`
-	// cannot resolve these from a project's .erun/config.yaml the way an
-	// interactive run does — project resolution fails outright with
-	// "cannot find git project", which --skip-if-unconfigured cannot cover
-	// because the skip decision itself needs a resolved project). The control
-	// plane already carries both for its own purposes — ExposeServicesZone from
-	// the same services zone its DNS-01 cert issuance uses, ExposePlatformNamespace
-	// from the namespace its own Jobs (and, in a self-hosted platform, the
-	// PowerDNS singleton) run in — so this reuses that knowledge rather than
-	// inventing a second source for it. Either left empty falls the chained
-	// expose back to project-based resolution, which fails exactly as it always
-	// has for a sourceless Job; since exposure is best-effort (see
-	// exposeChainScript), that failure no longer takes the deploy down with it.
+	// The Job has no git checkout, so `erun expose` cannot resolve these from a
+	// project; empty falls back to project resolution, which fails best-effort.
 	ExposeServicesZone      string
 	ExposePlatformNamespace string
-	// RuntimeImageOverride, when set, threads `--runtime-image <value>` to the
-	// in-Job `erun deploy` — the caller's bootstrap decision for a tenant with no
-	// published <tenant>-devops image: install the canonical published
-	// erun-devops chart+image by reference instead of resolving artifacts that do
-	// not exist. Empty leaves the Job's deploy command exactly as it was before
-	// this existed, deploying the tenant's own artifacts.
+	// RuntimeImageOverride installs the canonical erun-devops image for a tenant with
+	// no published <tenant>-devops image.
 	RuntimeImageOverride string
-	// MaxCPU/MaxMemory/MaxStorage are Kubernetes quantity strings (e.g. "4",
-	// "8Gi", "80Gi") threaded to `erun deploy` as --max-cpu/--max-memory/
-	// --max-storage, capping the environment's namespace with a ResourceQuota +
-	// LimitRange (erun-common/kubernetes_resource_quota.go). Empty leaves the
-	// Job's deploy command unchanged from before these existed. All three are
-	// set together or not at all (routes.validateNamespaceQuotaFloor and
-	// eruncommon.ValidateNamespaceResourceQuota both require completeness).
+	// Kubernetes quantity strings for the namespace ResourceQuota; all set or none.
 	MaxCPU     string
 	MaxMemory  string
 	MaxStorage string
-	// MaxCPUMillicores/MaxMemoryMB/MaxStorageGB are the same cap as
-	// MaxCPU/MaxMemory/MaxStorage in their original numeric form, carried
-	// alongside the Kubernetes quantity strings so a usage-metering caller
-	// (service.EnvironmentProvisioner) can record the applied cap without
-	// re-parsing a quantity string.
+	// The same cap in numeric form, for usage metering without re-parsing.
 	MaxCPUMillicores int
 	MaxMemoryMB      int
 	MaxStorageGB     int
-	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key
-	// (mcptoken.Signer), threaded to the in-Job `erun deploy` as
-	// --mcp-auth-public-key so the runtime's MCP edge trusts tokens the backend
-	// mints for the console — the same file://-issuer mechanism the
-	// desktop uses with its own key, not the OIDC issuer path. Empty leaves the
-	// Job's deploy command unchanged, so the edge stays loopback-only exactly as
-	// before this existed.
+	// MCPAuthPublicKeyPEM lets the runtime's MCP edge trust backend-minted tokens;
+	// empty keeps the edge loopback-only.
 	MCPAuthPublicKeyPEM string
-	// TLSDNS01Token/TLSDNS01BrokerURL/TLSDNS01WebhookGroupName/TLSACMEEmail/
-	// TLSACMEServer thread a per-env TLS certificate through erun's DNS-01
-	// broker: the deploy Job writes the token to disk and passes it to
-	// the chained `erun expose`, which provisions the env's own namespaced
-	// cert-manager Issuer + Certificate so the Ingress's wildcard TLS secret
-	// actually gets populated. All empty (the default, no DNS-01 broker
-	// configured) leaves the chained expose exactly as it was before this
-	// existed — the Ingress still references the wildcard secret, nothing
-	// provisions it. Only takes effect alongside ExposeTargetIP, since there is
-	// no Ingress to serve the cert without one.
+	// Per-env TLS through the DNS-01 broker; only effective with ExposeTargetIP.
 	TLSDNS01Token            string
 	TLSDNS01BrokerURL        string
 	TLSDNS01WebhookGroupName string
@@ -146,13 +77,9 @@ type DeployJobParams struct {
 	TLSACMEServer            string
 }
 
-// mcpExposeService is the logical service name the deploy Job exposes: the
-// env's MCP edge, reachable at mcp.<tenant>-<environment>.<services zone>.
+// mcpExposeService is reachable at mcp.<tenant>-<environment>.<services zone>.
 const mcpExposeService = "mcp"
 
-// buildDeployJob renders the deploy Job. The container runs a non-interactive
-// `erun deploy <tenant> <env> --version <version>`; in-cluster, erun resolves
-// the kube context from the mounted ServiceAccount.
 func buildDeployJob(params DeployJobParams) *batchv1.Job {
 	backoff := jobBackoffLimit
 	deadline := jobActiveDeadlineSeconds
@@ -187,15 +114,8 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 	}
 }
 
-// buildDeployCommand composes the Job's argv. The Job's `command` replaces the
-// image's entrypoint, so none of the entrypoint's usual setup runs: no
-// in-cluster kubeconfig (the runtime boot's writeRuntimeKubeconfig) and no
-// ~/.config/erun/<tenant>/<environment>/config.yaml for `erun deploy` to
-// resolve — a freshly-registered environment was never baked into any image,
-// so nothing on disk describes it. bootstrapEnvironmentScript seeds both
-// explicitly before `erun deploy` runs, keeping `deploy` itself an unchanged
-// pure primitive: the Job (this caller) supplies the environment's shape, the
-// primitive still only consumes on-disk config exactly as it always has.
+// `command` replaces the image entrypoint, so bootstrapEnvironmentScript seeds
+// the kubeconfig and env config that entrypoint would have written.
 func buildDeployCommand(params DeployJobParams) []string {
 	deploy := []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version}
 	if override := strings.TrimSpace(params.RuntimeImageOverride); override != "" {
@@ -207,11 +127,8 @@ func buildDeployCommand(params DeployJobParams) []string {
 		script += writeMCPAuthPublicKeyScript(pem)
 		deploy = append(deploy, "--mcp-auth-public-key", mcpAuthPublicKeyJobPath)
 	}
-	// Every file a chained step reads is written BEFORE the deploy command, never
-	// between it and the chain. exposeChainScript opens with " && " so exposure
-	// stays conditional on the deploy succeeding; anything appended after
-	// shellJoin(deploy) instead glues itself onto the deploy's last argument,
-	// which silently corrupted --mcp-auth-public-key into a path ending "pemcat".
+	// Chained-step files must be written before the deploy command: anything appended
+	// after shellJoin(deploy) glues onto its last argument.
 	exposeFiles, exposeChain := buildExposeChain(params)
 	script += exposeFiles
 	script += shellJoin(deploy)
@@ -219,21 +136,13 @@ func buildDeployCommand(params DeployJobParams) []string {
 	return []string{"sh", "-c", script}
 }
 
-// dns01TokenJobPath is where the per-env DNS-01 broker token is written inside
-// the deploy Job before the chained `erun expose --dns01-token-file` reads it.
-// Fixed, outside $HOME, for the same reasons as mcpAuthPublicKeyJobPath.
 const dns01TokenJobPath = "/tmp/erun-deploy-dns01-token"
 
-// writeDNS01TokenScript writes the token to disk via a quoted heredoc — never
-// through argv or shellJoin — so it never appears in the Job's command line or
-// a process listing.
+// Heredoc, never argv, so the token stays out of the command line and process list.
 func writeDNS01TokenScript(token string) string {
 	return fmt.Sprintf("cat > %s <<'DNS01_TOKEN_EOF'\n%s\nDNS01_TOKEN_EOF\n", dns01TokenJobPath, strings.TrimRight(token, "\n"))
 }
 
-// buildExposeChain composes the deploy Job's chained `erun expose` step
-// (empty when ExposeTargetIP is unset), including the per-env TLS flags when
-// configured.
 func buildExposeChain(params DeployJobParams) (exposeFiles, chain string) {
 	ip := strings.TrimSpace(params.ExposeTargetIP)
 	if ip == "" {
@@ -248,10 +157,6 @@ func buildExposeChain(params DeployJobParams) (exposeFiles, chain string) {
 	return tlsScript, exposeChainScript(expose)
 }
 
-// tlsExposeFlags returns the heredoc that writes the per-env DNS-01 broker
-// token to disk (empty when TLS provisioning is unconfigured) plus the flags
-// that thread it and the broker/ACME coordinates onto the chained `erun
-// expose`.
 func tlsExposeFlags(params DeployJobParams) (script string, flags []string) {
 	token, broker, email := strings.TrimSpace(params.TLSDNS01Token), strings.TrimSpace(params.TLSDNS01BrokerURL), strings.TrimSpace(params.TLSACMEEmail)
 	if token == "" || broker == "" || email == "" {
@@ -267,29 +172,15 @@ func tlsExposeFlags(params DeployJobParams) (script string, flags []string) {
 	return writeDNS01TokenScript(token), flags
 }
 
-// exposeFailureMarker prefixes the line exposeChainScript prints when the
-// chained expose step does not succeed. ExposeFailureFromOutput reads it back
-// out of the Job's captured output.
 const exposeFailureMarker = "ERUN_EXPOSE_FAILED"
 
-// exposeChainScript runs expose after a successful deploy without letting its
-// failure fail the Job. Exposure (DNS + Ingress) is best-effort: the
-// deploy already landed a healthy workload, so failing the whole Job over a
-// DNS/Ingress problem would record a running environment as a failed
-// provision, exactly the misdirection the issue reported. `{ ... || printf
-// ...; }` always exits 0, so the deploy's own `&&` is the only thing that can
-// still fail the script; on a real expose failure the marker line carries
-// expose's own combined output so ExposeFailureFromOutput can recover it from
-// the Job's log after a successful run, instead of the environment silently
-// losing the reason it is not exposed.
+// Exposure is best-effort: `{ ... || printf ...; }` always exits 0, and the
+// marker line preserves expose's output for ExposeFailureFromOutput.
 func exposeChainScript(expose []string) string {
 	return " && { expose_out=$(" + shellJoin(expose) + " 2>&1) || printf '" + exposeFailureMarker + ": %s\\n' \"$expose_out\"; }"
 }
 
-// ExposeFailureFromOutput extracts the chained expose step's failure detail
-// from the deploy Job's captured stdout (jobexec.Options.CaptureOutput), or ""
-// when exposure succeeded, was never attempted (ExposeTargetIP unset), or the
-// Job predates chaining an expose at all.
+// ExposeFailureFromOutput extracts the chained expose failure, or "" if none.
 func ExposeFailureFromOutput(output string) string {
 	marker := exposeFailureMarker + ": "
 	idx := strings.Index(output, marker)
@@ -299,17 +190,8 @@ func ExposeFailureFromOutput(output string) string {
 	return strings.TrimSpace(output[idx+len(marker):])
 }
 
-// ExposeHostnameFromParams reports the MCP edge hostname the chained `erun
-// expose mcp` call produces when it actually runs — the same deterministic
-// formula `erun expose` itself resolves, computed here rather than scraped
-// back out of the Job's output because nothing about it is uncertain once the
-// inputs below are known. Gated on the exact same condition buildExposeChain
-// uses to pass --services-zone/--platform-namespace: if either is
-// blank the chain falls back to project-based resolution, which fails
-// outright for this git-checkout-less Job (see DeployJobParams'
-// ExposeServicesZone doc), so there is no real value to compute. Callers must
-// still gate this on ExposeFailureFromOutput returning "" — a real failure
-// with all three inputs present must not be reported as a working hostname.
+// ExposeHostnameFromParams computes the MCP edge hostname expose produces, or ""
+// when the zone or namespace is missing. Callers must also check ExposeFailureFromOutput.
 func ExposeHostnameFromParams(params DeployJobParams) string {
 	ip := strings.TrimSpace(params.ExposeTargetIP)
 	zone := strings.TrimSpace(params.ExposeServicesZone)
@@ -320,9 +202,6 @@ func ExposeHostnameFromParams(params DeployJobParams) string {
 	return fmt.Sprintf("%s.%s.%s", mcpExposeService, config.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
 }
 
-// namespaceQuotaFlags appends --max-cpu/--max-memory/--max-storage when all
-// three are configured. Deliberately all-or-nothing: a partial set would leave
-// erun deploy validating an incomplete NamespaceResourceQuota.
 func namespaceQuotaFlags(params DeployJobParams) []string {
 	cpu, memory, storage := strings.TrimSpace(params.MaxCPU), strings.TrimSpace(params.MaxMemory), strings.TrimSpace(params.MaxStorage)
 	if cpu == "" || memory == "" || storage == "" {
@@ -331,36 +210,17 @@ func namespaceQuotaFlags(params DeployJobParams) []string {
 	return []string{"--max-cpu", cpu, "--max-memory", memory, "--max-storage", storage}
 }
 
-// mcpAuthPublicKeyJobPath is where the backend's MCP public key PEM is written
-// inside the deploy Job before `erun deploy --mcp-auth-public-key` reads it. A
-// fixed path outside $HOME so it never rides through shellJoin's single-quoting
-// (which would defeat variable expansion) and works regardless of the image's
-// HOME.
+// Fixed path outside $HOME so it avoids shellJoin's quoting and works regardless of HOME.
 const mcpAuthPublicKeyJobPath = "/tmp/erun-deploy-mcp-auth-public-key.pem"
 
-// writeMCPAuthPublicKeyScript writes the PEM to disk via a quoted heredoc —
-// never through argv or shellJoin — so the key never appears in the Job's
-// command line or a process listing.
+// Heredoc, never argv, so the key stays out of the command line and process list.
 func writeMCPAuthPublicKeyScript(pem string) string {
 	return fmt.Sprintf("cat > %s <<'MCP_AUTH_PUBLIC_KEY_EOF'\n%s\nMCP_AUTH_PUBLIC_KEY_EOF\n", mcpAuthPublicKeyJobPath, strings.TrimRight(pem, "\n"))
 }
 
-// bootstrapEnvironmentScript seeds the in-cluster kubeconfig context
-// (mirroring the runtime boot's writeRuntimeKubeconfig, from the ServiceAccount token
-// Kubernetes auto-mounts into every pod, or — when Placement names a remote
-// cluster — that cluster's own admin-token credential instead) and a
-// minimal tenant/env config for erun's CLI verbs to resolve, then chains the
-// real command with `&&`. Every lifecycle Job — deploy, stop, delete — sets
-// `command`, which replaces the image's entrypoint, so none of the
-// entrypoint's usual setup runs; this is the one seeding path all three
-// share, so a Job that skips it is a caller bug, not a second copy that can
-// drift out of sync. It deliberately does not carry a runtime version:
-// nothing this seeds it for reads it back (deploy gets its version from the
-// explicit `--version` this seeds a command line for, never from the config
-// it writes), so a version here would just be a second, unused place to keep
-// in sync. Tenant and environment are DNS-1123-label-shaped values already
-// validated upstream (routes.decodeCreateEnvironmentInput et al.), so they
-// are safe to interpolate directly into the generated YAML.
+// bootstrapEnvironmentScript seeds the kubeconfig and a minimal tenant/env config
+// that every lifecycle Job needs, since `command` bypasses the entrypoint.
+// Tenant and environment are validated DNS-1123 labels, safe to interpolate.
 func bootstrapEnvironmentScript(tenant, environment string, placement PlacementParams) string {
 	return kubeconfigScript(placement) + fmt.Sprintf(`mkdir -p "$HOME/.config/erun/%[1]s/%[2]s"
 cat > "$HOME/.config/erun/%[1]s/config.yaml" <<TENANT_EOF
@@ -375,9 +235,6 @@ ENV_EOF
 `, tenant, environment, placement.kubernetesContextOrInCluster())
 }
 
-// inClusterKubeconfigScript is the pre-#1112 behavior, byte-for-byte: the
-// Job's own mounted ServiceAccount token authenticates against the cluster
-// the Job itself runs in.
 const inClusterKubeconfigScript = `set -e
 mkdir -p "$HOME/.kube"
 erun_deploy_ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
@@ -403,16 +260,8 @@ users:
 KUBECONFIG_EOF
 `
 
-// kubeconfigScript seeds $HOME/.kube/config for either target. A remote
-// placement uses kubectl's own config subcommands rather than a hand-rolled
-// YAML heredoc, because the context name and server URL are operator-
-// authored strings (a context's name, its instance's public IP) that must
-// never be interpreted as shell syntax: shellJoin single-quotes each one as
-// its own argv element, the same treatment every other untrusted value in
-// this package gets. The admin-token credential is read back from the env
-// var a Kubernetes Secret populates (see PlacementSecretName) — double-quoted
-// so it always reaches kubectl as one argument, whatever characters it
-// contains — never written into the Job spec itself.
+// Remote placement uses kubectl config subcommands so operator-authored strings
+// are never shell syntax; the admin token comes from a Secret-populated env var.
 func kubeconfigScript(placement PlacementParams) string {
 	if !placement.remote() {
 		return inClusterKubeconfigScript
@@ -428,10 +277,7 @@ func kubeconfigScript(placement PlacementParams) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// shellJoin renders argv as a POSIX shell command line, single-quoting every
-// argument so tenant/environment/version/IP values (already validated as
-// DNS-1123 labels or IPs upstream, but not this function's job to trust) can
-// never be interpreted as shell syntax.
+// shellJoin single-quotes every argument so no value is ever shell syntax.
 func shellJoin(argv []string) string {
 	quoted := make([]string, len(argv))
 	for i, arg := range argv {
@@ -440,19 +286,15 @@ func shellJoin(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// DeployJobName is deterministic in its inputs, so a resumed workflow watches
-// the Job it already created (a create conflict is treated as "watch the
-// existing one") rather than starting a second rollout. An explicit deploy
-// passes a per-attempt deployID so a retry of the same version is a new Job
-// instead of a re-read of the previous attempt's outcome.
+// DeployJobName is deterministic so a resumed workflow re-watches its Job; deployID
+// separates attempts of the same version.
 func DeployJobName(tenant, environment, version, deployID string) string {
 	name := jobexec.SanitizeName(tenant + "-" + environment + "-" + version)
 	suffix := ""
 	if deployID != "" {
 		suffix = "-" + jobexec.ShortID(deployID)
 	}
-	// Kubernetes caps an object name at 63 characters; trim the descriptive
-	// middle rather than the attempt suffix, which is what keeps attempts apart.
+	// Trim the middle, not the attempt suffix, to fit the 63-character name limit.
 	if budget := jobexec.MaxJobNameLength - len(jobNamePrefix) - len(suffix); len(name) > budget {
 		name = strings.Trim(name[:budget], "-")
 	}
@@ -461,9 +303,7 @@ func DeployJobName(tenant, environment, version, deployID string) string {
 
 const jobNamePrefix = "erun-deploy-"
 
-// Launcher creates and watches deploy, stop, and delete Jobs. One instance
-// covers all three lifecycle actions; each gets its own jobexec.Runner only
-// because Kind/Container differ, not a second launcher.
+// Launcher creates and watches deploy, stop, and delete Jobs.
 type Launcher struct {
 	kube         kubernetes.Interface
 	runner       *jobexec.Runner
@@ -474,29 +314,20 @@ type Launcher struct {
 func NewLauncher(kube kubernetes.Interface) *Launcher {
 	return &Launcher{
 		kube: kube,
-		// CaptureOutput: a successful deploy Job's own log is where
-		// ExposeFailureFromOutput finds the chained expose step's marker, since a
-		// best-effort expose failure never turns the Job itself into a failure.
-		runner:     jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName, CaptureOutput: true}),
-		stopRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
-		// CaptureOutput: a successful delete Job's own log is where
-		// UnexposeFailureFromOutput finds the chained unexpose step's marker,
-		// mirroring the deploy runner above.
+		// A best-effort expose failure only shows in a successful Job's log.
+		runner:       jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName, CaptureOutput: true}),
+		stopRunner:   jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
 		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName, CaptureOutput: true}),
 	}
 }
 
-// PollEvery sets how often every runner's watch re-reads its Job's status.
 func (l *Launcher) PollEvery(every time.Duration) {
 	l.runner.PollEvery = every
 	l.stopRunner.PollEvery = every
 	l.deleteRunner.PollEvery = every
 }
 
-// Run creates the deploy Job and blocks until it reaches a terminal state,
-// returning the result. When params.Placement targets a remote cluster
-// (#1112), it first upserts the Secret the Job's container reads its admin
-// token from.
+// Run creates the deploy Job and blocks until it is terminal.
 func (l *Launcher) Run(ctx context.Context, params DeployJobParams) (Result, error) {
 	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
 		return Result{}, fmt.Errorf("provision placement credential: %w", err)

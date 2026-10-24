@@ -8,14 +8,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// An idle-status read parses every activity snapshot and reclaims every lease
-// it cannot parse, while the desktop, the CLI and the MCP server rewrite those
-// same files. A write that truncates the file a reader is reading hands it an
-// empty or half-written document. These tests hold a hard link to the inode a
-// reader would have open across a write: a write that replaces the file leaves
-// that inode whole, and one that rewrites it in place does not.
+// A hard link keeps a reader's inode across a write: replacing leaves it whole,
+// rewriting in place does not.
 
 func linkObserver(t *testing.T, path string) string {
 	t.Helper()
@@ -39,9 +36,9 @@ func TestRecordEnvironmentActivityReplacesTheSnapshotRatherThanRewritingItInPlac
 	isolateActivityCache(t)
 	record := func(address string) {
 		t.Helper()
-		if err := RecordEnvironmentActivity(EnvironmentActivityParams{
+		if err := RecordEnvironmentActivity(model.EnvironmentActivityParams{
 			Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI,
-			ClientUpdates: []EnvironmentActivityClientUpdate{{Address: address, Bytes: 1}},
+			ClientUpdates: []model.EnvironmentActivityClientUpdate{{Address: address, Bytes: 1}},
 		}); err != nil {
 			t.Fatalf("record activity: %v", err)
 		}

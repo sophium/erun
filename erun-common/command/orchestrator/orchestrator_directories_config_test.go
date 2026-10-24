@@ -8,11 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestOrchestratorDirectoriesSurviveARoundTrip pins the on-disk spelling of an
-// orchestrator's own directories. The desktop re-marshals the whole root config
-// every time a definition is written, so a tag that did not match the field it
-// claims would drop every directory the operator had added — silently, on the
-// next save, with the directories gone from a definition that still looks fine.
+// TestOrchestratorDirectoriesSurviveARoundTrip: the desktop re-marshals the whole root config, so a
+// wrong tag silently drops directories.
 func TestOrchestratorDirectoriesSurviveARoundTrip(t *testing.T) {
 	t.Parallel()
 	original := config.ERunConfig{

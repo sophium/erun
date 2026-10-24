@@ -12,15 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// contributeAppForward is the per-env kubectl port-forward that bridges the
-// contribute clone's in-pod headless ERun app out to the developer's host,
-// so they can open the locally-built desktop app in a browser without
-// leaving the env.
+// contributeAppForward port-forwards the contribute clone's in-pod headless app to the host.
 type contributeAppForward struct {
 	mu        sync.Mutex
 	gen       int
@@ -53,9 +51,7 @@ func (f *contributeAppForward) exitedWithError() (bool, string) {
 	return true, msg
 }
 
-// adopt swaps in a freshly-spawned cmd. It returns false when stop() has
-// already run concurrently; the caller must then kill the supplied cmd to
-// avoid leaking a kubectl process the user asked to tear down.
+// adopt returns false after stop(); the caller must then kill cmd.
 func (f *contributeAppForward) adopt(cmd *exec.Cmd, stderr *bytes.Buffer) bool {
 	if f == nil {
 		return false
@@ -75,9 +71,7 @@ func (f *contributeAppForward) adopt(cmd *exec.Cmd, stderr *bytes.Buffer) bool {
 	return true
 }
 
-// startReap publishes the eventual exit only while the forward is still on
-// the same generation, so a slow Wait() for a cmd that adopt() has since
-// swapped out cannot falsely mark the current one as exited.
+// startReap publishes the exit only for the current generation, so a stale Wait cannot mark a newer cmd exited.
 func (f *contributeAppForward) startReap(gen int, cmd *exec.Cmd) {
 	if cmd == nil {
 		return
@@ -92,20 +86,14 @@ func (f *contributeAppForward) startReap(gen int, cmd *exec.Cmd) {
 	}()
 }
 
-// contributeAppPortReachableTimeout is generous on purpose: a cold in-pod
-// build of erun-app (yarn install, the lint/typecheck gates, the vite
-// bundle, a CGO build against webkit2gtk) takes 2-3 minutes, while
-// incremental rebuilds are ~30s. 5 minutes covers both without letting a
-// genuine failure (no listener, dead forward) hide behind the wait.
+// A cold in-pod erun-app build takes 2-3 minutes; incremental ~30s.
 var (
 	contributeAppPortReachableTimeout      = 5 * time.Minute
 	contributeAppPortReachablePollInterval = 500 * time.Millisecond
 )
 
-// spawnContributeAppForwardCmd starts the kubectl port-forward, capturing
-// stderr so a real error (missing deployment, unknown context, busy host
-// port, pod with no listener) surfaces instead of just the reachability
-// timeout. Reaping is owned by the forward, so this must not call Wait().
+// spawnContributeAppForwardCmd captures stderr so real errors surface. The forward
+// owns reaping; do not Wait here.
 var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*exec.Cmd, *bytes.Buffer, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	core.HideConsoleWindow(cmd)
@@ -119,7 +107,7 @@ var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*ex
 }
 
 func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, []string, int, error) {
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -153,20 +141,12 @@ func (f *contributeAppForward) stop() {
 		return
 	}
 	_ = cmd.Process.Kill()
-	// startReap has the Wait() goroutine; no need to Wait() here.
 }
 
-// waitForContributeAppReachable polls until the in-pod ERun app is serving
-// HTTP, or the timeout expires. The check must be HTTP, not a plain TCP
-// dial: kubectl port-forward accepts host-side TCP connections even when
-// nothing in the pod is listening, then drops the whole forward with
-// `error: lost connection to pod`. That almost always means the in-pod
-// side is mid-rebuild and will bind seconds later, so the loop respawns
-// kubectl on each exit before the deadline, preserving the last stderr so
-// a genuine failure still surfaces if the app never binds.
-//
-// A nil forward with empty args is the reuse path — something is already
-// listening locally — so the loop just polls HTTP and owns no kubectl.
+// waitForContributeAppReachable polls HTTP, not TCP: kubectl port-forward accepts
+// connections with no pod listener, then dies with "lost connection to pod" while
+// the app rebuilds. It respawns kubectl until the deadline, keeping the last stderr.
+// A nil forward with empty args means something already listens locally.
 func waitForContributeAppReachable(ctx context.Context, port int, forward *contributeAppForward, args []string) error {
 	deadline := time.Now().Add(contributeAppPortReachableTimeout)
 	var lastExitMsg string
@@ -215,10 +195,7 @@ func lastExitMsgOrPlaceholder(msg string) string {
 	return msg
 }
 
-// canReachLocalContributeAppEndpoint reports whether something in the pod is
-// actually answering HTTP: any response (even a 404) proves a server is
-// alive, while a refused connection or transport error means it is still
-// booting or nothing is listening.
+// canReachLocalContributeAppEndpoint treats any HTTP response, even 404, as a live server.
 func canReachLocalContributeAppEndpoint(port int) bool {
 	if port <= 0 {
 		return false
@@ -232,9 +209,7 @@ func canReachLocalContributeAppEndpoint(port int) bool {
 	return true
 }
 
-// canConnectLocalContributeAppPort is the TCP-only check for whether a
-// port-forward is already alive, regardless of whether the pod-side server
-// is serving — the distinction from the HTTP reach check.
+// canConnectLocalContributeAppPort checks only that the forward accepts TCP.
 func canConnectLocalContributeAppPort(port int) bool {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 	if err != nil {

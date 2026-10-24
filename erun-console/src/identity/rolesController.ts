@@ -26,9 +26,7 @@ export type UserRolesState =
   | { status: 'error'; message: string };
 
 export interface UserRolesController {
-  // tenantRoles is every role the tenant has defined — the grantable set a
-  // "Manage roles" surface picks from, independent of whether the read
-  // succeeded for this particular user.
+  // Independent of whether this user's role read succeeded.
   tenantRoles: Role[];
   userRolesState: UserRolesState;
   actionError: string | undefined;
@@ -36,13 +34,6 @@ export interface UserRolesController {
   revoke: (roleId: string) => Promise<void>;
 }
 
-// useUserRolesController adapts rolesApi's tenant-role list and one user's
-// role assignments behind a single controller: the tenant's full role list
-// (to populate a grant picker) plus that user's currently held roles, and the
-// grant/revoke mutations. Granting or revoking invalidates the user's own
-// roles tag, so the dialog reflects the new grant set without a manual
-// refresh — the same pattern useUsersController already uses for
-// enroll/deactivate.
 export function useUserRolesController(token: string, userId: string): UserRolesController {
   const tenantRolesQuery = useListRolesQuery(token);
   const userRolesQuery = useListUserRolesQuery({ token, userId });

@@ -26,9 +26,7 @@ import { wailsApi } from './wailsApi';
 import type { NoValue } from './wailsBaseQuery';
 import { wailsQueryFn } from './wailsBaseQuery';
 
-// reviewDetailApi is named apart from reviewApi (the local diff panel's own
-// endpoint) on purpose: "review" already means the diff panel here, and this
-// is the hosted platform review object the Reviews tab shows.
+// Distinct from reviewApi (the local diff panel): this is the hosted platform review.
 export const reviewDetailApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getReviewDetail: builder.query<UIReviewDetail, UIReviewDetailInput>({

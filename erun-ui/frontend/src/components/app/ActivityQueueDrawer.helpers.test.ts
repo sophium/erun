@@ -6,10 +6,6 @@ import type { ActivityQueueEntry } from '@/app/activityQueueState';
 
 import { activityElapsedLabel } from './ActivityQueueDrawer.helpers';
 
-// A running entry that spent real time queued must show elapsed time since it
-// started RUNNING, not since it was enqueued -- otherwise the card inflates
-// the duration by however long the entry sat waiting for a slot.
-
 function entry(overrides: Partial<ActivityQueueEntry>): ActivityQueueEntry {
   return {
     id: 'entry-1',
@@ -31,7 +27,6 @@ test('a running entry that waited before starting anchors elapsed on startedRunn
     startedRunningAt: '2026-08-24T00:06:40.000Z',
   });
   const now = Date.parse('2026-08-24T00:06:50.000Z');
-  // 10 real seconds of running, not the 6m50s since enqueue/startedAt.
   assert.equal(activityElapsedLabel(queued, now), '   10s');
 });
 

@@ -11,61 +11,22 @@ import (
 	"testing"
 )
 
-// A repository method whose only parameter is a context.Context has no
-// caller-supplied argument that could identify a single row or narrow a
-// query — its result set can only be scoped to a tenant by something the
-// method reads out of the security context, or left to PostgreSQL RLS.
-// erun_operations' RLS policy is unconditional (USING (true), by design, so
-// an OPERATIONS caller's cross-tenant reads keep working), so a method of
-// this shape that never reads the security context returns every tenant's
-// rows for an OPERATIONS caller instead of its own — the defect that made
-// EnvironmentRepository.Count/List and TenantQuotaRepository.Get answer a
-// quota question with the whole platform's total.
-//
-// A second, structurally different group has the same defect: a method that
-// takes a filter struct (or a plain scalar such as ListMergeQueue's
-// targetBranch) instead of bare ctx. Its caller-supplied argument narrows the
-// query but says nothing about the tenant, so an empty/wide filter has
-// exactly the context-only methods' problem — every tenant's rows for an
-// OPERATIONS caller. That shape can't be told apart from a legitimate single-
-// row `Get(ctx, id)` lookup by parameter count alone, so the scan below keys
-// on the "List" naming convention this module's AGENTS.md already
-// establishes for collection-returning methods instead: every top-level
-// method named `List` or `List*` is in scope, regardless of its parameter
-// list.
-//
-// tenantScopeClassification is every method of either shape found in this
-// package. TestContextOnlyRepositoryMethodsAreClassified fails when a new
-// one appears with no entry, forcing whoever adds it to consciously pick a
-// kind below instead of silently repeating the mistake, and fails when an
-// entry's method no longer exists, so a rename cannot leave a stale label
-// behind. It does not by itself prove a scopedExplicitly entry is correct —
-// that is what the OPERATIONS-caller regression tests in
-// environment_delete_e2e_test.go, tenant_quotas_e2e_test.go, and
-// operations_scope_e2e_test.go are for.
+// A context-only or List* repository method can scope to a tenant only via the
+// security context, since erun_operations' RLS policy is unconditional. Every
+// such method must be classified so new ones are a conscious choice.
 type tenantScopeKind int
 
 const (
-	// scopedExplicitly means the method reads TenantID off the security
-	// context and applies it as an explicit query predicate rather than
-	// relying on RLS alone.
+	// scopedExplicitly applies the security context's TenantID as a query predicate.
 	scopedExplicitly tenantScopeKind = iota
-	// deliberatelyCrossTenant means every tenant's rows (or rows keyed by
-	// the caller's identity rather than its resolved tenant) are the
-	// intended answer, documented as such where the method is declared.
+	// deliberatelyCrossTenant returns every tenant's rows by design, documented at the method.
 	deliberatelyCrossTenant
-	// notTenantOwned means the table behind the method carries no row-level
-	// security at all, so erun_operations' unconditional policy is not the
-	// mechanism in play here.
+	// notTenantOwned reads a table with no RLS.
 	notTenantOwned
-	// trackedDebt means the method has the same shape as the defect above
-	// and has not been fixed yet.
+	// trackedDebt means the method has the defect and is not fixed yet.
 	trackedDebt
 )
 
-// String names a kind for the classification prompt below, so the message
-// naming valid choices can't drift out of sync with the identifiers a fix
-// actually assigns.
 func (k tenantScopeKind) String() string {
 	switch k {
 	case scopedExplicitly:
@@ -197,13 +158,7 @@ var tenantScopeClassification = map[string]tenantScopeEntry{
 	},
 }
 
-// TestContextOnlyRepositoryMethodsAreClassified is the structural half of the
-// contract described above. It does not evaluate SQL text: a query can
-// mention tenant_id in a JOIN condition without that scoping the result to
-// the caller, so the only reliable structural signal is "did this method
-// even look at who is calling" — everything else is a judgment call the
-// classification map above records instead of a heuristic that could be
-// walked through.
+// Structural only: SQL mentioning tenant_id need not scope to the caller.
 func TestContextOnlyRepositoryMethodsAreClassified(t *testing.T) {
 	root, err := filepath.Abs(".")
 	if err != nil {
@@ -238,10 +193,8 @@ func TestContextOnlyRepositoryMethodsAreClassified(t *testing.T) {
 	}
 }
 
-// tenantScopeSensitiveRepositoryMethods parses every non-test .go file in
-// this package's directory and returns "ReceiverType.MethodName" for every
-// method matching either shape the classification map covers: context-only,
-// or named List/List*.
+// tenantScopeSensitiveRepositoryMethods returns context-only and List* methods
+// of this package's non-test files.
 func tenantScopeSensitiveRepositoryMethods(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -271,10 +224,6 @@ func tenantScopeSensitiveRepositoryMethods(t *testing.T, dir string) []string {
 	return methods
 }
 
-// listShapedMethodsInFile returns "ReceiverType.MethodName" for every
-// top-level method declaration in file whose name is List or starts with
-// List, regardless of its parameter list — the naming convention this
-// module's AGENTS.md establishes for methods that return a collection.
 func listShapedMethodsInFile(file *ast.File) []string {
 	var methods []string
 	for _, decl := range file.Decls {
@@ -291,9 +240,6 @@ func listShapedMethodsInFile(file *ast.File) []string {
 	return methods
 }
 
-// contextOnlyMethodsInFile returns "ReceiverType.MethodName" for every
-// top-level method declaration in file whose parameter list is exactly one
-// context.Context.
 func contextOnlyMethodsInFile(file *ast.File) []string {
 	var methods []string
 	for _, decl := range file.Decls {
@@ -310,8 +256,6 @@ func contextOnlyMethodsInFile(file *ast.File) []string {
 	return methods
 }
 
-// receiverTypeName returns the pointer receiver's named type, or "" for a
-// value receiver or any other shape this package does not use.
 func receiverTypeName(recv *ast.FieldList) string {
 	if len(recv.List) != 1 {
 		return ""
@@ -327,8 +271,6 @@ func receiverTypeName(recv *ast.FieldList) string {
 	return ident.Name
 }
 
-// isContextOnlySignature reports whether fn's parameter list is exactly one
-// parameter of type context.Context.
 func isContextOnlySignature(fn *ast.FuncType) bool {
 	if fn.Params == nil || len(fn.Params.List) != 1 {
 		return false

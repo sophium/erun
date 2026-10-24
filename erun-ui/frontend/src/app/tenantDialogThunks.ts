@@ -253,11 +253,7 @@ function applySavedTenantConfig(
   }
 }
 
-// inviteRequestDraftCarryOver keeps the request dialog's in-progress draft
-// (kind/note/rate-limit countdown) when reopening the same tenant's
-// dashboard, and resets it for a different one — split out of
-// openTenantDashboard so that thunk's own branching stays under the module's
-// complexity cap.
+// Keeps the invite-request draft when reopening the same tenant's dashboard.
 function inviteRequestDraftCarryOver(
   sameTenant: boolean,
   currentDashboard: TenantDashboardState,
@@ -332,12 +328,7 @@ export const setTenantDashboardTab =
     }
   };
 
-// prefillRegistrationFromInviteRequest arrives at the Registration tab
-// already knowing the environment name the operator is about to register —
-// the same one the invite request already carried, whether it is still
-// pending, was declined and retried, or is long since approved. Never
-// overwrites a name the operator has already typed (only fills a
-// still-blank draft).
+// Prefills the registration name from the invite request, never overwriting a typed one.
 function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: RootState): void {
   const request = state.tenantDashboard.data?.myInviteRequest;
   const environmentName = request?.environmentName?.trim();
@@ -350,10 +341,7 @@ function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: Root
   }
 }
 
-// setReviewFilter applies a Reviews-tab discovery filter and reloads the
-// dashboard so the new filter reaches the platform read, not just local
-// state — matching every other tenant-dashboard filter's the-list-is-the-
-// state-of-the-world contract.
+// setReviewFilter reloads so the filter reaches the platform read.
 export const setReviewFilter =
   (next: Partial<ReviewFilterState>): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -362,13 +350,7 @@ export const setReviewFilter =
     await dispatch(loadTenantDashboard());
   };
 
-// setReviewStatusFilter narrows the Reviews tab by status.
-//
-// It deliberately does not reload the dashboard, unlike setReviewFilter above.
-// mine/waitingOnMe are answered by the platform (author=/reviewer= on
-// GET /v1/reviews), so they cost a read; statuses are narrowed locally from the
-// list the panel already holds, so a round-trip would refetch exactly what is on
-// screen and make a chip click feel like a page load.
+// setReviewStatusFilter narrows locally, so unlike setReviewFilter it does not reload.
 export const setReviewStatusFilter =
   (statuses: string[]): AppThunk =>
   (dispatch, getState) => {
@@ -376,14 +358,8 @@ export const setReviewStatusFilter =
     dispatch(patchTenantDashboard({ reviewFilter }));
   };
 
-// tenantDashboardWhoamiResolved reports whether loadTenantDashboard's own
-// load actually reached the platform's GET /v1/whoami -- true for every
-// platformState except the ones that mean the identity resolution never got
-// that far (not connected, ambiguous alias, or no session at all), and except
-// tenant-mismatch, whose whoami did answer but answered for a different
-// platform tenant: that is evidence about that tenant's enrollment, never
-// about this local tenant's, and invalidating the sidebar's enrollment poll on
-// it would let another tenant's roster state answer for this one.
+// tenantDashboardWhoamiResolved is false when whoami was never reached, or
+// answered for a different platform tenant (tenant-mismatch).
 function tenantDashboardWhoamiResolved(platformState: string | undefined): boolean {
   return (
     platformState !== TENANT_PLATFORM_STATE_NOT_CONNECTED &&
@@ -409,21 +385,9 @@ export const loadTenantDashboard =
       state.tenantDashboard.platformAliasOverride,
     );
     dispatch(patchTenantDashboard({ loading: true, error: '' }));
-    // forceRefetch: true, because this fires on every dashboard open and every
-    // Refresh click — without it RTK Query's cache (never invalidated here)
-    // just replays the first successful result for the life of the process.
-    // unsubscribe once consumed so the one-shot call doesn't pin that cache
-    // entry open forever either.
-    //
-    // loadTenantDashboard has many independent callers for the same tenant
-    // (dialog open, Refresh, and the post-mutation reload every registration,
-    // platform-connect, and invite-request thunk runs) with no periodic poll
-    // to catch a dropped one later, so two of them landing close together
-    // must not race. RTK Query's condition() bails a forced refetch out from
-    // under a pending request for the same query before ever looking at
-    // forceRefetch (see erun#1953's getInitialState fix), so without this
-    // wait the later caller would silently inherit the earlier request's
-    // pre-mutation data instead of its own fresh read.
+    // forceRefetch because this cache is never invalidated. RTK Query's condition()
+    // drops a forced refetch while the same query is pending, so wait or a later
+    // caller inherits pre-mutation data.
     await dispatch(tenantApi.util.getRunningQueryThunk('getTenantDashboard', input));
     const request = dispatch(
       tenantApi.endpoints.getTenantDashboard.initiate(input, { forceRefetch: true }),
@@ -442,10 +406,7 @@ export const loadTenantDashboard =
         }),
       );
       if (tenantDashboardWhoamiResolved(data.platformState)) {
-        // The dashboard's own load just made the exact call
-        // (GET /v1/whoami) the sidebar's enrollment poll uses to decide
-        // enrolled -- independent evidence of the same transition, and an
-        // invalidation here is a no-op when nothing changed.
+        // This load just called the same whoami the enrollment poll uses.
         dispatch(tenantInviteRequestApi.util.invalidateTags(['TenantEnrollment']));
       }
     } catch (error) {
@@ -473,11 +434,7 @@ export const refreshTenantDashboard = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-// chooseTenantPlatformAlias resolves the choose-alias state: more than one
-// erun-type platform alias is configured and the operator picked one. The
-// choice is kept in tenantDashboard state (not persisted) so it survives
-// tab switches for this session but resets the next time this tenant's
-// dashboard is opened fresh.
+// The chosen alias lives in session state and resets when the dashboard reopens.
 export const chooseTenantPlatformAlias =
   (alias: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -485,12 +442,7 @@ export const chooseTenantPlatformAlias =
     await dispatch(loadTenantDashboard());
   };
 
-// tenantDashboardInput no longer resolves a platform base URL or cloud
-// alias itself — the desktop's Go side resolves the erun-type platform
-// alias the same way `erun platform` does and reports the outcome on the
-// response (platformState/platformAlias/platformUrl). This only still needs
-// an environment for the API-log panel's own MCP/kube-context read, which is
-// a distinct, per-environment concern.
+// The Go side resolves the platform alias; the environment is only for the API-log panel.
 function tenantDashboardInput(
   tenantName: string,
   tenant: UITenant | undefined,

@@ -1,13 +1,8 @@
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The per-env Outputs dialog lets an operator download the files an agent
-// produced in the runtime pod. The real backend RPCs need a live pod
-// (kubectl exec) and a native Save dialog, so the headless harness cannot
-// drive them: this spec mocks both and locks only the reachable frontend
-// invariants. The kubectl-exec transfer, filename derivation, and traversal
-// safety live in the Go tests (erun-integration/outputs_test.go and the
-// erun-common/erun-ui tests).
+// The real RPCs need a live pod and a native Save dialog, so both are mocked
+// and only frontend invariants are asserted.
 
 interface InvokeBody {
   method?: string;
@@ -68,12 +63,7 @@ test.describe('agent outputs dialog (#588)', () => {
     await expect(app.outputsDialog.list('Agent outputs')).toBeVisible();
 
     await app.outputsDialog.downloadButton('report.pdf').click();
-    // The recorded call and the status line are both the answer to a
-    // DownloadAgentOutput round trip this spec's own route handler owns, not a
-    // render that has already happened. A bare `expect.poll` and a bare
-    // `toContainText` resolve to expect's 10s default rather than to the budget
-    // this test declared, so the read carries that budget explicitly -- see the
-    // held-download case at the end of this file for the reproduction.
+    // Bare expect reads use expect's 10s default, not the test's budget.
     await expect
       .poll(
         () =>
@@ -91,20 +81,8 @@ test.describe('agent outputs dialog (#588)', () => {
     await expect(app.outputsDialog.status()).toContainText(SAVED_PATH, withTestBudget());
   });
 
-  // The download's own answer is what both reads above are about, and
-  // `expect.poll` and `toContainText` carry no budget of the test's unless they
-  // are given one: with no explicit timeout they resolve to `expect.timeout`
-  // (10s on POSIX), which is a separate clock from the 30s this test declares
-  // and is not moved by `test.setTimeout(...)`. A transfer that is merely slow
-  // on a loaded machine therefore reds the step with the test's own budget
-  // unspent. The hold is injected at the RPC this spec already stubs rather than
-  // by loading the machine, so the reproduction is deterministic on a quiet
-  // host, and it sits just past that 10s default -- the smallest delay that
-  // discriminates.
-  //
-  // Pre-fix this reds at exactly 10_000ms with 20s of its own budget unused;
-  // with both reads pointed at the budget the test declared it passes at the
-  // download's real arrival.
+  // The download is held just past expect's 10s default, which test.setTimeout
+  // does not move, so reads must carry the test's budget explicitly.
   test('a download that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -122,10 +100,7 @@ test.describe('agent outputs dialog (#588)', () => {
         });
       }
       if (body.method === 'DownloadAgentOutput') {
-        // Held before the call is recorded, so the poll below has nothing to
-        // converge on until the transfer actually answers. Anchored to the
-        // request, so the delay is the same however long the dialog took to
-        // open.
+        // Anchored to the request, so the delay is independent of dialog open time.
         if (holdUntil === 0) {
           holdUntil = Date.now() + 12_000;
         }

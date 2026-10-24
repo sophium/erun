@@ -20,10 +20,6 @@ func TestEnvironmentEventCursorRoundTripsItsPosition(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventCursorZeroEncodesToTheEmptyToken pins the two
-// representations of "from the beginning" together: the start of a stream is
-// one value, whether it comes from a client that omits the parameter or one
-// that echoes back the empty NextCursor a finished page returned.
 func TestEnvironmentEventCursorZeroEncodesToTheEmptyToken(t *testing.T) {
 	if got := (EnvironmentEventCursor{}).String(); got != "" {
 		t.Fatalf("zero String() = %q, want empty", got)
@@ -37,11 +33,6 @@ func TestEnvironmentEventCursorZeroEncodesToTheEmptyToken(t *testing.T) {
 	}
 }
 
-// TestParseEnvironmentEventCursorRefusesATokenThatIsNotAPosition is the
-// reproduction of the failure a resume cursor is most likely to meet: a token
-// the server never issued. Accepting it and falling back to the zero cursor
-// would answer "start over", replaying the whole log to a reader that asked
-// only for what it missed.
 func TestParseEnvironmentEventCursorRefusesATokenThatIsNotAPosition(t *testing.T) {
 	for _, token := range []string{"not-a-position", "1.5", "-1", "0", " ", "42,7", "1e3"} {
 		_, err := ParseEnvironmentEventCursor(token)

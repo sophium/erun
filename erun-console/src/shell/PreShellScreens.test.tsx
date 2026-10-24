@@ -7,9 +7,6 @@ import {
   TenantUnresolvedScreen,
 } from './PreShellScreens';
 
-// Builds a JWT-shaped string with the given payload — the same shape
-// src/auth/identity.test.ts uses, since NotEnrolledScreen decodes the token
-// the same way.
 function tokenWith(payload: Record<string, unknown>): string {
   const encode = (value: string): string => {
     const bytes = new TextEncoder().encode(value);
@@ -189,10 +186,6 @@ describe('NotEnrolledScreen', () => {
   });
 });
 
-// erun#1721: this screen is the "unresolvable" counterpart to NotEnrolledScreen
-// above -- shown when the API cannot tell which tenant a token resolves to,
-// as distinct from a genuinely-unenrolled identity. It must not repeat the
-// "an operator must enrol you" copy, since the caller may already be enrolled.
 describe('TenantUnresolvedScreen', () => {
   it('shows the API-reported reason instead of the not-enrolled copy', () => {
     render(
@@ -246,11 +239,6 @@ describe('TenantUnresolvedScreen', () => {
   });
 });
 
-// erun#1752: shown when resolution failed for an internal reason (already
-// sanitized server-side into a safe message) rather than a real answer about
-// enrolment. It must never claim the caller isn't enrolled, and -- unlike
-// NotEnrolledScreen -- must never offer an enroll command: whatever link
-// this identity has, it was not what failed.
 describe('ResolutionErrorScreen', () => {
   it('shows the API-reported reason instead of the not-enrolled copy, with no enroll command', () => {
     render(

@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-// stubTarget models the four method-return shapes the reflective invoke
-// handler supports — (T, error), (T), (error), () — without importing the
-// real desktop App.
 type stubTarget struct {
 	calls []string
 }
@@ -98,13 +95,13 @@ func TestStaticAssetServed(t *testing.T) {
 
 func TestInvokeReturnsData(t *testing.T) {
 	_, target, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Echo", Args: []json.RawMessage{json.RawMessage(`"hello"`)}})
+	body := mustMarshal(t, invokeRequest{Method: "Echo", Args: []json.RawMessage{json.RawMessage(`"hello"`)}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		out, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status %d: %s", resp.StatusCode, out)
 	}
@@ -125,13 +122,13 @@ func TestInvokeReturnsData(t *testing.T) {
 
 func TestInvokeReturnsErrorEnvelope(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Boom", Args: []json.RawMessage{}})
+	body := mustMarshal(t, invokeRequest{Method: "Boom", Args: []json.RawMessage{}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 500 {
+	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
 	var env invokeEnvelope
@@ -145,20 +142,20 @@ func TestInvokeReturnsErrorEnvelope(t *testing.T) {
 
 func TestInvokeUnknownMethod(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Missing", Args: nil})
+	body := mustMarshal(t, invokeRequest{Method: "Missing", Args: nil})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 404 {
+	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
 
 func TestInvokePlainReturn(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Plain", Args: []json.RawMessage{json.RawMessage(`3`)}})
+	body := mustMarshal(t, invokeRequest{Method: "Plain", Args: []json.RawMessage{json.RawMessage(`3`)}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -231,8 +228,6 @@ func readFirstSSEEvent(body io.Reader, got chan<- event) {
 	}
 }
 
-// waitForSubscriber blocks until the SSE subscription registers, so Emit
-// cannot race ahead of it.
 func waitForSubscriber(t *testing.T, srv *Server) {
 	t.Helper()
 
@@ -253,14 +248,14 @@ func waitForSubscriber(t *testing.T, srv *Server) {
 
 func TestClipboardStoresInMemory(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(clipboardRequest{Action: "set", Text: "hello"})
+	body := mustMarshal(t, clipboardRequest{Action: "set", Text: "hello"})
 	resp, err := http.Post(ts.URL+"/__erun_clipboard", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 
-	body, _ = json.Marshal(clipboardRequest{Action: "get"})
+	body = mustMarshal(t, clipboardRequest{Action: "get"})
 	resp, err = http.Post(ts.URL+"/__erun_clipboard", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -275,12 +270,6 @@ func TestClipboardStoresInMemory(t *testing.T) {
 	}
 }
 
-// TestEmitReplacesDroppedEventWithGapMarker fills a subscriber's channel to
-// capacity, then emits one more event. Silently discarding it would leave the
-// subscriber unable to tell "nothing happened" apart from "I missed one" —
-// instead the oldest queued event must be evicted and replaced with an
-// eventsDroppedName marker carrying the miss count, so the subscriber always
-// has an explicit, actionable trace of the gap.
 func TestEmitReplacesDroppedEventWithGapMarker(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
@@ -316,14 +305,12 @@ func drainAll(ch <-chan event, n int) []event {
 	return out
 }
 
-// assertFillerRange checks a contiguous run of filler events starting at
-// startArg, proving the dropped "overflow" event was replaced rather than
-// silently queued alongside the survivors.
 func assertFillerRange(t *testing.T, events []event, startArg int) {
 	t.Helper()
 	for i, ev := range events {
 		want := startArg + i
-		if ev.Name != "filler" || ev.Args[0].(int) != want {
+		got, ok := ev.Args[0].(int)
+		if ev.Name != "filler" || !ok || got != want {
 			t.Fatalf("event %d = %+v, want filler #%d", i, ev, want)
 		}
 	}
@@ -334,9 +321,21 @@ func assertGapMarker(t *testing.T, ev event, wantMissed int64) {
 	if ev.Name != eventsDroppedName {
 		t.Fatalf("event = %+v, want the %q gap marker", ev, eventsDroppedName)
 	}
-	if len(ev.Args) != 1 || ev.Args[0].(int64) != wantMissed {
+	if len(ev.Args) != 1 {
 		t.Fatalf("gap marker args = %+v, want missed count %d", ev.Args, wantMissed)
 	}
+	if missed, ok := ev.Args[0].(int64); !ok || missed != wantMissed {
+		t.Fatalf("gap marker args = %+v, want missed count %d", ev.Args, wantMissed)
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	body, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func bufioReaderForSSE(r io.Reader) *lineReader {

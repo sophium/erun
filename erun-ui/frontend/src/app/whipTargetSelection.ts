@@ -2,12 +2,7 @@ import type { WhipDefaultTarget, WhipTargetSelection } from '@/app/model';
 
 import type { main } from '../../wailsjs/go/models';
 
-// defaultWhipTargetSelection is what a freshly opened whip popover starts
-// from: the sidebar's current focus, checked by itself, nothing else. Never
-// "everything" -- an unfocused surface (dashboard, or nothing at all) starts
-// from an empty selection rather than defaulting to every configured target
-// (erun#1700's "an empty selection is not all", read the other way: no
-// default is not a default of all either).
+// Starts from the sidebar's focus only; with no focus, nothing is selected.
 export function defaultWhipTargetSelection(defaultTarget: WhipDefaultTarget): WhipTargetSelection {
   if (!defaultTarget) {
     return {
@@ -65,13 +60,8 @@ export function selectAllWhipTargets(selection: WhipTargetSelection): WhipTarget
   return { ...selection, environmentMode: 'all', orchestratorMode: 'all' };
 }
 
-// resolveWhipTargetRefs turns the working selection into the explicit list
-// WhipNow requires, against the freshest known population: an "all" category
-// resolves to every id currently listed (so an orchestrator that started
-// after "Select all orchestrators" was clicked, but before Whip actually ran,
-// is still included -- erun#1700's "group selects follow the population, not
-// a snapshot"); a "custom" category resolves to the checked ids that are
-// still present in that population, dropping any that disappeared.
+// resolveWhipTargetRefs resolves "all" against the current population, so
+// orchestrators started after the click are included, and drops vanished ids.
 export function resolveWhipTargetRefs(
   selection: WhipTargetSelection,
   targets: main.uiWhipTargetList,
@@ -104,10 +94,6 @@ export function resolveWhipTargetRefs(
   return refs;
 }
 
-// countWhipTargets is the count the primary action states before it acts
-// (erun#1700's "state the count before acting"), resolved against the same
-// freshest population resolveWhipTargetRefs uses so the number never lies
-// about what a click would actually push.
 export function countWhipTargets(
   selection: WhipTargetSelection,
   targets: main.uiWhipTargetList,

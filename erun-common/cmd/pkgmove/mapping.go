@@ -8,12 +8,10 @@ import (
 	"strings"
 )
 
-// rootDir is the module root package's directory in a mapping.
 const rootDir = "."
 
-// packageMap says which package directory every file and declaration of the
-// module belongs to. Directories are relative to the module root; rootDir is
-// the root package itself.
+// packageMap assigns every module file and declaration a package directory,
+// relative to the module root.
 type packageMap struct {
 	rules     []fileRule
 	overrides map[declKey]string
@@ -25,8 +23,6 @@ type fileRule struct {
 	pattern string
 }
 
-// declKey names a top-level declaration by the file it is declared in today
-// and its name.
 type declKey struct {
 	file string
 	name string
@@ -71,11 +67,8 @@ func (m *packageMap) parseLine(text string) error {
 	return nil
 }
 
-// fileDir is the package directory a file belongs to: the first rule whose
-// pattern matches it. A pattern without a slash matches a file's base name,
-// so a rule written for a source file also moves its tests when they share a
-// prefix; a test file no rule names follows its source file. A file nothing
-// names stays where it is.
+// fileDir returns the first matching rule's directory. A pattern without a
+// slash matches base names; an unnamed test file follows its source file.
 func (m packageMap) fileDir(rel string) string {
 	if dir, ok := m.matchRule(rel); ok {
 		return dir
@@ -117,9 +110,7 @@ func trimOSSuffix(stem string) string {
 	return stem
 }
 
-// declDir is where a top-level declaration goes: its override if it has one,
-// otherwise its file's directory. An override names its file the way a rule
-// does: a bare name is a root package file, a path names any other.
+// declDir is the declaration's override, else its file's directory.
 func (m packageMap) declDir(rel, name string) string {
 	key := declKey{file: rel, name: name}
 	if path.Dir(rel) == rootDir {

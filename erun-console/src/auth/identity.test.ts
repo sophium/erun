@@ -2,13 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { readTokenIdentity } from './identity';
 
-// Builds a JWT-shaped string with the given payload. Only the payload segment
-// is ever read, so the header and signature are placeholders.
 function tokenWith(payload: Record<string, unknown>): string {
   const encode = (value: string): string => {
-    // UTF-8 first, then base64url — what a real issuer emits. Passing the
-    // string straight to btoa would encode Latin-1 bytes and produce a token no
-    // issuer would ever mint.
+    // UTF-8 then base64url, as a real issuer emits.
     const bytes = new TextEncoder().encode(value);
     const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -44,9 +40,7 @@ describe('readTokenIdentity', () => {
   });
 
   it('returns nothing for a token that is not a readable JWT, rather than throwing', () => {
-    // The dev-bearer fallback is an opaque string, and this runs on the screen a
-    // stuck user sees -- throwing there would replace an explanation with a
-    // blank page.
+    // Throwing here would blank the screen a stuck user sees.
     for (const value of ['', 'dev-token', 'a.b', 'a.b.c.d', 'not-base64.$$$.sig']) {
       const identity = readTokenIdentity(value);
       expect(identity.subject).toBeUndefined();

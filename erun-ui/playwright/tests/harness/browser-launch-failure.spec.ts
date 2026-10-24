@@ -5,65 +5,27 @@ import * as path from 'node:path';
 
 import { test, expect } from '@playwright/test';
 
-// A browser that dies at launch must be reported with its own log, not by its
-// first line.
-//
-// Playwright reports a browser that died before it was ready as
-// `browserType.launch: Target page, context or browser has been closed` — a
-// generic with no cause in it — and charges the death to whichever spec
-// happened to ask for the worker's browser first. The diagnosis is not missing
-// from the error: Playwright appends its own call log, which carries
-// `[pid=…] <process did exit: exitCode=null, signal=SIGSEGV>`, and the
-// browser's own stderr above it. It is simply below the first line, so it is
-// the part that gets quoted away — one harness defect read as three spec
-// failures across three areas, each attributed to a spec that was never wrong.
-//
-// The contract this pins is the one the suite's reporter
-// (reporters/browserLaunchFailure.ts, registered by playwright.config.ts) adds:
-// for a real browser death, the run's own output carries a block that leads
-// with the death and then reproduces Playwright's text verbatim.
-//
-// A real segfault cannot be waited for — occurrences are hours apart — so the
-// death is constructed: a stand-in process Playwright launches as the browser
-// that writes the same stderr a dying Chromium writes and then dies of
-// SIGSEGV. That is a faithful reproduction of the *reporting* defect, which is
-// the defect here: every early death, at any delay, is reported this way.
-//
-// It lives under tests/harness/ rather than tests/areas/ deliberately: it
-// belongs to no area and drives no desktop flow, so it takes the base `test`
-// (never fixtures/erunApp.ts) and boots no worker backend of its own. It is
-// also deliberately driven through a nested Playwright run rather than by
-// importing the reporter and calling it: the assertion is about what reaches
-// the output of a real run, and a unit call would pass even if the reporter
-// were never wired in or never invoked for a launch failure.
+// A browser that dies at launch must be reported with its own log, not by
+// Playwright's generic first line. The death is faked by a stand-in process
+// that writes Chromium-like stderr and segfaults, run in a nested Playwright
+// project so the assertion covers the reporter actually being wired in.
 
 const SUITE_DIR = path.join(__dirname, '..', '..');
 const PLAYWRIGHT_CLI = path.join(SUITE_DIR, 'node_modules', '@playwright', 'test', 'cli.js');
 const SUITE_NODE_MODULES = path.join(SUITE_DIR, 'node_modules');
 const REPORTER_PATH = path.join(SUITE_DIR, 'reporters', 'browserLaunchFailure.ts');
 
-// The block's own opening line. It is the reporter's contract with an operator
-// reading a gate log, so it is asserted by name rather than by shape.
+// The reporter's contract with an operator reading a gate log.
 const BLOCK_HEADER = '>> playwright: BROWSER LAUNCH FAILURE';
 
-// Markers the block must carry, each one a piece of the diagnosis that used to
-// be discarded: the browser's own stderr, the line Playwright recorded for the
-// process's death, and the generic Playwright reported the failure as — kept
-// verbatim, since the block adds legibility rather than a second diagnosis.
 const STAND_IN_STDERR = 'ERROR:dbus/bus.cc:405';
 const PLAYWRIGHT_GENERIC =
   'Error: browserType.launch: Target page, context or browser has been closed';
 
-// The death differs by platform, and only the death: POSIX raises a real
-// SIGSEGV, while win32 has no signal to raise and the stand-in exits with a
-// code (its own `catch` branch). Both are the same event to the reporter.
+// win32 has no SIGSEGV to raise, so the stand-in exits with a code instead.
 const STAND_IN_DEATH = process.platform === 'win32' ? /exitCode=1, signal=null/ : /signal=SIGSEGV/;
 
-// The stand-in browser. It is a Node program rather than a shell script so the
-// same one runs on win32, where CreateProcess cannot exec a shell script at
-// all; `ignoreDefaultArgs` makes the launch execute exactly this and nothing
-// else. Its stderr lines are the shape a Chromium on this host emits on the way
-// down, and they are the payload the block has to surface.
+// A Node program so it runs on win32 too; ignoreDefaultArgs runs exactly this.
 const STAND_IN_BROWSER = `\
 process.stderr.write('[ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\\n');
 process.stderr.write('[ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Error.ServiceUnknown\\n');
@@ -76,10 +38,7 @@ setTimeout(() => {
 }, 50);
 `;
 
-// stageStandInProject lays out a throwaway Playwright project: the stand-in
-// browser, a config that launches it as the browser, and one spec that asks for
-// a page. node_modules is a link to the suite's own, so the nested run resolves
-// the same @playwright/test this one did.
+// stageStandInProject writes a throwaway project that launches the stand-in.
 function stageStandInProject(dir: string): void {
   const testsDir = path.join(dir, 'tests');
   fs.mkdirSync(testsDir, { recursive: true });
@@ -97,8 +56,7 @@ function stageStandInProject(dir: string): void {
       `  reporter: [['list']],\n` +
       `  use: {\n` +
       `    launchOptions: {\n` +
-      // The stand-in IS the browser for this run: Playwright's own Chromium
-      // arguments would only be arguments to a Node program.
+      // The stand-in IS the browser, so Chromium's default args do not apply.
       `      executablePath: ${JSON.stringify(process.execPath)},\n` +
       `      ignoreDefaultArgs: true,\n` +
       `      args: [${JSON.stringify(browser)}],\n` +
@@ -115,10 +73,7 @@ function stageStandInProject(dir: string): void {
   );
 }
 
-// runNestedSuite runs the throwaway project to completion and returns
-// everything it printed. The reporter under test writes to stderr and the list
-// reporter to stdout, so both are collected into one stream in arrival order —
-// which is also how the gate's own job log sees them.
+// runNestedSuite returns stdout and stderr merged in arrival order.
 function runNestedSuite(dir: string): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [PLAYWRIGHT_CLI, 'test', `--reporter=${REPORTER_PATH}`], {
@@ -134,8 +89,7 @@ function runNestedSuite(dir: string): Promise<{ code: number | null; output: str
   });
 }
 
-// browserLaunchBlocks returns each reporter block in the run's output, header
-// line first.
+// browserLaunchBlocks returns each reporter block in the output, header first.
 function browserLaunchBlocks(output: string): string[][] {
   const blocks: string[][] = [];
   let current: string[] | undefined;
@@ -148,9 +102,7 @@ function browserLaunchBlocks(output: string): string[][] {
     if (current === undefined) {
       continue;
     }
-    // A block is the contiguous run of reporter lines that follows it; the
-    // payload it reproduces verbatim is not prefixed, so the first unprefixed
-    // line ends the block proper.
+    // The first unprefixed line ends the block.
     if (!line.startsWith('>> playwright:')) {
       current = undefined;
       continue;
@@ -171,8 +123,7 @@ test('a browser that dies at launch is reported with its own log, not its first 
     stageStandInProject(dir);
     const { code, output } = await runNestedSuite(dir);
 
-    // The browser died, so the spec that asked for a page failed. This is the
-    // precondition for everything below, not the assertion under test.
+    // Precondition, not the assertion under test.
     expect(code, `the nested run unexpectedly passed:\n${output}`).not.toBe(0);
 
     const blocks = browserLaunchBlocks(output);
@@ -185,18 +136,14 @@ test('a browser that dies at launch is reported with its own log, not its first 
     const block = blocks[0] ?? [];
     const blockText = block.join('\n');
 
-    // The whole point of the block: it leads with the cause. Everything below
-    // it may be quoted away, so the death has to be in what an operator reads
-    // first — a cause-free headline is the defect being fixed.
+    // The block must lead with the cause.
     expect(block.slice(0, 5).join('\n')).toMatch(STAND_IN_DEATH);
     expect(blockText).toContain(STAND_IN_STDERR);
-    // Attribution: the death is a harness event, and the spec it was charged to
-    // is named as the spec it was charged to — not left to look like a defect.
+    // The death is attributed as a harness event, naming the charged spec.
     expect(blockText).toContain('harness event');
     expect(blockText).toContain('launch.spec.ts');
 
-    // Nothing is invented: Playwright's own text is reproduced, generic headline
-    // and all, below the block's own summary of it.
+    // Playwright's own text is reproduced verbatim.
     expect(output).toContain(PLAYWRIGHT_GENERIC);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });

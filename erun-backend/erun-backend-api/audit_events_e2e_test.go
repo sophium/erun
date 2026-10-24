@@ -16,9 +16,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// Row-level security is the entire authorization boundary for reading audit
-// events, so it is exercised against a real migrated PostgreSQL rather than a
-// fake that would just agree with itself about which rows a tenant may see.
+// RLS is the whole read authorization boundary, so this runs against real PostgreSQL.
 func auditEventDatabase(t *testing.T) (*repository.AuditEventRepository, *sql.DB) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -28,10 +26,8 @@ func auditEventDatabase(t *testing.T) (*repository.AuditEventRepository, *sql.DB
 	return repository.NewAuditEventRepository(repository.NewTxManager(db, repository.DialectPostgres)), db
 }
 
-// seedAuditTenant creates a tenant and one user of its own for the scenario,
-// so a run never disturbs rows another tenant owns and RLS is actually
-// exercised. audit_events.erun_user_id foreign-keys (tenant_id, user_id), so a
-// user row is required before an audit event can be logged for it.
+// seedAuditTenant creates an isolated tenant plus the user audit_events.erun_user_id
+// references.
 func seedAuditTenant(t *testing.T, db *sql.DB) (tenantID string, userID string) {
 	t.Helper()
 	stamp := time.Now().Format("20060102150405.000000")
@@ -59,10 +55,8 @@ func seedAuditTenant(t *testing.T, db *sql.DB) (tenantID string, userID string) 
 	return tenantID, userID
 }
 
-// seedAuditOperationsTenant is seedAuditTenant's OPERATIONS-type twin, for the
-// scoping regression test below: erun_operations' RLS policy is unconditional
-// (USING (true)), so only an OPERATIONS caller can actually exercise the
-// bypass List must guard against explicitly.
+// seedAuditOperationsTenant seeds an OPERATIONS tenant, whose RLS policy is
+// unconditional, so List's own tenant guard is what is exercised.
 func seedAuditOperationsTenant(t *testing.T, db *sql.DB) (tenantID string, userID string) {
 	t.Helper()
 	stamp := time.Now().Format("20060102150405.000000")
@@ -90,17 +84,12 @@ func seedAuditOperationsTenant(t *testing.T, db *sql.DB) (tenantID string, userI
 	return tenantID, userID
 }
 
-// operationsAuditContext is auditContext's OPERATIONS-type twin.
 func operationsAuditContext(tenantID, userID string) context.Context {
 	return security.WithContext(context.Background(), security.Context{
 		TenantID: tenantID, TenantType: "OPERATIONS", ErunUserID: userID,
 	})
 }
 
-// TestAuditEventListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS caller's List must not include a stranger
-// tenant's audit events even though erun_operations' RLS policy makes them
-// visible too.
 func TestAuditEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	strangerTenantID, strangerUserID := seedAuditTenant(t, db)
@@ -124,8 +113,6 @@ func TestAuditEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// seedAuditUser adds a second user to an already-seeded tenant, for scenarios
-// that need two distinct erun_user_id values within one tenant.
 func seedAuditUser(t *testing.T, db *sql.DB, tenantID string) string {
 	t.Helper()
 	var userID string
@@ -148,9 +135,6 @@ func logAuditEvent(t *testing.T, repo *repository.AuditEventRepository, ctx cont
 	mustNoErr(t, repo.LogAuditEvent(ctx, event), "log audit event")
 }
 
-// TestAuditEventListIsScopedByTenant is the invariant the whole read API rests
-// on: a caller from one tenant must never see another tenant's audit rows,
-// even though both are simple SELECTs behind the same endpoint.
 func TestAuditEventListIsScopedByTenant(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	tenantA, userA := seedAuditTenant(t, db)
@@ -183,10 +167,7 @@ func TestAuditEventListIsScopedByTenant(t *testing.T) {
 	}
 }
 
-// TestAuditEventListNeverExposesParameterPayloads proves the read path holds
-// even when a row does carry recorded arguments: an MCP tool such as
-// cloud_inject_aws_credentials takes credentials as arguments, and this is
-// where a future MCP audit caller would have serialized them.
+// MCP tools such as cloud_inject_aws_credentials take credentials as arguments.
 func TestAuditEventListNeverExposesParameterPayloads(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	tenantID, userID := seedAuditTenant(t, db)
@@ -211,8 +192,6 @@ func TestAuditEventListNeverExposesParameterPayloads(t *testing.T) {
 	}
 }
 
-// TestAuditEventListFiltersMatchTheirIndexedColumns exercises the filters the
-// three audit_events indexes exist for: erun_user_id and (api_method, api_path).
 func TestAuditEventListFiltersMatchTheirIndexedColumns(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	tenantID, userA := seedAuditTenant(t, db)
@@ -258,10 +237,7 @@ func TestAuditEventListFiltersMatchTheirIndexedColumns(t *testing.T) {
 	}
 }
 
-// TestAuditEventListPaginatesStablyAcrossInserts is the DOS-shaped concern the
-// issue calls out: audit_events is append-only and unbounded, so paging must
-// use the (created_at, audit_event_id) keyset rather than an offset that a
-// concurrent insert would shift under the caller.
+// audit_events is append-only, so paging must use a keyset rather than an offset.
 func TestAuditEventListPaginatesStablyAcrossInserts(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	tenantID, userID := seedAuditTenant(t, db)
@@ -301,9 +277,8 @@ func auditEventIDs(t *testing.T, repo *repository.AuditEventRepository, ctx cont
 	return ids
 }
 
-// pageThroughInsertingBetweenPages pages one row at a time, inserting a new
-// row after each page is fetched — the shape of a table receiving writes while
-// a caller is still paging through it — and returns the audit event ids seen.
+// pageThroughInsertingBetweenPages inserts a row after each page and returns the
+// ids seen.
 func pageThroughInsertingBetweenPages(
 	t *testing.T, repo *repository.AuditEventRepository, ctx context.Context, tenantID, userID string, total int,
 ) map[string]bool {
@@ -317,9 +292,6 @@ func pageThroughInsertingBetweenPages(
 			t.Fatalf("page %d returned %d events, want 1", i, len(page.Events))
 		}
 
-		// A new row lands mid-pagination. It sorts newest-first, ahead of
-		// every page already handed out, so it must not appear in — or shift
-		// — any page still to come.
 		logAuditEvent(t, repo, ctx, model.AuditEvent{
 			TenantID: tenantID, ErunUserID: userID, ExternalUserID: "u", ExternalIssuerID: "https://issuer.example",
 			Type: model.AuditEventTypeCLI, CLICommand: "erun build (inserted mid-page)",
@@ -343,8 +315,6 @@ func pageThroughInsertingBetweenPages(
 	return seen
 }
 
-// TestAuditEventListReportsNextCursorOnlyWhenMoreRemain guards the boundary of
-// the limit+1 lookahead: the last real page must not claim a next page exists.
 func TestAuditEventListReportsNextCursorOnlyWhenMoreRemain(t *testing.T) {
 	repo, db := auditEventDatabase(t)
 	tenantID, userID := seedAuditTenant(t, db)
@@ -364,12 +334,8 @@ func TestAuditEventListReportsNextCursorOnlyWhenMoreRemain(t *testing.T) {
 	}
 }
 
-// TestAuditEventListFiltersUseTheirDedicatedIndex proves the filters List
-// exposes are the ones the three audit_events indexes were actually built for,
-// not filters that would force a sequential scan as the trail grows. It seeds
-// enough rows with real selectivity for PostgreSQL's planner to prefer the
-// dedicated composite index over the plain tenant/created_at one, rather than
-// forcing the choice with enable_seqscan.
+// Seeds enough selective rows for the planner to prefer the dedicated index
+// without forcing it via enable_seqscan.
 func TestAuditEventListFiltersUseTheirDedicatedIndex(t *testing.T) {
 	_, db := auditEventDatabase(t)
 	tenantID, _ := seedAuditTenant(t, db)
@@ -398,10 +364,8 @@ func TestAuditEventListFiltersUseTheirDedicatedIndex(t *testing.T) {
 	}
 }
 
-// seedBulkAuditEvents inserts n rows directly (bypassing LogAuditEvent, which
-// would take one round trip per row) spread across userIDs and two API
-// methods, so erun_user_id and api_method actually narrow the row set instead
-// of every value being equally represented.
+// seedBulkAuditEvents inserts rows directly with skewed user/method values so the
+// filters are selective.
 func seedBulkAuditEvents(t *testing.T, db *sql.DB, tenantID string, userIDs []string, n int) {
 	t.Helper()
 	_, err := db.Exec(`
@@ -422,15 +386,13 @@ func seedBulkAuditEvents(t *testing.T, db *sql.DB, tenantID string, userIDs []st
 	mustNoErr(t, err, "analyze audit_events")
 }
 
-// postgresUUIDArrayLiteral formats a Go string slice as a PostgreSQL array literal. The
-// values are test-controlled UUIDs from seedAuditUser, never external input.
+// Values are test-controlled UUIDs, never external input.
 func postgresUUIDArrayLiteral(values []string) string {
 	return "{" + strings.Join(values, ",") + "}"
 }
 
-// explainAuditEventList runs EXPLAIN for the same shape of query List builds
-// (tenant-scoped by RLS, ordered newest first) inside a transaction with the
-// tenant's real security context, and returns the plan as text.
+// explainAuditEventList EXPLAINs List's query shape under the tenant's real
+// security context.
 func explainAuditEventList(t *testing.T, db *sql.DB, tenantID string, where string, extraArgs []any) string {
 	t.Helper()
 	tx, err := db.Begin()

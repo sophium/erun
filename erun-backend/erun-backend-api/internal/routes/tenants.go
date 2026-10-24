@@ -21,8 +21,7 @@ type TenantRepository interface {
 	Current(ctx context.Context) (model.Tenant, error)
 }
 
-// TenantBootstrapNameReconciler is the one-way, operations-only rename
-// workflow. Satisfied by *service.TenantService.
+// TenantBootstrapNameReconciler is the one-way, operations-only rename workflow.
 type TenantBootstrapNameReconciler interface {
 	ReconcileBootstrapName(ctx context.Context, tenant model.Tenant) (model.Tenant, error)
 }
@@ -32,9 +31,6 @@ type TenantRoutes struct {
 	reconciler TenantBootstrapNameReconciler
 }
 
-// createTenantRequest is the operations-only tenant-registration body.
-// orgFieldKey/orgFieldValue are set only for an org-scoped (shared) issuer;
-// a single-tenant issuer leaves both empty.
 type createTenantRequest struct {
 	Name          string `json:"name"`
 	Type          string `json:"type"`
@@ -52,8 +48,6 @@ func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantReposi
 	register(http.MethodPatch, "/v1/tenants/reconcile-bootstrap-name", http.HandlerFunc(routes.reconcileBootstrapName))
 }
 
-// listTenants returns every tenant for an operations-scoped caller, or a
-// single-item list containing only the caller's own tenant otherwise.
 func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
 	tenants, err := r.tenants.List(req.Context())
 	if err != nil {
@@ -63,10 +57,7 @@ func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, tenants)
 }
 
-// reachableTenants answers "which tenants can I, this caller, reach" —
-// available to any authenticated caller (no OPERATIONS gate), unlike
-// listTenants above. See TenantRepository.Reachable for why this is the one
-// route allowed to cross tenant scope on the caller's own behalf.
+// reachableTenants is the one route allowed to cross tenant scope on the caller's behalf; see TenantRepository.Reachable.
 func (r TenantRoutes) reachableTenants(w http.ResponseWriter, req *http.Request) {
 	tenants, err := r.tenants.Reachable(req.Context())
 	if err != nil {
@@ -76,15 +67,10 @@ func (r TenantRoutes) reachableTenants(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusOK, tenants)
 }
 
-// createTenant gates on an OPERATIONS tenant beyond the WriteAll permission POST
-// already requires, because tenants/issuers/tenant_issuers are root resolution
-// tables writable only by erun_operations.
+// createTenant requires an OPERATIONS tenant: these root resolution tables are writable only by erun_operations.
 func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		// Protected routes always run behind authentication middleware that stamps
-		// the security context, so a missing context is an internal wiring error,
-		// not a client fault.
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
@@ -112,15 +98,8 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-// reconcileBootstrapName renames the caller's own tenant to this instance's
-// declared ERUN_TENANT value: the migration path for a platform whose
-// OPERATIONS tenant bootstrapped under the legacy "operations" placeholder
-// before ERUN_TENANT was read at bootstrap. It takes no request body — the
-// target name is this instance's own config, never a caller-supplied value —
-// which is what keeps this a narrow, one-way repair action rather than a
-// general tenant-rename API. Gated to an operations tenant the same way
-// createTenant is, since renaming the platform's own root tenant identity is
-// exactly the class of write createTenant already restricts.
+// reconcileBootstrapName renames the caller's tenant to this instance's ERUN_TENANT. It takes no body so it
+// cannot become a general rename API.
 func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -159,9 +138,6 @@ func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Re
 	writeJSON(w, http.StatusOK, reconciled)
 }
 
-// parseCreateTenantParams decodes and validates the tenant-registration body,
-// returning a non-empty message (with its HTTP status) when the input must be
-// rejected before ever reaching the repository.
 func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, int, string) {
 	var body createTenantRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -170,11 +146,7 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 
 	name := strings.TrimSpace(body.Name)
 	issuer := strings.TrimSpace(body.Issuer)
-	// Enforce the no-hyphen tenant-name rule: the runtime namespace is
-	// <tenant>-<env>, so a hyphen in the tenant would make the mapping
-	// non-injective (a-b + c and a + b-c both collapse to a-b-c), a
-	// cross-tenant namespace-collision/takeover vector on a public
-	// provisioning surface.
+	// The runtime namespace is <tenant>-<env>, so a hyphenated tenant would allow cross-tenant namespace collisions.
 	if err := config.ValidateTenantName(name); err != nil {
 		return repository.CreateTenantParams{}, http.StatusBadRequest, err.Error()
 	}
@@ -199,14 +171,8 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 	}, 0, ""
 }
 
-// duplicateIssuerMessage names the (issuer, org) mapping a create collided
-// with, since a caller re-registering an already-mapped issuer needs to know
-// whether to pick a different org discriminator or that the issuer is simply
-// taken. A single-tenant issuer cannot be scoped to a different org by
-// retrying this same create call: the issuer row's org-scoping mode is fixed
-// at first registration and this route's ON CONFLICT DO NOTHING leaves it
-// untouched, so the message points at the operations-only conversion route
-// that actually rewrites it and backfills the existing mapping.
+// duplicateIssuerMessage points at the org-scope conversion route: ON CONFLICT DO NOTHING means retrying
+// this create can never change an existing issuer's scoping.
 func duplicateIssuerMessage(issuer, orgFieldValue string) string {
 	if orgFieldValue == "" {
 		return fmt.Sprintf("issuer %q is already mapped to a tenant with no org discriminator; an operations caller must first convert it to org-scoped via PATCH /v1/tenant-issuers (orgFieldKey/orgFieldValue), which backfills the existing tenant's mapping, before a second tenant can be created on it with --org-field-key/--org-field-value", issuer)

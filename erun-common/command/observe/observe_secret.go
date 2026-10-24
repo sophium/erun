@@ -3,36 +3,25 @@ package observe
 import (
 	"encoding/json"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedSecretCheck reports whether a named Secret exists and carries a
-// named key — never the value. Error carries a non-"not found" kubectl
-// failure (for example an RBAC denial) so that case is never silently
-// reported as the secret simply not existing.
-type ObservedSecretCheck struct {
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Exists bool   `json:"exists"`
-	HasKey bool   `json:"hasKey"`
-	Error  string `json:"error,omitempty"`
-}
-
-// observeSecretItem is a deliberately partial parse of `kubectl get secret -o
-// json`: only key names are read out of Data/StringData, never a value.
+// observeSecretItem reads only key names, never values.
 type observeSecretItem struct {
 	Data       map[string]string `json:"data"`
 	StringData map[string]string `json:"stringData"`
 }
 
-func fetchObservedSecretCheck(args []string, check ObserveSecretCheck) ObservedSecretCheck {
-	result := ObservedSecretCheck{Name: check.Name, Key: check.Key}
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+func fetchObservedSecretCheck(args []string, check model.ObserveSecretCheck) model.ObservedSecretCheck {
+	result := model.ObservedSecretCheck{Name: check.Name, Key: check.Key}
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		if eruncommon.IsKubectlNotFound(stderr) {
+		if clusterread.IsKubectlNotFound(stderr) {
 			return result
 		}
-		result.Error = eruncommon.KubectlErrorMessage(err, stderr).Error()
+		result.Error = deploy.KubectlErrorMessage(err, stderr).Error()
 		return result
 	}
 	var secret observeSecretItem

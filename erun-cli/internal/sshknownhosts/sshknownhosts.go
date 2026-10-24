@@ -70,12 +70,8 @@ func scanHostKeys(host string, port int) ([]string, error) {
 	return parseHostKeyScanOutput(stdout.String(), stderr.String(), err)
 }
 
-// parseHostKeyScanOutput extracts host key lines from an ssh-keyscan run. Only
-// stdout is a candidate for keys: ssh-keyscan writes diagnostics (KEX/negotiation
-// failures) to stderr, and a diagnostic has no "#" prefix, so it would otherwise
-// pass the blank/comment filter and be mistaken for a key. Each candidate line is
-// further required to name a known host key type, since a scan can also emit
-// non-key stdout noise.
+// parseHostKeyScanOutput extracts host key lines from ssh-keyscan stdout only, keeping
+// lines with a known key type; diagnostics would otherwise pass as keys.
 func parseHostKeyScanOutput(stdout, stderr string, cmdErr error) ([]string, error) {
 	lines := make([]string, 0, 3)
 	for _, line := range strings.Split(strings.ReplaceAll(stdout, "\r\n", "\n"), "\n") {
@@ -101,9 +97,7 @@ func parseHostKeyScanOutput(stdout, stderr string, cmdErr error) ([]string, erro
 	return lines, nil
 }
 
-// isHostKeyLine reports whether line looks like a "host keytype base64key"
-// known_hosts entry rather than diagnostic text such as an unsupported-KEX
-// message, which has no key-type token to match against.
+// isHostKeyLine reports whether line is a "host keytype key" entry.
 func isHostKeyLine(line string) bool {
 	fields := strings.Fields(line)
 	if len(fields) < 3 {

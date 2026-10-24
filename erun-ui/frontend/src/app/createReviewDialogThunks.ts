@@ -10,27 +10,12 @@ import { openReviewDetail } from './reviewDetailThunks';
 import { patchCreateReviewDialog, resetCreateReviewDialog } from './slices/createReviewDialogSlice';
 import type { AppThunk, RootState } from './store';
 
-// createReviewDialogThunks drives the "Open a review" dialog: pushing the
-// selected environment's branch (commit, then push — the precondition
-// CreateReview's sourceBranch needs) and, once pushed, creating the review.
-// Each write is its own explicit button with its own busy/error state, so
-// none of this fires implicitly on open (Professional UX: side-effecting
-// actions need a visible boundary, not an on-open side effect).
+// Drives the "Open a review" dialog. Commit, push and create are explicit
+// buttons; nothing fires on open.
 
-// CreateReviewDialogContext is what a caller already knows and the dialog
-// should never ask the operator to retype: the diff panel's own entry point
-// (DiffList.StartReviewAction) already knows which environment it is showing
-// and which branch the diff is based on, so it passes both. The Reviews tab's
-// New review button has neither — it derives tenant/environment from the
-// tenant dashboard the way it always has, and target branch defaults to
-// 'main' the way it always has.
-// knownCapability lets a caller that already resolved canCreateReview from a
-// loaded tenant dashboard (the Reviews tab's own New review button, gated on
-// that same field — TenantDashboardPanels.Reviews.tsx) skip the dialog's
-// independent network probe entirely. Without it, opening the dialog re-runs
-// TenantReviewCreateCapability's own platform resolution on every open, which
-// can disagree with the dashboard's already-current answer (and did, for the
-// two write flows this broke — see tenant-dashboard-review-write.spec.ts).
+// CreateReviewDialogContext is what the caller already knows. knownCapability
+// skips the dialog's own capability probe, which can disagree with the
+// dashboard's current answer.
 export interface CreateReviewDialogContext {
   tenant?: string;
   environment?: string;
@@ -38,11 +23,6 @@ export interface CreateReviewDialogContext {
   knownCapability?: boolean;
 }
 
-// resolveCreateReviewDialogContext fills in whatever the caller did not
-// already know (the Reviews tab's tenant/environment come from the tenant
-// dashboard; its target branch has no diff to read one from) — split out so
-// openCreateReviewDialog's own branching stays under the module's complexity
-// cap.
 function resolveCreateReviewDialogContext(
   context: CreateReviewDialogContext | undefined,
   state: RootState,
@@ -56,10 +36,7 @@ function resolveCreateReviewDialogContext(
   return { tenant, environment, targetBranch: normalizeTargetBranch(context?.targetBranch) };
 }
 
-// normalizeTargetBranch falls back to 'main' for a blank hint. Written as an
-// early return rather than `hint || 'main'` / `hint ? hint : 'main'` because
-// both trip eslint's prefer-nullish-coalescing (neither is a true nullish
-// check, since a blank string is falsy but not nullish).
+// Not `hint || 'main'`: that trips prefer-nullish-coalescing.
 function normalizeTargetBranch(hint: string | undefined): string {
   const trimmed = hint?.trim();
   if (!trimmed) {
@@ -95,18 +72,13 @@ export const openCreateReviewDialog =
     ]);
   };
 
-// loadCreateReviewDialogCapability resolves whether the signed-in user may
-// open a review for tenant at all, independent of the tenant dashboard —
-// the diff panel's own "Start a review" affordance can be clicked before the
-// dashboard has ever loaded, so the dialog resolves its own answer rather
-// than assuming one is already known (Degrade by permission,
-// erun-ui/AGENTS.md).
+// The diff panel can open the dialog before the dashboard loads, so the
+// dialog resolves its own capability.
 const loadCreateReviewDialogCapability =
   (tenant: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     try {
-      // Typed at the boundary the way wailsQueryFn types its own calls, so
-      // the hand-written shape (not the generated model) is what this reads.
+      // Typed to the hand-written shape, as wailsQueryFn does.
       const capability = (await TenantReviewCreateCapability(tenant)) as UIReviewCreateCapability;
       const dialog = getState().createReviewDialog;
       if (!dialog.open || dialog.tenant !== tenant) {
@@ -130,9 +102,6 @@ const loadCreateReviewDialogCapability =
     }
   };
 
-// loadCreateReviewDialogBranch reads the environment's current branch to
-// prefill sourceBranch — split out of openCreateReviewDialog so that
-// function's own branching stays under the module's complexity cap.
 const loadCreateReviewDialogBranch =
   (tenant: string, environment: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -153,8 +122,7 @@ const loadCreateReviewDialogBranch =
     }
   };
 
-// resetCreateReviewDialogState is a plain value (not a dispatched action) so
-// openCreateReviewDialog can spread it into one patch alongside `open: true`.
+// A plain value so it can be spread into one patch with `open: true`.
 function resetCreateReviewDialogState() {
   return {
     name: '',
@@ -189,9 +157,7 @@ export const updateCreateReviewDialog =
     dispatch(patchCreateReviewDialog(values));
   };
 
-// commitCreateReviewBranch commits every change in the selected environment's
-// working tree — an explicit, separate step from push so the operator can
-// commit without pushing, or push a branch that is already committed.
+// commitCreateReviewBranch commits the environment's whole working tree.
 export const commitCreateReviewBranch =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const dialog = getState().createReviewDialog;
@@ -213,18 +179,13 @@ export const commitCreateReviewBranch =
     }
   };
 
-// pushCreateReviewBranch pushes the selected environment's current branch —
-// CreateReview's own precondition, since the platform can only reference a
-// sourceBranch that already exists on the remote.
+// pushCreateReviewBranch pushes the current branch; CreateReview needs it on the remote.
 export const pushCreateReviewBranch = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().createReviewDialog;
   if (!dialog.sourceBranch || dialog.pushing) {
     return;
   }
-  // Starting the push clears the commit step's failure too: it belongs to an
-  // attempt the operator has moved past, and leaving it renders a red banner
-  // beside the green "Pushed to origin/…" badge, which says two contradictory
-  // things about the same branch.
+  // Also clear the stale commit error so it does not contradict the push badge.
   dispatch(patchCreateReviewDialog({ pushing: true, pushError: '', commitError: '' }));
   try {
     const result = await dispatch(
@@ -241,10 +202,7 @@ export const pushCreateReviewBranch = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-// clearCreateReviewError drops a stale create-review write error once a
-// sign-in it prompted has succeeded, so the dialog recovers instead of
-// showing the identical error and button next to a now-valid session
-// (#1392) — the operator retries Create themselves from there.
+// clearCreateReviewError drops a write error once the sign-in it prompted succeeds.
 export const clearCreateReviewError = (): AppThunk => (dispatch) => {
   dispatch(patchCreateReviewDialog({ createError: '' }));
 };
@@ -266,19 +224,14 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
         name,
         targetBranch,
         sourceBranch,
-        // The dialog names no repository: the environment it opened against may
-        // be a remote worktree whose checkout this host cannot read, so there
-        // is no origin to derive one from here. `erun review create` in the
-        // repository's own checkout does name one.
+        // The environment may be a remote worktree this host cannot read, so there is
+        // no origin to derive a repository from.
         repository: '',
       }),
     ).unwrap();
     dispatch(resetCreateReviewDialog());
     dispatch(showNotification('success', `Opened ${review.name || review.reviewId}.`));
     void dispatch(openReviewDetail(review.reviewId, dialog.tenant));
-    // Refreshes this section's chip immediately -- the operator learns the
-    // review now exists from the chip itself, not only from the detail
-    // dialog this also opens (Nielsen #1, visibility of system status).
     if (dialog.environment) {
       void dispatch(
         loadDiffReviewStatus(

@@ -8,9 +8,7 @@ import (
 	"syscall"
 )
 
-// defaultDindEntrypointHost wires the sidecar's real procfs, sysfs and
-// hostname, and hands the process over to dockerd-entrypoint.sh with execve,
-// so the daemon replaces erun rather than running as its child.
+// execve makes dockerd replace erun rather than run as its child.
 func defaultDindEntrypointHost() (dindEntrypointHost, error) {
 	return dindEntrypointHost{
 		procRoot: "/proc",

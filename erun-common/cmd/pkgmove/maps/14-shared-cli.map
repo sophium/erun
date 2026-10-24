@@ -1,0 +1,63 @@
+# Split erun-cli/cmd/shared into one package per concern under cmd/shared/<concern>, so a command
+# imports only the concerns it uses; cmd/shared keeps the build info its -ldflags name.
+# Command plumbing every command uses: context, flags, groups.
+shared/clicmd shared/feedback_render.go
+shared/clicmd shared/root_runtime.go
+shared/clicmd shared/output_json_contract_test.go
+# Which environment a command targets.
+shared/envscope shared/outputs.go
+shared/envscope shared/root_runtime.go:ScopedOpenParams
+# Plain text rendering.
+shared/textfmt shared/list.go
+shared/textfmt shared/observe_render.go
+shared/textfmt shared/outputs.go:FormatOutputSize
+# Runtime usage and sizing reports.
+shared/usageview shared/usage_render.go
+shared/usageview shared/list.go:RuntimeSizingLines
+# Interactive prompts.
+shared/prompt shared/root.go
+shared/prompt shared/init.go
+shared/prompt shared/confirm_prompt.go
+shared/prompt shared/plain_prompt.go
+shared/prompt shared/open.go:StdinIsTerminal
+# Cloud provider setup and preflight.
+shared/cloudcli shared/cloud.go
+shared/cloudcli shared/root.go:WithCloudContextPreflight
+# Calls into an environment's MCP edge.
+shared/envcall shared/environment_call.go
+shared/envcall shared/activity_lease*.go
+shared/envcall shared/mcp_call.go
+shared/envcall shared/mcp_reattach.go
+shared/envcall shared/job.go
+# Local kubectl port-forwards and their records.
+shared/portfwd shared/port_forward_*.go
+shared/portfwd shared/background_process_*.go
+shared/portfwd shared/mcp_port_forward.go
+shared/portfwd shared/api_port_forward.go
+shared/deploynotice shared/deploy_port_forward_notice.go
+shared/helmrecovery shared/helm_recovery.go
+# Resolving and initializing the environment a command opens.
+shared/opentarget shared/open.go
+shared/opentarget shared/deploy.go
+# Desktop app, IDE and host OS lookups.
+shared/desktop shared/app.go
+shared/desktop shared/doctor_desktop_app.go
+shared/desktop shared/open_ide.go
+shared/desktop shared/open.go:CurrentHostOS
+# SSHD activation, key sync, local config and port-forward.
+shared/sshdlink shared/sshd*.go
+# Declarations with a single importer move into it.
+version shared/build.go:ErrVersionFileNotFound
+open shared/cloud.go:RefreshEnvironmentHostCredentials
+open shared/port_forward_state.go:ReclaimOrphanedPortForwardRecords
+sshd shared/open.go:ResolveOpenWithInitRetryForParams
+apiserver shared/root.go:APILauncher
+mcp shared/root.go:MCPLauncher
+. shared/feedback_render.go:AuditCommand
+. shared/feedback_render.go:formatAuditCommand
+. shared/feedback_render.go:changedFlagArgs
+. shared/feedback_render.go:redactAuditArgs
+. shared/feedback_render.go:isSensitiveFlag
+. shared/feedback_render.go:AddTimeFlag
+. shared/feedback_render.go:timeFlagUsage
+. shared/feedback_render.go:VerboseFlagUsage

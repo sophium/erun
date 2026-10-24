@@ -2,14 +2,8 @@ package normalize
 
 import "testing"
 
-// TestSyntheticTimingRowsAreStripped locks the invariant that a step-timing
-// "(unaccounted)"/"(ran concurrently, overlap)" row's presence, not just its
-// duration, is decided by wall clock — a stubbed subprocess in a real-run
-// scenario costs a different share of the 100ms noise floor on every host, so
-// the row can appear on one host's run and not another's. Apply must drop the
-// whole line regardless of the row's depth or duration, so its host-dependent
-// presence can never fail a golden comparison. Drives Apply directly so it
-// runs on every OS.
+// TestSyntheticTimingRowsAreStripped: whether a synthetic timing row appears at
+// all depends on wall clock, so Apply drops the whole line.
 func TestSyntheticTimingRowsAreStripped(t *testing.T) {
 	cases := []struct {
 		name string

@@ -8,10 +8,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// fakeWhipRunner records every command it was asked to run and answers from a
-// scripted table, so these tests never shell out to a real dtach.
 type fakeWhipRunner struct {
 	calls   [][]string
 	outputs map[string]string
@@ -30,8 +29,7 @@ func (f *fakeWhipRunner) run(name string, args ...string) ([]byte, error) {
 
 func TestEnvironmentWhipSessionAliveReadsMasterPID(t *testing.T) {
 	f := &fakeWhipRunner{outputs: map[string]string{}}
-	// The scan script is generated dynamically (it embeds the socket path), so
-	// stub every "sh -c ..." call with a live master pid regardless of body.
+	// The scan script embeds the socket path, so stub every "sh -c" call.
 	f.outputs["placeholder"] = ""
 	alive, err := environmentWhipSessionAlive(func(name string, args ...string) ([]byte, error) {
 		f.calls = append(f.calls, append([]string{name}, args...))
@@ -60,10 +58,8 @@ func TestEnvironmentWhipSessionAliveFalseWhenNoMaster(t *testing.T) {
 	}
 }
 
-// TestPushEnvironmentWhipNudgeSettleOrder is the settle-write assertion the
-// task calls out explicitly: the nudge text and the carriage return that
-// submits it must be two separate writes, spaced by the settle duration, never
-// coalesced into one — mirroring orchestrator_pacing.go's writeOrchestratorPacingNudge.
+// TestPushEnvironmentWhipNudgeSettleOrder: text and CR must be two writes spaced by the settle,
+// never coalesced.
 func TestPushEnvironmentWhipNudgeSettleOrder(t *testing.T) {
 	f := &fakeWhipRunner{outputs: map[string]string{}}
 	settled := false
@@ -99,7 +95,7 @@ func TestRunLocalEnvironmentWhipDryRunPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Decision != WhipDecisionNudge {
+	if result.Decision != model.WhipDecisionNudge {
 		t.Fatalf("expected a live, explicit call to decide nudge, got %v/%v", result.Decision, result.Reason)
 	}
 	if result.Pushed {
@@ -141,14 +137,14 @@ func TestRunLocalEnvironmentWhipCapsAfterMaxNudges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if second.Decision != WhipDecisionCap || second.Reason != WhipReasonCapCrossed {
+	if second.Decision != model.WhipDecisionCap || second.Reason != model.WhipReasonCapCrossed {
 		t.Fatalf("expected the second call to cross the cap, got decision=%v reason=%v", second.Decision, second.Reason)
 	}
 	third, err := RunLocalEnvironmentWhip(time.Now(), runner, "acme", "dev", cfg, true, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if third.Decision != WhipDecisionNone || third.Reason != WhipReasonAlreadyCapped {
+	if third.Decision != model.WhipDecisionNone || third.Reason != model.WhipReasonAlreadyCapped {
 		t.Fatalf("expected the third call to stay capped, got decision=%v reason=%v", third.Decision, third.Reason)
 	}
 }
@@ -161,16 +157,13 @@ func TestRunLocalEnvironmentWhipNotAliveWhenNoMaster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Decision != WhipDecisionNone || result.Reason != WhipReasonNotAlive {
+	if result.Decision != model.WhipDecisionNone || result.Reason != model.WhipReasonNotAlive {
 		t.Fatalf("expected none/not-alive, got %v/%v", result.Decision, result.Reason)
 	}
 }
 
-// TestWhipEnvironmentStatePathDoesNotCreateDirectory pins the same dry-run
-// purity contract erun#1907 fixed for the config tree: resolving where the
-// whip nudge bookkeeping lives is a pure read (loadWhipEnvironmentState calls
-// it before RunLocalEnvironmentWhip's own dry-run check) and must not create
-// ~/.cache/erun/whip/<tenant>/<environment>/ as a side effect.
+// TestWhipEnvironmentStatePathDoesNotCreateDirectory: resolving the state path runs before the
+// dry-run check, so it must not create the directory.
 func TestWhipEnvironmentStatePathDoesNotCreateDirectory(t *testing.T) {
 	isolateActivityCache(t)
 	path, err := whipEnvironmentStatePath("acme", "dev")

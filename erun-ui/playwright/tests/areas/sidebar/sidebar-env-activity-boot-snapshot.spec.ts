@@ -2,25 +2,9 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// erun#1216 bug 2: the env-activity Wails event only fires on a transition,
-// and the Go poller's own memory (app.envActivity) survives a page reload
-// that does not restart the Go process — but the pre-fix Redux store did not,
-// so a still-busy environment rendered idle after the ErrorBoundary "Reload
-// app" button until the next transition, which for a long agent turn can be
-// tens of minutes away.
-//
-// This spec drives the fix's frontend half directly, mirroring
-// sidebar-orchestrator-busy-snapshot.spec.ts: it stubs LoadState over
-// /__erun_invoke to answer with a busy env snapshot, reboots the app (a real
-// fresh mount via page.goto, not a simulated event), and asserts the row
-// renders busy immediately, with no env-activity event ever emitted. Before
-// the fix this would render idle, because nothing but that missing event
-// could have set it. The event path itself (env-activity flipping the dot
-// while the app is already running) is covered by sidebar-env-activity.spec.ts;
-// the Go-side seeding this snapshot depends on is covered by
-// erun-ui/environment_activity_test.go
-// (TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation,
-// TestLoadStateSeedsEnvironmentActivityFromThePoller).
+// env-activity only fires on transitions and the Go poller outlives a reload, so a reload must seed
+// a busy env from LoadState.
+// Go-side seeding is covered by erun-ui/environment_activity_test.go.
 
 const TENANT = 'boot-snap';
 const ENVIRONMENT = 'dev';

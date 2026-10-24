@@ -5,21 +5,18 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-// NewServicesCmd builds `erun services`: the CLI's own surface for the read
-// model the desktop's Ports tab renders as its Service picker
-// (eruncommon.ListEnvironmentServices). It exists because that call shipped on
-// the desktop alone, which left `erun expose`'s SERVICE argument -- a derived
-// label that resolves to the in-namespace Service <tenant>-<service> -- a name
-// the caller had to know in advance, with nothing on this surface able to
-// report it and no way to name the real backend when the derivation is wrong.
-func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+// NewServicesCmd builds `erun services`, listing the names `erun expose` accepts.
+func NewServicesCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "services",
@@ -42,21 +39,21 @@ func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServicesCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runServicesCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	return cmd
 }
 
-func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
+func runServicesCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	services, err := expose.RunListEnvironmentServices(ctx, req)
 	if err != nil {
 		return fmt.Errorf("cannot list this environment's Services: %w", err)
@@ -64,17 +61,14 @@ func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, param
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(services)
 	}
 	return writeServicesResult(ctx, services)
 }
 
-// writeServicesResult renders the listing as the report it is. An exposed
-// Service carries its public address on an indented line beneath it, the same
-// shape `erun observe` uses for an Ingress's backends: the Service line stays
-// about what is running, and the address is what the exposure added to it.
-func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList) error {
+// writeServicesResult renders the listing, with an exposed Service's address on an indented line.
+func writeServicesResult(ctx core.Context, result model.EnvironmentServiceList) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
 		return err
 	}
@@ -87,7 +81,7 @@ func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList)
 	}
 	for _, service := range result.Services {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s (%s): ports %s\n",
-			service.Name, shared.ValueOrNone(service.Type), formatServicePorts(service.Ports)); err != nil {
+			service.Name, textfmt.ValueOrNone(service.Type), formatServicePorts(service.Ports)); err != nil {
 			return err
 		}
 		if service.Exposure == nil {
@@ -101,11 +95,8 @@ func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList)
 	return nil
 }
 
-// formatServicePorts renders the ports an Ingress would route to, named the
-// way the Service names them and bare where kubectl reports none -- a
-// single-port Service is the common case and the reason a picker cannot rely
-// on names alone.
-func formatServicePorts(ports []common.ObservedServicePort) string {
+// formatServicePorts renders a Service's ports, named where kubectl names them.
+func formatServicePorts(ports []model.ObservedServicePort) string {
 	rendered := make([]string, 0, len(ports))
 	for _, port := range ports {
 		if strings.TrimSpace(port.Name) != "" {
@@ -114,5 +105,5 @@ func formatServicePorts(ports []common.ObservedServicePort) string {
 		}
 		rendered = append(rendered, strconv.Itoa(port.Port))
 	}
-	return shared.FormatStringList(rendered)
+	return textfmt.FormatStringList(rendered)
 }

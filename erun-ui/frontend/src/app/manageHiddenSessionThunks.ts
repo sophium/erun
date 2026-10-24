@@ -21,10 +21,8 @@ export const enableManageSSHD = (): AppThunk<Promise<void>> => async (dispatch, 
   await dispatch(startHiddenSession('sshd-init', selection, StartSSHDInitSession));
 };
 
-// Unlike enableManageSSHD, doctor is also reachable from the sidebar's
-// stethoscope button with no Manage dialog open — so it targets the
-// currently selected environment rather than the dialog's own selection,
-// which is only ever set together with the dialog itself opening.
+// startManageDoctor targets the selected environment: it is reachable with no
+// Manage dialog open.
 export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const dialog = state.manageDialog;
@@ -39,17 +37,8 @@ export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch,
   await dispatch(startHiddenSession('doctor', selection, StartDoctorSession));
 };
 
-// Both HiddenSessionMode starters (StartSSHDInitSession, StartDoctorSession)
-// pipe their command into the shared Local shell and always come back as a
-// 'local' session, never a dedicated PTY with its own exit event (see
-// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring"). Each
-// command reports its own completion through a trace-line-driven Wails event
-// instead (doctor-completed, sshd-init-completed) — that tracking was
-// unreachable dead code for both commands until each was wired up in turn
-// (erun#1268, erun#1276), because this thunk kept a second, PTY-exit-shaped
-// tracking path alive for a kind that never arrives. Refusing a kind other
-// than 'local' here closes that seam: a future starter that returns a
-// different kind cannot silently repeat the same mistake a third time.
+// Hidden sessions always run in the shared Local shell and report completion via
+// trace-driven events, never a PTY exit, so other kinds are refused.
 const startHiddenSession =
   (
     mode: HiddenSessionMode,

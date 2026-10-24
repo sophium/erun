@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/deploynotice"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
 )
 
-func NewUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func NewUpgradeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
 	var versionOverride string
 	var tenant string
 	var environment string
@@ -60,13 +64,13 @@ func NewUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 			if err != nil {
 				return err
 			}
-			holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
+			holder := model.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
 			deployer = lifecycle.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
-			return runUpgrade(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, target, deployer)
+			return runUpgrade(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, target, deployer)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Deploy this exact version to every opted-in environment, skipping channel resolution")
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Restrict the upgrade to a specific tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Restrict the upgrade to a specific environment; requires --tenant")
@@ -78,7 +82,7 @@ func NewUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	return cmd
 }
 
-func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (lifecycle.UpgradeTarget, error) {
+func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (model.UpgradeTarget, error) {
 	if len(args) >= 1 {
 		tenant = args[0]
 	}
@@ -86,9 +90,9 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 		environment = args[1]
 	}
 	if strings.TrimSpace(environment) != "" && strings.TrimSpace(tenant) == "" {
-		return lifecycle.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
+		return model.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
 	}
-	return lifecycle.UpgradeTarget{
+	return model.UpgradeTarget{
 		Tenant:          strings.TrimSpace(tenant),
 		Environment:     strings.TrimSpace(environment),
 		VersionOverride: strings.TrimSpace(versionOverride),
@@ -98,13 +102,11 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx core.Context, store common.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
-	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
-	// that env's trace log; the cross-tenant global run has no single env to
-	// attribute the trace to.
+func runUpgrade(ctx core.Context, store seam.DeployStore, target model.UpgradeTarget, deploy seam.UpgradeItemDeployer) error {
+	// Only a scoped run has one env to attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
-		ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
+		ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
 		defer closeEnvTrace()
 	}
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",
@@ -142,10 +144,7 @@ func runUpgrade(ctx core.Context, store common.DeployStore, target lifecycle.Upg
 	return nil
 }
 
-// printUpgradeDryRunMarker prints the unambiguous terminal line the dry-run
-// convention uses elsewhere (e.g. `erun exec plan-ruleset-bypass --dry-run`),
-// so a fleet-wide "--fleet"/"--gate-environment" preview can never read as a
-// completed rollout no matter how many members the resolved plan announces.
+// printUpgradeDryRunMarker prints the dry-run terminal line so a preview never reads as a rollout.
 func printUpgradeDryRunMarker(ctx core.Context) error {
 	if !ctx.DryRun {
 		return nil
@@ -154,48 +153,46 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
-	return func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
-		deployTarget := common.DeployTarget{
+func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) seam.UpgradeItemDeployer {
+	return func(ctx core.Context, item model.UpgradePlanItem) error {
+		deployTarget := model.DeployTarget{
 			Tenant:          item.Tenant,
 			Environment:     item.Environment,
 			VersionOverride: item.Target,
 			Force:           force,
 		}
-		specs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+		specs, err := deploypkg.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 		if err != nil {
 			return err
 		}
-		if err := common.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
+		if err := deploypkg.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
-		if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+		if err := deploypkg.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, deploypkg.ResolveDeployedHelmReleaseVersion); err != nil {
 			return err
 		}
-		shared.NoticeStaleRuntimePortForwards(ctx, specs)
+		deploynotice.NoticeStaleRuntimePortForwards(ctx, specs)
 		return nil
 	}
 }
 
-// upgradeScopeReason names why no environments are in the plan. --fleet and
-// --gate-environment already include every non-host environment in scope
-// regardless of opt-in, so an empty plan there means the tenant itself has no
-// environment to fill it, not a missed "Upgrade all" opt-in.
-func upgradeScopeReason(target lifecycle.UpgradeTarget) string {
+// upgradeScopeReason explains an empty plan. --fleet and --gate-environment ignore
+// opt-in, so an empty plan there means the tenant has no environments.
+func upgradeScopeReason(target model.UpgradeTarget) string {
 	if target.Fleet || target.GateEnvironment != "" {
 		return " to roll"
 	}
 	return " opted into Upgrade all"
 }
 
-func gateSuffix(item lifecycle.UpgradePlanItem) string {
+func gateSuffix(item model.UpgradePlanItem) string {
 	if item.IsGate {
 		return "  [gate]"
 	}
 	return ""
 }
 
-func scopeSuffix(target lifecycle.UpgradeTarget) string {
+func scopeSuffix(target model.UpgradeTarget) string {
 	if target.Environment != "" {
 		return fmt.Sprintf(" for %s/%s", target.Tenant, target.Environment)
 	}
@@ -205,7 +202,7 @@ func scopeSuffix(target lifecycle.UpgradeTarget) string {
 	return ""
 }
 
-func laggingSuffix(item lifecycle.UpgradePlanItem) string {
+func laggingSuffix(item model.UpgradePlanItem) string {
 	if item.Lagging {
 		return "  (will upgrade)"
 	}

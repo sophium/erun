@@ -6,21 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// workCloneRemoveAll is the seam a test overrides to simulate a removal
-// failure deterministically. A real filesystem-permission fixture cannot
-// exercise this path reliably: os.RemoveAll succeeds for any permission a
-// process's own uid can bypass, including root's, so a chmod'd file proves
-// nothing when the test runs as root.
+// workCloneRemoveAll is a test seam: a chmod fixture proves nothing under root.
 var workCloneRemoveAll = os.RemoveAll
 
-// isUnderWorkRoot reports whether dir sits strictly inside root. root itself
-// does not count -- reclaim only ever removes a clone inside the work root,
-// never the work root directory.
+// isUnderWorkRoot reports whether dir is strictly inside root (root itself excluded).
 func isUnderWorkRoot(root, dir string) bool {
 	root = filepath.Clean(root)
 	dir = filepath.Clean(dir)
@@ -31,29 +26,16 @@ func isUnderWorkRoot(root, dir string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-// WorkCloneReclaimDecision is the outcome of checking whether an agent job's
-// working directory is safe to remove now that the job has finished. It is
-// its own dry-run report: computing it never mutates or deletes anything.
+// WorkCloneReclaimDecision says whether a finished agent job's clone is safe to remove.
 type WorkCloneReclaimDecision struct {
 	Dir string
-	// Reclaim is true only when nothing in dir would be lost by deleting it:
-	// no uncommitted change (tracked or untracked) and every commit reachable
-	// from HEAD already exists on a remote.
+	// Reclaim is true only with no uncommitted change and every HEAD commit on a remote.
 	Reclaim bool
-	// Reason always explains the decision -- why it is safe to reclaim, or
-	// why it was kept.
-	Reason string
+	Reason  string
 }
 
-// DecideWorkCloneReclaim is the pure git-state check behind reclaim: given a
-// candidate directory, is deleting it safe? It never deletes anything itself
-// and never consults job records -- see reclaimAgentJobWorkClone for the
-// caller that also confirms the job that owned dir has actually finished
-// before acting on this.
-//
-// A missing answer is never read as safe. Every early return below keeps the
-// clone (Reclaim stays false) unless a specific, checked condition proves
-// deleting it loses nothing.
+// DecideWorkCloneReclaim reports whether deleting dir loses nothing; it never
+// deletes, and any unanswered check keeps the clone.
 func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecision {
 	decision := WorkCloneReclaimDecision{Dir: dir}
 
@@ -62,8 +44,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 		decision.Reason = "not a directory"
 		return decision
 	}
-	inside, err := gitIsInsideWorkTree(ctx, dir)
-	if err != nil || !inside {
+	if !gitIsInsideWorkTree(ctx, dir) {
 		decision.Reason = "not a git working tree"
 		return decision
 	}
@@ -77,10 +58,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 		return decision
 	}
 
-	// Best-effort: a stale local view of the remote can only make this check
-	// more conservative (it might miss a merge that landed since the last
-	// fetch and keep a clone that was actually safe), never less safe, so a
-	// fetch failure (no network, offline test fixture) is not fatal.
+	// Best-effort: a stale remote view only makes the check more conservative.
 	gitFetchOrigin(ctx, dir)
 
 	branch, err := gitx.GitCurrentBranch(ctx, dir)
@@ -94,12 +72,9 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 	return decideBranchWorkCloneReclaim(ctx, dir, branch, decision)
 }
 
-// decideDetachedWorkCloneReclaim handles a clone left on a detached HEAD: safe
-// only when the exact commit checked out is already reachable from some
-// remote-tracking ref, since a detached commit is unreachable (and therefore
-// as good as lost) the moment nothing else points at it.
+// decideDetachedWorkCloneReclaim is safe only when HEAD is reachable from a remote ref.
 func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	sha, ok, err := eruncommon.GitResolvedRef(ctx, dir, "HEAD")
+	sha, ok, err := gitref.GitResolvedRef(ctx, dir, "HEAD")
 	if err != nil || !ok {
 		decision.Reason = "detached HEAD and its commit could not be resolved"
 		return decision
@@ -113,19 +88,12 @@ func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkC
 	return decision
 }
 
-// decideBranchWorkCloneReclaim handles a clone on a real branch. The ordinary
-// case is an upstream that already has every local commit; a repository that
-// squash-merges (this one included) leaves a second, equally common end
-// state for a landed branch -- the local commits are individually absent from
-// upstream (or upstream is gone entirely) because the merge tool folded them
-// into one commit on the default branch under a different SHA. That case is
-// only ever treated as safe when it can be proven (see findSquashMergeCommit);
-// otherwise the branch is kept exactly as an ordinary set of unpushed commits
-// would be.
+// decideBranchWorkCloneReclaim also accepts a proven squash-merge, since squashed
+// commits are absent from upstream under their own SHAs.
 func decideBranchWorkCloneReclaim(ctx core.Context, dir, branch string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	upstream, hasUpstream := eruncommon.ResolveBranchUpstreamCandidate(ctx, dir, branch)
+	upstream, hasUpstream := gitref.ResolveBranchUpstreamCandidate(ctx, dir, branch)
 	if hasUpstream {
-		ahead, err := eruncommon.GitCommitsAhead(ctx, dir, upstream, branch)
+		ahead, err := gitref.GitCommitsAhead(ctx, dir, upstream, branch)
 		if err != nil {
 			decision.Reason = fmt.Sprintf("could not compare %s against its upstream %s: %v", branch, upstream, err)
 			return decision
@@ -154,23 +122,15 @@ func decideBranchWorkCloneReclaim(ctx core.Context, dir, branch string, decision
 	return decision
 }
 
-// findSquashMergeCommit proves a branch's exact changeset already landed on
-// the remote's default branch under a different commit, the normal end state
-// for a branch this repository squash-merged. Proof is a tree-hash match: a
-// commit on the default branch whose full resulting tree is byte-identical to
-// branch's own tip tree means every file branch would contribute is already
-// present there, which is a stronger, exact claim than comparing patches
-// (immune to context-line or whitespace differences a patch-id compare could
-// be fooled by). Search is bounded to commits between the branches' merge
-// base and the default branch's tip, so a large history costs one bounded
-// walk rather than the whole repository log.
+// findSquashMergeCommit finds a default-branch commit whose tree equals branch's
+// tip tree, searching only from the merge base.
 func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBranch string, ok bool) {
 	defaultBranch, hasDefault := resolveDefaultBranchForMerge(ctx, dir, "origin")
 	if !hasDefault {
 		return "", "", false
 	}
 	defaultRef := "origin/" + defaultBranch
-	if _, exists, err := eruncommon.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
+	if _, exists, err := gitref.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
 		return "", "", false
 	}
 
@@ -195,18 +155,14 @@ func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBr
 	return "", "", false
 }
 
-// resolveDefaultBranchForMerge mirrors job_worktree.go's own
-// environmentJobWorktreeIsProtectedBranch fallback: origin/HEAD's symref is
-// authoritative when it is set, but a shallow or single-branch fetch (a real
-// layout this repository's own lanes use) never sets it, so the common
-// default names are checked directly against what actually exists on the
-// remote rather than guessed blindly.
+// resolveDefaultBranchForMerge falls back to common names that exist on the
+// remote when origin/HEAD is unset (shallow or single-branch fetches).
 func resolveDefaultBranchForMerge(ctx core.Context, dir, remote string) (string, bool) {
-	if def, ok := eruncommon.GitRemoteDefaultBranch(ctx, dir, remote); ok {
+	if def, ok := gitx.GitRemoteDefaultBranch(ctx, dir, remote); ok {
 		return def, true
 	}
 	for _, candidate := range []string{"main", "master", "develop"} {
-		if _, ok, err := eruncommon.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
+		if _, ok, err := gitref.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
 			return candidate, true
 		}
 	}
@@ -220,10 +176,7 @@ func shortSHA(sha string) string {
 	return sha
 }
 
-// gitFetchOrigin refreshes the local view of the remote so the checks above
-// see recently landed merges rather than whatever the clone last observed.
-// Best-effort by design (see DecideWorkCloneReclaim): a failure here only
-// ever pushes the decision toward keeping a clone, never toward losing one.
+// gitFetchOrigin is best-effort; failure only biases toward keeping a clone.
 func gitFetchOrigin(ctx core.Context, dir string) {
 	ctx.TraceCommand("", "git", "-C", dir, "fetch", "origin", "--prune")
 	_ = core.Command("git", "-C", dir, "fetch", "origin", "--prune").Run()
@@ -240,15 +193,13 @@ func gitMergeBase(ctx core.Context, dir, a, b string) (string, bool) {
 }
 
 func gitTreeHash(ctx core.Context, dir, rev string) (string, bool) {
-	sha, ok, err := eruncommon.GitResolvedRef(ctx, dir, rev+"^{tree}")
+	sha, ok, err := gitref.GitResolvedRef(ctx, dir, rev+"^{tree}")
 	if err != nil || !ok {
 		return "", false
 	}
 	return sha, true
 }
 
-// gitCommitTree pairs a commit with the tree it produced, as read from `git
-// log --format=%H %T`.
 type gitCommitTree struct {
 	sha  string
 	tree string
@@ -271,9 +222,7 @@ func gitCommitTreesInRange(ctx core.Context, dir, rangeSpec string) ([]gitCommit
 	return commits, nil
 }
 
-// gitRemoteRefContainingCommit reports the first remote-tracking ref that
-// contains sha, skipping a remote's symbolic HEAD line (e.g.
-// "origin/HEAD -> origin/main") which names no ref of its own.
+// gitRemoteRefContainingCommit skips symbolic "origin/HEAD -> ..." lines.
 func gitRemoteRefContainingCommit(ctx core.Context, dir, sha string) (string, bool) {
 	ctx.TraceCommand("", "git", "-C", dir, "branch", "-r", "--contains", sha)
 	output, err := core.Command("git", "-C", dir, "branch", "-r", "--contains", sha).Output()
@@ -290,24 +239,17 @@ func gitRemoteRefContainingCommit(ctx core.Context, dir, sha string) (string, bo
 	return "", false
 }
 
-// reclaimAgentJobWorkClone runs once, at the same point captureAgentJobWorktreeOutcome
-// runs (finishEnvironmentJob), and only for a job whose own run just ended
-// cleanly (EnvironmentJobStateExited): never one still running, never one
-// that left unresolved background work behind it (abandoned/gate-incomplete
-// are excluded by that same check), and never anything outside the work root,
-// which is what keeps the runtime repo untouchable regardless of what a
-// caller set Dir to. Restricted to Kind == EnvironmentJobKindAgent, the kind
-// the actual problem is about; a command job's Dir is routinely the runtime
-// repo itself, and this never even inspects a command job's Dir.
-func reclaimAgentJobWorkClone(job eruncommon.EnvironmentJob) (reclaimed bool, reason string) {
-	if job.Kind != EnvironmentJobKindAgent || job.State != eruncommon.EnvironmentJobStateExited {
+// reclaimAgentJobWorkClone removes a cleanly exited agent job's clone, only
+// inside the work root, so the runtime repo is never touched.
+func reclaimAgentJobWorkClone(job jobstate.EnvironmentJob) (reclaimed bool, reason string) {
+	if job.Kind != EnvironmentJobKindAgent || job.State != jobstate.EnvironmentJobStateExited {
 		return false, ""
 	}
 	dir := strings.TrimSpace(job.Dir)
 	if dir == "" {
 		return false, ""
 	}
-	root, err := eruncommon.WorkCloneRoot("")
+	root, err := gitref.WorkCloneRoot("")
 	if err != nil || !isUnderWorkRoot(root, dir) {
 		return false, ""
 	}
@@ -320,11 +262,7 @@ func reclaimAgentJobWorkClone(job eruncommon.EnvironmentJob) (reclaimed bool, re
 	if err := workCloneRemoveAll(dir); err != nil {
 		return false, fmt.Sprintf("git state allowed reclaiming %s but removing it failed: %v", dir, err)
 	}
-	// os.RemoveAll returning nil is not, by itself, proof dir is gone -- it
-	// also returns nil when a path never existed, and nothing in this package
-	// guards against a future change trusting that return value alone. Stat
-	// the path directly so "reclaimed" can never be reported while dir still
-	// resolves on disk.
+	// RemoveAll returns nil for a missing path too; confirm the dir is gone.
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		if err == nil {
 			return false, fmt.Sprintf("git state allowed reclaiming %s but it still exists on disk after removal", dir)

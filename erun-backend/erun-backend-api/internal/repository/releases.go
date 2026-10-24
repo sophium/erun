@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -19,17 +20,14 @@ func NewReleaseRepository(txs *TxManager) *ReleaseRepository {
 	return &ReleaseRepository{txs: txs}
 }
 
-// ReleaseFilter narrows a release listing. An empty filter lists the tenant's
-// whole queue and history, newest first.
+// ReleaseFilter narrows a release listing.
 type ReleaseFilter struct {
 	ReviewID     string
 	TargetBranch string
 	Status       model.ReleaseStatus
 }
 
-// Create enqueues a release. The status, attempt and every executor-owned field
-// are database-owned, so a caller cannot enqueue a row that claims to have
-// already released.
+// Create enqueues a release; status, attempt and executor fields are database-owned.
 func (r *ReleaseRepository) Create(ctx context.Context, release model.Release) (model.Release, error) {
 	created := release
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -55,8 +53,7 @@ func (r *ReleaseRepository) Get(ctx context.Context, releaseID string) (model.Re
 	return release, err
 }
 
-// FindByCommit resolves the release already recorded for a merge commit. It is
-// how the trigger answers "this commit is already released" without inserting.
+// FindByCommit resolves the release already recorded for a merge commit.
 func (r *ReleaseRepository) FindByCommit(ctx context.Context, commitID string) (model.Release, error) {
 	var release model.Release
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -70,10 +67,8 @@ func (r *ReleaseRepository) FindByCommit(ctx context.Context, commitID string) (
 	return release, err
 }
 
-// List returns the caller's tenant's releases matching filter. Scoped
-// explicitly by tenant_id from the security context rather than left to RLS:
-// erun_operations' policy is unconditional, so an OPERATIONS caller's empty
-// filter would otherwise read every tenant's releases.
+// List returns the caller's tenant's releases, scoped explicitly by tenant_id
+// because erun_operations' RLS policy is unconditional.
 func (r *ReleaseRepository) List(ctx context.Context, filter ReleaseFilter) ([]model.Release, error) {
 	var releases []model.Release
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -101,26 +96,16 @@ func (r *ReleaseRepository) List(ctx context.Context, filter ReleaseFilter) ([]m
 	return releases, err
 }
 
-// ClaimWindow bounds when the serial queue will hand out the next release.
-// Cooldown is the minimum spacing between consecutive releases for one tenant,
-// so a trigger stuck in a loop cannot spend the cluster on back-to-back releases.
+// ClaimWindow bounds when the serial queue hands out the next release. Cooldown
+// spaces a tenant's releases so a looping trigger cannot run them back to back.
 type ClaimWindow struct {
 	Cooldown time.Duration
 }
 
-// ClaimNext takes the tenant's oldest queued release and marks it running,
-// returning false when the tenant already has one in flight, is inside its
-// cooldown, or has nothing queued. Ordering by the UUIDv7 release_id makes the
-// queue FIFO by enqueue time.
-//
-// The serialisation invariant itself is the partial unique index on running
-// rows, not this predicate: two claimers racing would both read the same
-// pre-claim snapshot, so the loser has to lose in the database. A conflict is
-// therefore "somebody else claimed it", not an error.
-//
-// The cooldown check correlates on tenant_id rather than relying on row-level
-// security to scope it, because the window is per tenant even under the
-// operations role, whose policy sees every tenant's rows.
+// ClaimNext marks the tenant's oldest queued release running, or returns false.
+// The partial unique index on running rows enforces serialisation, so a
+// conflict means another claimer won. The cooldown check filters tenant_id
+// explicitly because the operations role sees every tenant.
 func (r *ReleaseRepository) ClaimNext(ctx context.Context, window ClaimWindow) (model.Release, bool, error) {
 	var release model.Release
 	claimed := false
@@ -155,7 +140,7 @@ func (r *ReleaseRepository) ClaimNext(ctx context.Context, window ClaimWindow) (
 		case err == nil:
 			claimed = true
 			return nil
-		case normalizeNoRows(err) == ErrNotFound, isUniqueViolation(err):
+		case errors.Is(normalizeNoRows(err), ErrNotFound), isUniqueViolation(err):
 			return nil
 		default:
 			return err
@@ -164,11 +149,8 @@ func (r *ReleaseRepository) ClaimNext(ctx context.Context, window ClaimWindow) (
 	return release, claimed, err
 }
 
-// ExpireStale fails any release still marked running past staleAfter, so a
-// control plane that died mid-release does not hold its tenant's only in-flight
-// slot forever. The reason it records says the run stopped reporting rather than
-// claiming the release itself failed, because what actually happened to the Job
-// is unknown from here.
+// ExpireStale fails releases running past staleAfter so a dead control plane
+// cannot hold the tenant's in-flight slot.
 func (r *ReleaseRepository) ExpireStale(ctx context.Context, staleAfter time.Duration, reason string) (int, error) {
 	expired := 0
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -192,11 +174,8 @@ func (r *ReleaseRepository) ExpireStale(ctx context.Context, staleAfter time.Dur
 	return expired, err
 }
 
-// Requeue returns a terminal release to the queue as a fresh attempt. The bumped
-// attempt is what keys the next Job and durable workflow, so the retry runs
-// instead of replaying the previous attempt's outcome. A release that already
-// published is never requeued: its version is public, and a second one for the
-// same commit is the failure this queue exists to prevent.
+// Requeue returns a terminal release to the queue with a bumped attempt. A
+// published release is never requeued: its version is already public.
 func (r *ReleaseRepository) Requeue(ctx context.Context, releaseID string) (model.Release, error) {
 	var release model.Release
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -214,9 +193,7 @@ func (r *ReleaseRepository) Requeue(ctx context.Context, releaseID string) (mode
 	return release, err
 }
 
-// ReleaseOutcome is one terminal write for a release attempt: the status, the
-// version it published, the build it recorded, and the reason it failed. Version
-// and BuildID are only ever set on a successful publish.
+// ReleaseOutcome is one terminal write; Version and BuildID are set only on success.
 type ReleaseOutcome struct {
 	Status        model.ReleaseStatus
 	Version       string
@@ -225,8 +202,7 @@ type ReleaseOutcome struct {
 }
 
 // RecordOutcome persists a release attempt's terminal state. The version is
-// written only here, after the run published it, because a version minted
-// locally by a run that then failed is a phantom nothing can resolve.
+// written only here, after publish, so a failed run never leaves a phantom one.
 func (r *ReleaseRepository) RecordOutcome(ctx context.Context, releaseID string, outcome ReleaseOutcome) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`

@@ -10,8 +10,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// gatewayCatalogSeed is the erun-level gateway catalog (root config's
-// `openrouter:` block) a scenario needs.
+// gatewayCatalogSeed is the root config's `openrouter:` block.
 type gatewayCatalogSeed struct {
 	baseURL      string
 	authTokenRef string
@@ -24,9 +23,7 @@ type gatewayModelSeed struct {
 	context int
 }
 
-// defaultGatewayCatalogSeed lists one model the gateway can drive and one it
-// cannot (deepseek-v4.1-flash requires its own reasoning echoed back), so a
-// scenario can reach both sides of that refusal against the same catalog.
+// defaultGatewayCatalogSeed lists one drivable model and one that is refused (deepseek-v4.1-flash needs its reasoning echoed back).
 func defaultGatewayCatalogSeed() gatewayCatalogSeed {
 	return gatewayCatalogSeed{
 		baseURL:      "https://openrouter.ai/api",
@@ -39,10 +36,7 @@ func defaultGatewayCatalogSeed() gatewayCatalogSeed {
 	}
 }
 
-// seedGatewayCatalog appends the catalog to the isolated root config. It
-// appends rather than overwrites, so call it after any seeder that rewrites
-// config.yaml whole (seedCloudContextConfig, seedERunCloudProviderAlias), or
-// that seeder drops the catalog.
+// seedGatewayCatalog appends, so call it after any seeder that rewrites config.yaml whole.
 func seedGatewayCatalog(t testing.TB, setup env.Setup, catalog gatewayCatalogSeed) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

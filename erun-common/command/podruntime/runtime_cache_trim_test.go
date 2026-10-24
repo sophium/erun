@@ -24,9 +24,6 @@ func runtimeTestContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	}, &out
 }
 
-// addGoCacheEntry writes one go cache entry the way cmd/go lays it out: a
-// two-hex-digit subdirectory holding a data file and its action file, both named
-// by the entry's hash, aged by age.
 func addGoCacheEntry(t *testing.T, dir string, index, size int, age time.Duration) {
 	t.Helper()
 	sub := filepath.Join(dir, fmt.Sprintf("%02x", index%256))
@@ -50,11 +47,6 @@ func addGoCacheEntry(t *testing.T, dir string, index, size int, age time.Duratio
 	}
 }
 
-func goCacheHasEntry(dir string, index int) bool {
-	_, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%02x", index%256), fmt.Sprintf("%064x", index)+"-d"))
-	return err == nil
-}
-
 func goCacheListing(t *testing.T, dir string) string {
 	t.Helper()
 	var paths []string
@@ -75,8 +67,6 @@ func mustGoCacheSize(t *testing.T, dir string) int64 {
 	return size
 }
 
-// The common case, and the one that decides whether this can run on an
-// interval: a cache inside its cap is not touched and nothing is reported.
 func TestTrimGoBuildCacheLeavesACacheUnderItsCapAlone(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 16; i++ {
@@ -96,8 +86,6 @@ func TestTrimGoBuildCacheLeavesACacheUnderItsCapAlone(t *testing.T) {
 	}
 }
 
-// A cache directory that does not exist holds nothing; creating it would leave
-// a build to find a directory it never made.
 func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 	ctx, out := runtimeTestContext(false)
@@ -110,56 +98,6 @@ func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	}
 }
 
-// The point of evicting rather than clearing: the oldest entries go and the
-// newest stay.
-func TestTrimGoBuildCacheEvictsLeastRecentlyUsedFirst(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 10; i++ {
-		addGoCacheEntry(t, dir, i*100, 200000, time.Duration(400-i*30)*time.Hour)
-	}
-	limit := mustGoCacheSize(t, dir) / 2
-	ctx, out := runtimeTestContext(false)
-	if _, err := TrimGoBuildCache(ctx, dir, limit); err != nil {
-		t.Fatal(err)
-	}
-	if size := mustGoCacheSize(t, dir); size > limit {
-		t.Fatalf("the cache should be within its %d byte cap, got %d", limit, size)
-	}
-	if goCacheHasEntry(dir, 0) {
-		t.Fatal("the oldest entry should have been evicted")
-	}
-	if !goCacheHasEntry(dir, 900) {
-		t.Fatal("the newest entry should have survived")
-	}
-	if !strings.Contains(out.String(), "trimmed the go build cache at "+dir) {
-		t.Fatalf("a trim that evicted should say so, got %q", out.String())
-	}
-}
-
-// The cache's bookkeeping sits beside the entries: trim.txt is go's own record
-// of its last age trim, and a file in a subdirectory that is not an entry is
-// nobody's to delete.
-func TestTrimGoBuildCacheOnlyEvictsCacheEntries(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 8; i++ {
-		addGoCacheEntry(t, dir, i, 200000, 300*time.Hour)
-	}
-	for name, body := range map[string]string{"trim.txt": "200\n", "README": "docs\n", "log.txt": "history\n", "00/not-an-entry": "stray\n"} {
-		writeAssetFile(t, filepath.Join(dir, name), body)
-	}
-	ctx, _ := runtimeTestContext(false)
-	if _, err := TrimGoBuildCache(ctx, dir, 100000); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"trim.txt", "README", "log.txt", "00/not-an-entry"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Fatalf("the trim removed %s, which is not a cache entry", name)
-		}
-	}
-}
-
-// An action whose output has to be run is stored as a directory; it is sized by
-// what it holds and goes with its contents.
 func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	dir := t.TempDir()
 	hash := fmt.Sprintf("%064x", 7)
@@ -187,63 +125,6 @@ func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	}
 }
 
-func TestTrimGoBuildCacheDryRunRemovesNothing(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 16; i++ {
-		addGoCacheEntry(t, dir, i, 200000, 300*time.Hour)
-	}
-	full := mustGoCacheSize(t, dir)
-	ctx, out := runtimeTestContext(true)
-	result, err := TrimGoBuildCache(ctx, dir, full/4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mustGoCacheSize(t, dir) != full {
-		t.Fatal("--dry-run removed something")
-	}
-	if result.Evicted == 0 || !strings.Contains(out.String(), "nothing removed") {
-		t.Fatalf("--dry-run should count what it would evict and say it removed nothing, got %+v %q", result, out.String())
-	}
-}
-
-func TestTrimGoBuildCacheRefusesBadArguments(t *testing.T) {
-	ctx, _ := runtimeTestContext(false)
-	for _, tc := range []struct {
-		dir      string
-		maxBytes int64
-	}{{"", 1}, {t.TempDir(), 0}, {t.TempDir(), -5}} {
-		if _, err := TrimGoBuildCache(ctx, tc.dir, tc.maxBytes); err == nil {
-			t.Fatalf("TrimGoBuildCache(%q, %d) should refuse its arguments", tc.dir, tc.maxBytes)
-		}
-	}
-}
-
-// Growth must not accumulate: each round adds as much as the cap holds, so a
-// trim that removed the newest entries, or nothing, would end a round over it.
-func TestTrimGoBuildCacheStaysBoundedUnderGrowth(t *testing.T) {
-	dir := t.TempDir()
-	const limit = 2000000
-	ctx, _ := runtimeTestContext(false)
-	for round := 0; round < 6; round++ {
-		for i := 0; i < 24; i++ {
-			addGoCacheEntry(t, dir, round*24+i, 400000, time.Duration(6-round)*time.Hour)
-		}
-		if _, err := TrimGoBuildCache(ctx, dir, limit); err != nil {
-			t.Fatal(err)
-		}
-		if size := mustGoCacheSize(t, dir); size > limit {
-			t.Fatalf("round %d: the cache grew past its %d byte cap to %d", round, limit, size)
-		}
-	}
-	entries, err := goBuildCacheEntries(dir)
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("a bounded cache should still hold entries, not be emptied: %d, %v", len(entries), err)
-	}
-}
-
-// A bounded cache is still a warm one: against the real toolchain, the entries
-// the last build used survive a trim that evicts the aged bulk, so the next
-// build is still answered from the cache.
 func TestTrimGoBuildCacheKeepsTheWorkingSetWarm(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {

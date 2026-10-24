@@ -9,10 +9,6 @@ import { rememberSelectedTab, removeTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// Picking and closing one tab of the selected environment. Split out of
-// ./sessionThunks to keep that file under the max-lines cap, the same way
-// ./closeEnvironmentThunks holds the env-scoped teardown; sessionThunks
-// re-exports both so existing imports still resolve.
 export const selectTerminalTab =
   (sessionId: number): AppThunk =>
   (dispatch, getState, extra) => {

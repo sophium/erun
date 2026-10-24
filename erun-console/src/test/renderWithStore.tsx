@@ -4,10 +4,7 @@ import { Provider } from 'react-redux';
 
 import { createAppStore } from '../app/store';
 
-// Every panel now reads through the Redux store (RTK Query hooks), so a test
-// needs a Provider in the tree. Each call builds a fresh store — reusing one
-// across tests would let RTK Query's cache carry a prior test's mocked-fetch
-// response into the next.
+// A fresh store per call keeps RTK Query's cache from leaking across tests.
 export function renderWithStore(element: React.ReactElement): RenderResult {
   return render(<Provider store={createAppStore()}>{element}</Provider>);
 }

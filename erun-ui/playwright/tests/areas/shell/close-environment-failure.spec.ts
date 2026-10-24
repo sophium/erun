@@ -1,14 +1,7 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// A CloseEnvironmentSessions failure used to render as a neutral info pill
-// via showTerminalMessage — polite aria-live, no role="alert" — indistinguishable
-// from a routine status update. Unlike a Manage-dialog-scoped failure (where
-// the dialog's own inline error already carries the message while the
-// titlebar sits behind the modal's aria-hidden), closing an env's tabs is a
-// sidebar action with no dialog in the way, so the titlebar pill is the only
-// surface — and it must be an actionable error. The pill no longer offers a
-// Copy action for a bare RPC error with no captured command output: copying
-// the same sentence already visible in the pill earns the operator nothing.
+// Closing an env's tabs has no dialog in the way, so a failure must surface as an actionable
+// titlebar alert.
 test.describe('close environment — failure surfacing', () => {
   test('a close failure renders as an error, not a silent info pill, with no Copy action for a message with no captured output', async ({
     app,
@@ -16,8 +9,6 @@ test.describe('close environment — failure surfacing', () => {
     seededEnv,
   }) => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
-    // waitFor (not expect) converges the open's own render against the
-    // enclosing test's budget rather than expect's fixed one.
     await app.sidebar
       .envOpenDot(seededEnv.tenant, seededEnv.environment)
       .waitFor({ state: 'visible' });
@@ -44,8 +35,7 @@ test.describe('close environment — failure surfacing', () => {
     await expect(pill).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy output' })).toBeHidden();
 
-    // The close never completed, so the dot must still be there — a stray
-    // success side effect alongside the reported failure would itself be a bug.
+    // The close never completed, so the open dot must remain.
     await expect(app.sidebar.envOpenDot(seededEnv.tenant, seededEnv.environment)).toBeVisible();
   });
 });

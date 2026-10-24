@@ -22,22 +22,14 @@ import {
 import { Cloud, Server } from 'lucide-react';
 import type * as React from 'react';
 
-// A pure render of the read model the parent fetched; the fetch/auth lifecycle
-// lives in App. Empty collections render an empty-state card, never an empty
-// table, so an empty view never reads as a disabled input.
+// Empty collections render an empty-state card, never an empty table.
 
 function placeholder(value: string | undefined): string {
   return value && value.length > 0 ? value : '—';
 }
 
-// ProvisionFailure is the reason a failed provision gives, rendered beside the
-// status badge and announced as it appears. Both call sites are guarded on
-// `status === 'failed'`, so the role is `alert` rather than the split
-// EnvironmentsPanel's deployFeedbackRole draws — nothing rendered here is a
-// standing blocked state. Without it the reason materialises silently next to
-// a badge that has already changed, and a screen-reader user learns the
-// resource failed only by re-reading the list; the string is the whole payload
-// of the row, not decoration.
+// Always `alert`: both call sites render it only for a failed status, and the reason
+// appears after the badge changes, so it must be announced.
 function ProvisionFailure({ message }: { message: string }): React.ReactElement {
   return (
     <span className="text-xs text-destructive" role="alert" aria-live="polite">
@@ -55,9 +47,7 @@ function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
   );
 }
 
-// deployedVersionCell renders the version the last successful deploy actually
-// installed, distinct from the declared pin (the "Runtime version" column) —
-// a failed or in-flight deploy leaves this on whatever is still running.
+// The version the last successful deploy installed, distinct from the declared pin.
 function deployedVersionCell(env: Environment): string {
   if (env.deployedVersion === undefined) {
     return '—';
@@ -141,8 +131,7 @@ const ENV_STATUS_LABELS: Record<EnvironmentStatus, string> = {
   provisioning: 'Provisioning',
   running: 'Running',
   failed: 'Failed',
-  // Without these two the lenient status parse rendered no badge at all for an
-  // environment mid-teardown, so it read as an ordinary one (#1170).
+  // Without these the lenient status parse renders no badge for a teardown.
   deleting: 'Deleting',
   'deletion-blocked': 'Delete blocked',
 };
@@ -156,10 +145,7 @@ const ENV_STATUS_TONES: Record<EnvironmentStatus, StatusBadgeTone> = {
   'deletion-blocked': 'warning',
 };
 
-// Shares the desktop's StatusBadge (erun-kit) so the same erun status renders
-// identically in both surfaces. A resource with no status (registered before
-// provisioning existed) renders no badge. Generic over the status maps so
-// contexts and environments share one call site.
+// Shares erun-kit's StatusBadge with the desktop; no status renders no badge.
 function renderStatusBadge<T extends string>(
   status: T | undefined,
   tones: Record<T, StatusBadgeTone>,

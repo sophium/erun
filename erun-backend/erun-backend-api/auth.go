@@ -34,8 +34,7 @@ type (
 type Identity struct {
 	Tenant Tenant
 	User   User
-	// Org is the resolved org claim value for an org-scoped issuer; empty for
-	// single-tenant issuers.
+	// Org is empty for single-tenant issuers.
 	Org string
 }
 
@@ -49,10 +48,8 @@ func (f IdentityResolverFunc) ResolveIdentity(ctx context.Context, claims Claims
 	return f(ctx, claims)
 }
 
-// OrgResolver derives the org claim value that, with the issuer, resolves the
-// tenant for a shared (org-scoped) issuer; it returns "" for single-tenant or
-// unregistered issuers. The org belongs in the identity cache key so a shared
-// issuer cannot collide different orgs onto one cached tenant.
+// OrgResolver derives the org claim for a shared issuer, or "" otherwise; the org
+// is part of the identity cache key so orgs cannot collide on one cached tenant.
 type OrgResolver interface {
 	ResolveOrg(ctx context.Context, claims Claims) (string, error)
 }
@@ -74,8 +71,6 @@ func (f TokenVerifierFunc) VerifyBearerToken(ctx context.Context, token string) 
 }
 
 type TenantResolver interface {
-	// ResolveTenantByIssuer maps a verified token to its tenant by (issuer, org);
-	// single-tenant issuers ignore the org.
 	ResolveTenantByIssuer(ctx context.Context, claims Claims) (Tenant, error)
 }
 
@@ -121,8 +116,7 @@ type AuthContext struct {
 	Claims Claims
 	Tenant Tenant
 	User   User
-	// Org is the resolved org claim value for an org-scoped issuer; empty for
-	// single-tenant issuers.
+	// Org is empty for single-tenant issuers.
 	Org string
 }
 
@@ -201,9 +195,7 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// authenticate verifies the request's bearer token and returns its claims. It
-// logs the concrete rejection reason and returns the client-facing error, which
-// deliberately hides verifier detail behind ErrInvalidBearerToken.
+// authenticate hides verifier detail behind ErrInvalidBearerToken.
 func (m *AuthMiddleware) authenticate(r *http.Request) (Claims, error) {
 	token, err := bearerToken(r.Header.Get("Authorization"))
 	if err != nil {
@@ -226,8 +218,7 @@ func logAuthRejected(r *http.Request, reason string) {
 	log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, reason)
 }
 
-// authenticatedContext carries the resolved identity to route code both as the
-// auth context and as the security context repository transactions bind RLS from.
+// The identity is also the security context repository transactions bind RLS from.
 func authenticatedContext(ctx context.Context, claims Claims, identity Identity) context.Context {
 	ctx = context.WithValue(ctx, authContextKey{}, AuthContext{
 		Claims: claims,
@@ -245,10 +236,7 @@ func authenticatedContext(ctx context.Context, claims Claims, identity Identity)
 	})
 }
 
-// authorize enforces endpoint authorization and reports whether the request may
-// continue, writing the rejection itself. Both authorization and auditing key off
-// the canonical route path, so a request that reached here without one is a
-// route-registration fault rather than a caller error.
+// authorize writes the rejection itself; a missing route path is a registration fault.
 func (m *AuthMiddleware) authorize(w http.ResponseWriter, req *http.Request, identity Identity) bool {
 	if m.authz == nil && m.audit == nil {
 		return true
@@ -271,23 +259,16 @@ func (m *AuthMiddleware) authorize(w http.ResponseWriter, req *http.Request, ide
 }
 
 func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Identity, error) {
-	// Derive the org first so it is part of the cache key: a shared org-scoped
-	// issuer maps the same (issuer, subject) to different tenants per org, so
-	// (issuer, subject) alone would leak one tenant's RLS context to another.
-	//
-	// A failed derivation leaves the org unknown; caching under org="" would
-	// conflate it with a single-tenant success or a different org and reintroduce
-	// that cross-tenant collision, so it bypasses the cache and falls through to
-	// full resolution. org="" is reserved strictly for issuers positively known
-	// to be single-tenant or unregistered.
+	// The org is part of the cache key: (issuer, subject) alone would leak one org's
+	// tenant to another. A failed derivation bypasses the cache, since org="" is
+	// reserved for issuers known to be single-tenant or unregistered.
 	org, orgErr := m.resolveOrg(ctx, claims)
 	cache := m.cache
 	if orgErr != nil {
 		cache = nil
 	}
 
-	// A cached success whose username the token now contradicts counts as a miss,
-	// so the refreshed username reaches the database.
+	// A cached success whose username the token contradicts is a miss.
 	if cache != nil {
 		identity, err, ok := cache.Get(claims.Issuer, claims.Subject, org)
 		if ok && !cachedIdentityNeedsUsernameRefresh(identity, err, claims) {
@@ -309,9 +290,7 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 	return identity, nil
 }
 
-// tenantAndUser resolves the tenant and ERun user for verified claims. The
-// combined identity resolver takes precedence when wired, because it owns
-// bootstrap and must create tenant, issuer, and user atomically.
+// The combined resolver wins when wired: it must bootstrap tenant, issuer, and user atomically.
 func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tenant, User, error) {
 	if m.identities != nil {
 		tenant, user, err := m.identities.ResolveIdentity(ctx, claims)
@@ -328,18 +307,8 @@ func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tena
 	return tenant, user, nil
 }
 
-// classifyIdentityError normalizes the combined IdentityResolver's error onto
-// the same ErrTenantNotResolved/ErrUserNotResolved split the separate
-// tenant/user resolver wiring above already produces, so Wrap reports which
-// half failed the same way regardless of which wiring is in play.
-// security.ErrTenantUnresolved means the tenant itself could not be
-// determined from the token (an org-scoped issuer whose token carries no
-// matching org claim, or an issuer with no tenant mapping at all) — distinct
-// from a repository.ErrNotFound reached after a tenant already resolved,
-// which means this external identity simply is not enrolled in it. Any other
-// error passes through unclassified rather than being guessed at;
-// repository.ErrIdentityResolutionFailed is one such error, and authErrorCode
-// still recognizes it directly as RESOLUTION_FAILED, distinct from both.
+// classifyIdentityError maps the combined resolver's errors onto the same
+// ErrTenantNotResolved/ErrUserNotResolved split; other errors pass through.
 func classifyIdentityError(err error) error {
 	if err == nil {
 		return nil
@@ -353,8 +322,7 @@ func classifyIdentityError(err error) error {
 	return err
 }
 
-// resolvedIdentity treats a blank tenant or user as unresolved, so a resolver
-// that reports no error but no identity cannot authenticate a request.
+// A resolver returning no error but a blank tenant or user must not authenticate.
 func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error) {
 	if err == nil && strings.TrimSpace(tenant.TenantID) == "" {
 		err = ErrTenantNotResolved
@@ -368,16 +336,8 @@ func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error)
 	return tenant, user, nil
 }
 
-// authErrorCode reports the machine-readable code for a resolution failure so
-// a client can render "no tenant matched this token" apart from "you are not
-// enrolled" instead of collapsing both into one generic message — the
-// distinction the not-enrolled UI otherwise cannot make (erun#1721).
-// RESOLUTION_FAILED is a third, distinct outcome: an internal error (a
-// database failure IdentityRepository already sanitized into
-// repository.ErrIdentityResolutionFailed) rather than a real answer about
-// enrolment, so a client must not tell the caller they need enrolling, or
-// that their tenant could not be determined — neither claim is true here
-// (erun#1752).
+// authErrorCode lets a client tell "no tenant matched" from "not enrolled";
+// RESOLUTION_FAILED is an internal error that claims neither.
 func authErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrTenantNotResolved):
@@ -391,10 +351,8 @@ func authErrorCode(err error) string {
 	}
 }
 
-// authErrorEnvelope mirrors internal/routes' {code, message} error envelope
-// (see internal/routes/errors.go) so every API error response — including
-// this pre-route auth layer, which cannot import that internal package's
-// unexported writer — carries the same machine-readable shape.
+// authErrorEnvelope mirrors internal/routes' {code, message} envelope, which this
+// package cannot import.
 type authErrorEnvelope struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -403,7 +361,9 @@ type authErrorEnvelope struct {
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(authErrorEnvelope{Code: code, Message: message})
+	if err := json.NewEncoder(w).Encode(authErrorEnvelope{Code: code, Message: message}); err != nil {
+		return // the status is already sent; a failed body write has no one to report to
+	}
 }
 
 func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string, error) {
@@ -413,11 +373,8 @@ func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string,
 	return m.orgResolver.ResolveOrg(ctx, claims)
 }
 
-// resolvedOrg returns the org to record on a successfully resolved identity. On
-// the normal path the org derived for the cache key stands. When the initial
-// derivation failed, full resolution has since warmed the issuer's org-scoping
-// mode, so re-derive now for an accurate audit record; a still-failing
-// derivation leaves it empty rather than failing an already-resolved request.
+// resolvedOrg re-derives the org when the cache-key derivation failed; a repeat
+// failure leaves it empty rather than failing the request.
 func (m *AuthMiddleware) resolvedOrg(ctx context.Context, claims Claims, org string, orgErr error) string {
 	if orgErr == nil {
 		return org
@@ -471,10 +428,7 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 		APIPath:          apiPath,
 		CreatedAt:        time.Now().UTC(),
 	}
-	// A caller authenticates with the same bearer token whether it arrived via
-	// the CLI, the console, or an MCP tool call, so nothing about the request
-	// otherwise distinguishes them; PlatformClient.WithMCPTool sets this header
-	// only when erun-mcp made the call, naming which tool did.
+	// The header is the only thing distinguishing MCP-originated calls.
 	if tool := strings.TrimSpace(r.Header.Get(platformclient.MCPToolAuditHeader)); tool != "" {
 		event.Type = model.AuditEventTypeMCP
 		event.MCPTool = tool

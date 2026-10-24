@@ -4,9 +4,7 @@ import type { TerminalController } from './TerminalController';
 
 export const ControllerContext = React.createContext<TerminalController | null>(null);
 
-// State changes go through dispatch/thunks; the controller is reserved for
-// imperative side effects the React layer cannot perform itself (focus the
-// terminal, queue a resize, read the live xterm cursor for a paste).
+// The controller is only for imperative side effects; state goes through dispatch.
 export function useController(): TerminalController {
   const controller = React.useContext(ControllerContext);
   if (!controller) {

@@ -12,22 +12,9 @@ import { setSessionId } from './slices/terminalSlice';
 import { store } from './store';
 import { TerminalController } from './TerminalController';
 
-// A driver over the real classes -- the real TerminalController mounted on a
-// real DOM, the real terminalDisplayMiddleware reacting to real store
-// dispatches, a real xterm instance and a real SerializeAddon -- and "the pane"
-// read back out of xterm with a serializer, so what it asserts is what a reader
-// would see rather than an inference from internal bookkeeping.
-//
-// The ownership rule these cases pin: after every switch settles, the pane
-// holds exactly one session's screen, and it is the session the store names.
-//
-// Two delays matter and neither is wall-clock. `settled()` is xterm's own idle
-// point (an empty write's completion callback fires once every chunk queued
-// ahead of it has parsed). The keystroke is the other one: xterm's write buffer
-// drains synchronously when it is empty and the user has typed since the last
-// drain, so a real keydown is what makes the switch's barrier land inside the
-// dispatch instead of a task later. Every case that could care which way that
-// went runs with the keystroke and without it.
+// Drives the real controller, middleware, xterm and SerializeAddon. Pins: once a
+// switch settles, the pane holds exactly the store's session's screen. A typed
+// keystroke makes xterm drain synchronously, so cases run with and without one.
 
 const LOCAL_SCREEN = 'LOCAL-PROMPT-MARKER\r\n'.repeat(6);
 const EXTRA_SCREEN = 'EXTRA-PROMPT-MARKER\r\n'.repeat(4);
@@ -59,9 +46,7 @@ function installBrowserGlobals(): Map<string, OutputHandler[]> {
     }),
   });
   const handlers = new Map<string, OutputHandler[]>();
-  // The Wails bridge is the transport boundary this driver stands in for: there
-  // is no Go process behind it, it only hands back the subscriptions the app
-  // registers, and every call it makes from the app is inert.
+  // Stand-in Wails bridge: no Go process, every call is inert.
   (window as unknown as Record<string, unknown>).runtime = {
     EventsOnMultiple: (name: string, callback: OutputHandler) => {
       const registered = handlers.get(name) ?? [];
@@ -77,8 +62,7 @@ function installBrowserGlobals(): Map<string, OutputHandler[]> {
   (window as unknown as Record<string, unknown>).go = {
     main: { App: new Proxy({}, { get: () => () => Promise.resolve(undefined) }) },
   };
-  // jsdom performs no layout, so the terminal keeps its constructed geometry and
-  // no resize is ever reported: the observer's callbacks are inert.
+  // jsdom performs no layout, so no resize is ever reported.
   (globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
     observe = noop;
     unobserve = noop;
@@ -111,8 +95,6 @@ function mountDriver(): Driver {
     reviewMain: element('div') as HTMLDivElement,
     diffList: element('div') as HTMLDivElement,
   });
-  // The controller owns the terminal it created; the driver reads the pane back
-  // through a second real serializer loaded onto that same instance.
   const terminal = (controller as unknown as { terminal: Terminal }).terminal;
   const paneReader = new SerializeAddon();
   terminal.loadAddon(paneReader);
@@ -125,11 +107,7 @@ function mountDriver(): Driver {
         handler({ sessionId, data });
       }
     },
-    // Settled = every write already queued for xterm has been parsed, including
-    // the writes a switch issues. A switch runs from a write callback and issues
-    // its own writes there, after a single barrier was already queued, so the
-    // first barrier lets the queued switch run and the second lets what it wrote
-    // be parsed.
+    // A switch writes from a write callback, so two barriers are needed.
     settled: async () => {
       for (let barrier = 0; barrier < 2; barrier += 1) {
         await new Promise<void>((resolve) => {
@@ -160,9 +138,7 @@ function mountDriver(): Driver {
 }
 
 async function tearDown(driver: Driver): Promise<void> {
-  // Let the terminal's own animation-frame work drain before tearing it down:
-  // under jsdom a viewport sync scheduled by a write outlives the dispose and
-  // touches renderer services that are already gone.
+  // Under jsdom a viewport sync scheduled by a write outlives dispose.
   for (let frame = 0; frame < 2; frame += 1) {
     await new Promise((resolve) => {
       requestAnimationFrame(() => {
@@ -173,8 +149,6 @@ async function tearDown(driver: Driver): Promise<void> {
   driver.unmount();
 }
 
-// Puts `screen` on `sessionId`, leaves the store and the pane on it, and leaves
-// any other session's output buffered rather than rendered.
 async function openOn(driver: Driver, sessionId: number, screen: string): Promise<void> {
   store.dispatch(setSessionId(sessionId));
   await driver.settled();
@@ -203,15 +177,11 @@ test('a rapid click pair lands with only the landed tab on screen', async () => 
       store.dispatch(setSessionId(EXTRA));
       await driver.settled();
       const where = `gap=${String(gapMs)}ms`;
-      // The landed tab's own screen is on the pane, and the tab the pair
-      // switched away from is not: an inclusion-only check would pass on the
-      // joined pane, which carries both markers, four of one and six of the
-      // other.
+      // Inclusion alone would pass on a joined pane carrying both markers.
       const landed = driver.pane();
       if (!landed.includes(EXTRA_MARKER) || landed.includes(LOCAL_MARKER)) {
         failures.push(`${where}: landed pane wrong: ${landed}`);
       }
-      // And the tab the pair switched away from still renders its own screen.
       store.dispatch(setSessionId(LOCAL));
       await driver.settled();
       const back = driver.pane();
@@ -225,8 +195,6 @@ test('a rapid click pair lands with only the landed tab on screen', async () => 
   }
 });
 
-// Four ways a reader's two clicks can reach the store. Whatever the spacing,
-// the pane must end on the last session named and the store must agree.
 const DELIVERIES: { name: string; deliver: (driver: Driver) => Promise<void> }[] = [
   {
     name: 'same task',
@@ -285,13 +253,8 @@ for (const delivery of DELIVERIES) {
   });
 }
 
-// globalConfigCloudThunks.startCloudInitSession: startSession() has already been
-// awaited when it dispatches setSessionId for the new session, so that session's
-// output can already be buffered, and it calls resetTerminal() on the very next
-// statement. The clear it asks for is the one the switch performs between
-// capturing the outgoing screen and activating the incoming one -- a second
-// clear landing after that activation wipes the screen the reader is waiting
-// for, and the new session renders nothing.
+// Mirrors startCloudInitSession: setSessionId then resetTerminal(); a second
+// clear after activation would wipe the new session's screen.
 test('a new session with buffered output renders through the reset that follows its selection', async () => {
   const driver = mountDriver();
   try {
@@ -308,9 +271,7 @@ test('a new session with buffered output renders through the reset that follows 
   }
 });
 
-// manageDeleteThunks: deleting the selected environment dispatches
-// setSessionId(0) and resets. The close has to capture the outgoing session's
-// screen, clear the pane, and leave nothing of the dead session behind.
+// Mirrors manageDeleteThunks: setSessionId(0) then reset.
 test('a close after a session captures it and clears the pane', async () => {
   const driver = mountDriver();
   try {
@@ -332,11 +293,6 @@ test('a close after a session captures it and clears the pane', async () => {
   }
 });
 
-// The close that follows a reader's first typing in the new session. The new
-// session's output arrives live (it was not buffered before the switch), so the
-// pane really holds it by the time the delete lands -- and the close has to
-// capture and clear it rather than collapsing on what the pane is recorded as
-// holding.
 test('a close after a typed session clears the screen it is showing', async () => {
   const driver = mountDriver();
   try {
@@ -359,11 +315,8 @@ test('a close after a typed session clears the screen it is showing', async () =
   }
 });
 
-// The constraint the switch ordering is built around: xterm drains an empty-buffer
-// write synchronously when the user has typed since the last drain, so the
-// barrier that serializes a switch can land inside the dispatch that armed it.
-// Nothing may key off which way that went, so each sequence runs twice -- typed
-// and not -- and the two panes have to agree.
+// The switch barrier may land inside the dispatch when the user has typed, so
+// each sequence runs typed and untyped and the panes must agree.
 const BARRIER_POSITIONS: {
   name: string;
   expected: 'fresh' | 'blank' | 'extra';

@@ -3,14 +3,17 @@ package e2e
 import (
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewE2ECmd(resolveOpen envscope.OpenResolver, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var tenant, environment, component, baseURL, version string
 	cmd := &cobra.Command{
 		Use:   "e2e",
@@ -51,10 +54,10 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot common.ProjectFi
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runE2ECommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), findProjectRoot, component, baseURL, version)
+			return runE2ECommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), findProjectRoot, component, baseURL, version)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&component, "component", "", "Run only the named suite (a directory under e2e/); default runs every suite")
@@ -63,7 +66,7 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot common.ProjectFi
 	return cmd
 }
 
-func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, findProjectRoot common.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, findProjectRoot seam.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
@@ -79,14 +82,14 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params com
 		return err
 	}
 
-	e2eResult, err := e2e.RunE2E(ctx, e2e.E2EParams{
+	e2eResult, err := e2e.RunE2E(ctx, model.E2EParams{
 		Plan:        plan,
 		Target:      target,
 		BaseURL:     baseURL,
 		Version:     version,
 		TargetNamed: targetNamed,
 	})
-	if e2eResult == nil || ctx.DryRun || ctx.Output != core.OutputJSON {
+	if e2eResult == nil || ctx.DryRun || ctx.Output != model.OutputJSON {
 		return err
 	}
 	if writeErr := ctx.WriteResult(e2eResult); writeErr != nil {
@@ -95,20 +98,17 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params com
 	return err
 }
 
-// resolveE2ETarget resolves the environment the suites run against. With
-// --base-url and --version and no --tenant/--environment the URL and version
-// name the target entirely, so no environment is resolved at all: a machine
-// with no tenant configured can still run the suites against, say, production.
-func resolveE2ETarget(resolveOpen shared.OpenResolver, params common.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
+// resolveE2ETarget resolves no environment when --base-url and --version name the target.
+func resolveE2ETarget(resolveOpen envscope.OpenResolver, params model.OpenParams, targetNamed bool, baseURL, version string) (model.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
-		return e2e.E2ETarget{}, nil
+		return model.E2ETarget{}, nil
 	}
 	result, err := resolveOpen(params)
 	if err != nil {
-		return e2e.E2ETarget{}, err
+		return model.E2ETarget{}, err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	return e2e.E2ETarget{
+	req := cloud.ShellLaunchParamsFromResult(result)
+	return model.E2ETarget{
 		Tenant:            req.Tenant,
 		Environment:       req.Environment,
 		Namespace:         req.Namespace,

@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// reviewerRole grants exactly the review read a caller who cannot open a
-// review is missing, through a pattern pair the way a real tenant's role does.
+// reviewerRole grants the review read through a pattern pair, as real tenant roles do.
 func reviewerRole() PlatformRole {
 	return PlatformRole{
 		RoleID: "role-reviewer",
@@ -31,8 +30,6 @@ func TestPlatformAccessRemedyForNamesTheRoleThatCoversTheRead(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the reviewer role to cover the review read")
 	}
-	// The whole point of the hand-over is that the operator pastes it: the
-	// caller's own user id and the covering role's id are both already in it.
 	if want := "erun platform user grant-role --user-id user-1 --role-id role-reviewer"; remedy.Command != want {
 		t.Fatalf("expected %q, got %q", want, remedy.Command)
 	}
@@ -59,8 +56,6 @@ func TestPlatformAccessRemedyForMatchesAnExactPermissionPair(t *testing.T) {
 }
 
 func TestPlatformAccessRemedyForReportsNoRemedyWithoutACoveringRole(t *testing.T) {
-	// A role exists, but it grants something else entirely: handing over a
-	// command that grants it would be a promise the grant does not keep.
 	if remedy, ok := PlatformAccessRemedyFor(
 		"user-1",
 		[]PlatformRole{{RoleID: "role-audit", Name: "Auditor", Permissions: []PlatformRolePermission{
@@ -73,8 +68,6 @@ func TestPlatformAccessRemedyForReportsNoRemedyWithoutACoveringRole(t *testing.T
 }
 
 func TestPlatformAccessRemedyForReportsNoRemedyWithoutAUserID(t *testing.T) {
-	// Without the caller's own id there is no command to hand over, and a
-	// half-filled one would be a placeholder dressed as an answer.
 	if remedy, ok := PlatformAccessRemedyFor("", []PlatformRole{reviewerRole()}, "GET", "/v1/reviews/review-1"); ok {
 		t.Fatalf("expected no remedy without a user id, got %+v", remedy)
 	}

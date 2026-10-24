@@ -5,25 +5,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// exposure_app.go is the desktop half of the Ports tab's public-exposure
-// surface: list an environment's active exposures, expose a new service at a
-// public hostname, and remove the environment's public DNS record. It
-// composes the shared expose/unexpose primitives in erun-common; it holds no
-// expose/unexpose planning of its own.
-
-// ListEnvironmentExposures powers the Ports tab's exposure list. Configured
-// is false for either of two distinct reasons, named in NotConfiguredReason
-// so the tab's empty state can tell them apart: a host environment has no
-// pod and no cluster at all, so exposure can never apply; a cluster-backed
-// environment whose project carries no platform block simply hasn't been set
-// up for it yet. A listing the caller's Kubernetes credentials cannot make
-// reports Restricted instead of a bare empty list.
+// ListEnvironmentExposures reports why exposure is not configured (host env vs
+// no platform block) and Restricted when credentials cannot list.
 func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list environment exposures", selection.Tenant, selection.Environment); err != nil {
@@ -36,9 +26,9 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 	if !configured {
 		return uiExposureList{Services: []uiExposedService{}, NotConfiguredReason: notConfiguredReason}, nil
 	}
-	services, err := eruncommon.ListExposedServices(req)
+	services, err := clusterread.ListExposedServices(req)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrListExposedServicesForbidden) {
+		if errors.Is(err, clusterread.ErrListExposedServicesForbidden) {
 			return uiExposureList{Configured: true, Restricted: true, Services: []uiExposedService{}}, nil
 		}
 		return uiExposureList{Configured: true, Error: err.Error(), Services: []uiExposedService{}}, nil
@@ -46,12 +36,7 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 	return uiExposureList{Configured: true, Services: toUIExposedServices(services)}, nil
 }
 
-// ListEnvironmentServices powers the Ports tab's service picker: what the
-// environment is actually running, and which of those already have a public
-// hostname. It answers the question that used to have no answer anywhere in
-// the product — exposing a service meant typing a name you had to know
-// already, and knowing the naming convention the Ingress backend is derived
-// from.
+// ListEnvironmentServices lists Services and their existing public hostnames.
 func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServiceList, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list environment services", selection.Tenant, selection.Environment); err != nil {
@@ -74,15 +59,7 @@ func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServi
 	return uiEnvironmentServiceList{Configured: true, Services: toUIEnvironmentServices(services)}, nil
 }
 
-// ExposeEnvironmentService exposes one Service at a public hostname under the
-// platform's services zone. See eruncommon.RunExposeService for the resolved
-// plan; it is applied here directly (no dry-run switch -- the Ports tab form
-// commits on submit, matching every other Manage dialog save action).
-// RunExposeService's own DNS write automatically routes through the
-// platform's API instead of a direct pdnsutil exec when an erun platform
-// alias is configured -- no separate desktop control needed,
-// since a developer's local cluster is exactly the case that alias exists
-// for.
+// ExposeEnvironmentService applies expose.RunExposeService directly, with no dry run.
 func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposedService, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
@@ -112,12 +89,8 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 	return uiExposedService{Service: result.Service, Hostname: result.Hostname, Scheme: result.Scheme}, nil
 }
 
-// UnexposeEnvironment removes the environment's per-env wildcard DNS record --
-// the DNS-side counterpart to every service exposed under it. It de-lists
-// every hostname the Ports tab shows, not just one row: the wildcard record
-// covers the whole environment, and there is no narrower primitive that
-// removes a single service's route without it (see
-// eruncommon.RunUnexposeService).
+// UnexposeEnvironment removes the per-env wildcard DNS record, de-listing every
+// service exposed under it; there is no per-service primitive.
 func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("unexpose environment", selection.Tenant, selection.Environment); err != nil {
@@ -127,7 +100,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 	if !expose.ProjectHasExposablePlatform(projectRoot) {
 		return uiUnexposeResult{}, fmt.Errorf("this environment's project has no platform block configured")
 	}
-	result, err := expose.RunUnexposeService(core.Context{}, expose.UnexposeParams{
+	result, err := expose.RunUnexposeService(core.Context{}, model.UnexposeParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		ProjectRoot: projectRoot,
@@ -138,11 +111,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 	return uiUnexposeResult{WildcardName: result.WildcardName}, nil
 }
 
-// resolveExposureRequest resolves the env's namespace/context (for listing
-// its Ingresses), whether it is configured for exposure at all, and -- when
-// it isn't -- which of the two distinct reasons applies. A host environment
-// is checked first and always wins: it has no cluster to check a platform
-// block against, so that reason takes priority over the project's config.
+// resolveExposureRequest checks a host environment first: it has no cluster.
 func (a *App) resolveExposureRequest(selection uiSelection) (req configpkg.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
@@ -163,10 +132,7 @@ func (a *App) resolveExposureRequest(selection uiSelection) (req configpkg.Shell
 	return req, true, "", nil
 }
 
-// exposeProjectRoot resolves the currently open project, the same way every
-// other command that reads a project's platform block does. Empty (never an
-// error) when no project can be found -- that reads as "not configured" here,
-// exactly as it does for a project with no platform block at all.
+// exposeProjectRoot returns "" when no project is found, which reads as not configured.
 func (a *App) exposeProjectRoot() string {
 	if a.deps.findProjectRoot == nil {
 		return ""
@@ -178,7 +144,7 @@ func (a *App) exposeProjectRoot() string {
 	return root
 }
 
-func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedService {
+func toUIExposedServices(services []clusterread.ExposedService) []uiExposedService {
 	result := make([]uiExposedService, 0, len(services))
 	for _, service := range services {
 		result = append(result, uiExposedService{
@@ -193,7 +159,7 @@ func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedServic
 	return result
 }
 
-func toUIEnvironmentServices(services []expose.EnvironmentService) []uiEnvironmentService {
+func toUIEnvironmentServices(services []model.EnvironmentService) []uiEnvironmentService {
 	result := make([]uiEnvironmentService, 0, len(services))
 	for _, service := range services {
 		entry := uiEnvironmentService{Name: service.Name, Type: service.Type}

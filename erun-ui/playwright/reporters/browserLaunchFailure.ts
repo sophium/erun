@@ -8,44 +8,14 @@ import type {
   TestResult,
 } from '@playwright/test/reporter';
 
-// A browser that dies before it is ready is reported by Playwright as
-// `browserType.launch: Target page, context or browser has been closed` — a
-// generic with no cause in it — and the death is charged to whichever spec
-// happened to ask for the worker's browser first. Both halves of that are
-// misleading: the cause is a harness event (the headless_shell process dying of
-// SIGSEGV ~1 ms into startup on this host), and the spec that absorbed it is an
-// arbitrary one of the N specs the worker would have run.
-//
-// The cause is not missing, it is buried. Playwright's own error carries the
-// whole browser log — the `<launched> pid=…` line, the browser's stderr
-// (`ERROR:dbus/bus.cc:405 …`), and, in the call log, the
-// `[pid=…] <process did exit: exitCode=null, signal=SIGSEGV>` line that names
-// the death. Everything below the first line is exactly the diagnosis, and an
-// error whose first line is a generic is an error whose diagnosis gets quoted
-// away: reading `Target page, context or browser has been closed` out of a
-// 3 MB gate log tells an operator nothing, and three separate areas each lost a
-// run to it before anyone read far enough to see it was one death, not three
-// defects.
-//
-// This reporter stops that: it recognises an error that carries a browser
-// process death, and prints one delimited block that leads with the death and
-// then reproduces Playwright's own browser log verbatim. Nothing is
-// re-diagnosed and nothing is invented — the text was always there, and this
-// only stops it being discarded.
-//
-// It never alters the run: it prints, and the failure stands exactly as it was.
+// Playwright reports a browser that dies at launch as a cause-free generic charged to an
+// arbitrary spec; this reporter prints one block leading with the death, followed by
+// Playwright's own browser log verbatim. It never alters the run's outcome.
 
-// A browser log is bounded by Playwright's own collector, but the `<launching>`
-// line is a several-hundred-argument command line that appears twice (once in
-// the browser log, once in the call log). The cap keeps one block from
-// dominating a gate log; the head and the tail are both kept, since the
-// browser's own stderr is at the top and the death line at the bottom.
+// Head and tail are both kept: the browser's stderr is at the top, the death line at the bottom.
 const MAX_PAYLOAD_CHARS = 8_192;
 
-// browserProcessDeathLine returns Playwright's own record of the browser
-// process's exit, or '' when the text carries none (which is what makes it a
-// usable test for "this error is a browser death" rather than any other
-// failure).
+// Empty when the text carries no browser exit, which makes it the browser-death test.
 const BROWSER_EXIT_PATTERN = /<process did exit: exitCode=[^,]*, signal=[^>]*>/;
 
 export function browserProcessDeathLine(message: string): string {
@@ -53,8 +23,6 @@ export function browserProcessDeathLine(message: string): string {
   return match ? match[0] : '';
 }
 
-// browserStderrLines returns the lines the browser process itself wrote to
-// stderr, which is where a dying Chromium says what it was doing first.
 const BROWSER_STDERR_PATTERN = /^\[pid=\d+\]\[err\] (.*)$/;
 
 function browserStderrLines(message: string): string[] {
@@ -68,16 +36,11 @@ function browserStderrLines(message: string): string[] {
   return lines;
 }
 
-// browserDeathSignature identifies one death, so a worker that is replaced and
-// dies again is reported as the same defect rather than a fresh one. The pid
-// and the timestamps differ every time, so neither is part of it.
+// Excludes pid and timestamps so a replaced worker dying again counts as the same death.
 function browserDeathSignature(message: string): string {
   return [browserProcessDeathLine(message), ...browserStderrLines(message)].join(' | ');
 }
 
-// boundPayload keeps a pathological browser log from dominating the gate log
-// without ever hiding the death: the death line is already in the block's
-// headline, and both ends of the payload are printed.
 function boundPayload(message: string): string {
   if (message.length <= MAX_PAYLOAD_CHARS) {
     return message;
@@ -91,9 +54,6 @@ function boundPayload(message: string): string {
   );
 }
 
-// formatBrowserLaunchReport is the block itself. It leads with the cause, names
-// the spec the death was charged to so the misattribution is visible rather
-// than inherited, and then reproduces Playwright's own text.
 export function formatBrowserLaunchReport(message: string, chargedTo: string): string {
   const death = browserProcessDeathLine(message);
   const stderr = browserStderrLines(message);
@@ -119,11 +79,7 @@ export function formatBrowserLaunchReport(message: string, chargedTo: string): s
 
 const SUITE_DIR = path.join(__dirname, '..');
 
-// suiteRelativeLocation names the spec the way the operator sees it in the
-// run's own output, rather than as an absolute path under whoever's checkout
-// this happens to be. A spec outside the suite — the harness's own regression
-// spec runs the reporter over a throwaway project — keeps its absolute path
-// rather than a chain of `..` segments, which names nothing.
+// A spec outside the suite keeps its absolute path rather than a chain of `..`.
 function suiteRelativeLocation(test: TestCase): string {
   const relative = path.relative(SUITE_DIR, test.location.file);
   const file = relative.startsWith('..') ? test.location.file : relative;
@@ -131,12 +87,7 @@ function suiteRelativeLocation(test: TestCase): string {
   return `${file}${line} "${test.title}"`;
 }
 
-// BrowserLaunchFailureReporter prints one block per distinct browser death.
-//
-// Repeats are collapsed to a single line naming the count: a worker whose
-// browser dies is replaced and the next worker may die identically, so the same
-// death arrives once per restart. Printing the whole block each time is how one
-// harness defect came to read as several unrelated spec failures.
+// Repeats of the same death (one per worker restart) collapse to a count line.
 class BrowserLaunchFailureReporter implements Reporter {
   private readonly deaths = new Map<string, number>();
 

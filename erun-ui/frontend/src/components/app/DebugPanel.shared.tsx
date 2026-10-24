@@ -4,10 +4,6 @@ import * as React from 'react';
 
 import { useCopyAction } from './DebugPanel.hooks';
 
-// Shared pane chrome every Diagnostics console tab reuses: a Copy button
-// and the toolbar row that sits outside the scroll region so it can never be
-// pushed out of view by always-on capture.
-
 export function CopyButton({
   copyStatus,
   disabled,
@@ -32,9 +28,7 @@ export function CopyButton({
   );
 }
 
-// clear is omitted entirely (rather than rendered disabled) for panes with no
-// clear behavior at all (the app/orchestrator log): a permanently-disabled
-// button with no explanation reads as broken, not as "not applicable here".
+// Panes with no clear behaviour omit the button; a permanently disabled one reads as broken.
 export function PrimaryPaneToolbar({
   label,
   content,
@@ -46,8 +40,7 @@ export function PrimaryPaneToolbar({
   clear?: { canClear: boolean; onClear: () => void };
   onRefresh: () => void;
 }): React.ReactElement {
-  // Copy reads the full content, never a baselined/cleared view — a cleared
-  // pane must never produce a truncated bug report.
+  // Copy reads the full content, so a cleared pane never truncates a report.
   const { copyStatus, copy } = useCopyAction(content);
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-1">

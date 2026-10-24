@@ -11,11 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// isolateOrchestratorWhipConfig points the shared xdg config dir at a temp
-// directory for one test and forces the adrg/xdg package (which caches its
-// resolved base directories at process init, not per read) to re-resolve them
-// against the new env var -- the same fix erun-common's activity cache tests
-// already need for the same underlying library.
+// adrg/xdg caches base dirs at init, so Reload after changing XDG_CONFIG_HOME.
 func isolateOrchestratorWhipConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -37,11 +33,6 @@ func writeRootConfig(t *testing.T, body string) {
 	}
 }
 
-// TestRefreshOrchestratorWhipConfigUnconfiguredKeepsTodaysText is half of the
-// "configurable message, default-preserving" contract: an install with no
-// whip section in ~/.erun/config.yaml (or no config file at all) must resolve
-// to exactly today's constant text -- behaviour does not change for anyone
-// who configures nothing.
 func TestRefreshOrchestratorWhipConfigUnconfiguredKeepsTodaysText(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 
@@ -56,10 +47,7 @@ func TestRefreshOrchestratorWhipConfigUnconfiguredKeepsTodaysText(t *testing.T) 
 	}
 }
 
-// TestRefreshOrchestratorWhipConfigOverrideWins is the other half: a
-// configured message in ~/.erun/config.yaml overrides the default, and takes
-// effect on the next reconciler tick (refreshOrchestratorWhipConfig) without a
-// rebuild or restart.
+// A configured whip takes effect on the next refresh, without a restart.
 func TestRefreshOrchestratorWhipConfigOverrideWins(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	writeRootConfig(t, "whip:\n  message: \"Stop dawdling and ship it.\"\n  maxnudges: 3\n")
@@ -75,10 +63,6 @@ func TestRefreshOrchestratorWhipConfigOverrideWins(t *testing.T) {
 	}
 }
 
-// TestWhipOrchestratorsNowNamesEveryOutcome is the section-level whip's
-// visible-record contract: every requested orchestrator appears in the
-// result, named with its own decision and reason -- not just an aggregate
-// "ran" signal.
 func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -90,7 +74,6 @@ func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	app.sessions[aliveKey] = &managedTerminal{session: aliveSession, key: aliveKey, serial: 1, kind: sessionKindOrchestrator}
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "alive", startedAt: time.Now()}
 
-	// Not alive: no managed session registered for this orchestrator at all.
 	app.orchestrators["gone"] = &orchestratorSession{id: "gone", serial: 2, name: "gone", startedAt: time.Now()}
 
 	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"alive": {}, "gone": {}})
@@ -109,13 +92,7 @@ func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	}
 }
 
-// TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately is the other
-// half of the issue: an explicit, operator-triggered whip goes through the
-// same sendOrchestratorPacingNudge write the automatic pacer uses (so it
-// still costs against the shared cap, unchanged), but must register in its
-// own cumulative pacingWhipCount/pacingLastWhipAtUnix history rather than
-// being indistinguishable from an automatic nudge -- or invisible, which was
-// the reported defect.
+// An explicit whip shares the pacer's cap but keeps its own history.
 func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -124,8 +101,7 @@ func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) 
 	session := newCallRecordingSession()
 	key := orchestratorSessionKey("agent")
 	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 1, kind: sessionKindOrchestrator}
-	// Fresh activity: an automatic pass would never nudge this session, but an
-	// explicit whip ignores staleness and pushes it anyway.
+	// An automatic pass would skip this fresh session; an explicit whip does not.
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 1, name: "agent", startedAt: time.Now()}
 
 	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"agent": {}})
@@ -147,10 +123,7 @@ func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) 
 	}
 }
 
-// A configured orchestrator the desktop never opened has no session, and
-// orchestratorPacingRows only enumerates sessions. Naming it anyway is the
-// whole contract of an explicit whip: an omitted target reads as "not
-// considered", where a skip names a reason the operator can act on.
+// An explicit whip names a configured orchestrator with no session instead of omitting it.
 func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -183,13 +156,7 @@ func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testin
 	}
 }
 
-// TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators is the regression
-// test for the desktop's own blast-radius bug (erun#1700): an orchestrator not
-// in the requested set must not be nudged at all -- not merely omitted from
-// the report after being pushed anyway. It asserts against the recording
-// session's own write, not just the returned outcome list, so a filter that
-// only trimmed the report (while still pushing everyone) would still fail
-// this test.
+// Asserts on writes, so a filter that only trimmed the report still fails.
 func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -221,11 +188,6 @@ func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
 	}
 }
 
-// TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs is WhipTargets'
-// population contract for orchestrators: a live session and a configured-but-
-// never-opened orchestrator both appear, deduplicated by id, so "select all
-// orchestrators" can offer every orchestrator the operator could otherwise
-// pick individually.
 func TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{config: &config.ERunConfig{
 		Orchestrators: []config.OrchestratorConfig{

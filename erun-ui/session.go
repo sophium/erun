@@ -12,17 +12,13 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-// ignoreAlreadyClosed makes a session's Close idempotent. A PTY whose process
-// already exited has had its file closed by the streaming goroutine, so a later
-// teardown gets "file already closed" — which is the desired end state, not a
-// failure. Reporting it as one made "close environment" fail for an env whose
-// session happened to die first, and the desktop then left the row rendered as
-// open because the caller aborts its unwind on error.
+// ignoreAlreadyClosed makes Close idempotent: a PTY whose process exited already
+// had its file closed by the streaming goroutine.
 func ignoreAlreadyClosed(err error) error {
 	if errors.Is(err, os.ErrClosed) {
 		return nil
@@ -30,31 +26,12 @@ func ignoreAlreadyClosed(err error) error {
 	return err
 }
 
-// errKillDidNotLand is what a session's Close reports when it asked the platform
-// to end the session's process and the process was still running afterwards. It
-// says something about the process, and it is the only Close failure that does:
-// every other one says the desktop could not release its own end of the session
-// — a pty file, a handle — which leaves the process's fate exactly where it was.
-// A teardown that gets this error back did not end the session it was asked to,
-// so it must not claim the exit the survivor will eventually produce.
+// errKillDidNotLand means the process survived the kill, so the teardown must not
+// claim the survivor's eventual exit as its own.
 var errKillDidNotLand = errors.New("process outlived the kill")
 
-// killProcessTree runs a teardown's process kill and reports whether it ended
-// the process. It is the decision, not the mechanics: the kill command and the
-// liveness probe are the platform's, and a session that already holds its
-// process handle can answer the probe without an OpenProcess an EDR denies.
-//
-// The command's own exit status is the attempt and is deliberately not read as
-// the outcome: it answers neither way by itself. Windows' taskkill exits
-// non-zero for a process that has already exited — a kill that needed no doing,
-// not one that failed — and a status of success is a claim about a tree this
-// session cannot see. The process handle answers the question the caller
-// actually has, which is whether the process is gone.
-//
-// That report is what a teardown's caller turns into ownership of the exit: a
-// close that returns errKillDidNotLand did not end its session, and the
-// survivor's eventual real death is then reported rather than read back as the
-// close the operator already watched finish.
+// killProcessTree judges the kill by the liveness probe, not the kill command's
+// exit status: taskkill exits non-zero for an already-exited process.
 func killProcessTree(pid int, kill func() error, alive func() bool) error {
 	if pid <= 0 {
 		return nil
@@ -70,15 +47,10 @@ type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
 	Wait() error
-	// Pid returns 0 when no real process backs the session; the stale-shell
-	// detector uses it to decide whether a session whose Wait hasn't returned
-	// is still alive.
+	// Pid returns 0 when no real process backs the session.
 	Pid() int
-	// Alive reports whether the backing process is still running. It must not
-	// depend on OpenProcess/os.FindProcess: on locked-down Windows an endpoint
-	// security agent denies OpenProcess, which would make a live shell look dead
-	// and surface a false "shell exited unexpectedly". Implementations use the
-	// process handle they already hold (Windows) or a signal-0 probe (POSIX).
+	// Alive must not use OpenProcess/os.FindProcess: EDR agents on Windows deny it,
+	// which would make a live shell look dead.
 	Alive() bool
 }
 
@@ -92,20 +64,14 @@ type startTerminalSessionParams struct {
 	InitialInput []byte
 }
 
-// Markers the launching process may carry that a fresh interactive terminal must
-// not inherit. NO_COLOR/FORCE_COLOR are honored on presence alone, so either one
-// silently defeats the TERM/COLORTERM the PTY sets for the child. The Claude
-// Code markers announce an already-running session, so a claude launched under
-// them starts as a nested child: it stops saving its transcript and reports
-// itself as somebody else's subprocess.
+// NO_COLOR/FORCE_COLOR defeat the PTY's TERM on presence alone; the Claude Code
+// markers would make a claude launched here run as a nested child.
 var strippedSessionEnvNames = []string{"NO_COLOR", "FORCE_COLOR", "CLAUDECODE", "CLAUDE_PID"}
 
 const strippedSessionEnvPrefix = "CLAUDE_CODE_"
 
-// terminalSessionEnv assembles a PTY child's environment. Order is the contract:
-// the scrubbed inherited environment first, then the caller's own values, then
-// the terminal capabilities, so a caller that deliberately sets one of the
-// stripped names still wins.
+// terminalSessionEnv order is the contract: scrubbed inherited env, then the
+// caller's values, then terminal capabilities.
 func terminalSessionEnv(inherited, requested []string) []string {
 	env := make([]string, 0, len(inherited)+len(requested)+2)
 	for _, entry := range inherited {
@@ -134,10 +100,7 @@ func stripsFromTerminalSession(entry string) bool {
 }
 
 func resolveCLIExecutable() string {
-	// ERUN_APP_CLI is a test seam: the Playwright harness points it at an inert
-	// `erun` stub so the ERun/AI tabs never resolve a real build artifact sitting
-	// next to the app binary and drive `erun open` against the stubbed cluster,
-	// which would loop the env-open specs red.
+	// ERUN_APP_CLI is a test seam for the Playwright harness's inert `erun` stub.
 	if override := strings.TrimSpace(os.Getenv("ERUN_APP_CLI")); override != "" {
 		return override
 	}
@@ -190,11 +153,7 @@ func runIDECommand(ctx context.Context, params startTerminalSessionParams) (stri
 	return string(output), err
 }
 
-// launchHostArtifactDetached starts a host binary and detaches it so it keeps
-// running independently of the desktop; HideConsoleWindow suppresses the console
-// flash a windowless desktop child would otherwise get on Windows. It backs the
-// host "run artifact" facade so a binary an agent cross-built in the pod can be
-// run or debugged on the host.
+// launchHostArtifactDetached starts a host binary detached from the desktop.
 func launchHostArtifactDetached(exePath, dir string) error {
 	cmd := exec.Command(exePath)
 	cmd.Dir = dir
@@ -219,10 +178,7 @@ func buildOpenArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
 }
 
-// withAppSession makes the `erun open` a reattachable dtach session so closing
-// or reopening a tab (or a transient kubectl-exec drop) reconnects to the running
-// shell instead of spawning a parallel one, and the AI tab's work keeps running
-// in the pod meanwhile.
+// withAppSession makes `erun open` a reattachable dtach session so reopening a tab reconnects instead of spawning a new shell.
 func withAppSession(args []string, sessionID string, ai, contribute bool) []string {
 	args = append(args, "--app-session", sessionID)
 	if contribute {
@@ -320,26 +276,8 @@ func localOpenIDEWindowsCommand(ide string) (string, error) {
 	}
 }
 
-func buildSSHDInitArgs(selection uiSelection) []string {
-	return []string{"sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
-}
-
-func buildDoctorArgs(selection uiSelection) []string {
-	return []string{"doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
-}
-
-// buildOpenNoShellArgs builds the forwarder-rebind open. Every caller is the
-// desktop reacting to a dropped connection rather than the operator asking for
-// the environment, so it carries --reconnect: a rebind must reattach to a
-// running environment, never start the one the operator just stopped.
-func buildOpenNoShellArgs(tenant, environment string) []string {
-	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt", "--reconnect"}
-}
-
-// reconnectSessionParams marks a tab respawn as machine-initiated. The desktop
-// respawns a tab whenever its session drops, and a stop is exactly what drops
-// every session — so without this the respawn reads as an operator opening the
-// environment and starts the runtime the stop just reclaimed.
+// reconnectSessionParams marks a respawn as machine-initiated: a stop drops every
+// session, and the respawn must not restart the runtime the stop reclaimed.
 func reconnectSessionParams(params startTerminalSessionParams) startTerminalSessionParams {
 	params.Args = append(append([]string(nil), params.Args...), "--reconnect")
 	return params
@@ -362,12 +300,7 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result config.
 	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
 }
 
-// runOpenForReconnect streams the `erun open` child's output through onLine so
-// the desktop shows progress while a possibly-slow open is in flight, and folds
-// the trailing stderr into the returned error so the user still sees the
-// actionable detail on failure. It passes --reconnect, so the child reattaches
-// to the runtime that is already there: it neither deploys one nor starts a
-// stopped environment.
+// runOpenForReconnect passes --reconnect so it never deploys or starts a stopped environment.
 func runOpenForReconnect(ctx context.Context, cliPath string, result config.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
@@ -438,151 +371,6 @@ func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result config
 	return fmt.Errorf("activate SSHD port-forward: %w: %s", err, detail)
 }
 
-func buildInitArgs(selection uiSelection) []string {
-	envType := strings.TrimSpace(selection.Type)
-	if envType == "" {
-		// Older frontends that don't yet send Type still expect the
-		// pre-Type behavior — pinned to remote-agent. The CLI itself
-		// defaults to local-agent when --type is unset, which would be
-		// a silent behavior change for the desktop flow.
-		envType = "remote-agent"
-	}
-	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type=" + envType}
-	args = appendInitOptionalFlags(args, selection)
-	// local-agent and host both resolve their worktree from a directory on this
-	// machine, so both pass it through as --project-root; init refuses a host
-	// create outright when it has no directory to use. remote-agent checks out
-	// its own worktree on a cluster PVC and runtime has no worktree at all, so
-	// neither takes the flag.
-	if envType == "local-agent" || envType == "host" {
-		if localRepoPath := strings.TrimSpace(selection.LocalRepoPath); localRepoPath != "" {
-			args = append(args, "--project-root", localRepoPath)
-		}
-	}
-	args = append(
-		args,
-		"--set-default-tenant="+boolArg(selection.SetDefaultTenant),
-		"--confirm-environment=true",
-	)
-	if selection.NoGit {
-		args = append(args, "--no-git")
-	}
-	return args
-}
-
-func appendInitOptionalFlags(args []string, selection uiSelection) []string {
-	pairs := []struct{ flag, value string }{
-		{"--version", strings.TrimSpace(selection.Version)},
-		{"--runtime-image", strings.TrimSpace(selection.RuntimeImage)},
-		{"--runtime-cpu", strings.TrimSpace(selection.RuntimeCPU)},
-		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
-		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
-	}
-	// Where erun's own chart is pulled from is a separate coordinate from where
-	// the project's images go, so it is not part of the mutually exclusive set
-	// below.
-	pairs = append(pairs, struct{ flag, value string }{"--runtime-registry", strings.TrimSpace(selection.RuntimeRegistry)})
-	// The three registry choices are mutually exclusive (`erun init` rejects any
-	// pair); the explicit hosted and cluster selections win over a static string.
-	if !selection.ClusterRegistry && !selection.ErunRegistry {
-		pairs = append(pairs, struct{ flag, value string }{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)})
-	}
-	for _, pair := range pairs {
-		if pair.value != "" {
-			args = append(args, pair.flag, pair.value)
-		}
-	}
-	// Repeated rather than comma-joined: a secret name may legally contain no
-	// comma, but repeating is what the flag documents and never needs escaping.
-	for _, secret := range selection.ImagePullSecrets {
-		if name := strings.TrimSpace(secret); name != "" {
-			args = append(args, "--image-pull-secret", name)
-		}
-	}
-	if selection.ClusterRegistry {
-		args = append(args, "--cluster-registry")
-	}
-	if selection.ErunRegistry {
-		args = append(args, "--erun-registry")
-	}
-	return args
-}
-
-func buildDeployArgs(selection uiSelection) []string {
-	args := []string{"deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
-	if version := strings.TrimSpace(selection.Version); version != "" {
-		args = append(args, "--version", version)
-	} else {
-		// deploy is a pure primitive: it requires an explicit version. With no
-		// version the operator means "redeploy what this env already runs", so
-		// install the persisted version via --current rather than erroring.
-		args = append(args, "--current")
-	}
-	if image := deployRuntimeImageOverride(selection); image != "" {
-		args = append(args, "--runtime-image", image)
-	}
-	args = appendDeployComponentsFlag(args, selection)
-	return args
-}
-
-// appendDeployComponentsFlag threads the operator's exact component selection
-// into the pure deploy primitive rather than reaching for a convenience switch
-// (erun-ui/AGENTS.md); an empty selection appends nothing so deploy falls back to
-// the env's saved default.
-func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
-	names := make([]string, 0, len(selection.Components))
-	for _, raw := range selection.Components {
-		if name := strings.TrimSpace(raw); name != "" {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return args
-	}
-	return append(args, "--components", strings.Join(names, ","))
-}
-
-// deployRuntimeImageOverride returns the runtime image to force via
-// `deploy --runtime-image`, or "" when the pick is the env's own image and needs
-// no override. An override lets an operator bootstrap a new env on the shared
-// ERun base image before the tenant's own <tenant>-devops image exists.
-func deployRuntimeImageOverride(selection uiSelection) string {
-	image := strings.TrimSpace(selection.RuntimeImage)
-	if image == "" {
-		return ""
-	}
-	repo := image
-	if idx := strings.LastIndex(repo, "/"); idx >= 0 {
-		repo = repo[idx+1:]
-	}
-	if idx := strings.IndexAny(repo, ":@"); idx >= 0 {
-		repo = repo[:idx]
-	}
-	if repo == config.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
-		return ""
-	}
-	return image
-}
-
-// buildUpgradeArgs scopes `erun upgrade` to one env so the Upgrade-all flow can
-// upgrade each member in parallel; a selection Version pins the exact target the
-// operator picked from the versions an env's registries offered.
-func buildUpgradeArgs(selection uiSelection) []string {
-	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
-	if version := strings.TrimSpace(selection.Version); version != "" {
-		args = append(args, "--version", version)
-	}
-	return args
-}
-
-func buildCloudInitAWSArgs() []string {
-	return []string{"cloud", "init", "aws"}
-}
-
-func buildCloudInitCloudflareArgs() []string {
-	return []string{"cloud", "init", "cloudflare"}
-}
-
 func resolveTerminalStartDir(preferred string) string {
 	candidates := []string{strings.TrimSpace(preferred)}
 
@@ -607,7 +395,7 @@ func resolveTerminalStartDir(preferred string) string {
 	return "."
 }
 
-func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result config.OpenResult) string {
+func resolveDeployStartDir(findProjectRoot seam.ProjectFinderFunc, result config.OpenResult) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return resolveTerminalStartDir(projectRoot)
@@ -621,15 +409,8 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 
 const defaultAITool = "claude"
 
-// localShellDeterministicPromptOverrideEnvVar and localShellDeterministicPrompt
-// are a headless-test seam (see playwright/fixtures/seedRoot.ts): the Local tab
-// otherwise launches the operator's own $SHELL, so a terminal-content spec that
-// selects text by screen position inherits that shell's dotfile-configured
-// prompt shape and startup timing — host-dependent in both content and race
-// window. The Local tab still has to run real commands (erun init/deploy piped
-// into the shared shell), so the override launches a genuine interactive POSIX
-// shell rather than a scripted stub; it only pins the prompt and skips rc files
-// ($ENV unset) for fast, deterministic startup.
+// Headless-test seam (playwright/fixtures/seedRoot.ts): a real POSIX shell with a
+// pinned prompt and no rc files, for deterministic terminal-content specs.
 const (
 	localShellDeterministicPromptOverrideEnvVar = "ERUN_LOCAL_SHELL_OVERRIDE"
 	localShellDeterministicPrompt               = "erun-test$ "
@@ -637,12 +418,8 @@ const (
 
 func resolveLocalShellCommand(goos string) (string, []string) {
 	if strings.TrimSpace(goos) == "windows" {
-		// ConPTY resolves a non-absolute executable relative to the session's
-		// start dir (not PATH), so a bare "powershell.exe" becomes
-		// "<startDir>\powershell.exe" and fails with "the system cannot find the
-		// file specified". Return an absolute shell path. $SHELL is ignored on
-		// Windows — it is typically a POSIX path from Git Bash that ConPTY cannot
-		// launch. Prefer PowerShell 7 (pwsh), fall back to Windows PowerShell.
+		// ConPTY resolves a bare executable against the start dir, not PATH, so return an
+		// absolute path. $SHELL is ignored on Windows (often a Git Bash path ConPTY cannot launch).
 		for _, name := range []string{"pwsh.exe", "powershell.exe"} {
 			if resolved, err := exec.LookPath(name); err == nil {
 				return resolved, []string{"-NoLogo"}
@@ -685,9 +462,7 @@ func localSessionBanner(selection uiSelection) []byte {
 	if tenant == "" || environment == "" {
 		return nil
 	}
-	// Emitted as a terminal-output event (not pty input) so it doesn't get
-	// fed to the shell. ANSI dim makes it look like an inline comment so it
-	// doesn't compete visually with real shell output.
+	// Emitted as terminal output, not pty input, so the shell never sees it.
 	banner := fmt.Sprintf("\x1b[2m# Local host shell for %s/%s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
 	return []byte(banner)
 }

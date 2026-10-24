@@ -33,11 +33,7 @@ import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
-// ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
-// operator's host-side control plane. Its headline is the cross-env AI
-// orchestrators — host-side AI sessions that drive environments (delegate work to
-// in-pod agents, review the synced mirror, run built artifacts on this machine),
-// grouped by tenant — and its header carries the erun-global actions.
+// ErunSection is the host-side control plane: AI orchestrators by tenant, plus erun-global actions.
 export function ErunSection(): React.ReactElement {
   return (
     <div className="pb-3" data-testid="erun-section">
@@ -49,8 +45,6 @@ export function ErunSection(): React.ReactElement {
 
 function ErunHeader(): React.ReactElement {
   const dispatch = useAppDispatch();
-  // The orchestrator to return to after a restart is whichever one owns the
-  // active terminal session, if any.
   const activeOrchestratorId = useAppSelector((state) => {
     const activeSessionId = state.terminal.sessionId;
     if (activeSessionId <= 0) {
@@ -58,9 +52,7 @@ function ErunHeader(): React.ReactElement {
     }
     return state.orchestrators.items.find((o) => o.sessionId === activeSessionId)?.id ?? '';
   });
-  // Doctor diagnoses one environment's runtime and config, so it needs a
-  // target; disable rather than silently no-op when nothing is selected
-  // (Nielsen #5, error prevention).
+  // Doctor needs a target, so disable without a selection.
   const hasSelectedEnvironment = useAppSelector((state) => state.selection.selected !== null);
   return (
     <div className="flex items-center justify-between gap-2 pr-1.5 pb-1.5 pl-3.5">
@@ -138,8 +130,7 @@ function OrchestratorsArea(): React.ReactElement {
   const error = useAppSelector((state) => state.orchestrators.error);
   const focus = useAppSelector(selectSidebarFocus);
 
-  // The orchestrator a rebuild+restart returns to is restored by boot(), which
-  // owns the initial pane selection; here we only load the list for the sidebar.
+  // boot() restores the post-restart orchestrator; this only loads the list.
   React.useEffect(() => {
     void dispatch(loadOrchestrators());
   }, [dispatch]);
@@ -185,11 +176,7 @@ function OrchestratorsArea(): React.ReactElement {
         </ul>
       )}
       {error ? (
-        // The same primitive the panel this list opens uses, so the sidebar
-        // and the pane behind it report one failure one way: icon as well as
-        // colour, wrapping for a long upstream error, and the alert role.
-        // Inset to the sidebar's own 3.5 gutter, which the primitive's padding
-        // does not carry.
+        // Inset to the sidebar's 3.5 gutter, which the primitive does not carry.
         <div className="px-3.5 pb-1">
           <InlineAlert>{error}</InlineAlert>
         </div>
@@ -207,18 +194,13 @@ function OrchestratorRow({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const running = orchestrator.status === 'running' && orchestrator.sessionId > 0;
-  // Scoped to this orchestrator's own session, so concurrent orchestrators each
-  // spin on their own row rather than on whichever one happens to be selected.
+  // Scoped to this orchestrator's session.
   const busy = useAppSelector(
     (state) =>
       orchestrator.sessionId > 0 &&
       state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
   );
-  // A background shell is independent of the turn's own busy state —
-  // it can keep running after the turn that started it goes idle, which is
-  // exactly the case that had no affordance at all before this. Shown only
-  // when the turn itself is not already spinning, so the row never carries
-  // two motion cues fighting for the same attention.
+  // A background shell can outlive its turn; shown only when the turn is not spinning.
   const shellActivity = useAppSelector((state) =>
     orchestrator.sessionId > 0
       ? state.orchestratorShellActivity.bySession[orchestrator.sessionId]
@@ -226,10 +208,7 @@ function OrchestratorRow({
   );
   return (
     <li>
-      {/* The row's own styling moves onto the hover card's anchor div, the way
-          EnvironmentRow does it, so the <li> keeps its list semantics inside
-          the "AI orchestrators" list while the hover surface is the whole row
-          rather than a 12px spinner icon (#1343). */}
+      {/* Row styling moves onto the hover card's anchor so the <li> keeps list semantics. */}
       <OrchestratorHoverCard
         className={cn(
           'group mr-1 ml-1 flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-3.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -271,11 +250,7 @@ function OrchestratorRow({
   );
 }
 
-// OrchestratorBusyIndicator is the turn-busy sibling of OrchestratorShellIndicator
-// below, wrapped in the same IconTooltip so a working orchestrator explains
-// itself on hover exactly like every other spinner in the sidebar — the
-// aria-label alone reached only screen readers, leaving a sighted mouse user
-// with an inert spin.
+// OrchestratorBusyIndicator explains itself on hover like other sidebar spinners.
 function OrchestratorBusyIndicator({
   name,
   busyAtUnix,
@@ -291,13 +266,7 @@ function OrchestratorBusyIndicator({
   );
 }
 
-// OrchestratorShellIndicator is BusyRowSpinner's own icon, reused rather than
-// a one-off, so a running shell reports activity identically to a working
-// turn or a busy environment (Nielsen #4, consistency). The aria-label — and
-// the hover tooltip, since elapsed time and the command are worth seeing at a
-// glance, not just to a screen reader — name what is running and for how
-// long, which is the whole point of this indicator: "1 shell" alone cannot
-// tell the operator whether it is doing something or just spinning its wheels.
+// OrchestratorShellIndicator names the running command and elapsed time.
 function OrchestratorShellIndicator({
   name,
   activity,
@@ -313,12 +282,7 @@ function OrchestratorShellIndicator({
   );
 }
 
-// The orchestrator row mirrors the environment row: a shape-encoded status dot
-// plus a single hover-revealed "…" that opens the orchestrator's dialog, where
-// restart and delete live. Clicking the row itself starts or opens the
-// orchestrator, so no inline start/stop button is needed. Transient
-// (Investigate) orchestrators have no persisted definition to manage, so they
-// show only the status dot.
+// OrchestratorRowActions: a status dot plus "…" for the dialog; transient orchestrators get only the dot.
 function OrchestratorRowActions({
   orchestrator,
   running,
@@ -328,11 +292,7 @@ function OrchestratorRowActions({
   running: boolean;
   active: boolean;
 }): React.ReactElement {
-  // A live session's toolset is fixed at launch (see erun#1319): re-scoping it
-  // while it runs cannot take effect until it restarts, so "running" alone
-  // would say the save already applied when it has not. The dot borrows the
-  // same shape 'failed' already uses (WCAG non-colour-only status) rather
-  // than inventing a third one, since both mean "this needs your attention."
+  // A live session's toolset is fixed at launch, so a re-scope needs a restart; reuses the 'failed' shape.
   const restartRequired = running && orchestrator.restartRequired;
   return (
     <>
@@ -359,10 +319,7 @@ function OrchestratorRowActions({
   );
 }
 
-// The environment row has this same affordance for the files its agent produced
-// in the pod. An orchestrator produces its files here instead, which is why it
-// needs its own reader rather than the env one — but from the operator's side it
-// is the same question, so it is the same button and the same dialog.
+// Orchestrator outputs are produced on this host, so they need their own reader.
 function OrchestratorRowOutputsButton({
   orchestrator,
   active,

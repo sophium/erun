@@ -4,8 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithStore } from '../test/renderWithStore';
 import { ProvisionPanel } from './ProvisionPanel';
 
-// fetch is mocked at the boundary so each flow exercises the real client +
-// controller against the api-protocol.md contract.
+// fetch is mocked at the boundary so the real client and controller run.
 
 interface MockReq {
   method: string;
@@ -21,7 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-// A 204 has no JSON body; calling .json() would throw, matching the real fetch.
+// A 204 has no JSON body, so .json() throws like the real fetch.
 function noContentResponse(): Response {
   return {
     ok: true,
@@ -122,7 +121,7 @@ describe('ProvisionPanel alias form', () => {
 describe('ProvisionPanel create-context flow', () => {
   it('POSTs the context then polls getContext and shows the final running status', async () => {
     vi.useFakeTimers();
-    // First GET stays provisioning so the poll loop iterates before the terminal running.
+    // The first GET stays provisioning so the poll loop iterates.
     let getCount = 0;
     const calls = mockFetch((req) => {
       if (req.method === 'POST') {
@@ -143,8 +142,6 @@ describe('ProvisionPanel create-context flow', () => {
       target: { value: 'eu-west-2' },
     });
 
-    // Flush the POST + first poll's promise resolutions inside act so React
-    // applies the state updates before we assert.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Provision context' }));
       await Promise.resolve();
@@ -191,7 +188,6 @@ describe('ProvisionPanel create-context flow', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Provision context' }));
 
-    // The 202 already carries `failed`, so the terminal state renders without polling.
     expect(await screen.findByText('primary failed to provision.')).toBeInTheDocument();
     expect(screen.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
   });

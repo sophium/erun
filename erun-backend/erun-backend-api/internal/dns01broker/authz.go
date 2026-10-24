@@ -1,9 +1,5 @@
-// Package dns01broker authorizes and executes ACME DNS-01 challenge writes on
-// behalf of per-env callers, so per-tenant cert issuance is safe on a
-// multi-tenant cluster. Its reason to exist is the impersonation guard in this
-// file: a caller proven (by its token) to be tenant A's env may only write
-// challenge records inside A's own subzone, so A can never prove control of
-// tenant B's names even though PowerDNS holds one zone-wide TSIG key centrally.
+// Package dns01broker authorizes and executes ACME DNS-01 challenge writes so a
+// per-env token can only write challenges inside its own tenant's subzone.
 package dns01broker
 
 import (
@@ -11,22 +7,11 @@ import (
 	"strings"
 )
 
-// acmeChallengePrefix is the leftmost label every ACME DNS-01 challenge record
-// carries. The broker writes nothing else, so requiring it is defense in depth:
-// even a valid per-env token cannot use the broker to write an arbitrary record
-// (e.g. an A/CNAME) inside its own subzone through the challenge path.
+// acmeChallengePrefix keeps even a valid token from writing non-challenge records.
 const acmeChallengePrefix = "_acme-challenge."
 
-// AuthorizeChallenge reports nil when the env identified by (tenant, environment)
-// may write the ACME DNS-01 challenge record `fqdn` within `servicesZone`, and a
-// non-nil error (to surface as 403) otherwise. The env's subzone is
-// `<tenant>-<environment>.<servicesZone>`; a challenge record must be an
-// `_acme-challenge` name at or below it. Matching is case-insensitive and
-// trailing-dot-insensitive (DNS names are both).
-//
-// The (tenant, environment) come from the verified token, never from the FQDN,
-// so a caller cannot widen its own scope by asking for another tenant's name —
-// that request simply falls outside its subzone and is refused.
+// AuthorizeChallenge reports whether the env may write challenge record fqdn.
+// tenant and environment come from the verified token, never from fqdn.
 func AuthorizeChallenge(tenant, environment, servicesZone, fqdn string) error {
 	tenant = normalizeName(tenant)
 	environment = normalizeName(environment)
@@ -38,15 +23,9 @@ func AuthorizeChallenge(tenant, environment, servicesZone, fqdn string) error {
 	if !strings.HasPrefix(name, acmeChallengePrefix) {
 		return fmt.Errorf("dns01: %q is not an _acme-challenge record", fqdn)
 	}
-	// The env's subzone. The tenant is hyphen-free (enforced at registration), so
-	// the "<tenant>-<environment>" label is unambiguous and cannot be spoofed by
-	// another tenant whose name happens to share a prefix.
+	// Tenants are hyphen-free (enforced at registration), so this label is unambiguous.
 	envSuffix := tenant + "-" + environment + "." + servicesZone
-	// The wildcard-cert challenge is exactly "_acme-challenge.<subzone>"; a
-	// per-host challenge is "_acme-challenge.<host>.<subzone>". Both must sit
-	// within the env subzone — the leading dot on the suffix prevents a sibling
-	// subzone (e.g. "b-e1.services.z" vs "a-e1.services.z") or an outside zone
-	// (e.g. "...services.z.evil.com") from slipping through.
+	// The leading dot keeps sibling subzones and outside zones from matching.
 	if name == acmeChallengePrefix+envSuffix || strings.HasSuffix(name, "."+envSuffix) {
 		return nil
 	}

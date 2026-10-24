@@ -10,36 +10,20 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// EnvironmentHostnameWriter performs the platform's own wildcard A-record
-// write for an environment's own subzone -- the PowerDNS access `erun
-// expose` cannot assume every caller has: the Ingress it
-// applies lands in the target environment's own cluster, which the caller
-// already has credentials for, but the DNS write lands in the platform's
-// cluster, which a developer's local environment never does. Satisfied by
-// *dns01broker.PowerDNSWriter.
+// EnvironmentHostnameWriter writes an environment's wildcard A record in the
+// platform's DNS, which a developer's local environment cannot reach directly.
 type EnvironmentHostnameWriter interface {
 	UpsertA(fqdn, value string) error
 	DeleteA(fqdn string) error
 }
 
-// EnvironmentHostnameRoutes lets a tenant point its own environment's
-// wildcard hostname at an IP through the platform API, for a caller with no
-// direct PowerDNS access to the platform's cluster. Authorized the same way
-// POST .../dns01-token already is: TenantUserClass, enforced implicitly by
-// r.environments.Get's row-level security -- reaching this handler at all
-// already proves membership in the environment's own tenant, and the
-// wildcard name is always derived from that environment, never from
-// caller-supplied input, so a tenant can never write outside its own
-// subzone.
+// EnvironmentHostnameRoutes authorizes via environments.Get's RLS, and the name is
+// always derived from that environment, so a tenant never writes outside its subzone.
 type EnvironmentHostnameRoutes struct {
 	environments EnvironmentRepository
 	tenants      ConfigTenantRepository
-	// writer is nil when the platform's PowerDNS write path is not
-	// configured; the handlers then report 501 rather than claiming a write
-	// they cannot perform.
-	writer EnvironmentHostnameWriter
-	// servicesZone is the zone tenant hostnames live under -- the same zone
-	// the DNS-01 broker's own PowerDNSWriter is configured against.
+	// writer is nil when PowerDNS writes are unconfigured; handlers then answer 501.
+	writer       EnvironmentHostnameWriter
 	servicesZone string
 }
 
@@ -58,10 +42,7 @@ type environmentHostnameResponse struct {
 	TargetIP string `json:"targetIp,omitempty"`
 }
 
-// setHostname upserts the caller's own environment's wildcard A record. A
-// private or loopback target (e.g. 127.0.0.1, for a local cluster) is
-// accepted on purpose, not refused as a mistake -- the whole point of this
-// route is letting a developer's local preview resolve.
+// setHostname deliberately accepts private and loopback targets for local previews.
 func (r EnvironmentHostnameRoutes) setHostname(w http.ResponseWriter, req *http.Request) {
 	if r.writer == nil || r.servicesZone == "" {
 		writeError(w, http.StatusNotImplemented, "environment hostname DNS write is not configured")
@@ -89,8 +70,6 @@ func (r EnvironmentHostnameRoutes) setHostname(w http.ResponseWriter, req *http.
 	writeJSON(w, http.StatusOK, environmentHostnameResponse{Hostname: wildcard, TargetIP: targetIP})
 }
 
-// deleteHostname removes the caller's own environment's wildcard A record,
-// symmetric with `erun unexpose`'s direct pdnsutil path.
 func (r EnvironmentHostnameRoutes) deleteHostname(w http.ResponseWriter, req *http.Request) {
 	if r.writer == nil || r.servicesZone == "" {
 		writeError(w, http.StatusNotImplemented, "environment hostname DNS write is not configured")
@@ -108,11 +87,7 @@ func (r EnvironmentHostnameRoutes) deleteHostname(w http.ResponseWriter, req *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resolveWildcard resolves the caller's own environment's wildcard hostname
-// -- *.<tenant>-<env>.<servicesZone>, the same formula `erun expose` computes
-// locally via pdnsutil. environments.Get is row-level-security scoped to the
-// caller's tenant, so this can only ever resolve to the caller's own
-// environment.
+// resolveWildcard returns *.<tenant>-<env>.<servicesZone>, matching `erun expose`.
 func (r EnvironmentHostnameRoutes) resolveWildcard(req *http.Request) (string, error) {
 	ctx := req.Context()
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))

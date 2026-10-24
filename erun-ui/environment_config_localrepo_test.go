@@ -9,15 +9,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestManageDialogRepoPathMatchesInit pins the property that the dialog and init
-// agree on a repository path: any path the Manage dialog accepts, init accepts,
-// and any path init rejects, the dialog rejects with a comparable message.
-//
-// It drives the dialog's save path (updatedEnvironmentConfig, the function
-// SaveEnvironmentConfig persists through) over the fixture set declared in
-// erun-common/local_repo_path_test.go and asserts the dialog's verdict equals
-// the shared definition's verdict for every one of them — so the two sides are
-// compared to each other, not to a second copy of the expectations.
+// TestManageDialogRepoPathMatchesInit runs the shared fixtures from
+// erun-common/base/config/local_repo_path_test.go through the dialog's save path.
 func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "not-a-directory.txt")
@@ -70,9 +63,6 @@ func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 	}
 }
 
-// TestManageDialogRepoPathIgnoresOtherTypes pins the other half: a remote or
-// runtime env's recorded path names an in-pod directory, so the dialog must keep
-// saving it unchecked rather than start refusing deploys' worth of edits.
 func TestManageDialogRepoPathIgnoresOtherTypes(t *testing.T) {
 	for _, envType := range []configpkg.EnvironmentType{
 		configpkg.EnvironmentTypeRemoteAgent,

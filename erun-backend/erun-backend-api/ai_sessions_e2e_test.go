@@ -15,12 +15,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// The upsert-by-natural-key contract (a later report replaces the row, an
-// omitted tool carries the previous one forward) and the tenant boundary on
-// ai_sessions.environment_id's composite FK both live in SQL, so both are
-// exercised against a real migrated PostgreSQL rather than a fake repository
-// that only ever agrees with itself. Mirrors environmentDeleteDatabase's
-// shape (environment_delete_e2e_test.go).
+// The upsert and tenant-boundary contracts live in SQL, so these run against a
+// real migrated PostgreSQL.
 func aiSessionsDatabase(t *testing.T) (*repository.AISessionRepository, *repository.EnvironmentRepository, context.Context, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -34,8 +30,7 @@ func aiSessionsDatabase(t *testing.T) (*repository.AISessionRepository, *reposit
 	sessions := repository.NewAISessionRepository(txManager)
 	environments := repository.NewEnvironmentRepository(txManager)
 	t.Cleanup(func() {
-		// environments has no ON DELETE CASCADE from tenants (unlike
-		// ai_sessions' own cascade from environments), so it must go first.
+		// environments has no ON DELETE CASCADE from tenants, so it must go first.
 		if _, err := db.Exec(`DELETE FROM environments WHERE tenant_id = $1`, tenantID); err != nil {
 			t.Logf("clearing the test tenant's environments (cascades ai_sessions): %v", err)
 		}
@@ -57,10 +52,8 @@ func seedAISessionTestTenant(t *testing.T, db *sql.DB) string {
 	return tenantID
 }
 
-// aiSessionsOperationsDatabase mirrors aiSessionsDatabase, but seeds an
-// OPERATIONS-typed tenant: erun_operations' RLS policy is unconditional
-// (USING (true)), so only an OPERATIONS caller can actually exercise the
-// bypass List must guard against.
+// aiSessionsOperationsDatabase seeds an OPERATIONS tenant, whose RLS policy is
+// unconditional, so List's own tenant guard is what is exercised.
 func aiSessionsOperationsDatabase(t *testing.T, db *sql.DB) (*repository.AISessionRepository, *repository.EnvironmentRepository, context.Context) {
 	t.Helper()
 	var tenantID string
@@ -82,11 +75,6 @@ func aiSessionsOperationsDatabase(t *testing.T, db *sql.DB) (*repository.AISessi
 	return repository.NewAISessionRepository(txManager), repository.NewEnvironmentRepository(txManager), ctx
 }
 
-// TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant pins the
-// failure scenario directly: an OPERATIONS caller's List for its own
-// environment id must not surface a stranger tenant's session event for a
-// same-named session, even though erun_operations' RLS policy makes the
-// stranger's row visible too.
 func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	strangerSessions, strangerEnvironments, strangerCtx, _ := aiSessionsDatabase(t)
 	strangerEnv, err := strangerEnvironments.Create(strangerCtx, model.Environment{Name: "stranger-env", Type: model.EnvironmentTypeRuntime})
@@ -104,9 +92,7 @@ func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing
 	_, err = opsSessions.Record(opsCtx, model.AISessionEvent{EnvironmentID: opsEnv.EnvironmentID, SessionID: "ai", Event: "turn-start"})
 	mustNoErr(t, err, "record ops session event")
 
-	// Guessing the stranger's own environment id must not surface the
-	// stranger's row: erun_operations bypasses RLS, so only the explicit
-	// tenant_id predicate stands between this call and the stranger's data.
+	// erun_operations bypasses RLS; only the explicit tenant_id predicate guards this.
 	crossTenant, err := opsSessions.List(opsCtx, strangerEnv.EnvironmentID)
 	mustNoErr(t, err, "list stranger's environment id as operations caller")
 	if len(crossTenant) != 0 {
@@ -120,12 +106,6 @@ func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing
 	}
 }
 
-// TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport pins
-// the property eruncommon.RecordAISessionEvent enforces locally
-// (previouslyReportedAISessionTool): a later event that omits Tool must not
-// blank out the one a prior event already reported, so a long-running
-// session's tool column never goes empty mid-conversation just because a
-// bare turn-end omitted it.
 func TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport(t *testing.T) {
 	sessions, environments, ctx, _ := aiSessionsDatabase(t)
 	env, err := environments.Create(ctx, model.Environment{Name: "prod", Type: model.EnvironmentTypeRuntime})
@@ -147,10 +127,6 @@ func TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport(t *test
 	}
 }
 
-// TestAISessionRepositoryRecordReplacesRatherThanAccumulates pins the
-// "one row per (environment, session), latest event wins" contract: a second
-// report for the same session must update the existing row, not create a
-// second one a List call would then double-count.
 func TestAISessionRepositoryRecordReplacesRatherThanAccumulates(t *testing.T) {
 	sessions, environments, ctx, _ := aiSessionsDatabase(t)
 	env, err := environments.Create(ctx, model.Environment{Name: "prod", Type: model.EnvironmentTypeRuntime})
@@ -171,8 +147,6 @@ func TestAISessionRepositoryRecordReplacesRatherThanAccumulates(t *testing.T) {
 	}
 }
 
-// TestAISessionRepositoryListIsScopedToOneEnvironment proves List does not
-// leak a session reported against a sibling environment in the same tenant.
 func TestAISessionRepositoryListIsScopedToOneEnvironment(t *testing.T) {
 	sessions, environments, ctx, _ := aiSessionsDatabase(t)
 	envA, err := environments.Create(ctx, model.Environment{Name: "prod-a", Type: model.EnvironmentTypeRuntime})
@@ -192,16 +166,8 @@ func TestAISessionRepositoryListIsScopedToOneEnvironment(t *testing.T) {
 	}
 }
 
-// TestAISessionRepositoryRecordRefusesAnEnvironmentFromAnotherTenant is the
-// authorization proof this table needs: the composite foreign key
-// (tenant_id, environment_id) -> environments(tenant_id, environment_id)
-// means a caller cannot report against another tenant's environment id even
-// though environment ids are globally unique UUIDs, because tenant_id always
-// defaults to the CALLER's own resolved tenant (erun_current_tenant_id()),
-// never the caller-supplied value. There is no environment row for (this
-// caller's tenant, that other tenant's environment id), so the insert fails
-// closed rather than silently attaching the report to the wrong tenant or to
-// nothing.
+// The composite FK plus tenant_id defaulting to the caller's tenant makes the
+// insert fail closed.
 func TestAISessionRepositoryRecordRefusesAnEnvironmentFromAnotherTenant(t *testing.T) {
 	sessionsA, environmentsA, ctxA, _ := aiSessionsDatabase(t)
 	envA, err := environmentsA.Create(ctxA, model.Environment{Name: "prod", Type: model.EnvironmentTypeRuntime})

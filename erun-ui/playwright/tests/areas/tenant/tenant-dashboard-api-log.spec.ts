@@ -8,13 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// The tenant dashboard only calls LoadTenantDashboard once it can resolve both
-// an API URL (from an environment) and a primary cloud alias (from the tenant
-// config, which the seeded `pw` tenant already normalizes to pw-aws). None of
-// the baseline envs carry an apiUrl, so this stages one throwaway env that does,
-// purely to satisfy that gate; the RPC itself is stubbed below rather than
-// hitting a real backend, per playwright/AGENTS.md's "stub the RPC over
-// /__erun_invoke" guidance for state the seeded baseline does not carry.
+// The dashboard loads only once an env has an apiUrl, so stage one; the RPC
+// itself is stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -48,14 +43,11 @@ function dashboardData(
   };
 }
 
-// The raw transport error, as the backend hands it over: the panel must render
-// it unchanged, not paraphrase it away.
+// The panel must render the raw transport error unchanged.
 const RAW_ERROR = 'exit status 1: kubectl stub: no cluster in the Playwright harness';
 
-// The API log is one tab of nine read over the environment's own MCP edge, so
-// nothing else on screen connects a transport error to this panel. A failed
-// read has to name the read it could not make, with the raw error kept visible
-// beneath that subject for whoever needs the original text.
+// A failed read must name the read it could not make, with the raw error kept
+// beneath it.
 test.describe('tenant dashboard — API log tab', () => {
   test('a failed read names the read that failed and keeps the raw error', async ({
     app,
@@ -65,7 +57,6 @@ test.describe('tenant dashboard — API log tab', () => {
     try {
       await waitForSeededRow(app, SEED_TENANT, environment);
 
-      // What LoadTenantDashboard returns for a failed API log read.
       await stubLoadTenantDashboard(
         page,
         dashboardData(environment, {
@@ -81,7 +72,7 @@ test.describe('tenant dashboard — API log tab', () => {
       await expect(alert).toBeVisible();
       await expect(alert).toContainText("Could not read this environment's API log");
       await expect(alert).toContainText(RAW_ERROR);
-      // A failed read must never be readable as "nothing logged yet".
+      // A failed read must never read as "nothing logged yet".
       await expect(app.tenantDashboard.apiLogEmptyState()).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);

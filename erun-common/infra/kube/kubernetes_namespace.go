@@ -9,17 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// NamespaceDeleteTimeout bounds how long DeleteKubernetesNamespace waits for
-// Kubernetes to finish tearing a namespace down before giving up and naming
-// why. Without a ceiling, a namespace stuck on an unsatisfiable finalizer (a
-// DNS-01 solver that stopped answering, for example) blocks the caller for as
-// long as Kubernetes is willing to sit in Terminating.
+// NamespaceDeleteTimeout bounds the wait so a namespace stuck on a finalizer
+// cannot block the caller indefinitely.
 const NamespaceDeleteTimeout = 20 * time.Minute
 
-// NamespaceTerminationBlockedError names a namespace that did not finish
-// terminating within NamespaceDeleteTimeout, carrying its own conditions
-// verbatim -- the same detail `kubectl describe namespace` shows, which turns
-// a bare timeout into an actionable diagnosis.
+// NamespaceTerminationBlockedError names a namespace still terminating after NamespaceDeleteTimeout, with its conditions.
 type NamespaceTerminationBlockedError struct {
 	Namespace string
 	Detail    string
@@ -32,14 +26,8 @@ func (e *NamespaceTerminationBlockedError) Error() string {
 	return fmt.Sprintf("namespace %q did not finish terminating within %s:\n%s", e.Namespace, NamespaceDeleteTimeout, e.Detail)
 }
 
-// NamespaceDeleteRefusedError names a namespace delete the cluster never
-// accepted -- RBAC, an admission webhook, an API server that answered the
-// request with anything but "accepted". It is a distinct type from
-// NamespaceTerminationBlockedError because the two are different situations
-// with different remedies, and reporting the first as the second is
-// confidently wrong twice over: no wait happened, and the namespace's own
-// termination conditions describe a teardown that never started, sending an
-// operator to investigate finalizers when the fault is a missing grant.
+// NamespaceDeleteRefusedError names a delete the cluster never accepted; unlike a
+// blocked termination, no wait happened and finalizers are not involved.
 type NamespaceDeleteRefusedError struct {
 	Namespace string
 	Detail    string
@@ -52,17 +40,8 @@ func (e *NamespaceDeleteRefusedError) Error() string {
 	return fmt.Sprintf("namespace %q was not deleted: the cluster refused the request:\n%s", e.Namespace, e.Detail)
 }
 
-// TraceEnsureKubernetesNamespace traces the namespace check EnsureKubernetesNamespace
-// performs and, only when the create that would follow is actually going to run,
-// traces that too. A dry run cannot read the cluster to know which way the check
-// resolves without every dry-run scenario in the suite needing a kubectl stub it
-// otherwise has no reason to declare, so it states the create as conditional
-// instead of asserting it: asserting it unconditionally is exactly the defect
-// where a dry run showed a create the real run, finding the namespace
-// already there, never performed. The real run does have a cluster to ask, so it
-// resolves the same question live and traces only the branch that will execute —
-// mirroring announceWorktreeVolumeChange's real/dry-run split for the same class
-// of decision.
+// TraceEnsureKubernetesNamespace traces the namespace check and, when it will run, the create.
+// A dry run cannot ask the cluster, so it traces the create as conditional.
 func TraceEnsureKubernetesNamespace(ctx core.Context, contextName, namespace string) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -83,8 +62,6 @@ func TraceEnsureKubernetesNamespace(ctx core.Context, contextName, namespace str
 	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName), "create", "namespace", namespace)...)
 }
 
-// kubernetesContextArgs is the shared --context prefix every kubectl invocation
-// in this file carries when the caller names one.
 func kubernetesContextArgs(contextName string) []string {
 	contextName = strings.TrimSpace(contextName)
 	if contextName == "" {
@@ -140,8 +117,7 @@ func TraceDeleteKubernetesNamespace(ctx core.Context, contextName, namespace str
 	ctx.TraceCommand("", "kubectl", args...)
 }
 
-// traceRetractACMEChallenges mirrors retractACMEChallenges for a dry run, so
-// the traced sequence is the one a real delete runs.
+// traceRetractACMEChallenges mirrors retractACMEChallenges for a dry run.
 func traceRetractACMEChallenges(ctx core.Context, contextName, namespace string) {
 	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName),
 		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
@@ -150,16 +126,7 @@ func traceRetractACMEChallenges(ctx core.Context, contextName, namespace string)
 		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")...)
 }
 
-// DeleteKubernetesNamespace deletes a namespace and waits up to
-// NamespaceDeleteTimeout for Kubernetes to finish tearing it down. A
-// namespace still present after the timeout returns
-// *NamespaceTerminationBlockedError naming its own conditions, so a caller can
-// tell "still terminating, here is why" apart from every other kubectl
-// failure; a delete the cluster never accepted returns
-// *NamespaceDeleteRefusedError carrying kubectl's refusal, because that one is
-// not a termination problem at all. A namespace that has actually disappeared
-// by the time the timeout is checked (a benign race between the wait and the
-// finalizer clearing) still reports success.
+// DeleteKubernetesNamespace deletes a namespace and waits up to NamespaceDeleteTimeout for it to go.
 func DeleteKubernetesNamespace(contextName, namespace string) error {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -171,16 +138,8 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
-	// Retract any in-flight ACME challenge before the namespace teardown that
-	// would remove the credential its cleanup needs (#1174). Deleting the
-	// namespace first removes the env's DNS-01 token Secret as ordinary
-	// content, and Kubernetes gives no ordering guarantee against cert-manager
-	// finalizing a still-pending Challenge in the same namespace -- so the
-	// finalizer would never clear and the namespace would sit in Terminating
-	// for the full NamespaceDeleteTimeout. Best-effort by design: a cluster
-	// with no cert-manager, or a challenge that will not finalize, must not
-	// block the delete. If a challenge does survive this, the namespace's own
-	// conditions still name it in NamespaceTerminationBlockedError below.
+	// Retract ACME challenges first: deleting the namespace removes the DNS-01 token
+	// Secret their finalizers need, wedging the namespace in Terminating. Best-effort.
 	retractionNote := retractACMEChallenges(contextName, namespace)
 
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
@@ -196,9 +155,7 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 			return nil
 		}
 		if namespaceDeleteWasRefused(message) {
-			// Neither the namespace's conditions nor the retraction note belong
-			// here: both describe a teardown in progress, and this one never
-			// started. kubectl's own refusal is the only fact that explains it.
+			// Termination conditions describe a teardown that never started here.
 			return &NamespaceDeleteRefusedError{
 				Namespace: namespace,
 				Detail:    namespaceDeleteRefusalDetail(message),
@@ -206,11 +163,7 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		}
 		return &NamespaceTerminationBlockedError{
 			Namespace: namespace,
-			// The retraction note rides along here rather than being logged: if
-			// the namespace wedged AND the retraction could not run, those two
-			// facts belong together, in the one string an operator reads off
-			// the environment row.
-			Detail: joinTerminationDetail(namespaceTerminationConditions(contextName, namespace), retractionNote),
+			Detail:    joinTerminationDetail(namespaceTerminationConditions(contextName, namespace), retractionNote),
 		}
 	}
 	if message == "" {
@@ -219,13 +172,8 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
 }
 
-// namespaceDeleteWasRefused reports whether kubectl's failure means the delete
-// was never accepted, as opposed to accepted and then not finishing. The wait
-// expiring is the one failure that genuinely is a termination problem, and
-// kubectl names it; everything else it reports ended the request before the
-// namespace could enter Terminating. An empty message says nothing either way
-// and keeps the termination reading, where the namespace's own conditions are
-// the only evidence left to go on.
+// namespaceDeleteWasRefused reports whether the delete was never accepted; only a
+// wait timeout means it was accepted and did not finish.
 func namespaceDeleteWasRefused(message string) bool {
 	if strings.TrimSpace(message) == "" {
 		return false
@@ -234,11 +182,7 @@ func namespaceDeleteWasRefused(message string) bool {
 	return !strings.Contains(lowered, "timed out") && !strings.Contains(lowered, "deadline exceeded")
 }
 
-// namespaceDeleteRefusalDetail carries kubectl's own refusal and, when that
-// refusal is a permission problem, names the grant that resolves it. An
-// operator handed only "forbidden" still has to work out that the fix is an
-// RBAC rule -- and that the finalizers a termination message would have sent
-// them to are not involved at all.
+// namespaceDeleteRefusalDetail carries kubectl's refusal and, for a permission problem, the grant that fixes it.
 func namespaceDeleteRefusalDetail(message string) string {
 	if !kubernetesRequestForbidden(message) {
 		return message
@@ -246,45 +190,23 @@ func namespaceDeleteRefusalDetail(message string) string {
 	return message + "\nthis kubeconfig's user is not permitted to delete this namespace; grant it delete on namespaces (RBAC) and retry. The namespace is not terminating, so its finalizers are not the cause."
 }
 
-// kubernetesRequestForbidden matches kubectl's own wording for a request the
-// cluster refused on credentials or permissions, so a refusal can name its
-// remedy instead of only quoting the server.
 func kubernetesRequestForbidden(message string) bool {
 	lowered := strings.ToLower(message)
 	return strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "unauthorized")
 }
 
-// acmeRetractTimeout bounds the pre-teardown challenge retraction. Short on
-// purpose: it is an optimization that avoids a 20-minute wedge, so it must
-// never itself become a long wait. A challenge that has not finalized by then
-// is left to the namespace delete, where the webhook shim's own tolerance for
-// an already-deleted token Secret clears the finalizer instead.
+// acmeRetractTimeout is short on purpose. A challenge still pending afterwards is cleared at
+// namespace delete by the webhook's tolerance of an already-deleted token Secret.
 const acmeRetractTimeout = 90 * time.Second
 
-// retractACMEChallenges deletes the namespace's cert-manager Certificates and
-// waits for its ACME Challenges to finalize, so a challenge's cleanup runs
-// while the DNS-01 token Secret it authenticates with still exists.
-//
-// Returns a note describing why the retraction could not run, or "" when it ran
-// (or was legitimately unnecessary). The note is folded into the blocked-delete
-// error if the namespace then wedges, which is the one place an operator is
-// already looking. It is deliberately not logged: this is a library used by the
-// CLI, and writing to the CLI's own output would be both noise and a golden
-// change for every delete.
-//
-// The distinction matters. A cluster with no cert-manager has no CRDs, the read
-// fails with "the server doesn't have a resource type", and skipping is exactly
-// right at zero cost. A cluster that HAS cert-manager but refuses the read is
-// the opposite: the retraction cannot work, the namespace will wedge, and
-// treating that as "nothing to retract" is how this shipped inert the first
-// time (#1183) -- the read was Forbidden, that was read as "no challenges", and
-// the whole step was skipped with nothing to say so.
+// retractACMEChallenges deletes Certificates and waits for Challenges to finalize while the
+// DNS-01 token Secret still exists. It returns a note when the retraction could not run;
+// it does not log, since CLI output would change for every delete. Absent CRDs skip
+// silently, but a Forbidden read must not count as nothing to retract.
 func retractACMEChallenges(contextName, namespace string) string {
 	present, err := acmeChallengesPresent(contextName, namespace)
 	if err != nil {
 		if acmeCRDsAbsent(err.Error()) {
-			// No cert-manager on this cluster: nothing to retract, and nothing
-			// to report. The normal case for a local or test cluster.
 			return ""
 		}
 		return fmt.Sprintf("the pre-teardown ACME challenge retraction could not run (%s); if a challenge is still finalizing it will hold this namespace until the namespace delete times out", strings.TrimSpace(err.Error()))
@@ -300,10 +222,7 @@ func retractACMEChallenges(contextName, namespace string) string {
 		return fmt.Sprintf("deleting this namespace's cert-manager Certificates before teardown did not succeed (%s: %s); a challenge still finalizing will hold the namespace until the delete times out", deleteErr, strings.TrimSpace(string(output)))
 	}
 
-	// Wait for the challenges to actually go, rather than assuming the
-	// Certificate delete cascaded synchronously -- cert-manager removes the
-	// Order and its Challenges asynchronously, and it is the Challenge's
-	// finalizer, not the Certificate's, that blocks the namespace.
+	// cert-manager removes Challenges asynchronously, and their finalizer is what blocks the namespace.
 	deadline := time.Now().Add(acmeRetractTimeout)
 	for time.Now().Before(deadline) {
 		stillPresent, waitErr := acmeChallengesPresent(contextName, namespace)
@@ -315,10 +234,7 @@ func retractACMEChallenges(contextName, namespace string) string {
 	return fmt.Sprintf("this namespace's ACME challenges had not finalized %s after its Certificates were deleted; the namespace delete may wait on their finalizer", acmeRetractTimeout)
 }
 
-// acmeCRDsAbsent reports whether a kubectl failure means cert-manager's ACME
-// CRDs are not installed, as opposed to any other failure. Matched on kubectl's
-// own wording for an unknown resource type; anything else -- Forbidden above
-// all -- is a real problem and must not be mistaken for an absent CRD.
+// acmeCRDsAbsent reports whether kubectl failed because the ACME CRDs are not installed.
 func acmeCRDsAbsent(message string) bool {
 	lowered := strings.ToLower(message)
 	return strings.Contains(lowered, "the server doesn't have a resource type") ||
@@ -326,9 +242,6 @@ func acmeCRDsAbsent(message string) bool {
 		strings.Contains(lowered, "no matches for kind")
 }
 
-// acmeChallengesPresent reports whether the namespace currently has any ACME
-// Challenge. The error is returned rather than folded into false, so the caller
-// can tell "cert-manager is not installed" from "the read was refused".
 func acmeChallengesPresent(contextName, namespace string) (bool, error) {
 	args := append(kubernetesContextArgs(contextName),
 		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")
@@ -339,9 +252,6 @@ func acmeChallengesPresent(contextName, namespace string) (bool, error) {
 	return strings.TrimSpace(string(output)) != "", nil
 }
 
-// joinTerminationDetail combines the namespace's own conditions with a note
-// about the pre-teardown retraction, keeping either alone readable when the
-// other is empty.
 func joinTerminationDetail(conditions, note string) string {
 	switch {
 	case note == "":
@@ -353,10 +263,7 @@ func joinTerminationDetail(conditions, note string) string {
 	}
 }
 
-// namespaceTerminationConditions reads back a namespace's own status
-// conditions, so a blocked delete can name its blocker instead of leaving the
-// caller with only "timed out". "" (a read failure, or no conditions
-// reported) leaves the caller with the bare timeout message.
+// namespaceTerminationConditions returns the namespace's status conditions, or "" on failure.
 func namespaceTerminationConditions(contextName, namespace string) string {
 	args := []string{}
 	if contextName != "" {
@@ -372,10 +279,7 @@ func namespaceTerminationConditions(contextName, namespace string) string {
 	return formatNamespaceConditions(string(output))
 }
 
-// formatNamespaceConditions turns kubectl's raw "type=status<TAB>message"
-// lines into the aligned "Type=Status  Message" shape `kubectl describe
-// namespace` shows, so a blocked delete's own diagnosis reads the same way an
-// operator would find it by hand.
+// formatNamespaceConditions renders conditions the way `kubectl describe namespace` does.
 func formatNamespaceConditions(raw string) string {
 	type condition struct{ key, message string }
 	var conditions []condition
@@ -404,8 +308,6 @@ func formatNamespaceConditions(raw string) string {
 	return strings.Join(lines, "\n")
 }
 
-// kubernetesNamespaceExists dispatches to the subprocess or library path per
-// the kubectl-namespace-get execution mode (see execution_mode.go).
 func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	if config.CurrentExecutionMode(kubectlNamespaceGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryKubernetesNamespaceExists(contextName, namespace)
@@ -429,11 +331,7 @@ func defaultKubernetesNamespaceExists(contextName, namespace string) (bool, erro
 	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
 }
 
-// KubernetesResourceNotFound matches kubectl's absent-resource message for any
-// kind, so a caller can tell "not there" apart from "could not ask". Exported
-// so callers outside this package (erun-ui's out-of-pod health probes) can
-// make the same distinction instead of collapsing every kubectl failure to a
-// plain negative.
+// KubernetesResourceNotFound reports whether kubectl's message means the resource is absent.
 func KubernetesResourceNotFound(message string) bool {
 	message = strings.ToLower(strings.TrimSpace(message))
 	return strings.Contains(message, "notfound") || strings.Contains(message, "not found")

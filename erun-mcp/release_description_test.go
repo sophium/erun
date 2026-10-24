@@ -7,19 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// TestReleaseToolDoesNotClaimItPublishesArtifacts reproduces the contradiction
-// that left a released version with nothing to deploy.
-//
-// `erun release` marks source control and nothing else, so a version's images
-// and charts are published by a separate command. The release tool's
-// description promised the opposite -- that the release builds and publishes
-// that version's artifacts and reads each one back before it pushes the tag --
-// so a caller reads a completed release as a deployable version, reaches for
-// `erun deploy --version <v>`, and only meets the failure there, after the tag
-// is already public and the release has been announced as cut.
-//
-// A description is not decorative: it is the whole contract an MCP caller has,
-// and this one named a capability the command does not have.
+// `erun release` only marks source control; its description must not claim to
+// publish artifacts.
 func TestReleaseToolDoesNotClaimItPublishesArtifacts(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
@@ -39,8 +28,6 @@ func TestReleaseToolDoesNotClaimItPublishesArtifacts(t *testing.T) {
 		t.Fatal("the release tool is not registered")
 	}
 
-	// It must not advertise artifact production it does not perform. These are
-	// the claims the stale description made, as a caller would read them.
 	for _, claim := range []string{
 		"builds and publishes",
 		"reads each one back from the registry",
@@ -51,8 +38,7 @@ func TestReleaseToolDoesNotClaimItPublishesArtifacts(t *testing.T) {
 		}
 	}
 
-	// A caller told the release publishes nothing needs to be told what does,
-	// or the description is accurate and still a dead end.
+	// It must name what does publish, or the description is a dead end.
 	for _, next := range []string{"build --release", "push --version"} {
 		if !strings.Contains(release, next) {
 			t.Errorf("the release tool description does not name %q, so a caller whose release published nothing has no next step from the description alone.\ndescription: %s", next, release)

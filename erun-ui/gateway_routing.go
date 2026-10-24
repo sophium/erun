@@ -11,38 +11,27 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-// uiGatewayRouting is one environment whose running pod routes Claude Code
-// somewhere its saved configuration no longer asks for.
+// uiGatewayRouting is an environment whose pod routes Claude Code somewhere
+// its saved configuration no longer asks for.
 type uiGatewayRouting struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
-	// Deployed is the gateway the running pod uses, "" for Anthropic directly.
+	// Deployed is "" for Anthropic directly.
 	Deployed string `json:"deployed"`
-	// Wanted is the gateway the saved configuration resolves to, "" for none.
-	Wanted string `json:"wanted"`
+	Wanted   string `json:"wanted"`
 }
 
-// gatewayRoutingReadTimeout bounds one environment's read: an unreachable
-// cluster must not hold up the answer for every other environment.
+// gatewayRoutingReadTimeout keeps one unreachable cluster from holding up the rest.
 const gatewayRoutingReadTimeout = 20 * time.Second
 
-// gatewayRoutingReadConcurrency bounds how many clusters are asked at once.
 const gatewayRoutingReadConcurrency = 6
 
-// readGatewayRouting is the cluster read, a seam so no test reaches kubectl.
+// readGatewayRouting is a seam so no test reaches kubectl.
 var readGatewayRouting = lifecycle.ReadGatewayRouting
 
-// LoadGatewayRoutingDrift lists the environments whose running pod still
-// routes where it was last deployed to rather than where the saved
-// configuration now says.
-//
-// The gateway is rendered into the runtime Deployment, so switching it off in
-// ERun settings — or opting one environment out — changes nothing a pod does
-// until that environment is redeployed. Without this the switch looked like it
-// had no effect at all; with it the desktop names the environments and offers
-// the redeploy. An environment that cannot be read (no runtime deployed, an
-// unreachable cluster, a host environment with no pod) is left out rather than
-// reported as drifted: nothing here can be claimed about it.
+// LoadGatewayRoutingDrift lists environments whose running pod still routes
+// where it was last deployed, since a gateway change applies only on redeploy.
+// Unreadable environments are omitted, not reported as drifted.
 func (a *App) LoadGatewayRoutingDrift() ([]uiGatewayRouting, error) {
 	if a.deps.store == nil {
 		return []uiGatewayRouting{}, nil
@@ -86,8 +75,6 @@ type gatewayRoutingCandidate struct {
 	env    config.EnvConfig
 }
 
-// gatewayRoutingCandidates lists every configured environment that has a
-// runtime pod to read.
 func (a *App) gatewayRoutingCandidates() ([]gatewayRoutingCandidate, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -108,8 +95,7 @@ func (a *App) gatewayRoutingCandidates() ([]gatewayRoutingCandidate, error) {
 	return candidates, nil
 }
 
-// readGatewayRoutingDrift reads one environment's running pod, returning the
-// zero value when it matches its saved configuration or cannot be read.
+// readGatewayRoutingDrift returns the zero value on a match or an unreadable pod.
 func (a *App) readGatewayRoutingDrift(tenant string, env config.EnvConfig, catalog *config.OpenRouterConfig) uiGatewayRouting {
 	parent := a.ctx
 	if parent == nil {
@@ -124,24 +110,24 @@ func (a *App) readGatewayRoutingDrift(tenant string, env config.EnvConfig, catal
 	return uiGatewayRouting{Tenant: tenant, Environment: env.Name, Deployed: routing.Deployed, Wanted: routing.Wanted}
 }
 
-// LoadEnvironmentGatewayRouting is LoadGatewayRoutingDrift for one environment,
-// for the Manage dialog's pending-redeploy banner. It returns the zero value
-// (no Environment) when the pod matches its saved configuration or cannot be
-// read.
+// LoadEnvironmentGatewayRouting is LoadGatewayRoutingDrift for one environment.
 func (a *App) LoadEnvironmentGatewayRouting(selection uiSelection) (uiGatewayRouting, error) {
 	if a.deps.store == nil {
 		return uiGatewayRouting{}, nil
 	}
 	tenant, environment := strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)
-	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
-	if err != nil || !gatewayRoutingReadable(env) {
+	env, ok := a.loadGatewayRoutingReadableEnv(tenant, environment)
+	if !ok {
 		return uiGatewayRouting{}, nil
 	}
 	return a.readGatewayRoutingDrift(tenant, env, a.resolveOpenRouterConfig()), nil
 }
 
-// gatewayRoutingReadable is an environment with a runtime pod erun deploys: a
-// host environment has none, and one without a cluster has nowhere to look.
+func (a *App) loadGatewayRoutingReadableEnv(tenant, environment string) (config.EnvConfig, bool) {
+	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	return env, err == nil && gatewayRoutingReadable(env)
+}
+
 func gatewayRoutingReadable(env config.EnvConfig) bool {
 	return env.Type != config.EnvironmentTypeHost && strings.TrimSpace(env.KubernetesContext) != ""
 }

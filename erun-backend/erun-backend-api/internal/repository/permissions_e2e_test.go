@@ -13,11 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// The capability answer and the enforcement answer must agree exactly: a
-// capability set that disagrees with the authorizer is worse than none, because
-// it teaches a user to expect the wrong thing. Both read role_permissions
-// through RLS, so the property is exercised against a real migrated PostgreSQL
-// rather than a fake that agrees with itself.
 func permissionsDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -37,10 +32,7 @@ func permissionsDatabase(t *testing.T) (*sql.DB, string) {
 
 func clearPermissionsTenant(t *testing.T, db *sql.DB, tenantID string) {
 	t.Helper()
-	// user_external_ids and tenant_issuers come before users/tenants: both
-	// foreign-key into them, so a test that seeds an external identity (e.g.
-	// UserRepository.Create's issuer/subject path) would otherwise leave the
-	// users/tenants delete below silently failing on the FK.
+	// Delete FK children before users/tenants.
 	for _, table := range []string{"user_external_ids", "user_roles", "role_permissions", "roles", "users", "tenant_issuers", "tenants"} {
 		if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
 			t.Logf("clearing %s for tenant %s: %v", table, tenantID, err)
@@ -66,8 +58,6 @@ type seededPermission struct {
 	pathPattern   string
 }
 
-// grantRole creates a role carrying permissions and assigns it to the user,
-// mirroring how the identity bootstrap grants ReadAll/WriteAll.
 func grantRole(t *testing.T, db *sql.DB, tenantID, userID, name string, permissions []seededPermission) {
 	t.Helper()
 	var roleID string
@@ -96,9 +86,6 @@ func nullablePermissionValue(value string) any {
 	return value
 }
 
-// permissionsCandidateRoutes stands in for the handler's route catalog: a
-// realistic canonical route set, including path templates and the
-// method/path pairs the pattern roles are meant to straddle.
 var permissionsCandidateRoutes = []model.PlatformCapability{
 	{Method: "GET", Path: "/v1/audit-events"},
 	{Method: "GET", Path: "/v1/environments"},
@@ -112,10 +99,6 @@ var permissionsCandidateRoutes = []model.PlatformCapability{
 	{Method: "GET", Path: "/v1/whoami"},
 }
 
-// TestCapabilitySetAgreesWithEnforcement is the property the whole capability
-// contract rests on: every route the capability answer claims is permitted is
-// one the authorizer lets through, and every route it omits is one the
-// authorizer refuses.
 func TestCapabilitySetAgreesWithEnforcement(t *testing.T) {
 	db, tenantID := permissionsDatabase(t)
 	authorizer := &PermissionAuthorizer{txs: NewTxManager(db, DialectPostgres)}
@@ -177,9 +160,6 @@ func TestCapabilitySetAgreesWithEnforcement(t *testing.T) {
 	}
 }
 
-// TestCapabilitySetIsEmptyRatherThanAbsentForAPermissionlessUser separates the
-// two states a client must not conflate: resolving no capabilities is an
-// answer, and it is not an error.
 func TestCapabilitySetIsEmptyRatherThanAbsentForAPermissionlessUser(t *testing.T) {
 	db, tenantID := permissionsDatabase(t)
 	authorizer := &PermissionAuthorizer{txs: NewTxManager(db, DialectPostgres)}

@@ -4,15 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestJobPresenceLeaseRecordsInitiator is the regression test for the defect.
-// A job's own plain activity lease — the one every started job holds for its
-// whole lifetime, not only the exclusive-scope claim an --exclusive job also
-// takes — recorded no holder at all, so a refusal fed by it could only ever
-// say "an unnamed holder" even though the orchestrator that started the job
-// was known throughout (ERUN_ORCHESTRATOR_ID, read by environmentJobHolder).
+// A job's plain presence lease must record its initiator, not an unnamed holder.
 func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	isolateActivityCache(t)
 	t.Setenv("ERUN_ORCHESTRATOR_ID", "erun-devops")
@@ -21,7 +17,7 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	const environment = "build"
 	const id = "rel-erun-248"
 
-	recorder, err := registerEnvironmentJob(EnvironmentJobSupervisorParams{
+	recorder, err := registerEnvironmentJob(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -31,8 +27,6 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// startEnvironmentJobHeartbeat takes the lease synchronously (refresh(true))
-	// before it returns, so the lease is on disk the moment this call comes back.
 	_, stop := startEnvironmentJobHeartbeat(tenant, environment, recorder, 15*time.Minute, nil, false)
 	defer stop()
 
@@ -41,14 +35,15 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 		t.Fatalf("load leases: %v", err)
 	}
 	leaseID := environmentJobLeaseID(id)
-	var found *activity.EnvironmentActivityLease
-	for i := range leases {
-		if leases[i].ID == leaseID {
-			found = &leases[i]
+	var found model.EnvironmentActivityLease
+	var ok bool
+	for _, lease := range leases {
+		if lease.ID == leaseID {
+			found, ok = lease, true
 			break
 		}
 	}
-	if found == nil {
+	if !ok {
 		t.Fatalf("job's own presence lease %q not found among %+v", leaseID, leases)
 	}
 	if found.Holder.Orchestrator != "erun-devops" {

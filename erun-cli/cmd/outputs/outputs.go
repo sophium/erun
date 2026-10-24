@@ -7,16 +7,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
 
-func NewOutputsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
-	return shared.NewCommandGroup(
+func NewOutputsCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"outputs",
 		"List and download files an agent produced in the runtime pod",
 		newOutputsListCmd(resolveOpen),
@@ -24,7 +28,7 @@ func NewOutputsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	)
 }
 
-func newOutputsListCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newOutputsListCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, dirPath string
 	var limit int
 	cmd := &cobra.Command{
@@ -41,16 +45,16 @@ func newOutputsListCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsListCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, limit, kube.RunRemoteCommand)
+			return runOutputsListCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, limit, kube.RunRemoteCommand)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addOutputsScopeFlags(cmd, &tenant, &environment, &dirPath)
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of entries to list (newest-first); 0 lists all")
 	return cmd
 }
 
-func newOutputsDownloadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newOutputsDownloadCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, dirPath, dest string
 	var force bool
 	cmd := &cobra.Command{
@@ -68,10 +72,10 @@ func newOutputsDownloadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsDownloadCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, args[0], dest, force, kube.RunRemoteCommand)
+			return runOutputsDownloadCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, args[0], dest, force, kube.RunRemoteCommand)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addOutputsScopeFlags(cmd, &tenant, &environment, &dirPath)
 	cmd.Flags().StringVar(&dest, "dest", "", "Local destination file or directory (default: the current directory)")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite the local destination if it already exists")
@@ -84,17 +88,17 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	list, err := jobs.ResolveRuntimeOutputs(ctx, req, jobs.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
+	req := cloud.ShellLaunchParamsFromResult(result)
+	list, err := jobs.ResolveRuntimeOutputs(ctx, req, model.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(list)
 	}
 	if ctx.DryRun {
@@ -103,7 +107,7 @@ func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, pa
 	return writeOutputsListText(ctx, list)
 }
 
-func writeOutputsListText(ctx core.Context, list jobs.RuntimeOutputsListResult) error {
+func writeOutputsListText(ctx core.Context, list model.RuntimeOutputsListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Outputs in %s:\n", list.Dir); err != nil {
 		return err
 	}
@@ -116,7 +120,7 @@ func writeOutputsListText(ctx core.Context, list jobs.RuntimeOutputsListResult) 
 		if entry.IsDir {
 			kind = "dir"
 		}
-		if _, err := fmt.Fprintf(ctx.Stdout, "  %s  %s  %s  %s\n", entry.Name, shared.FormatOutputSize(entry.Size), entry.ModTime.UTC().Format(time.RFC3339), kind); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s  %s  %s  %s\n", entry.Name, textfmt.FormatOutputSize(entry.Size), entry.ModTime.UTC().Format(time.RFC3339), kind); err != nil {
 			return err
 		}
 	}
@@ -135,18 +139,17 @@ type outputsDownloadCLIResult struct {
 	SHA256        string `json:"sha256"`
 	IsArchive     bool   `json:"isArchive"`
 	ArchiveFormat string `json:"archiveFormat,omitempty"`
-	// Signing is present only when host-side ad-hoc code signing had something to
-	// report; see common.SignHostArtifact.
-	Signing *common.HostArtifactSigning `json:"signing,omitempty"`
+	// Signing is set only when host-side ad-hoc signing had something to report.
+	Signing *model.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	out, err := jobs.DownloadRuntimeOutput(ctx, req, jobs.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
+	req := cloud.ShellLaunchParamsFromResult(result)
+	out, err := jobs.DownloadRuntimeOutput(ctx, req, model.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
 	if err != nil {
 		return err
 	}
@@ -158,11 +161,9 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 	if err != nil {
 		return err
 	}
-	// The download is the point where a cross-built artifact becomes a file the
-	// operator runs, so it is where a darwin binary gets the signature macOS
-	// demands. A signing problem is reported, never fatal: the file has arrived.
-	signing := common.SignHostArtifact(destPath)
-	if ctx.Output == core.OutputJSON {
+	// A darwin binary gets signed here, where it becomes runnable; signing problems are reported, never fatal.
+	signing := codesign.SignHostArtifact(destPath)
+	if ctx.Output == model.OutputJSON {
 		result := outputsDownloadCLIResult{
 			Name:          out.Name,
 			Dest:          destPath,
@@ -176,15 +177,14 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 		}
 		return ctx.WriteResult(result)
 	}
-	ctx.Info(fmt.Sprintf("Downloaded %s (%s, sha256 %s) to %s", out.Name, shared.FormatOutputSize(out.Size), out.SHA256, destPath))
+	ctx.Info(fmt.Sprintf("Downloaded %s (%s, sha256 %s) to %s", out.Name, textfmt.FormatOutputSize(out.Size), out.SHA256, destPath))
 	if note := signing.Describe(); note != "" {
 		ctx.Info(note)
 	}
 	return nil
 }
 
-// resolveOutputsDest reduces the pod-side name to its base so a download can never
-// escape the chosen local directory.
+// resolveOutputsDest keeps only the base name so a download cannot escape dest.
 func resolveOutputsDest(dest, name string) string {
 	name = filepath.Base(filepath.FromSlash(name))
 	dest = strings.TrimSpace(dest)
@@ -197,7 +197,7 @@ func resolveOutputsDest(dest, name string) string {
 	return dest
 }
 
-func writeOutputDownloadToDisk(out jobs.RuntimeOutputResult, dest string, force bool) (string, error) {
+func writeOutputDownloadToDisk(out model.RuntimeOutputResult, dest string, force bool) (string, error) {
 	destPath := resolveOutputsDest(dest, out.Name)
 	if !force {
 		if _, err := os.Stat(destPath); err == nil {

@@ -4,17 +4,8 @@ import { artifactPath } from '../../../fixtures/artifacts.js';
 import { captureHoverCard, expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// No surface that lists environments reported their usage, so comparing two
-// environments meant opening the Manage dialog once per environment. This
-// spec locks in the fix: the environment-usage sweep's cached reading
-// (environment_usage.go) renders on the environment hover card and the
-// orchestrator hover card's per-environment lines, both driven off the one
-// `env-usage` Wails event, with its own age and a visible staleness flag —
-// and confirms hovering never triggers a probe of its own.
-//
-// Against origin/main every assertion below that looks for a usage row or
-// figure fails outright: neither hover card renders anything from a usage
-// reading at all.
+// The env-usage sweep's cached reading renders on the env and orchestrator hover cards, with its
+// age and staleness; hovering never probes.
 
 interface UsageEvent {
   tenant: string;
@@ -58,9 +49,7 @@ function freshUsagePayload(overrides: Partial<UsageEvent> = {}): UsageEvent {
         percentOfLimit: 25,
         oomKills: 0,
       },
-      // The scheduler's own input, read from the pod spec: the runtime
-      // container reserves 0.25 CPU / 1024Mi while the 2048Mi above is only the
-      // ceiling it may grow to.
+      // The pod spec's reservation; the 2048Mi above is only the ceiling.
       requests: {
         runtime: { cpuMilli: 250, memoryBytes: 1073741824, cpu: '0.25 CPU', memory: '1024Mi' },
       },
@@ -82,13 +71,8 @@ async function emitEnvUsage(page: Page, payload: UsageEvent): Promise<void> {
   }, payload);
 }
 
-// The backend's own usage sweep also runs on a timer against the seeded
-// (never-deployed, unreachable) alpha env and can overwrite the injected
-// reading with its own "not running" observation, so every assertion driven
-// by this helper re-drives the event until it converges, bounded by the
-// calling test's own deadline rather than a second cap the step picked for
-// itself — mirrors driveEnvActivity in
-// sidebar-orchestrator-hover-card-activity.spec.ts.
+// The backend sweep can overwrite the injected reading, so re-drive the event until assertions
+// converge.
 async function driveEnvUsage(
   page: Page,
   event: UsageEvent,
@@ -102,37 +86,25 @@ async function driveEnvUsage(
 
 test.describe('environment usage on the hover cards', () => {
   test('the environment hover card renders a fresh reading with its age', async ({ app, page }) => {
-    // driveEnvUsage's retry nests hoverEnvironmentRow's own retry inside it,
-    // so a single slow hover attempt under contention can consume most of the
-    // default 30s test budget before driveEnvUsage gets a chance to retry the
-    // whole thing. driveEnvUsage is bare precisely so that this declared
-    // budget is the one it spends: a cap of its own would take
-    // `min(this deadline, now + cap)` and make the widening below inert.
+    // The nested hover retry can consume the 30s default; driveEnvUsage has no cap of its own so
+    // this budget applies.
     test.setTimeout(60_000);
     await app.reboot();
 
     const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await driveEnvUsage(page, freshUsagePayload(), async () => {
-      // Move off first: a retry that re-hovers a row the pointer never left
-      // is a no-op (no genuine mouseenter fires), so a popover that closed
-      // for any other reason would never reopen.
+      // Move off first: re-hovering a row the pointer never left fires no mouseenter.
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(dialog).toBeVisible({ timeout: 1_000 });
-      // CPU and memory are separate labelled rows, not one joined
-      // "CPU 12.0% · Mem 25% of 2048Mi" string: each label is its own `dt`,
-      // so the labels and the figures are asserted separately.
       await expect(dialog.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(dialog.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(dialog).toContainText('12.0%', { timeout: 1_000 });
-      // The ceiling is named as one and the reservation is stated beside it:
-      // `of 2048Mi` alone reads as an environment holding 2GiB, which is the
-      // misreading this row exists to end.
+      // `of 2048Mi` alone would read as a 2GiB reservation.
       await expect(dialog).toContainText('of 2048Mi limit', { timeout: 1_000 });
       await expect(dialog).toContainText('1024Mi requested', { timeout: 1_000 });
       await expect(dialog).toContainText('0.25 CPU requested', { timeout: 1_000 });
-      // Each metric carries its own decile strip: 12% -> 2 filled segments,
-      // 25% -> 3, and neither is near its ceiling so neither reads amber.
+      // 12% -> 2 segments, 25% -> 3; neither is amber.
       const strips = dialog.locator('[data-decile-fill]');
       await expect(strips).toHaveCount(2, { timeout: 1_000 });
       await expect(strips.nth(0)).toHaveAttribute('data-decile-fill', '2', { timeout: 1_000 });
@@ -140,12 +112,9 @@ test.describe('environment usage on the hover cards', () => {
       await expect(strips.nth(0)).toHaveAttribute('data-decile-alert', 'false', {
         timeout: 1_000,
       });
-      // The figure carries a unit, a window (the % is "of" the limit), and its
-      // own age -- not a bare number an operator cannot interpret.
       await expect(dialog).toContainText('As of', { timeout: 1_000 });
       await expect(dialog).not.toContainText('Stale', { timeout: 1_000 });
-      // Taken while still converged and hovered — a screenshot outside this
-      // callback can race the backend sweep's own overwrite of the reading.
+      // Capture while converged; outside the callback the sweep can overwrite the reading.
       await captureHoverCard(
         dialog,
         artifactPath('test-results/environment-usage-visual/env-hover-card-fresh.png'),
@@ -157,10 +126,7 @@ test.describe('environment usage on the hover cards', () => {
     app,
     page,
   }) => {
-    // See the preceding test's comment: driveEnvUsage's retry nests
-    // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention, and driveEnvUsage is bare so that this is the
-    // budget it actually spends.
+    // See the preceding test.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -172,15 +138,12 @@ test.describe('environment usage on the hover cards', () => {
         staleAfterSeconds: 90,
       }),
       async () => {
-        // Move off first: a retry that re-hovers a row the pointer never
-        // left is a no-op (no genuine mouseenter fires), so a popover that
-        // closed for any other reason would never reopen.
+        // Move off first: re-hovering a row the pointer never left fires no mouseenter.
         await page.mouse.move(0, 0);
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
         await expect(dialog).toBeVisible({ timeout: 1_000 });
         await expect(dialog).toContainText('Stale', { timeout: 1_000 });
-        // Taken while still converged and hovered — a screenshot outside this
-        // callback can race the backend sweep's own overwrite of the reading.
+        // Capture while converged; outside the callback the sweep can overwrite the reading.
         await captureHoverCard(
           dialog,
           artifactPath('test-results/environment-usage-visual/env-hover-card-stale.png'),
@@ -189,10 +152,7 @@ test.describe('environment usage on the hover cards', () => {
     );
   });
 
-  // The two states the encoding exists to keep apart. A measured zero is a
-  // reading and renders an EMPTY (outlined) strip; a never-sampled environment
-  // renders no strip at all. If a zero loses its strip, "idle" and "unmeasured"
-  // look identical again and the card is back where it started.
+  // A measured zero renders an empty strip; a never-sampled env renders none.
   test('a measured zero renders an empty strip, not a missing one', async ({ app, page }) => {
     test.setTimeout(60_000);
     await app.reboot();
@@ -205,9 +165,7 @@ test.describe('environment usage on the hover cards', () => {
           tenant: SEED_TENANT,
           environment: SEED_ENV_ALPHA,
           available: true,
-          // The real wire shape for a zero: the Go side marks these fields
-          // `omitempty`, so a 0% arrives with the formatted string present and
-          // the number absent.
+          // The Go side marks these `omitempty`, so a 0% arrives with only the formatted string.
           cpu: { available: true, utilization: '0.0%' },
           memory: { available: true, current: '0Mi', limit: '2048Mi', oomKills: 0 },
         },
@@ -226,8 +184,7 @@ test.describe('environment usage on the hover cards', () => {
     );
   });
 
-  // Amber above 80%, and the segment count carries the same claim so a
-  // colour-blind or greyscale render loses nothing.
+  // The segment count carries the same claim as the colour.
   test('a reading above 80% renders amber and nine filled segments', async ({ app, page }) => {
     test.setTimeout(60_000);
     await app.reboot();
@@ -278,10 +235,7 @@ test.describe('environment usage on the hover cards', () => {
     app,
     page,
   }) => {
-    // See the first driveEnvUsage test's comment: its retry nests
-    // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention, and it is bare so that this is the budget it
-    // actually spends.
+    // See the first driveEnvUsage test.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -299,9 +253,7 @@ test.describe('environment usage on the hover cards', () => {
         },
       }),
       async () => {
-        // Move off first: a retry that re-hovers a row the pointer never
-        // left is a no-op (no genuine mouseenter fires), so a popover that
-        // closed for any other reason would never reopen.
+        // Move off first: re-hovering a row the pointer never left fires no mouseenter.
         await page.mouse.move(0, 0);
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
         await expect(dialog).toBeVisible({ timeout: 1_000 });
@@ -309,11 +261,9 @@ test.describe('environment usage on the hover cards', () => {
           timeout: 1_000,
         });
         await expect(dialog).not.toContainText('0%', { timeout: 1_000 });
-        // No metrics to draw gauges from, so no gauges at all -- an empty strip
-        // here would be read as "measured 0%".
+        // An empty strip would read as "measured 0%".
         await expect(dialog.locator('[data-decile-fill]')).toHaveCount(0, { timeout: 1_000 });
-        // Taken while still converged and hovered — a screenshot outside this
-        // callback can race the backend sweep's own overwrite of the reading.
+        // Capture while converged; outside the callback the sweep can overwrite the reading.
         await captureHoverCard(
           dialog,
           artifactPath('test-results/environment-usage-visual/env-hover-card-no-pod.png'),
@@ -322,18 +272,12 @@ test.describe('environment usage on the hover cards', () => {
     );
   });
 
-  // pw-orch (the seeded orchestrator) links pw/alpha, so driving one env-usage
-  // event and observing both cards is the actual regression check for "one
-  // event, multiple consumers": the two surfaces must never disagree about
-  // what this environment is using.
+  // pw-orch links pw/alpha, so one env-usage event must render identically on both cards.
   test('the orchestrator card renders the same joined reading for its linked environment', async ({
     app,
     page,
   }) => {
-    // See the first driveEnvUsage test's comment: its retry nests
-    // hoverOrchestratorRow's own retry, so this needs more than the 30s
-    // default under contention, and it is bare so that this is the budget it
-    // actually spends.
+    // See the first driveEnvUsage test.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -345,8 +289,7 @@ test.describe('environment usage on the hover cards', () => {
       await expect(dialog).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
       await expect(dialog).toContainText('CPU 12.0%', { timeout: 1_000 });
       await expect(dialog).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
-      // Taken while still converged and hovered — a screenshot outside this
-      // callback can race the backend sweep's own overwrite of the reading.
+      // Capture while converged; outside the callback the sweep can overwrite the reading.
       await captureHoverCard(
         dialog,
         artifactPath('test-results/environment-usage-visual/orchestrator-card-usage.png'),
@@ -354,19 +297,9 @@ test.describe('environment usage on the hover cards', () => {
     });
   });
 
-  // The trap this whole feature exists to avoid: a hover-triggered probe. The
-  // usage figure must come only from the cached sweep reading, never from a
-  // fresh kubectl-exec fired by the hover gesture itself.
+  // Usage must come only from the cached sweep, never a hover-triggered probe.
   test('hovering an environment triggers no LoadRuntimeUsage call', async ({ app, page }) => {
-    // Five real hover round-trips. Each one used to pair
-    // hoverEnvironmentRow's own convergence with a separate, un-retried
-    // `expect(...).toBeVisible()` -- but the card's open state belongs to the
-    // hovered row's own React state (erun-ui/playwright/AGENTS.md's hover-card
-    // bullet), so a re-render between the two calls can drop it, and nothing
-    // reopens it since the pointer never left. readEnvHoverCard reads the
-    // hover and the check as one retryable unit, recovering a drop by
-    // re-hovering. Five round-trips of that also legitimately need more than
-    // the 30s default under contention.
+    // Five hover round-trips need more than the 30s default under contention.
     test.setTimeout(60_000);
     let calls = 0;
     await page.route('**/__erun_invoke', async (route, request) => {
@@ -386,22 +319,13 @@ test.describe('environment usage on the hover cards', () => {
       await page.mouse.move(0, 0);
     }
 
-    // Converge on the card having gone before reading the counter. "No call
-    // happened" is only meaningful once the gesture that could have caused one
-    // has settled; read in the same tick the last hover returned, it samples
-    // the route handler before a late LoadRuntimeUsage could reach it, and this
-    // is the one assertion the whole spec exists to make
-    // (erun-ui/playwright/AGENTS.md, "assert nothing happened").
+    // Wait for the card to close before reading the counter, so a late call can still be caught.
     await app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA).waitFor({ state: 'hidden' });
     expect(calls).toBe(0);
   });
 
-  // The reservation is a separate read from the cgroup reading, and the two can
-  // disagree: the pod spec is read over kubectl and can be refused (RBAC, a
-  // pod mid-replacement) while the cgroup figures beside it arrive intact. Both
-  // sides matter -- an attempted-and-failed read must not render as a
-  // reservation of nothing, and it must not take the rest of the reading down
-  // with it.
+  // The reservation is read separately and can fail; a failed read must not render as zero or hide
+  // the rest.
   test('an unread reservation states no request rather than a zero one', async ({ app, page }) => {
     test.setTimeout(60_000);
     await app.reboot();
@@ -434,10 +358,8 @@ test.describe('environment usage on the hover cards', () => {
         await page.mouse.move(0, 0);
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
         await expect(dialog).toBeVisible({ timeout: 1_000 });
-        // The ceiling and the usage figures are unaffected by the failed read.
         await expect(dialog).toContainText('of 2048Mi limit', { timeout: 1_000 });
         await expect(dialog).toContainText('12.0%', { timeout: 1_000 });
-        // And nothing is claimed about a reservation nobody read.
         await expect(dialog).not.toContainText('requested', { timeout: 1_000 });
       },
     );

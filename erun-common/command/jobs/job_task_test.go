@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
@@ -20,11 +22,7 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	type taskResult struct {
 		Value string `json:"value"`
 	}
-	// The work blocks until the test has read the handle back. Asserting the
-	// job reads running is only meaningful while the work is genuinely still
-	// in flight: a task that returns immediately can record its outcome
-	// before StartTaskEnvironmentJob has handed the record back, so the
-	// returned handle would legitimately read exited.
+	// Block the work so the handle is read while the job is still running.
 	done := make(chan struct{})
 	release := make(chan struct{})
 	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
@@ -46,8 +44,6 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	if job.Kind != EnvironmentJobKindTask {
 		t.Fatalf("job kind = %q, want %q", job.Kind, EnvironmentJobKindTask)
 	}
-	// waitForEnvironmentJobFinished is the await that matters: it waits for
-	// the outcome to be recorded, not merely for the work to return.
 	close(release)
 	<-done
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
@@ -121,7 +117,7 @@ func TestStartTaskEnvironmentJobRecoversAPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if finished.State != eruncommon.EnvironmentJobStateExited {
+	if finished.State != jobstate.EnvironmentJobStateExited {
 		t.Fatalf("state = %q, want exited (never left running)", finished.State)
 	}
 	if finished.Succeeded {
@@ -143,7 +139,7 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -158,16 +154,14 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Name:        "blocking-task-again",
 		ID:          job.ID,
 		Run: func(io.Writer) (any, error) {
-			return nil, nil
+			return struct{}{}, nil
 		},
 	}); err == nil {
 		t.Fatal("starting a second task job with an id still running must be refused")
 	}
 }
 
-// waitForEnvironmentJobFinished polls the store until the job's goroutine has
-// recorded a terminal outcome, bounded so a bug that leaves it running forever
-// fails the test instead of hanging the suite.
+// waitForEnvironmentJobFinished polls, bounded, until the job records a terminal outcome.
 func waitForEnvironmentJobFinished(t *testing.T, tenant, environment, id string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -199,7 +193,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -208,7 +202,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 	<-started
 	defer close(release)
 
-	if _, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{
+	if _, err := CancelEnvironmentJob(core.Context{}, model.CancelEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          job.ID,
@@ -217,11 +211,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 	}
 }
 
-// A task job is Go work in this process, so nothing captures its stdio the way
-// a command job's supervisor does. Without the log it is handed, a failed one
-// leaves an exit code and an error string and nothing else -- no argv, no
-// output -- which is how a real build failure became indistinguishable from
-// any other after the fact.
+// A task job has no captured stdio, so the log it is handed is its only output.
 func TestStartTaskEnvironmentJobServesWhatTheWorkWrote(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -240,7 +230,7 @@ func TestStartTaskEnvironmentJobServesWhatTheWorkWrote(t *testing.T) {
 	}
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
 
-	output, err := ReadEnvironmentJobOutput(ReadEnvironmentJobOutputParams{Tenant: tenant, Environment: environment, ID: job.ID})
+	output, err := ReadEnvironmentJobOutput(model.ReadEnvironmentJobOutputParams{Tenant: tenant, Environment: environment, ID: job.ID})
 	if err != nil {
 		t.Fatalf("ReadEnvironmentJobOutput: %v", err)
 	}
@@ -255,9 +245,7 @@ func TestStartTaskEnvironmentJobServesWhatTheWorkWrote(t *testing.T) {
 	}
 }
 
-// The log honours the same cap a command job's does, so a chatty task cannot
-// fill the environment's home volume, and says so rather than letting a short
-// log read as a quiet run.
+// The log honours the command-job cap and records truncation.
 func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -269,7 +257,7 @@ func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
 		MaxOutputBytes: 16,
 		Run: func(log io.Writer) (any, error) {
 			_, _ = io.WriteString(log, strings.Repeat("x", 1024))
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -289,14 +277,11 @@ func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
 	}
 }
 
-// The whole point of the linkage: a job that starts a task and then ends its
-// own process must not report its own clean exit as the answer while the task
-// is still going. Before task jobs carried StartedByJobID at all, the parent's
-// child scan could never find one no matter what started it.
+// A parent must not report its own exit while a task it started still runs.
 func TestATaskJobIsFoundByTheJobThatStartedIt(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -336,13 +321,11 @@ func TestATaskJobIsFoundByTheJobThatStartedIt(t *testing.T) {
 	}
 }
 
-// Handoff is the escape hatch the linkage needs to be safe: work an agent
-// starts and deliberately leaves running past its own turn (a release, a long
-// deploy) must not be what makes its parent wait.
+// Handoff work must not make its parent wait.
 func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -358,7 +341,7 @@ func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	}); err != nil {
 		t.Fatalf("StartTaskEnvironmentJob: %v", err)
@@ -369,12 +352,7 @@ func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 		t.Fatalf("running children = %+v, want none: a handoff task must never hold its parent's finish check", running)
 	}
 
-	// Unblock the task and wait for its goroutine to actually finish (not
-	// just signal release) before the test returns. Without this, the
-	// goroutine's own cleanup (recorder.update, then the heartbeat's
-	// deferred ReleaseEnvironmentActivityLease) keeps running concurrently
-	// with whatever test runs next, and races that later test's own
-	// XDG_CACHE_HOME isolation over the shared xdg package state.
+	// Wait for the goroutine's cleanup so it cannot race the next test's XDG isolation.
 	close(release)
 	waitForEnvironmentJobFinished(t, tenant, environment, "release")
 }

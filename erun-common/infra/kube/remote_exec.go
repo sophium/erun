@@ -17,10 +17,7 @@ func PreviewRemoteCommand(req config.ShellLaunchParams, script string) RemoteCom
 	}
 }
 
-// TraceRemoteCommand renders the kubectl exec invocation and its script body
-// to the audit trace, with the script itself redacted from the argv line (it
-// still appears in full via TraceBlock) so a multi-line script doesn't blow
-// out the single-line command trace.
+// TraceRemoteCommand redacts the script from the argv line; TraceBlock shows it in full.
 func TraceRemoteCommand(ctx core.Context, req config.ShellLaunchParams, label, script string) {
 	preview := PreviewRemoteCommand(req, script)
 	traceArgs := append([]string{}, preview.Args...)

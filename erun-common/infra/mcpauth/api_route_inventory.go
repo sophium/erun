@@ -12,19 +12,10 @@ import (
 	"strings"
 )
 
-// api_route_inventory.go reads the router's own registered routes directly
-// out of erun-backend-api's source -- the same "read the source, don't
-// import it" mechanism erun-integration's desktop-surface and
-// role-classification gates already use for the same cross-module reason
-// (erun-backend-api is a separate Go module, so importing it directly would
-// be a new cross-module dependency rather than reuse of an existing one).
-// RunRouteCheck (route_check.go) uses this as its route inventory instead of
-// a hand-maintained list -- a hand-maintained list drifts, which is the
-// same defect one level up: a route can merge, close its issue, and never
-// actually be exercised against a deployed plane.
+// Routes are parsed from erun-backend-api's source rather than imported (it is a separate
+// module), so the route check cannot drift from the router.
 
-// APIRoute is one route erun-backend-api's router registers: a canonical
-// method and path template, e.g. GET /v1/reviews/{review_id}.
+// APIRoute is one registered route, e.g. GET /v1/reviews/{review_id}.
 type APIRoute struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
@@ -34,9 +25,6 @@ func (r APIRoute) String() string {
 	return r.Method + " " + r.Path
 }
 
-// httpMethodConstants maps the http.MethodX identifiers erun-backend-api's
-// register(...) calls use to their string values, so a method argument
-// written either way resolves the same.
 var httpMethodConstants = map[string]string{
 	"MethodGet":     "GET",
 	"MethodHead":    "HEAD",
@@ -49,13 +37,8 @@ var httpMethodConstants = map[string]string{
 	"MethodTrace":   "TRACE",
 }
 
-// DiscoverAPIRoutes parses every non-test .go file directly under routesDir
-// (erun-backend-api/internal/routes) and returns every route it registers,
-// sorted and de-duplicated. It recognizes the two registration shapes that
-// module's route files use: register(http.MethodX, "path", handler) (the
-// ProtectedRouteRegistrar convention every authenticated route uses) and
-// mux.HandleFunc("METHOD /path", handler) (the handful of intentionally
-// unauthenticated routes registered directly on the mux).
+// DiscoverAPIRoutes returns the sorted, de-duplicated routes registered in routesDir's non-test files,
+// via register(http.MethodX, ...) or mux.HandleFunc("METHOD /path", ...).
 func DiscoverAPIRoutes(routesDir string) ([]APIRoute, error) {
 	entries, err := os.ReadDir(routesDir)
 	if err != nil {
@@ -108,9 +91,6 @@ func routesFromFile(file *ast.File) []APIRoute {
 	return routes
 }
 
-// registerCallRoute recognizes register(method, "path", handler) -- the
-// routes.ProtectedRouteRegistrar convention every authenticated route in
-// internal/routes uses.
 func registerCallRoute(call *ast.CallExpr) (APIRoute, bool) {
 	ident, ok := call.Fun.(*ast.Ident)
 	if !ok || ident.Name != "register" || len(call.Args) < 2 {
@@ -127,9 +107,6 @@ func registerCallRoute(call *ast.CallExpr) (APIRoute, bool) {
 	return APIRoute{Method: method, Path: path}, true
 }
 
-// handleFuncCallRoute recognizes mux.HandleFunc("METHOD /path", handler) --
-// the combined-pattern form the mux's own intentionally unauthenticated
-// routes (platform discovery, invite accept/request) use.
 func handleFuncCallRoute(call *ast.CallExpr) (APIRoute, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "HandleFunc" || len(call.Args) < 1 {

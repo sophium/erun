@@ -3,23 +3,14 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
-// OrchestratorEnvRole mirrors the Go eruncommon.OrchestratorEnvRole values:
-// what an orchestrator uses a linked environment for. '' is undeclared, never
-// a default of either 'code', 'build', or 'runtime'.
+// OrchestratorEnvRole mirrors Go config.OrchestratorEnvRole; '' is undeclared.
 export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
 
-// OrchestratorAlias is the erun platform alias a host-side orchestrator
-// declares as its own: which configured erun-type cloud alias it acts as.
-// Mirrors the Go eruncommon.OrchestratorConfig.Alias. '' declares none of its
-// own, which is the default and leaves the orchestrator following this
-// machine's own alias.
+// OrchestratorAlias mirrors Go OrchestratorConfig.Alias; '' follows the machine's alias.
 export type OrchestratorAlias = string;
 
-// OrchestratorUseGateway, OrchestratorModel and OrchestratorEffort mirror the
-// Go eruncommon.OrchestratorConfig.UseGateway/Model/Effort: how the
-// orchestrator's Claude session launches. false routes nothing through the
-// erun-level gateway catalog, and '' is the default model or effort, never a
-// value of its own.
+// OrchestratorUseGateway, OrchestratorModel and OrchestratorEffort mirror Go
+// OrchestratorConfig; '' means the default.
 export type OrchestratorUseGateway = boolean;
 export type OrchestratorModel = string;
 export type OrchestratorEffort = string;
@@ -35,35 +26,13 @@ export interface OrchestratorEnvRef {
   environment: string;
   directory: string;
   role: OrchestratorEnvRole;
-  // activity is the environment-activity poller's last observation for this
-  // env (see uiEnvironment.Activity), joined onto the link rather than
-  // collected separately — the same reused shape, so this card and the
-  // sidebar row for the same environment can never disagree about what
-  // "busy" or "outage" means. Undefined until the poller has observed it.
+  // activity is the poller's observation joined onto the link, shared with the sidebar row.
   activity?: UIEnvironmentActivity;
-  // usage is the environment-usage sweep's last cached reading for this env
-  // (see uiEnvironment.Usage), joined the same way activity is — undefined
-  // until the sweep has observed it at least once.
   usage?: UIEnvironmentUsageSnapshot;
 }
 
-// OrchestratorInfo mirrors the Go orchestratorInfo JSON contract: a host-side
-// cross-env AI session that links agent environments (each reviewed in a host
-// directory) and may also name directories of its own, which belong to no
-// environment at all, and, when running, exposes the terminal SessionID the pane
-// attaches to. A definition needs at least one of the two. Transient ones
-// (Investigate) are not persisted.
-//
-// `busy` is the snapshot half of the fix: the sidebar spinner used to be
-// lit only by the ai-activity event, so a fetch that lands after the event (a
-// fresh mount, a window reopen) had no way to know the true state. loadOrchestrators
-// seeds aiBusyBySession from this field on every fetch — see planOrchestratorBusySeed
-// — so the event and the snapshot write the same store field instead of
-// competing for it.
-//
-// `shellRunning`/`shellCommand`/`shellStartedAtUnix` are the same treatment for
-// a background shell, independent of `busy`: a shell can outlive the
-// turn that started it. See planOrchestratorShellSeed.
+// OrchestratorInfo mirrors the Go orchestratorInfo JSON contract. `busy` and the
+// shell* fields seed the activity slices on every fetch.
 export interface OrchestratorInfo {
   id: string;
   name: string;
@@ -73,86 +42,39 @@ export interface OrchestratorInfo {
   sessionId: number;
   status: string;
   busy: boolean;
-  // busyAtUnix is when that busy report was written. Optional because a
-  // report can predate the field; the label degrades rather than inventing a
-  // duration (#1343).
+  // busyAtUnix is optional because older reports predate it.
   busyAtUnix?: number;
   transient: boolean;
   shellRunning: boolean;
   shellCommand: string;
   shellStartedAtUnix: number;
-  // nudgeCount/nudgeCapped/lastNudgeAtUnix mirror orchestratorSession's own
-  // pacing state (orchestrator_pacing.go): how many consecutive un-answered
-  // pacing nudges erun has sent this session, and whether it gave up after
-  // the cap. Zero/false for a stopped orchestrator, whose pacing state does
-  // not survive past its session. These are the cap's own live budget: they
-  // reset every time the session answers, so they say only whether it is
-  // *currently* at the cap.
+  // nudgeCount/nudgeCapped/lastNudgeAtUnix are the live pacing budget; they
+  // reset whenever the session answers.
   nudgeCount: number;
   nudgeCapped: boolean;
   lastNudgeAtUnix?: number;
-  // autoNudgeCount/lastAutoNudgeAtUnix and whipCount/lastWhipAtUnix are the
-  // cumulative history behind that budget: how many automatic nudges, and
-  // how many explicit operator whips, this session has ever received, and
-  // when the last of each went out. No pacing decision resets these, and
-  // unlike the live budget above they are not lost when the session goes
-  // away: the desktop persists them per orchestrator id and restores them on
-  // a later Start/Restart, so a session that answers every nudge still
-  // reports having been nudged rather than collapsing back to "never
-  // nudged" on a desktop restart. lastCappedAtUnix is the same treatment for
-  // the cap itself: it survives the rearm that clears nudgeCapped, so a
-  // session that has since resumed still reports having hit the cap before.
+  // autoNudgeCount/whipCount and their timestamps are cumulative history,
+  // persisted per orchestrator id across restarts.
   autoNudgeCount: number;
   lastAutoNudgeAtUnix?: number;
   whipCount: number;
   lastWhipAtUnix?: number;
   lastCappedAtUnix?: number;
-  // nudgeHistoryUnreadable is true when the persisted cumulative record above
-  // exists but could not be parsed back, so the counts above are an
-  // unverified zero rather than a confirmed "never nudged" — see
-  // orchestratorNudgeSummary.ts, which renders this case distinctly instead
-  // of asserting "Not nudged" for a history that was actually lost.
+  // nudgeHistoryUnreadable: the counts above are an unverified zero.
   nudgeHistoryUnreadable?: boolean;
-  // pacingUnreachable is true when this desktop holds no session for the
-  // orchestrator while its own hooks report one running elsewhere — a session
-  // started in a terminal, or by a previous desktop instance. The pacer decides
-  // only for sessions the desktop holds, so nothing here can nudge it, and its
-  // nudge count stays frozen at zero: exactly what a freshly checked,
-  // needing-nothing orchestrator looks like. See
-  // orchestratorPacingUnreachableNote, which is how the card tells those two
-  // states apart.
+  // pacingUnreachable: a session runs elsewhere that this desktop's pacer cannot nudge.
   pacingUnreachable?: boolean;
-  // restartRequired mirrors the Go side's own comparison of what this
-  // orchestrator's live session was actually spawned with against what it is
-  // linked to right now: true means an edit changed the scope while the
-  // session was running, so it still holds tools for an environment it was
-  // unlinked from and none for one newly linked — only Restart re-wires it
-  // (erun#1319).
+  // restartRequired: linked envs changed while running; only Restart re-wires the tools.
   restartRequired: boolean;
-  // roleChanged is true when a linked environment's role was edited while
-  // this session was running. Distinct from restartRequired: unlike the
-  // environment set, a role edit never changes which MCP tools the session
-  // holds, so this exists to offer the same Restart affordance without the
-  // "tools missing" wording that would not apply here.
+  // roleChanged offers Restart without the "tools missing" wording.
   roleChanged: boolean;
-  // alias is the erun platform alias this orchestrator declares as its own,
-  // absent when it declares none. It is a *selection* among aliases this host
-  // already has, never a credential: a host-side orchestrator has no pod and
-  // inherits the host's own config and secret store through its PTY. The
-  // dialog seeds its control from here and sends it straight back on save, so
-  // a value written by `erun orchestrator set-alias` survives an unrelated
-  // edit made in the desktop.
+  // alias is a selection among this host's aliases, never a credential; sent
+  // back unchanged on save.
   alias?: OrchestratorAlias;
-  // useGateway/model/effort are the launch settings as configured, absent at
-  // their defaults. Like alias, the dialog seeds from them and sends them back
-  // on save, so a value written by `erun orchestrator set-*` survives an
-  // unrelated edit.
+  // useGateway/model/effort are absent at their defaults; sent back unchanged on save.
   useGateway?: OrchestratorUseGateway;
   model?: OrchestratorModel;
   effort?: OrchestratorEffort;
-  // launchSettingsChanged is true when the configured launch settings differ
-  // from what the running session launched with. Like roleChanged it asks for
-  // a Restart without claiming tools are missing.
   launchSettingsChanged: boolean;
 }
 
@@ -198,14 +120,7 @@ export const orchestratorsSlice = createSlice({
       state.busy = false;
       state.error = action.payload;
     },
-    // setEnvActivityForOrchestratorEnvs is the live half of the activity join:
-    // a fetch (setOrchestrators) joins the poller's snapshot onto each env ref
-    // at that instant, but nothing previously kept it current between fetches,
-    // so a card could still show an outage the poller had already cleared. This
-    // patches every ref across every orchestrator that names the given
-    // tenant/environment, driven by the same env-activity event that already
-    // updates the sidebar row (see envStatusSlice.setEnvActivityForEnv), so the
-    // two never read from inputs of different ages again.
+    // Keeps joined activity current between fetches, from the same event the sidebar row uses.
     setEnvActivityForOrchestratorEnvs(
       state,
       action: PayloadAction<{
@@ -223,12 +138,6 @@ export const orchestratorsSlice = createSlice({
         }
       }
     },
-    // setEnvUsageForOrchestratorEnvs is the usage counterpart to
-    // setEnvActivityForOrchestratorEnvs: the usage sweep's own event patches
-    // every ref across every orchestrator that names the given
-    // tenant/environment, so the orchestrator card and the sidebar hover card
-    // for the same environment read the one cached figure rather than two
-    // fetches of different ages.
     setEnvUsageForOrchestratorEnvs(
       state,
       action: PayloadAction<{

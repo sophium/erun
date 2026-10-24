@@ -8,19 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
-// fakeKubernetesAPIServerForPod is fakeKubernetesAPIServer plus an explicit
-// namespace on the kubeconfig context. libraryGetPod (unlike
-// libraryKubernetesNamespaceExists/libraryPersistentVolumeClaimExists/
-// libraryImagePullSecretAuths) takes no namespace argument -- it resolves the
-// current namespace the same way kubectl does with no --namespace flag -- so
-// its test kubeconfig needs an explicit namespace or clientcmd's
-// DeferredLoadingClientConfig falls through to the in-cluster service account
-// namespace file, which is unfakeable and depends on the host actually
-// running this test.
+// fakeKubernetesAPIServerForPod pins the kubeconfig namespace; libraryGetPod
+// takes none and would otherwise fall back to the in-cluster service account file.
 func fakeKubernetesAPIServerForPod(t *testing.T, namespace string, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -51,11 +44,7 @@ func fakeKubernetesAPIServerForPod(t *testing.T, namespace string, handler http.
 	return server
 }
 
-// podGetResponseJSON renders the `kubectl get pod -o json` / client-go Pod
-// body the two kubectl-pod-get call sites (jobSupervisorContainerRestart,
-// dockerBuildContainerMemoryLimit) each read a different slice of: container
-// status (for the restart check) and container spec (for the memory limit).
-// One fixture covers both since a real Get returns the whole Pod either way.
+// podGetResponseJSON renders one Pod carrying both container status and spec.
 func podGetResponseJSON(namespace, name string) string {
 	return fmt.Sprintf(`{"kind":"Pod","apiVersion":"v1","metadata":{"name":%q,"namespace":%q},`+
 		`"spec":{"containers":[{"name":"erun-devops"},{"name":"erun-dind","resources":{"limits":{"memory":"8916Mi"}}}]},`+
@@ -87,11 +76,6 @@ func podNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// TestLibraryGetPodReadsContainerStatusAndSpec proves libraryGetPod returns a
-// typed Pod carrying both the container-status slice
-// libraryJobSupervisorContainerRestart reads and the container-spec slice
-// libraryDockerBuildContainerMemoryLimit reads, from the one Get both call
-// sites' dispatchers now share.
 func TestLibraryGetPodReadsContainerStatusAndSpec(t *testing.T) {
 	fakeKubernetesAPIServerForPod(t, "team-dev", podFoundHandler("team-dev", "pod-a"))
 
@@ -106,16 +90,13 @@ func TestLibraryGetPodReadsContainerStatusAndSpec(t *testing.T) {
 	if !ok || !restarted || reason != "OOMKilled" || exitCode != 137 {
 		t.Fatalf("libraryJobSupervisorContainerRestart = (%v, %q, %d, ok=%v), want (true, OOMKilled, 137, true)", restarted, reason, exitCode, ok)
 	}
-	limit, found := eruncommon.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind")
+	limit, found := build.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind")
 	if !found || limit != "8916Mi" {
 		t.Fatalf("libraryDockerBuildContainerMemoryLimit = (%q, %v), want (8916Mi, true)", limit, found)
 	}
 }
 
-// TestLibraryJobSupervisorContainerRestartReportsNoRestartAsADefiniteAnswer
-// proves a container with no terminated lastState reads as "did not restart,
-// but the answer is trusted" (ok=true), the same distinction
-// defaultJobSupervisorContainerRestart draws for a live container.
+// No terminated lastState is a trusted "did not restart" (ok=true).
 func TestLibraryJobSupervisorContainerRestartReportsNoRestartAsADefiniteAnswer(t *testing.T) {
 	fakeKubernetesAPIServerForPod(t, "team-dev", podFoundHandler("team-dev", "pod-a"))
 
@@ -125,10 +106,7 @@ func TestLibraryJobSupervisorContainerRestartReportsNoRestartAsADefiniteAnswer(t
 	}
 }
 
-// TestLibraryGetPodPropagatesNotFound proves a missing pod surfaces as an
-// error rather than a zero-value Pod that could be misread as an answer --
-// the "unknown must not render as a definite value" contract both dispatchers
-// rely on when they fold any libraryGetPod error into ok=false/found=false.
+// A missing pod must be an error, never a zero-value Pod.
 func TestLibraryGetPodPropagatesNotFound(t *testing.T) {
 	fakeKubernetesAPIServerForPod(t, "team-dev", podNotFoundHandler("pod-a"))
 
@@ -138,7 +116,7 @@ func TestLibraryGetPodPropagatesNotFound(t *testing.T) {
 	if _, _, _, _, ok := libraryJobSupervisorContainerRestart("pod-a", "erun-devops"); ok {
 		t.Fatal("expected ok=false when the pod cannot be read, not a guessed answer")
 	}
-	if _, found := eruncommon.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind"); found {
+	if _, found := build.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind"); found {
 		t.Fatal("expected found=false when the pod cannot be read, not a guessed answer")
 	}
 }

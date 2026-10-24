@@ -6,16 +6,14 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 )
 
-// hostedDefinitionUploadTimeout bounds the platform write. It matches the drift
-// read: the same platform, the same one-round-trip shape.
 const hostedDefinitionUploadTimeout = tenantDashboardTimeout
 
-// uiHostedDefinitionUpload is what an upload did, in the terms the panel
-// renders: the revision it wrote, and the local copy's divergence as of the
-// upload so the panel can replace what it was showing without a second read.
+// uiHostedDefinitionUpload carries LocalChange so the panel updates without a
+// second read.
 type uiHostedDefinitionUpload struct {
 	Revision    int                           `json:"revision"`
 	Describe    string                        `json:"describe"`
@@ -23,13 +21,7 @@ type uiHostedDefinitionUpload struct {
 }
 
 // UploadHostedDefinition sends this environment's portable settings to the
-// platform row its marker names.
-//
-// It is the operator's own action, and it is the recovery path the
-// watcher-driven upload falls back to: when this machine is not signed in to
-// the tenant's platform, or the last automatic upload failed, this is what the
-// panel's own button calls. The automatic path and this one are the same
-// transaction — see uploadHostedDefinition.
+// platform row its marker names; it is the manual recovery for auto-upload.
 func (a *App) UploadHostedDefinition(tenant, environment string) (uiHostedDefinitionUpload, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -42,14 +34,9 @@ func (a *App) UploadHostedDefinition(tenant, environment string) (uiHostedDefini
 	return a.uploadHostedDefinition(ctx, tenant, environment)
 }
 
-// uploadHostedDefinition runs one definition upload, recording the write it is
-// about to make with the origin filter so the config watcher does not read that
-// write as an outside change and upload over it.
-//
-// The mark is cleared on every path that ends without a write. A mark left
-// behind by a failed upload would swallow the next genuine outside change, and
-// nothing would report it — the same silent-swallow shape the filter exists to
-// prevent.
+// uploadHostedDefinition marks its write with the origin filter so the watcher
+// does not re-upload it. Every path without a write clears the mark, or it
+// would swallow the next outside change.
 func (a *App) uploadHostedDefinition(ctx context.Context, tenant, environment string) (uiHostedDefinitionUpload, error) {
 	a.definitionWriteOrigin.mark(tenant, environment)
 	result, err := a.runHostedDefinitionUpload(ctx, tenant, environment)
@@ -67,35 +54,25 @@ func (a *App) runHostedDefinitionUpload(ctx context.Context, tenant, environment
 	}
 	defer cancel()
 
-	upload, err := platform.PushEnvironmentDefinition(requestCtx, a.deps.store, client, platform.EnvDefinitionPushParams{
+	upload, err := platform.PushEnvironmentDefinition(requestCtx, a.deps.store, client, model.EnvDefinitionPushParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})
 	if err != nil {
 		return uiHostedDefinitionUpload{}, err
 	}
-	// The push stamped the marker, which the watcher will see as a write; the
-	// event that carries it still refreshes the sidebar, because the origin
-	// filter gates the upload and not the reload. This event is what refreshes
-	// the panel's own marker row, which the sidebar reload does not carry.
+	// The origin filter gates the upload, not reloads; this event refreshes the
+	// panel's marker row.
 	a.emitHostedDefinitionUploaded(tenant, environment, upload.Revision)
 
 	return uiHostedDefinitionUpload{
 		Revision: upload.Revision,
-		// An upload takes everything the panel can see, so the sentence says
-		// the revision rather than repeating the field list.
 		Describe: fmt.Sprintf("uploaded %s/%s to %s as definition revision %d", tenant, environment, upload.Environment.EnvironmentID, upload.Revision),
-		// Read back rather than assumed: the transfer's own stamp is what
-		// makes the copy in step, so this reports in-step only when that
-		// stamp actually landed, and reports the state plainly when something
-		// changed the config underneath the upload.
+		// Read back: in step only if the transfer's stamp actually landed.
 		LocalChange: a.reloadedHostedLocalChange(tenant, environment),
 	}, nil
 }
 
-// reloadedHostedLocalChange re-reads an environment's config and reports its
-// divergence, so a caller that just wrote it reports the state on disk rather
-// than the state it intended to leave.
 func (a *App) reloadedHostedLocalChange(tenant, environment string) uiHostedDefinitionLocalChange {
 	config, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -104,36 +81,21 @@ func (a *App) reloadedHostedLocalChange(tenant, environment string) uiHostedDefi
 	return hostedDefinitionLocalChangeToUI(configpkg.HostedDefinitionLocalChangeFor(config))
 }
 
-// autoUploadHostedDefinition uploads one environment's settings if they have
-// moved since the last transfer.
-//
-// It is the reusable decision, and it is deliberately silent about the states
-// where there is nothing to do and nothing to report. It does not consult the
-// origin filter: whether a change was this desktop's own write is a question
-// about the watcher's reaction, not about whether the environment needs an
-// upload — the launch catch-up and the panel's button ask the second question
-// and are not the observer the mark was recorded for.
+// autoUploadHostedDefinition uploads settings that moved since the last
+// transfer. It ignores the origin filter: only the watcher's reaction may.
 func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 	config, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		// A delete, a half-written create, or `erun init` still in progress.
-		// The sidebar reload already reports the config tree's state; an
-		// upload has nothing to send and no row to send it to.
+		// Deleted, half-created, or mid-init: nothing to send.
 		return
 	}
 	if _, ok := configpkg.HostedEnvironmentFromConfig(config); !ok {
 		return
 	}
 	if !configpkg.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
-		// The setting that changed never leaves the machine, or it is already
-		// what the platform holds. The digest is what says so without asking.
 		return
 	}
-	// Readiness is checked before anything is reported. A machine that is not
-	// signed in to the tenant's platform, or that never configured one, would
-	// otherwise raise a notification on every config write — and the state it
-	// would name already has its own surface. The divergence stays visible in
-	// the marker panel either way, because it is a local fact.
+	// Check readiness first so an unsigned machine is not notified on every write.
 	if resolution, resolveErr := a.resolveTenantPlatform(tenant, ""); resolveErr != nil || resolution.state != tenantPlatformStateReady {
 		return
 	}
@@ -148,21 +110,8 @@ func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 	}
 }
 
-// reactToConfigWatchTargets is the config watcher's reaction to a debounced
-// batch of config-tree changes: it refreshes the state every change implies,
-// and uploads the ones that are not this desktop's own write.
-//
-// The origin filter is applied here rather than inside
-// autoUploadHostedDefinition because this is the observer a mark is recorded
-// for — the one caller that is told about a write, and so the only one that
-// can be told the write was ours. Without that step a transfer's own stamp
-// would be read back as an outside change and uploaded over, one upload per
-// round trip, forever.
-//
-// The state refresh is deliberately not filtered alongside it. The origin
-// filter gates the upload, never the reload: a successful transfer rewrites
-// the environment's config, and the surfaces built from that config still have
-// to be told.
+// reactToConfigWatchTargets refreshes state for every change and uploads only
+// those that are not this desktop's own write; only the upload is filtered.
 func (a *App) reactToConfigWatchTargets(targets []definitionWatchTarget) {
 	a.emitEnvironmentsChanged()
 	for _, target := range targets {
@@ -173,19 +122,8 @@ func (a *App) reactToConfigWatchTargets(targets []definitionWatchTarget) {
 	}
 }
 
-// catchUpHostedDefinitions uploads every hosted environment whose settings
-// moved while this desktop was closed.
-//
-// The watcher cannot see those changes — they happened with nothing armed —
-// which is the whole reason the marker carries a digest rather than relying on
-// the watcher remembering. `erun init`, `erun cloud set`, and a deploy all
-// write an environment's config from outside this process, so this one pass at
-// launch is what keeps them from diverging silently: it converges what it can,
-// and everything it cannot is left visible in the marker panel.
-//
-// It runs once and does not re-arm anything, so it cannot become a loop: each
-// environment is visited at most once, and each upload's own write is filtered
-// by the origin mark.
+// catchUpHostedDefinitions uploads environments whose settings moved while the
+// desktop was closed. It runs once and re-arms nothing, so it cannot loop.
 func (a *App) catchUpHostedDefinitions() {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {

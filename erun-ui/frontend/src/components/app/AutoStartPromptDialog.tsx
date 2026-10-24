@@ -14,9 +14,6 @@ import { cancelAutoStartPrompt, confirmAutoStartPrompt } from '@/app/autoStartTh
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { InlineAlert } from '@/components/app/InlineAlert';
 
-// Asks once per remote environment whether opening it should auto-start its
-// stopped EC2 instance, and persists the answer so the prompt does not
-// reappear until the operator resets it.
 export function AutoStartPromptDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const prompt = useAppSelector((state) => state.autoStartPrompt);
@@ -24,9 +21,7 @@ export function AutoStartPromptDialog(): React.ReactElement {
   const environmentName = prompt.selection?.environment ?? '';
   const saving = prompt.saving;
   const open = prompt.open;
-  // Tracks which button was clicked so the spinner renders only on that
-  // one; otherwise both merely disable and the user can't tell which
-  // choice is in flight.
+  // Tracks the clicked button so only it shows a spinner.
   const [pendingChoice, setPendingChoice] = React.useState<'always' | 'never' | null>(null);
   React.useEffect(() => {
     if (!saving) {

@@ -3,52 +3,29 @@ package observe
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedPod is one pod's readiness as reported by the Ready condition, plus
-// the reason it is not ready when it isn't.
-type ObservedPod struct {
-	Name         string              `json:"name"`
-	Phase        string              `json:"phase"`
-	Ready        bool                `json:"ready"`
-	RestartCount int                 `json:"restartCount"`
-	Reason       string              `json:"reason,omitempty"`
-	Containers   []ObservedContainer `json:"containers,omitempty"`
-}
-
-// ObservedContainer names the image a pod's container is actually running —
-// the single most consequential fact an orchestrator cannot see without this,
-// since a hand-patched or out-of-band image looks identical to the recorded
-// one in every other erun surface — plus the resource limits it was started
-// with, read from the pod spec (status carries no limits of its own).
-type ObservedContainer struct {
-	Name           string            `json:"name"`
-	Image          string            `json:"image"`
-	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
-}
-
-// fetchObservedPods reuses podStatusList/podStatusItem (deploy_pod_watch.go):
-// the same deliberately partial `kubectl get pods -o json` parse deploy's
-// watcher uses, tolerating kubectl version drift the same way.
-func fetchObservedPods(args []string) ([]ObservedPod, error) {
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+// fetchObservedPods reuses deploy's partial pod parse, tolerating kubectl version drift.
+func fetchObservedPods(args []string) ([]model.ObservedPod, error) {
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get pods: %w", eruncommon.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get pods: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
-	list, ok := eruncommon.ParsePodStatusList(raw)
+	list, ok := deploy.ParsePodStatusList(raw)
 	if !ok {
 		return nil, fmt.Errorf("observe: parse pods: unrecognized kubectl output")
 	}
-	pods := make([]ObservedPod, 0, len(list.Items))
+	pods := make([]model.ObservedPod, 0, len(list.Items))
 	for _, item := range list.Items {
 		pods = append(pods, observedPodFromStatus(item))
 	}
 	return pods, nil
 }
 
-func observedPodFromStatus(item eruncommon.PodStatusItem) ObservedPod {
-	pod := ObservedPod{
+func observedPodFromStatus(item deploy.PodStatusItem) model.ObservedPod {
+	pod := model.ObservedPod{
 		Name:  item.Metadata.Name,
 		Phase: item.Status.Phase,
 		Ready: podStatusReady(item),
@@ -59,7 +36,7 @@ func observedPodFromStatus(item eruncommon.PodStatusItem) ObservedPod {
 	}
 	for _, cs := range item.Status.ContainerStatuses {
 		pod.RestartCount += cs.RestartCount
-		pod.Containers = append(pod.Containers, ObservedContainer{
+		pod.Containers = append(pod.Containers, model.ObservedContainer{
 			Name:           cs.Name,
 			Image:          cs.Image,
 			ResourceLimits: specLimits[cs.Name],
@@ -71,7 +48,7 @@ func observedPodFromStatus(item eruncommon.PodStatusItem) ObservedPod {
 	return pod
 }
 
-func podStatusReady(item eruncommon.PodStatusItem) bool {
+func podStatusReady(item deploy.PodStatusItem) bool {
 	for _, cond := range item.Status.Conditions {
 		if cond.Type == "Ready" {
 			return cond.Status == "True"
@@ -80,11 +57,9 @@ func podStatusReady(item eruncommon.PodStatusItem) bool {
 	return false
 }
 
-// podStatusNotReadyReason prefers a container-level reason (the concrete
-// image-pull/crash cause) and falls back to the pod-level conditions —
-// PodScheduled is the only place a reason exists for a pod that never got
-// admitted to a node at all.
-func podStatusNotReadyReason(item eruncommon.PodStatusItem) string {
+// podStatusNotReadyReason prefers a container reason; PodScheduled is the only reason for an
+// unadmitted pod.
+func podStatusNotReadyReason(item deploy.PodStatusItem) string {
 	if reason := containerStatusReason(item.Status.ContainerStatuses); reason != "" {
 		return reason
 	}
@@ -94,7 +69,7 @@ func podStatusNotReadyReason(item eruncommon.PodStatusItem) string {
 	return podConditionReason(item.Status.Conditions, "Ready")
 }
 
-func containerStatusReason(statuses []eruncommon.ContainerStatusEntry) string {
+func containerStatusReason(statuses []deploy.ContainerStatusEntry) string {
 	for _, cs := range statuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
 			return cs.State.Waiting.Reason
@@ -106,7 +81,7 @@ func containerStatusReason(statuses []eruncommon.ContainerStatusEntry) string {
 	return ""
 }
 
-func podConditionReason(conditions []eruncommon.PodConditionEntry, conditionType string) string {
+func podConditionReason(conditions []deploy.PodConditionEntry, conditionType string) string {
 	for _, cond := range conditions {
 		if cond.Type == conditionType && cond.Status != "True" && cond.Reason != "" {
 			return cond.Reason

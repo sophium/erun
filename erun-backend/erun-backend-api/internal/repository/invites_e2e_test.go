@@ -14,11 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Invite creation/listing/revocation is RLS-protected like every other
-// tenant-owned table, and ConsumeByToken deliberately runs with no
-// authenticated security context at all (WithinSystemTx) — both properties
-// only mean something against a real migrated PostgreSQL, not a fake that
-// agrees with itself.
+// RLS and WithinSystemTx behavior only mean something against real PostgreSQL.
 func invitesDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -68,9 +64,6 @@ func invitesContext(tenantID, tenantType, userID string) context.Context {
 	})
 }
 
-// TestInviteCreateListRevoke locks the operator-facing CRUD contract (#1483
-// items 2/3): a created invite is listed as outstanding, and revoking it
-// both removes it from that list and refuses a second revoke.
 func TestInviteCreateListRevoke(t *testing.T) {
 	db, tenantID := invitesDatabase(t)
 	inviter := seedInvitesUser(t, db, tenantID, "inviter")
@@ -105,9 +98,6 @@ func TestInviteCreateListRevoke(t *testing.T) {
 	}
 }
 
-// TestInviteConsumeByTokenIsSingleUse locks #1483's single-use requirement:
-// a second accept of the same token is refused, asserted against the
-// persisted row (consumed_at set), not just the returned error.
 func TestInviteConsumeByTokenIsSingleUse(t *testing.T) {
 	db, tenantID := invitesDatabase(t)
 	inviter := seedInvitesUser(t, db, tenantID, "inviter")
@@ -137,9 +127,6 @@ func TestInviteConsumeByTokenIsSingleUse(t *testing.T) {
 	}
 }
 
-// TestInviteConsumeByTokenRefusesExpiredAndUnknownTokens locks the other two
-// states #1483 asks to distinguish plainly: an expired invite and one that
-// never existed.
 func TestInviteConsumeByTokenRefusesExpiredAndUnknownTokens(t *testing.T) {
 	db, tenantID := invitesDatabase(t)
 	inviter := seedInvitesUser(t, db, tenantID, "inviter")
@@ -158,18 +145,11 @@ func TestInviteConsumeByTokenRefusesExpiredAndUnknownTokens(t *testing.T) {
 	}
 }
 
-// TestInviteCreateTargetingAnotherTenantRequiresExplicitOverride locks that
-// InviteFilter/CreateInviteParams' TenantID override actually scopes rows to
-// the named tenant rather than the caller's own session tenant — the
-// primitive resolveTargetTenant's OPERATIONS-only gate builds on at the
-// route layer.
 func TestInviteCreateTargetingAnotherTenantRequiresExplicitOverride(t *testing.T) {
 	db, callerTenantID := invitesDatabase(t)
 	otherTenantID := seedInvitesTenant(t, db, "invites-e2e-other", "COMPANY")
 	t.Cleanup(func() { clearInvitesTenant(t, db, otherTenantID) })
 	inviter := seedInvitesUser(t, db, callerTenantID, "inviter")
-	// erun_operations is what makes a cross-tenant explicit TenantID actually
-	// land against a different tenant than the caller's own session tenant.
 	ctx := invitesContext(callerTenantID, "OPERATIONS", inviter)
 	repo := NewInviteRepository(NewTxManager(db, DialectPostgres))
 

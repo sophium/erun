@@ -8,17 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MarshalConfigPreservingUnknownFields marshals config the same way
-// yaml.Marshal does, then overlays the result onto whatever document already
-// lives in existing (the config file's current bytes) so that a binary built
-// before some field existed can never delete that field when it writes: it
-// never gets a chance to, because the merge only touches keys config's own
-// type actually declares. Every other key — including nested ones this
-// binary's struct types cannot represent at all — survives untouched.
-//
-// A mixed-version install (desktop and CLI updating on separate cadences) is
-// the normal state, not an edge case, so every config.yaml writer routes
-// through this before writing (see erun-common/AGENTS.md).
+// MarshalConfigPreservingUnknownFields marshals config onto the existing document,
+// touching only keys config's type declares, so an older binary never deletes newer fields.
 func MarshalConfigPreservingUnknownFields(existing []byte, config any) ([]byte, error) {
 	fresh, err := yaml.Marshal(config)
 	if err != nil {
@@ -28,27 +19,32 @@ func MarshalConfigPreservingUnknownFields(existing []byte, config any) ([]byte, 
 		return fresh, nil
 	}
 
+	if out, ok := mergeConfigDocuments(existing, fresh, reflect.TypeOf(config)); ok {
+		return out, nil
+	}
+	return fresh, nil
+}
+
+func mergeConfigDocuments(existing, fresh []byte, t reflect.Type) ([]byte, bool) {
+	// Unparseable existing YAML has nothing to preserve; callers fall back to fresh.
 	var oldDoc, newDoc yaml.Node
 	if err := yaml.Unmarshal(existing, &oldDoc); err != nil {
-		// The previous file is not parseable YAML at all; there is nothing
-		// sound to preserve from it, so fall back to the plain marshal.
-		return fresh, nil
+		return nil, false
 	}
 	if err := yaml.Unmarshal(fresh, &newDoc); err != nil {
-		return fresh, nil
+		return nil, false
 	}
 
 	oldRoot, newRoot := documentRoot(&oldDoc), documentRoot(&newDoc)
 	if oldRoot == nil || newRoot == nil {
-		return fresh, nil
+		return nil, false
 	}
 
-	merged := mergeConfigNode(oldRoot, newRoot, reflect.TypeOf(config))
-	out, err := yaml.Marshal(merged)
+	out, err := yaml.Marshal(mergeConfigNode(oldRoot, newRoot, t))
 	if err != nil {
-		return fresh, nil
+		return nil, false
 	}
-	return out, nil
+	return out, true
 }
 
 func documentRoot(doc *yaml.Node) *yaml.Node {
@@ -61,23 +57,21 @@ func documentRoot(doc *yaml.Node) *yaml.Node {
 	return doc
 }
 
-// mergeConfigNode overlays new onto old for exactly the keys t's fields (recursively,
-// through embedded/inline fields) declare. Every key old carries that t does not
-// declare is copied through untouched, in its original position — that is the whole
-// point: t cannot drop what it does not know exists.
-func mergeConfigNode(old, new *yaml.Node, t reflect.Type) *yaml.Node {
+// mergeConfigNode overlays updated onto old for the keys t declares; undeclared
+// keys are kept in place.
+func mergeConfigNode(old, updated *yaml.Node, t reflect.Type) *yaml.Node {
 	if old == nil {
-		return new
+		return updated
 	}
-	if new == nil {
+	if updated == nil {
 		return old
 	}
-	if old.Kind != yaml.MappingNode || new.Kind != yaml.MappingNode {
-		return new
+	if old.Kind != yaml.MappingNode || updated.Kind != yaml.MappingNode {
+		return updated
 	}
 
 	known := knownYAMLFields(t)
-	merged := &yaml.Node{Kind: yaml.MappingNode, Tag: new.Tag, Style: new.Style}
+	merged := &yaml.Node{Kind: yaml.MappingNode, Tag: updated.Tag, Style: updated.Style}
 	handled := make(map[string]bool, len(known))
 
 	for i := 0; i+1 < len(old.Content); i += 2 {
@@ -88,96 +82,82 @@ func mergeConfigNode(old, new *yaml.Node, t reflect.Type) *yaml.Node {
 			continue
 		}
 		handled[key.Value] = true
-		newValue := mappingValue(new, key.Value)
+		newValue := mappingValue(updated, key.Value)
 		if newValue == nil {
-			// A known field with no current value (omitempty dropped it from the
-			// fresh marshal): this run cleared it, so drop the key.
+			// omitempty dropped it: this run cleared the field.
 			continue
 		}
 		merged.Content = append(merged.Content, key, mergeConfigValue(old.Content[i+1], newValue, fieldType))
 	}
 
-	for i := 0; i+1 < len(new.Content); i += 2 {
-		key := new.Content[i].Value
+	for i := 0; i+1 < len(updated.Content); i += 2 {
+		key := updated.Content[i].Value
 		if handled[key] {
 			continue
 		}
-		merged.Content = append(merged.Content, new.Content[i], new.Content[i+1])
+		merged.Content = append(merged.Content, updated.Content[i], updated.Content[i+1])
 	}
 
 	return merged
 }
 
-// mergeConfigValue recurses into struct-, slice-of-struct-, and map-of-struct-
-// shaped field values so an unknown field nested inside one of them (e.g. a
-// cloud provider alias's "erun:" block, several levels below the top of
-// config.yaml) survives too. Scalars, and slices/maps whose element type is
-// not itself a struct, have nothing further to preserve, so the fresh value
-// wins outright.
-func mergeConfigValue(old, new *yaml.Node, fieldType reflect.Type) *yaml.Node {
+// mergeConfigValue recurses into struct-shaped values so nested unknown keys survive.
+func mergeConfigValue(old, updated *yaml.Node, fieldType reflect.Type) *yaml.Node {
 	if fieldType == nil {
-		return new
+		return updated
 	}
 	for fieldType.Kind() == reflect.Pointer {
 		fieldType = fieldType.Elem()
 	}
-	switch fieldType.Kind() {
-	case reflect.Struct:
-		return mergeConfigNode(old, new, fieldType)
-	case reflect.Slice, reflect.Array:
-		return mergeConfigSliceNode(old, new, fieldType.Elem())
-	case reflect.Map:
-		return mergeConfigMapNode(old, new, fieldType.Elem())
-	default:
-		return new
+	kind := fieldType.Kind()
+	if kind == reflect.Struct {
+		return mergeConfigNode(old, updated, fieldType)
 	}
+	if kind == reflect.Slice || kind == reflect.Array {
+		return mergeConfigSliceNode(old, updated, fieldType.Elem())
+	}
+	if kind == reflect.Map {
+		return mergeConfigMapNode(old, updated, fieldType.Elem())
+	}
+	return updated
 }
 
-// mergeConfigSliceNode merges a sequence field whose elements are (pointers
-// to) structs. When the element type exposes a natural identity field (Alias,
-// ID, or Name — the conventions every persisted list in this package already
-// uses), items are matched by that value so an append or removal elsewhere in
-// the list does not fall back to a wholesale replace. Otherwise, same-length
-// sequences merge positionally; a length change with no identity field to key
-// on can't be aligned soundly, so the fresh sequence wins as-is.
-func mergeConfigSliceNode(old, new *yaml.Node, elemType reflect.Type) *yaml.Node {
-	if old.Kind != yaml.SequenceNode || new.Kind != yaml.SequenceNode {
-		return new
+// mergeConfigSliceNode matches struct elements by Alias/ID/Name when present, else
+// by position; a length change without identity takes the fresh sequence.
+func mergeConfigSliceNode(old, updated *yaml.Node, elemType reflect.Type) *yaml.Node {
+	if old.Kind != yaml.SequenceNode || updated.Kind != yaml.SequenceNode {
+		return updated
 	}
 	for elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 	if elemType.Kind() != reflect.Struct {
-		return new
+		return updated
 	}
 
 	if identityKey, ok := sliceIdentityField(elemType); ok {
-		return mergeConfigSliceNodeByIdentity(old, new, elemType, identityKey)
+		return mergeConfigSliceNodeByIdentity(old, updated, elemType, identityKey)
 	}
 
-	if len(old.Content) != len(new.Content) {
-		return new
+	if len(old.Content) != len(updated.Content) {
+		return updated
 	}
-	merged := &yaml.Node{Kind: yaml.SequenceNode, Tag: new.Tag, Style: new.Style}
-	for i := range new.Content {
-		merged.Content = append(merged.Content, mergeConfigNode(old.Content[i], new.Content[i], elemType))
+	merged := &yaml.Node{Kind: yaml.SequenceNode, Tag: updated.Tag, Style: updated.Style}
+	for i := range updated.Content {
+		merged.Content = append(merged.Content, mergeConfigNode(old.Content[i], updated.Content[i], elemType))
 	}
 	return merged
 }
 
-// mergeConfigSliceNodeByIdentity is mergeConfigSliceNode's identity-keyed path:
-// old items are indexed by identityKey's value, and each new item merges
-// against the old item sharing that value (an add or removal elsewhere in the
-// list does not disturb the rest).
-func mergeConfigSliceNodeByIdentity(old, new *yaml.Node, elemType reflect.Type, identityKey string) *yaml.Node {
+func mergeConfigSliceNodeByIdentity(old, updated *yaml.Node, elemType reflect.Type, identityKey string) *yaml.Node {
 	oldByKey := make(map[string]*yaml.Node, len(old.Content))
 	for _, item := range old.Content {
 		if key := mappingValue(item, identityKey); key != nil {
 			oldByKey[key.Value] = item
 		}
 	}
-	merged := &yaml.Node{Kind: yaml.SequenceNode, Tag: new.Tag, Style: new.Style}
-	for _, item := range new.Content {
+	merged := &yaml.Node{Kind: yaml.SequenceNode, Tag: updated.Tag, Style: updated.Style}
+	for _, item := range updated.Content {
 		key := mappingValue(item, identityKey)
 		if key == nil {
 			merged.Content = append(merged.Content, item)
@@ -192,26 +172,21 @@ func mergeConfigSliceNodeByIdentity(old, new *yaml.Node, elemType reflect.Type, 
 	return merged
 }
 
-// mergeConfigMapNode merges a mapping field whose values are (pointers to)
-// structs, keyed by the map's own keys (already a stable identity, unlike a
-// slice index). A key present in new but absent from old is added; a key
-// present in old but dropped from new is treated as an intentional removal
-// (map keys are user data the current binary fully owns, not a schema the
-// binary might not recognize yet — that ambiguity only applies to struct
-// fields, handled in mergeConfigNode).
-func mergeConfigMapNode(old, new *yaml.Node, elemType reflect.Type) *yaml.Node {
-	if old.Kind != yaml.MappingNode || new.Kind != yaml.MappingNode {
-		return new
+// mergeConfigMapNode merges struct-valued maps by key; a key missing from updated
+// is an intentional removal, since map keys are user data, not schema.
+func mergeConfigMapNode(old, updated *yaml.Node, elemType reflect.Type) *yaml.Node {
+	if old.Kind != yaml.MappingNode || updated.Kind != yaml.MappingNode {
+		return updated
 	}
-	merged := &yaml.Node{Kind: yaml.MappingNode, Tag: new.Tag, Style: new.Style}
-	for i := 0; i+1 < len(new.Content); i += 2 {
-		key := new.Content[i]
+	merged := &yaml.Node{Kind: yaml.MappingNode, Tag: updated.Tag, Style: updated.Style}
+	for i := 0; i+1 < len(updated.Content); i += 2 {
+		key := updated.Content[i]
 		oldValue := mappingValue(old, key.Value)
 		if oldValue == nil {
-			merged.Content = append(merged.Content, key, new.Content[i+1])
+			merged.Content = append(merged.Content, key, updated.Content[i+1])
 			continue
 		}
-		merged.Content = append(merged.Content, key, mergeConfigValue(oldValue, new.Content[i+1], elemType))
+		merged.Content = append(merged.Content, key, mergeConfigValue(oldValue, updated.Content[i+1], elemType))
 	}
 	return merged
 }
@@ -243,21 +218,13 @@ func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// legacyYAMLKeys is implemented by config types whose UnmarshalYAML migrates
-// one or more legacy scalar keys into current fields (see container_registry.go).
-// Without this, knownYAMLFields never learns those keys exist, so
-// mergeConfigNode treats a legacy key surviving in the old document as
-// "unknown" and copies it through untouched forever — defeating the
-// documented one-way migration: the value keeps re-migrating on every load,
-// clobbering whatever the current fields were actually set to.
+// legacyYAMLKeys lists keys UnmarshalYAML migrates away from; without it the merge
+// would keep a legacy key forever and re-migrate it on every load.
 type legacyYAMLKeys interface {
 	legacyYAMLKeys() []string
 }
 
-// knownYAMLFields returns the yaml key -> field-type map t declares, inlining
-// embedded/",inline" fields so their keys count as t's own, plus any legacy
-// keys t declares via legacyYAMLKeys. Non-struct types (including the zero
-// reflect.Type) declare no keys.
+// knownYAMLFields returns t's yaml keys and field types, including inline and legacy keys.
 func knownYAMLFields(t reflect.Type) map[string]reflect.Type {
 	fields := map[string]reflect.Type{}
 	if t == nil {
@@ -290,11 +257,8 @@ func knownYAMLFields(t reflect.Type) map[string]reflect.Type {
 	return fields
 }
 
-// addLegacyYAMLKeys adds t's legacy keys (if it declares any via
-// legacyYAMLKeys) to fields, mapped to a nil type. A legacy key is always
-// fully migrated into other fields, so the fresh marshal never re-emits it;
-// mergeConfigNode's own "known field with no current value" rule then drops
-// it, and that path never consults the type, so nil is safe here.
+// addLegacyYAMLKeys maps legacy keys to a nil type; the merge drops them without
+// consulting the type.
 func addLegacyYAMLKeys(fields map[string]reflect.Type, t reflect.Type) {
 	legacy, ok := reflect.New(t).Elem().Interface().(legacyYAMLKeys)
 	if !ok {
@@ -307,10 +271,7 @@ func addLegacyYAMLKeys(fields map[string]reflect.Type, t reflect.Type) {
 	}
 }
 
-// parseYAMLFieldTag mirrors yaml.v3's own field-name resolution closely enough
-// for schema purposes: an explicit "-" tag is skipped, an explicit name wins,
-// an anonymous field with no name defaults to inline, and everything else
-// defaults to the lowercased Go field name.
+// parseYAMLFieldTag mirrors yaml.v3's field-name resolution.
 func parseYAMLFieldTag(field reflect.StructField) (name string, inline bool, skip bool) {
 	tag := field.Tag.Get("yaml")
 	if tag == "-" {

@@ -15,9 +15,8 @@ import (
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
 )
 
-// Retention policies are psql scripts (:dry_run, \if), so the retention
-// suites run them through the real psql of a postgres:18.3 container, laid
-// out the way the erun-backend-db image lays them out for retention.sh.
+// Policies are psql scripts (:dry_run, \if), so they run through a real psql, laid
+// out as the erun-backend-db image lays them out.
 const (
 	retentionPolicyDir           = "../erun-backend-db/retention"
 	retentionScriptPath          = "../erun-backend-db/bin/retention.sh"
@@ -25,20 +24,14 @@ const (
 	retentionContainerEntrypoint = "/usr/local/bin/erun-backend-db-retention"
 )
 
-// retentionReportRow matches a "<table> | <count>" row of psql's aligned
-// output, the shape of each policy's eligible_for_deletion report.
 var retentionReportRow = regexp.MustCompile(`(?m)^\s*(\w+)\s*\|\s*(\d+)\s*$`)
 
-// retentionPsql is a postgres:18.3 container used only for its psql client.
 type retentionPsql struct {
 	container testcontainers.Container
 	// url reaches the database from inside the container.
 	url string
 }
 
-// startRetentionPsql starts the psql container for databaseURL with the named
-// policy files in retention.sh's retention/ directory and retention.sh as the
-// image's entrypoint, so the entrypoint sweeps exactly those policies.
 func startRetentionPsql(t *testing.T, ctx context.Context, databaseURL string, policies ...string) retentionPsql {
 	t.Helper()
 	parsed, err := url.Parse(databaseURL)
@@ -70,13 +63,10 @@ func startRetentionPsql(t *testing.T, ctx context.Context, databaseURL string, p
 	return retentionPsql{container: container, url: inside.String()}
 }
 
-// retentionPolicyPath is a policy file's path inside the psql container.
 func retentionPolicyPath(policy string) string {
 	return retentionContainerPolicyDir + "/" + policy
 }
 
-// run executes cmd in the psql container and returns its combined output and
-// exit code.
 func (p retentionPsql) run(t *testing.T, ctx context.Context, env []string, cmd ...string) (string, int) {
 	t.Helper()
 	opts := []tcexec.ProcessOption{tcexec.Multiplexed()}
@@ -93,8 +83,6 @@ func (p retentionPsql) run(t *testing.T, ctx context.Context, env []string, cmd 
 	return string(out), code
 }
 
-// sweep runs retention.sh itself with ERUN_RETENTION_DRY_RUN set, failing the
-// test unless it exits 0, and returns its output.
 func (p retentionPsql) sweep(t *testing.T, ctx context.Context, dryRun bool) string {
 	t.Helper()
 	env := []string{"ERUN_DATABASE_URL=" + p.url, "ERUN_RETENTION_DRY_RUN=" + strconv.FormatBool(dryRun)}
@@ -105,8 +93,6 @@ func (p retentionPsql) sweep(t *testing.T, ctx context.Context, dryRun bool) str
 	return out
 }
 
-// retentionReport parses the eligible_for_deletion rows from psql's output,
-// keyed by table name.
 func retentionReport(out string) map[string]string {
 	report := map[string]string{}
 	for _, m := range retentionReportRow.FindAllStringSubmatch(out, -1) {

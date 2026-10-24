@@ -12,60 +12,12 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// close_pull_request.go closes the GitHub pull request a merge queue
-// actually shipped. `erun exec gate-merge` lands a squash commit whose SHA is
-// not the branch head GitHub tracks, so GitHub never reconciles a queued
-// merge with its open pull request on its own -- the PR stays open forever
-// with no link to what actually shipped. This runs after `erun
-// review report-merged` has already succeeded and closes that gap: find the
-// branch's open pull request (a no-op, not an error, when there is none),
-// refuse loudly if its head moved since the merge drive fetched it, otherwise
-// record the landing commit in a comment and close it.
-
-// ClosePullRequestParams is the `erun exec close-pr` input.
-type ClosePullRequestParams struct {
-	// RemoteURL is the github.com remote the pull request lives on.
-	RemoteURL string
-	// Branch is the source branch whose open pull request should close --
-	// the review's sourceBranch.
-	Branch string
-	// TargetBranch is the pull request's base branch -- the review's
-	// targetBranch. Disambiguates when Branch has open pull requests
-	// against more than one base.
-	TargetBranch string
-	// GatedCommit is Branch's tip at the moment the merge drive fetched and
-	// built it (GateMergeLandedSource.SourceCommit). Closing is refused when
-	// the pull request's current head no longer matches this: something
-	// pushed to Branch after it was fetched, so the built content is not
-	// what closing would discard.
-	GatedCommit string
-	// LandingCommit is the commit that actually landed on TargetBranch,
-	// recorded in a comment on the pull request so a later reader does not
-	// have to search TargetBranch's history for it.
-	LandingCommit string
-}
-
-// ClosePullRequestResult is what actually happened.
-type ClosePullRequestResult struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Branch string `json:"branch"`
-	// Found is false when Branch has no open pull request against
-	// TargetBranch -- a queued plain branch is legitimate, so this is a
-	// no-op result, not an error.
-	Found  bool `json:"found"`
-	Number int  `json:"number,omitempty"`
-	Closed bool `json:"closed"`
-}
-
-// ClosePullRequestHeadMovedError reports that Branch's open pull request's
-// head no longer matches GatedCommit -- the same class of loud, named
-// refusal `erun exec push`'s own branch-mismatch check gives, because
-// closing the pull request here would silently discard whatever moved the
-// branch after the merge drive fetched it.
+// ClosePullRequestHeadMovedError reports that the pull request head no longer
+// matches GatedCommit, so closing would discard unbuilt work.
 type ClosePullRequestHeadMovedError struct {
 	Branch, GatedCommit, ActualHead string
 	Number                          int
@@ -78,8 +30,7 @@ func (e *ClosePullRequestHeadMovedError) Error() string {
 	)
 }
 
-// ClosePullRequestDependencies lets tests replace the HTTP call and gh token
-// resolution without a real network or a real gh CLI.
+// ClosePullRequestDependencies are the HTTP and gh token seams.
 type ClosePullRequestDependencies struct {
 	Client       *http.Client
 	ResolveToken func(owner string) (string, bool)
@@ -95,17 +46,12 @@ func normalizeClosePullRequestDependencies(deps ClosePullRequestDependencies) Cl
 	return deps
 }
 
-// closePullRequestInputs is ClosePullRequest's validated, trimmed input, kept
-// separate from ClosePullRequestParams so validation happens exactly once.
 type closePullRequestInputs struct {
 	branch, target, gatedCommit, landingCommit string
 	owner, repo                                string
 }
 
-// resolveClosePullRequestInputs validates and traces ClosePullRequest's
-// inputs, isolated so ClosePullRequest itself stays under the module's
-// cyclomatic complexity limit.
-func resolveClosePullRequestInputs(ctx core.Context, params ClosePullRequestParams) (closePullRequestInputs, error) {
+func resolveClosePullRequestInputs(ctx core.Context, params model.ClosePullRequestParams) (closePullRequestInputs, error) {
 	ctx.Trace("close-pr: resolving inputs")
 	inputs := closePullRequestInputs{
 		branch:        strings.TrimSpace(params.Branch),
@@ -129,16 +75,15 @@ func resolveClosePullRequestInputs(ctx core.Context, params ClosePullRequestPara
 	return inputs, nil
 }
 
-// ClosePullRequest finds Branch's open pull request against TargetBranch on
-// GitHub, refuses if its head has moved past GatedCommit, otherwise comments
-// LandingCommit on it and closes it.
-func ClosePullRequest(ctx core.Context, params ClosePullRequestParams, deps ClosePullRequestDependencies) (ClosePullRequestResult, error) {
+// ClosePullRequest comments LandingCommit on Branch's open pull request and
+// closes it, unless its head moved past GatedCommit.
+func ClosePullRequest(ctx core.Context, params model.ClosePullRequestParams, deps ClosePullRequestDependencies) (model.ClosePullRequestResult, error) {
 	inputs, err := resolveClosePullRequestInputs(ctx, params)
 	if err != nil {
-		return ClosePullRequestResult{}, err
+		return model.ClosePullRequestResult{}, err
 	}
 	deps = normalizeClosePullRequestDependencies(deps)
-	result := ClosePullRequestResult{Owner: inputs.owner, Repo: inputs.repo, Branch: inputs.branch}
+	result := model.ClosePullRequestResult{Owner: inputs.owner, Repo: inputs.repo, Branch: inputs.branch}
 
 	listURL := githubListPullRequestsURL(inputs.owner, inputs.repo, inputs.branch, inputs.target)
 	ctx.Trace("github: GET " + listURL)
@@ -150,43 +95,40 @@ func ClosePullRequest(ctx core.Context, params ClosePullRequestParams, deps Clos
 	token, ok := deps.ResolveToken(inputs.owner)
 	if !ok {
 		ctx.Trace("close-pr: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set")
-		return ClosePullRequestResult{}, fmt.Errorf(
+		return model.ClosePullRequestResult{}, fmt.Errorf(
 			"no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN")
 	}
 	return findAndClosePullRequest(ctx, deps, listURL, token, inputs, result)
 }
 
-// findAndClosePullRequest runs the mutating half of ClosePullRequest, isolated
-// so the validation and dry-run branching above it don't inflate that
-// function's complexity -- the same split GateMergeWorkingTree uses.
-func findAndClosePullRequest(ctx core.Context, deps ClosePullRequestDependencies, listURL, token string, inputs closePullRequestInputs, result ClosePullRequestResult) (ClosePullRequestResult, error) {
+func findAndClosePullRequest(ctx core.Context, deps ClosePullRequestDependencies, listURL, token string, inputs closePullRequestInputs, result model.ClosePullRequestResult) (model.ClosePullRequestResult, error) {
 	pulls, err := listOpenGitHubPullRequests(context.Background(), deps.Client, token, listURL, inputs.owner, inputs.repo)
 	if err != nil {
-		return ClosePullRequestResult{}, err
+		return model.ClosePullRequestResult{}, err
 	}
 	if len(pulls) == 0 {
 		ctx.Trace(fmt.Sprintf("close-pr: no open pull request for %s -> %s, nothing to close", inputs.branch, inputs.target))
 		return result, nil
 	}
 	if len(pulls) > 1 {
-		return ClosePullRequestResult{}, fmt.Errorf(
+		return model.ClosePullRequestResult{}, fmt.Errorf(
 			"found %d open pull requests for %s -> %s; expected at most one", len(pulls), inputs.branch, inputs.target)
 	}
 	pull := pulls[0]
 	result.Number = pull.Number
 
 	if pull.Head.SHA != inputs.gatedCommit {
-		return ClosePullRequestResult{}, &ClosePullRequestHeadMovedError{
+		return model.ClosePullRequestResult{}, &ClosePullRequestHeadMovedError{
 			Branch: inputs.branch, GatedCommit: inputs.gatedCommit, ActualHead: pull.Head.SHA, Number: pull.Number,
 		}
 	}
 
 	comment := fmt.Sprintf("Merged via the erun merge queue as %s on %s.", inputs.landingCommit, inputs.target)
 	if err := postGitHubIssueComment(context.Background(), deps.Client, token, inputs.owner, inputs.repo, pull.Number, comment); err != nil {
-		return ClosePullRequestResult{}, err
+		return model.ClosePullRequestResult{}, err
 	}
 	if err := closeGitHubPullRequest(context.Background(), deps.Client, token, inputs.owner, inputs.repo, pull.Number); err != nil {
-		return ClosePullRequestResult{}, err
+		return model.ClosePullRequestResult{}, err
 	}
 
 	result.Found = true
@@ -201,9 +143,6 @@ type githubPullRequest struct {
 	} `json:"head"`
 }
 
-// githubListPullRequestsURL builds the open-pull-requests-for-branch lookup
-// URL with branch/target properly query-escaped, since either may contain
-// characters (like "/") that are only safe inside a query value once encoded.
 func githubListPullRequestsURL(owner, repo, branch, target string) string {
 	query := url.Values{
 		"head":  {owner + ":" + branch},

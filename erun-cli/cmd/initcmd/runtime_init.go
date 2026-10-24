@@ -5,16 +5,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
-// NewRuntimeInitCmd is the erun-devops image's ENTRYPOINT: the init of the
-// runtime container, never something an operator runs.
+// NewRuntimeInitCmd is the erun-devops image's ENTRYPOINT.
 func NewRuntimeInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "runtime-init [devops | COMMAND [ARGS...]]",
@@ -42,12 +41,11 @@ func NewRuntimeInitCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRuntimeInitCommand(shared.CommandContext(cmd), args)
+			return runRuntimeInitCommand(clicmd.CommandContext(cmd), args)
 		},
 	}
-	// Everything after COMMAND belongs to it, not to erun.
 	cmd.Flags().SetInterspersed(false)
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -69,15 +67,13 @@ func runRuntimeInitCommand(ctx core.Context, args []string) error {
 		return internal.WithExitCode(err, code)
 	}
 	if code != 0 {
-		// The container's command already reported its own failure; only its
-		// exit code is the entrypoint's to pass on.
+		// The command already reported its failure; pass on only the exit code.
 		return internal.MarkReported(internal.WithExitCode(fmt.Errorf("exit status %d", code), code))
 	}
 	return nil
 }
 
-// NewTrimCacheCmd bounds the go build cache. The runtime entrypoint runs the same
-// trim in-process every half hour; this is the manual form.
+// NewTrimCacheCmd trims the go build cache manually; the entrypoint also runs it periodically.
 func NewTrimCacheCmd() *cobra.Command {
 	var maxBytes int64
 	cmd := &cobra.Command{
@@ -97,11 +93,11 @@ func NewTrimCacheCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrimCacheCommand(shared.CommandContext(cmd), args, maxBytes, cmd.Flags().Changed("max-bytes"))
+			return runTrimCacheCommand(clicmd.CommandContext(cmd), args, maxBytes, cmd.Flags().Changed("max-bytes"))
 		},
 	}
 	cmd.Flags().Int64Var(&maxBytes, "max-bytes", 0, "Cap in bytes (default: ERUN_GO_BUILD_CACHE_MAX_BYTES, else 16 GiB)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -128,9 +124,7 @@ func runTrimCacheCommand(ctx core.Context, args []string, maxBytes int64, maxByt
 	return ctx.WriteResult(result)
 }
 
-// NewInstallSkillsCmd installs erun's skills and reusable agents into the
-// assistants' discovery directories; the runtime entrypoint does the same at
-// every boot.
+// NewInstallSkillsCmd installs erun's skills and agents; the entrypoint also runs it at boot.
 func NewInstallSkillsCmd() *cobra.Command {
 	var skillsDir, agentsDir string
 	cmd := &cobra.Command{
@@ -148,12 +142,12 @@ func NewInstallSkillsCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInstallSkillsCommand(shared.CommandContext(cmd), skillsDir, agentsDir)
+			return runInstallSkillsCommand(clicmd.CommandContext(cmd), skillsDir, agentsDir)
 		},
 	}
-	cmd.Flags().StringVar(&skillsDir, "skills-dir", common.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
+	cmd.Flags().StringVar(&skillsDir, "skills-dir", core.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
 	cmd.Flags().StringVar(&agentsDir, "agents-dir", podruntime.RuntimeBakedAgentsDir, "Directory holding one <name>.md per agent")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -166,7 +160,7 @@ func runInstallSkillsCommand(ctx core.Context, skillsDir, agentsDir string) erro
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(result)
 	}
 	for _, target := range result.Targets {

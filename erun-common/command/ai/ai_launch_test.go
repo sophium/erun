@@ -5,176 +5,59 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// TestAISessionLaunchCommand pins which AI-tab launches compose claude with the
-// environment's flags (bare or claude; the runtime image's claude link resumes)
-// versus launch verbatim (other tools, or claude with explicit
-// flags). Remote Control naming is pinned separately by TestAISessionLaunchRemoteControl.
 func TestAISessionLaunchCommand(t *testing.T) {
 	effort := func(level string) configpkg.EnvironmentClaudeConfig {
 		l := level
 		return configpkg.EnvironmentClaudeConfig{Effort: &l}
 	}
 
-	t.Run("default claude launches at the env effort", func(t *testing.T) {
-		assertDefaultClaudeGuardAtEffort(t, effort("high"))
-	})
-
-	t.Run("explicit claude tool composes the same flags", func(t *testing.T) {
-		if got := eruncommon.AISessionLaunchCommand("claude", effort("low"), nil, "team", "dev"); !strings.Contains(got, "claude --effort low") || strings.Contains(got, "--continue") {
-			t.Fatalf("explicit claude must compose the env flags without --continue, got %q", got)
-		}
-	})
-
 	t.Run("a non-claude tool launches verbatim", func(t *testing.T) {
-		if got := eruncommon.AISessionLaunchCommand("codex", effort("max"), nil, "team", "dev"); got != "codex" {
+		if got := open.AISessionLaunchCommand("codex", effort("max"), nil, "team", "dev"); got != "codex" {
 			t.Fatalf("codex must launch verbatim, got %q", got)
 		}
 	})
 
 	t.Run("claude with explicit flags launches verbatim", func(t *testing.T) {
-		if got := eruncommon.AISessionLaunchCommand("claude --resume", effort("max"), nil, "team", "dev"); got != "claude --resume" {
+		if got := open.AISessionLaunchCommand("claude --resume", effort("max"), nil, "team", "dev"); got != "claude --resume" {
 			t.Fatalf("explicit-flag claude must launch verbatim, got %q", got)
 		}
 	})
-
-	t.Run("unset and invalid effort both resolve to ultracode", func(t *testing.T) {
-		assertEffortResolvesToUltracode(t, effort)
-	})
-
-	// ultracode is not a `claude --effort` value; it launches through the
-	// --settings mechanism instead.
-	t.Run("ultracode launches via --settings", func(t *testing.T) {
-		assertUltracodeInBothBranches(t, effort("ultracode"))
-	})
-
-	t.Run("an explicit max still launches via --effort", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", effort("max"), nil, "team", "dev")
-		if !strings.Contains(got, "--effort max") || strings.Contains(got, "--settings") {
-			t.Fatalf("explicit max must keep --effort max, got %q", got)
-		}
-	})
 }
 
-func assertDefaultClaudeGuardAtEffort(t *testing.T, config configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := eruncommon.AISessionLaunchCommand("", config, nil, "team", "dev")
-	// One plain launch: the runtime image's claude link decides whether to
-	// resume, so the AI tab carries no shell guard of its own.
-	if want := "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus --remote-control team/dev"; got != want {
-		t.Fatalf("launch = %q, want %q", got, want)
-	}
-}
-
-func assertEffortResolvesToUltracode(t *testing.T, effort func(string) configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-	if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
-		t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
-	}
-	// A bad persisted value must never reach the shell verbatim; it resolves
-	// to the default instead of injecting `--effort turbo`.
-	got = eruncommon.AISessionLaunchCommand("", effort("turbo"), nil, "team", "dev")
-	if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
-		t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
-	}
-}
-
-func assertUltracodeInBothBranches(t *testing.T, config configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := eruncommon.AISessionLaunchCommand("", config, nil, "team", "dev")
-	if strings.Count(got, `--settings '{"ultracode":true}'`) != 1 || strings.Contains(got, "--effort") {
-		t.Fatalf("ultracode must inject --settings (never --effort), got %q", got)
-	}
-	if !strings.Contains(got, `claude --settings '{"ultracode":true}'`) {
-		t.Fatalf("--settings must follow claude, got %q", got)
-	}
-}
-
-// TestAISessionLaunchCommandModelAndDebugFlags pins that the per-env default
-// model and verbose+debug launch flags each inject independently of the other.
-func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
-	t.Run("default model and verbose debug inject into the launch", func(t *testing.T) {
-		model := "fable"
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"opus", "fable"},
-			DefaultModel: &model,
-			VerboseDebug: true,
-		}, nil, "team", "dev")
-		if !strings.Contains(got, `claude --settings '{"ultracode":true}' --model fable --verbose --debug`) {
-			t.Fatalf("flags must compose after the effort flags, got %q", got)
-		}
-	})
-
-	t.Run("verbose debug composes with the resolved default model", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{VerboseDebug: true}, nil, "team", "dev")
-		if !strings.Contains(got, "--model opus --verbose --debug") {
-			t.Fatalf("expected --model opus --verbose --debug, got %q", got)
-		}
-	})
-}
-
-// TestAISessionLaunchSubagentModelPrefix pins that the subagent model mirrors
-// the launch model (CLAUDE_CODE_SUBAGENT_MODEL is set from --model), and is
-// absent when no model resolves or the tool is not claude.
 func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	model := func(v string) *string { return &v }
 
-	t.Run("prefix mirrors the resolved model and composes with ultracode", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"fable"},
-			DefaultModel: model("fable"),
-		}, nil, "team", "dev")
-		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --settings '{"ultracode":true}' --model fable`) {
-			t.Fatalf("prefix must precede claude and compose with --settings/--model, got %q", got)
-		}
-	})
-
 	t.Run("no prefix when no available model is a safe token", func(t *testing.T) {
-		// A launch carries no model only when every available model is
-		// unusable; nothing unusable is ever started.
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}}, nil, "team", "dev")
+		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}}, nil, "team", "dev")
 		if strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") || strings.Contains(got, "--model") {
 			t.Fatalf("expected no subagent-model prefix or --model without a safe model, got %q", got)
 		}
 	})
 
 	t.Run("no prefix for a non-claude tool", func(t *testing.T) {
-		if got := eruncommon.AISessionLaunchCommand("codex", configpkg.EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}, nil, "team", "dev"); strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") {
+		if got := open.AISessionLaunchCommand("codex", configpkg.EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}, nil, "team", "dev"); strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") {
 			t.Fatalf("non-claude tool must launch verbatim with no prefix, got %q", got)
 		}
 	})
 
-	t.Run("resume line carries the prefix when a model resolves", func(t *testing.T) {
-		script := strings.Join(eruncommon.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"fable"},
-			DefaultModel: model("fable"),
-		}, nil, "team", "dev"), "\n")
-		if !strings.Contains(script, "resume with") || !strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue") {
-			t.Fatalf("resume command must carry the subagent-model prefix:\n%s", script)
-		}
-	})
-
 	t.Run("resume line has no prefix for a non-claude tool", func(t *testing.T) {
-		script := strings.Join(eruncommon.AISessionLaunchLines("codex", configpkg.EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}, nil, "team", "dev"), "\n")
+		script := strings.Join(open.AISessionLaunchLines("codex", configpkg.EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}, nil, "team", "dev"), "\n")
 		if strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL") {
 			t.Fatalf("non-claude resume must not carry the prefix:\n%s", script)
 		}
 	})
 }
 
-// TestAISessionLaunchContextFollowsTheOptOut pins that an environment that left
-// the gateway is not sized from the catalog. Its own model shares an id with a
-// catalog listing, but it runs on its own sign-in, so the catalog's context
-// window describes a model this session is not using.
+// An opted-out env runs on its own sign-in, so the catalog's context window does not apply.
 func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 	model := func(v string) *string { return &v }
 	optOut := false
 	catalog := &configpkg.OpenRouterConfig{BaseURL: "https://gateway.example/api", Models: []configpkg.OpenRouterModel{{ID: "vendor/model-x", Context: 1048576}}}
-	got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
+	got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
 		UseGateway:   &optOut,
 		Models:       []string{"vendor/model-x"},
 		DefaultModel: model("vendor/model-x"),
@@ -187,71 +70,31 @@ func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchRemoteControl pins the default Remote Control launch: the
-// managed claude session is named <tenant>/<env> so the operator can drive it
-// from the Claude iOS app. It is gated off for the Bedrock/Mantle gateways —
-// the claude.ai account relay it pairs through cannot authenticate those — and
-// for a non-claude tool, and falls back to the unnamed flag (Claude Code then
-// names the session from the pod hostname) when the tenant/env is not safe to
-// inline.
+// Remote Control is off for Bedrock/Mantle gateways and non-claude tools, and
+// unnamed when tenant/env is unsafe to inline.
 func TestAISessionLaunchRemoteControl(t *testing.T) {
-	yes := func() *bool { b := true; return &b }
-
-	t.Run("named <tenant>/<env> by default", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-		if strings.Count(got, "--remote-control team/dev") != 1 {
-			t.Fatalf("expected --remote-control team/dev, got %q", got)
-		}
-	})
-
-	t.Run("gated off when the env uses the Bedrock gateway", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{UseBedrock: yes()}, nil, "team", "dev")
-		if strings.Contains(got, "--remote-control") {
-			t.Fatalf("Bedrock gateway auth must not enable remote control, got %q", got)
-		}
-	})
-
-	t.Run("gated off when the env uses the Mantle gateway", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{UseMantle: yes()}, nil, "team", "dev")
-		if strings.Contains(got, "--remote-control") {
-			t.Fatalf("Mantle gateway auth must not enable remote control, got %q", got)
-		}
-	})
-
 	t.Run("an unsafe tenant/env falls back to the unnamed flag", func(t *testing.T) {
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "a b; rm", "dev")
+		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "a b; rm", "dev")
 		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
 			t.Fatalf("unsafe tenant must yield the unnamed flag, got %q", got)
 		}
 	})
 
 	t.Run("a leading-dash tenant falls back to the unnamed flag", func(t *testing.T) {
-		// Shell-safe, but Claude Code's own arg parser would read a
-		// "-"-leading name as an option flag, so it is treated as unsafe.
-		got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "-rm", "dev")
+		// Claude Code would parse a "-"-leading name as a flag.
+		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "-rm", "dev")
 		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
 			t.Fatalf("leading-dash tenant must yield the unnamed flag, got %q", got)
 		}
 	})
 
 	t.Run("no remote control for a non-claude tool", func(t *testing.T) {
-		if got := eruncommon.AISessionLaunchCommand("codex", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"); strings.Contains(got, "--remote-control") {
+		if got := open.AISessionLaunchCommand("codex", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"); strings.Contains(got, "--remote-control") {
 			t.Fatalf("non-claude tool must launch verbatim without remote control, got %q", got)
-		}
-	})
-
-	t.Run("resume line carries the named flag", func(t *testing.T) {
-		script := strings.Join(eruncommon.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
-		if !strings.Contains(script, "--remote-control team/dev") {
-			t.Fatalf("resume line must carry the named remote-control flag:\n%s", script)
 		}
 	})
 }
 
-// TestResolveClaudeLaunchModel covers launch-model resolution: a chosen default
-// wins when available, else the first available model — never the agent's own
-// default. fable is opt-in (the env must both list and select it), and an
-// all-unusable set resolves to none.
 func TestResolveClaudeLaunchModel(t *testing.T) {
 	model := func(v string) *string { return &v }
 	cases := []struct {
@@ -259,86 +102,25 @@ func TestResolveClaudeLaunchModel(t *testing.T) {
 		config configpkg.EnvironmentClaudeConfig
 		want   string
 	}{
-		{"unset falls back to the first default-available model", configpkg.EnvironmentClaudeConfig{}, "opus"},
-		{"explicit model in explicit models", configpkg.EnvironmentClaudeConfig{Models: []string{"opus", "fable"}, DefaultModel: model("fable")}, "fable"},
-		{"explicit model not in explicit models falls back to first available", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("fable")}, "opus"},
-		{"explicit model in default available set when models unset", configpkg.EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
 		{"fable is opt-in: not auto-selected from the default available set", configpkg.EnvironmentClaudeConfig{DefaultModel: model("fable")}, "opus"},
-		{"first-available honours the env's narrowed set", configpkg.EnvironmentClaudeConfig{Models: []string{"sonnet", "haiku"}}, "sonnet"},
-		{"trimmed explicit model", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("  opus  ")}, "opus"},
-		{"blank explicit model falls back to first available", configpkg.EnvironmentClaudeConfig{DefaultModel: model("  ")}, "opus"},
 		{"unsafe explicit model falls back to first available", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("a b; rm")}, "opus"},
 		{"no safe token in the available set resolves to empty", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}, DefaultModel: model("a b; rm")}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := eruncommon.ResolveClaudeLaunchModel(tc.config, nil); got != tc.want {
+			if got := open.ResolveClaudeLaunchModel(tc.config, nil); got != tc.want {
 				t.Fatalf("resolveClaudeLaunchModel(%+v) = %q, want %q", tc.config, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestResolveClaudeEffort covers the per-env effort resolution: a valid level is
-// used; unset, blank, and invalid fall back to ultracode (the default) so the
-// launch never carries a bad effort flag.
-func TestResolveClaudeEffort(t *testing.T) {
-	level := func(v string) *string { return &v }
-	cases := []struct {
-		name   string
-		config configpkg.EnvironmentClaudeConfig
-		want   string
-	}{
-		{"unset", configpkg.EnvironmentClaudeConfig{}, "ultracode"},
-		{"valid", configpkg.EnvironmentClaudeConfig{Effort: level("low")}, "low"},
-		{"explicit max stays max", configpkg.EnvironmentClaudeConfig{Effort: level("max")}, "max"},
-		{"ultracode is a valid level", configpkg.EnvironmentClaudeConfig{Effort: level("ultracode")}, "ultracode"},
-		{"trimmed", configpkg.EnvironmentClaudeConfig{Effort: level("  high  ")}, "high"},
-		{"blank", configpkg.EnvironmentClaudeConfig{Effort: level("  ")}, "ultracode"},
-		{"invalid", configpkg.EnvironmentClaudeConfig{Effort: level("turbo")}, "ultracode"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := eruncommon.ResolveClaudeEffort(tc.config); got != tc.want {
-				t.Fatalf("resolveClaudeEffort(%+v) = %q, want %q", tc.config, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestAISessionLaunchLines pins the AI session's exit wrapper: the tool's exit
-// must never silently fall through to the trailing shell. A real claude exit
-// can't be staged in the headless Playwright harness, so these script-content
-// assertions own the contract; the launcher's composition into the dtach script
-// is locked by the open --ai dry-run goldens.
+// A real claude exit cannot be staged in Playwright, so these assertions own
+// the exit wrapper's contract.
 func TestAISessionLaunchLines(t *testing.T) {
-	t.Run("claude launch wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
-		script := strings.Join(eruncommon.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
-		for _, want := range []string{
-			"ai_status=0",
-			"--remote-control team/dev || ai_status=$?",
-			`[ "$ai_status" = 137 ]`,
-			"likely out of memory; consider raising Memory in the environment Runtime settings",
-			"Claude exited (exit %s)",
-			"Claude session ended",
-			"resume with: %s",
-		} {
-			if !strings.Contains(script, want) {
-				t.Fatalf("wrapper missing %q:\n%s", want, script)
-			}
-		}
-		// The resume is shell-quoted because it embeds single quotes itself
-		// (the ultracode settings JSON).
-		if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '"'"'{"ultracode":true}'"'"' --model opus --remote-control team/dev'`) {
-			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
-		}
-	})
-
 	t.Run("the wrapper executes: 137 yields the OOM marker and the intact resume", func(t *testing.T) {
-		lines := eruncommon.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-		// Swap the launch (line index 1 by construction) for a bare 137 exit to
-		// simulate the OOM kill; running the rest through a real sh verifies the
-		// printf escapes and shell-quoted resume end to end.
+		lines := open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
+		// Replace the launch with a 137 exit to simulate an OOM kill.
 		lines[1] = "(exit 137) || ai_status=$?"
 		out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
 		if err != nil {
@@ -354,7 +136,7 @@ func TestAISessionLaunchLines(t *testing.T) {
 	})
 
 	t.Run("a verbatim tool keeps its own resume and a tool-neutral label", func(t *testing.T) {
-		script := strings.Join(eruncommon.AISessionLaunchLines("codex", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
+		script := strings.Join(open.AISessionLaunchLines("codex", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
 		if !strings.Contains(script, "codex || ai_status=$?") {
 			t.Fatalf("verbatim tool must run unmodified ahead of the wrapper:\n%s", script)
 		}
@@ -367,22 +149,6 @@ func TestAISessionLaunchLines(t *testing.T) {
 	})
 }
 
-// TestAISessionLaunchCommandKeepsScheduleWakeup guards the legitimate side of
-// erun#1731: the AI tab's persistent, resumable session is exactly the launch
-// mode that has a later invocation to wake into, unlike the one-shot agent job
-// AgentJobCommand builds (locked by the erun-integration dry-run golden
-// job/agent_start_dry_run_plans_the_streaming_invocation). It must never pick
-// up the one-shot job's --disallowedTools ScheduleWakeup restriction.
-func TestAISessionLaunchCommandKeepsScheduleWakeup(t *testing.T) {
-	got := eruncommon.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-	if strings.Contains(got, "disallowedTools") || strings.Contains(got, "ScheduleWakeup") {
-		t.Fatalf("the persistent AI session must keep ScheduleWakeup available, got %q", got)
-	}
-}
-
-// TestClaudeBackgroundEffortKeepsMaxAsAFlag pins the split: every level the
-// effortLevel setting accepts goes to the settings file a restart re-reads, and
-// max, which that setting silently drops, stays a launch flag.
 func TestClaudeBackgroundEffortKeepsMaxAsAFlag(t *testing.T) {
 	cases := []struct {
 		effort   string

@@ -32,40 +32,29 @@ func (r stubConfigRateLimitReader) Get(context.Context) (model.PlatformRateLimit
 }
 
 type stubEnvironmentRepository struct {
-	environments []model.Environment
-	environment  model.Environment
-	created      model.Environment
-	createCalls  int
-	createInput  model.Environment
-	count        int
-	countErr     error
-	// countByContext maps a contextID to the environment count
-	// CountByContext reports for it; an unlisted id reports 0.
-	countByContext    map[string]int
-	countByContextErr error
-	// countByRuntimeType is what CountByType reports for
-	// model.EnvironmentTypeRuntime (#1113's aggregate resource-budget check).
-	countByRuntimeType int
-	countByTypeErr     error
-	err                error
-	// claimTaken makes ClaimDeploy report the deploy slot as already held, the
-	// shape a concurrent deploy produces.
-	claimTaken       bool
-	claimErr         error
-	claimCalls       int
-	markFailedCalls  int
-	markFailedReason string
-	// claimDeleteTaken makes ClaimDelete report the delete slot as already
-	// held, the shape a concurrent or still-in-flight delete produces.
+	environments            []model.Environment
+	environment             model.Environment
+	created                 model.Environment
+	createCalls             int
+	createInput             model.Environment
+	count                   int
+	countErr                error
+	countByContext          map[string]int
+	countByContextErr       error
+	countByRuntimeType      int
+	countByTypeErr          error
+	err                     error
+	claimTaken              bool
+	claimErr                error
+	claimCalls              int
+	markFailedCalls         int
+	markFailedReason        string
 	claimDeleteTaken        bool
 	claimDeleteErr          error
 	claimDeleteCalls        int
 	markDeleteBlockedCalls  int
 	markDeleteBlockedReason string
-	// lastListTenantID captures the security context's TenantID List saw, so a
-	// test can prove which tenant a scoped call actually queried without a
-	// real database's RLS to observe it.
-	lastListTenantID string
+	lastListTenantID        string
 }
 
 func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, string, time.Duration) (bool, error) {
@@ -114,9 +103,6 @@ func (r *stubEnvironmentRepository) CountByContext(_ context.Context, contextID 
 	return r.countByContext[contextID], nil
 }
 
-// CountByType reports countByRuntimeType for model.EnvironmentTypeRuntime and
-// 0 otherwise; the aggregate resource-budget check (#1113) is the only
-// caller, and it only ever asks about runtime environments.
 func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model.EnvironmentType) (int, error) {
 	if r.countByTypeErr != nil {
 		return 0, r.countByTypeErr
@@ -127,11 +113,7 @@ func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model
 	return 0, nil
 }
 
-// stubTenantQuotaRepository reports a fixed quota row for the quota guardrail.
-// Resource caps left at their zero value default to the same values an absent
-// tenant_quotas row would (repository.DefaultMax*), so existing test
-// constructions that only set maxEnvironments keep passing the resource-cap
-// floor check added for #605.
+// stubTenantQuotaRepository leaves zero resource caps at the repository defaults.
 type stubTenantQuotaRepository struct {
 	maxEnvironments       int
 	maxCPUMillicores      int
@@ -202,9 +184,7 @@ type stubContextRepository struct {
 	createCalls  int
 	createInput  model.Context
 	err          error
-	// getTenantID records the owning tenant the last Get was asked for, so a
-	// test can assert the caller named one rather than relying on RLS.
-	getTenantID string
+	getTenantID  string
 }
 
 func (r *stubContextRepository) List(context.Context) ([]model.Context, error) {
@@ -309,9 +289,7 @@ func TestGetContextNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
-	// The read is keyed on the caller's own tenant, never on the id alone: an
-	// id-only context read is what erun_operations' unconditional RLS policy
-	// would answer with another tenant's row.
+	// An id-only read would let erun_operations' RLS return another tenant's row.
 	if contexts.getTenantID != "tenant-1" {
 		t.Fatalf("context read asked for tenant %q, want tenant-1", contexts.getTenantID)
 	}

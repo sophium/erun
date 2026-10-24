@@ -11,45 +11,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// awsSTSIdentityExecutionOperation is the ExecutionModeFor/ExecutionModeReport
-// key for the `aws sts get-caller-identity` call sites (defaultResolveAWSIdentity
-// and defaultCheckAWSStatus below). Every remaining AWS operation stays
-// subprocess-only for its own reason: `aws sso login`/`aws sso logout` drive a
-// real browser device-code flow; `aws configure set` writes the shared
-// ~/.aws/config ini file rather than calling an AWS API; and the erun-oidc
-// federation setup (`aws iam enable-outbound-web-identity-federation`) is a
-// one-shot, rare call that would need a new IAM SDK dependency for a single
-// call site. `aws configure export-credentials` had been lumped in with these,
-// but it does neither — it only resolves the profile's credential chain, which
-// aws-sdk-go-v2's config package already replicates — so it is promoted below
-// as aws-export-credentials instead.
+// awsSTSIdentityExecutionOperation keys the `aws sts get-caller-identity` call sites.
+// sso login/logout, configure set, and federation setup stay subprocess-only.
 const awsSTSIdentityExecutionOperation = "aws-sts"
 
-// awsSTSWebIdentityTokenExecutionOperation is the ExecutionModeFor/
-// ExecutionModeReport key for the `aws sts get-web-identity-token` call site
-// (defaultRunAWSBearerToken below), the OIDC bearer-token mint
-// awsCloudProviderBearerToken uses to federate an AWS-provider alias with
-// erun. Kept distinct from awsSTSIdentityExecutionOperation per
-// execution_mode.go's convention of one key per ported call site, even though
-// both hang off the same aws-sdk-go-v2 STS client.
+// awsSTSWebIdentityTokenExecutionOperation keys the `aws sts get-web-identity-token` call site.
 const awsSTSWebIdentityTokenExecutionOperation = "aws-sts-web-identity-token"
 
-// awsExportCredentialsExecutionOperation is the ExecutionModeFor/
-// ExecutionModeReport key for the `aws configure export-credentials` call site
-// (defaultRunAWSExportCredentials below), the credential mint
-// ExportCloudProviderCredentials uses to seed a remote runtime pod with the
-// operator's host AWS identity — driven by `erun cloud refresh` and by the
-// desktop's background credential refresher (erun-ui/cloud_credentials_refresher.go),
-// which calls it roughly every 45 minutes for as long as an AWS-aliased
-// environment stays open.
+// awsExportCredentialsExecutionOperation keys the `aws configure export-credentials` call site.
 const awsExportCredentialsExecutionOperation = "aws-export-credentials"
 
-// libraryResolveAWSIdentity is the library-backed alternative to
-// defaultResolveAWSIdentity. It renders the exact same `aws sts
-// get-caller-identity` trace line for dry-run/audit parity, then resolves the
-// identity via aws-sdk-go-v2 instead of shelling out to the aws CLI.
+// libraryResolveAWSIdentity traces the same CLI line for parity, then uses aws-sdk-go-v2.
 func libraryResolveAWSIdentity(ctx core.Context, profile string) (AWSIdentity, error) {
 	profile = strings.TrimSpace(profile)
 	traceAWSGetCallerIdentity(ctx, profile)
@@ -60,29 +35,20 @@ func libraryResolveAWSIdentity(ctx core.Context, profile string) (AWSIdentity, e
 	return identity, nil
 }
 
-// libraryCheckAWSStatus is the library-backed alternative to
-// defaultCheckAWSStatus. Unlike the subprocess version it can never observe
-// "aws CLI is not installed" — there is no CLI to be missing — so that status
-// arm never fires here; every other classification (active, not configured,
-// expired) is preserved.
-func libraryCheckAWSStatus(_ core.Context, provider config.CloudProviderConfig) CloudProviderStatus {
+// libraryCheckAWSStatus never reports "aws CLI not installed"; other statuses match.
+func libraryCheckAWSStatus(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
 	_, err := awsSDKCallerIdentity(context.Background(), provider.Profile)
 	if err == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 	}
 	status := config.CloudTokenStatusExpired
 	if isAWSProfileNotConfiguredError(err) {
 		status = config.CloudTokenStatusNotConfigured
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: awsSDKErrorMessage(err)}
+	return model.CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: awsSDKErrorMessage(err)}
 }
 
-// libraryRunAWSBearerToken is the library-backed alternative to
-// defaultRunAWSBearerToken. It renders the exact same `aws sts
-// get-web-identity-token` trace line for dry-run/audit parity — including the
-// unconditional dry-run trace awsBearerTokenWithOIDCRetry issues a second time
-// to preview its federation-enable recovery — then mints the token via
-// aws-sdk-go-v2 instead of shelling out to the aws CLI.
+// libraryRunAWSBearerToken traces the same CLI line for parity, then uses aws-sdk-go-v2.
 func libraryRunAWSBearerToken(ctx core.Context, profile, audience string) (string, error) {
 	profile = strings.TrimSpace(profile)
 	audience = normalizeCloudBearerAudience(audience)
@@ -97,13 +63,7 @@ func libraryRunAWSBearerToken(ctx core.Context, profile, audience string) (strin
 	return token, nil
 }
 
-// libraryRunAWSExportCredentials is the library-backed alternative to
-// defaultRunAWSExportCredentials. It renders the exact same `aws configure
-// export-credentials` trace line for dry-run/audit parity, then resolves the
-// profile's credentials via aws-sdk-go-v2's own credential provider chain
-// (static keys, SSO, assume-role, credential_process, IMDS — the same
-// ~/.aws/config and ~/.aws/sso cache the aws CLI itself reads) instead of
-// shelling out to the aws CLI.
+// libraryRunAWSExportCredentials traces the same CLI line for parity, then uses aws-sdk-go-v2.
 func libraryRunAWSExportCredentials(ctx core.Context, profile string) (CloudProviderCredentials, error) {
 	profile = strings.TrimSpace(profile)
 	traceAWSExportCredentials(ctx, profile)
@@ -117,11 +77,7 @@ func libraryRunAWSExportCredentials(ctx core.Context, profile string) (CloudProv
 	return creds, nil
 }
 
-// awsGetCallerIdentityArgs is the single source of the `aws sts
-// get-caller-identity` argv, shared by defaultResolveAWSIdentity (which also
-// executes it as a subprocess) and traceAWSGetCallerIdentity (which only
-// renders it), so the dry-run/audit trace can never drift from either
-// execution path.
+// Shared by execution and trace so the dry-run line cannot drift.
 func awsGetCallerIdentityArgs(profile string) []string {
 	args := []string{"sts", "get-caller-identity", "--output", "json"}
 	if profile = strings.TrimSpace(profile); profile != "" {
@@ -134,11 +90,7 @@ func traceAWSGetCallerIdentity(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", awsGetCallerIdentityArgs(profile)...)
 }
 
-// awsGetWebIdentityTokenArgs is the single source of the `aws sts
-// get-web-identity-token` argv, shared by defaultRunAWSBearerToken (which also
-// executes it as a subprocess) and traceAWSGetWebIdentityToken (which only
-// renders it), so the dry-run/audit trace can never drift from either
-// execution path.
+// Shared by execution and trace so the dry-run line cannot drift.
 func awsGetWebIdentityTokenArgs(profile, audience string) []string {
 	args := []string{
 		"sts", "get-web-identity-token",
@@ -158,11 +110,7 @@ func traceAWSGetWebIdentityToken(ctx core.Context, profile, audience string) {
 	ctx.TraceCommand("", "aws", awsGetWebIdentityTokenArgs(profile, audience)...)
 }
 
-// awsConfigureExportCredentialsArgs is the single source of the `aws configure
-// export-credentials` argv, shared by defaultRunAWSExportCredentials (which
-// also executes it as a subprocess) and traceAWSExportCredentials (which only
-// renders it), so the dry-run/audit trace can never drift from either
-// execution path.
+// Shared by execution and trace so the dry-run line cannot drift.
 func awsConfigureExportCredentialsArgs(profile string) []string {
 	args := []string{"configure", "export-credentials", "--format", "process"}
 	if profile = strings.TrimSpace(profile); profile != "" {
@@ -215,14 +163,8 @@ func awsSDKWebIdentityToken(ctx context.Context, profile, audience string) (stri
 	return stringFromPtr(out.WebIdentityToken), nil
 }
 
-// awsSDKExportCredentials resolves profile's credentials through
-// aws-sdk-go-v2's own provider chain instead of the aws CLI's botocore
-// equivalent. Both read the same shared ~/.aws/config, ~/.aws/credentials, and
-// ~/.aws/sso/cache files and implement the same publicly documented AWS
-// credential chain, so no new network call is needed for the common
-// static-key, SSO, or assume-role cases — only whichever of those the chain
-// itself would already contact (STS for assume-role, SSO OIDC for a cached SSO
-// token) does one.
+// awsSDKExportCredentials uses the SDK's credential chain, which reads the same ~/.aws files
+// as the CLI.
 func awsSDKExportCredentials(ctx context.Context, profile string) (CloudProviderCredentials, error) {
 	var opts []func(*awsconfig.LoadOptions) error
 	if profile = strings.TrimSpace(profile); profile != "" {

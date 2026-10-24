@@ -8,8 +8,6 @@ import {
 
 describe('isClaudeModelToken', () => {
   it('accepts every shipped gateway id shape', () => {
-    // The ids an operator actually configures: vendor-prefixed with slashes and
-    // dots, plus the plain aliases the catalog may also carry.
     for (const id of [
       'deepseek/deepseek-v4.1-flash',
       'anthropic/claude-fable-5.1',
@@ -23,8 +21,7 @@ describe('isClaudeModelToken', () => {
   });
 
   it('rejects anything that would reach the shell as syntax', () => {
-    // A value outside the pattern is dropped at launch, so it must be refused
-    // at entry rather than saved and silently ignored.
+    // Such values are dropped at launch, so they are refused at entry.
     for (const id of ['a b', 'model; rm -rf /', 'a$(whoami)', 'a|b', 'a&b', 'a`b`', 'a\nb', '']) {
       expect(isClaudeModelToken(id)).toBe(false);
     }
@@ -101,7 +98,6 @@ describe('addClaudeModelId', () => {
 
 describe('selectableClaudeModelIds', () => {
   it('returns usable ids and drops blank or malformed rows', () => {
-    // A default model must never be selectable from a row the launch would drop.
     expect(
       selectableClaudeModelIds([
         { id: 'deepseek/deepseek-v4.1-flash' },
@@ -119,9 +115,7 @@ describe('selectableClaudeModelIds', () => {
   });
 
   it('drops a row declared to require reasoning echo', () => {
-    // The declared listing is the one model a default must not name: it is what
-    // the environment renders as ANTHROPIC_MODEL and what an exec agent job
-    // starts on, and no erun lane can drive it.
+    // The declared listing is the one model no erun lane can drive.
     expect(
       selectableClaudeModelIds([
         { id: 'deepseek/deepseek-v4.1-flash', requiresReasoningEcho: true },

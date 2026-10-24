@@ -9,24 +9,16 @@ import (
 	"time"
 )
 
-// A release discovers a bad registry credential at the push — after every image
-// has been built for every architecture. That is the most expensive possible
-// moment to learn it, and the remedy it then offers is an interactive login,
-// which is unanswerable in exactly the contexts erun pushes callers toward: a
-// detached job, an agent run, any release that is not sitting at a terminal.
-//
-// The credential is knowable in advance. erun logs docker into ghcr with the gh
-// token, and GitHub reports a token's scopes on any API response, so one request
-// answers "can this publish?" before the first build starts.
+// A bad push credential would otherwise surface after the full multi-arch build,
+// with an interactive remedy unusable in detached runs; GitHub reports token
+// scopes on any API response, so one request answers it up front.
 
 const githubOAuthScopesHeader = "X-OAuth-Scopes"
 
-// ghcrPushScope is the scope a ghcr push requires. read:packages is implied by
-// repo access for a private package and is not what denials are about.
+// ghcrPushScope is the scope denials are about; read:packages comes with repo access.
 const ghcrPushScope = "write:packages"
 
-// MissingGHCRPushScopeError is returned when the credential erun would use is
-// known not to permit publishing.
+// MissingGHCRPushScopeError means the push credential is known to lack write:packages.
 type MissingGHCRPushScopeError struct {
 	Registry string
 	Scopes   []string
@@ -46,15 +38,8 @@ func (e *MissingGHCRPushScopeError) Error() string {
 		e.Registry, ghcrPushScope, have, ghcrPushScope)
 }
 
-// VerifyGHCRPushScope reports whether the gh token can publish to the registry a
-// tag names. It answers only for ghcr, and only when it can answer with
-// certainty.
-//
-// An inconclusive check — no gh on PATH, no token, GitHub unreachable, a
-// response without the scopes header — returns nil rather than blocking the
-// build. The point is to convert a *known* failure into an immediate one, not to
-// invent a new way for a release to refuse to start; a credential that is
-// actually bad still fails at the push exactly as it does today.
+// VerifyGHCRPushScope checks the gh token can publish to a ghcr tag. Inconclusive
+// checks return nil so the build fails at the push as before.
 func VerifyGHCRPushScope(ctx context.Context, client *http.Client, tag string) error {
 	registry := DockerRegistryFromImageTag(tag)
 	if !IsGHCRRegistry(registry) {
@@ -67,16 +52,10 @@ func VerifyGHCRPushScope(ctx context.Context, client *http.Client, tag string) e
 	return verifyGHCRPushScopeFor(ctx, client, registry, token, GithubAPIBaseURL)
 }
 
-// GithubAPIBaseURL is where every GitHub REST call in this package goes. A
-// variable so a unit test can point it at a server that answers like GitHub
-// does, and resolved from the environment so the integration suite can drive
-// the real wire path from the compiled binary instead of only its dry-run
-// trace -- the seam the ruleset-bypass and commit-status calls previously had
-// no equivalent of.
+// GithubAPIBaseURL is the GitHub REST base; overridable so tests can drive the real wire path.
 var GithubAPIBaseURL = resolveGitHubAPIBaseURL()
 
-// gitHubAPIBaseURLOverrideEnv is a deliberate test seam, not a production
-// knob: nothing erun ships sets it, and a real run always talks to GitHub.
+// gitHubAPIBaseURLOverrideEnv is a test seam only; nothing erun ships sets it.
 const gitHubAPIBaseURLOverrideEnv = "ERUN_GITHUB_API_BASE_URL_OVERRIDE"
 
 func resolveGitHubAPIBaseURL() string {
@@ -90,8 +69,6 @@ func resolveGitHubAPIBaseURL() string {
 	return override
 }
 
-// verifyGHCRPushScopeFor is the decision, with the token and the endpoint as
-// inputs so it can be exercised without a real credential.
 func verifyGHCRPushScopeFor(ctx context.Context, client *http.Client, registry, token, apiBaseURL string) error {
 	if strings.TrimSpace(token) == "" {
 		return nil
@@ -108,9 +85,7 @@ func verifyGHCRPushScopeFor(ctx context.Context, client *http.Client, registry, 
 	return &MissingGHCRPushScopeError{Registry: registry, Scopes: scopes}
 }
 
-// githubTokenScopes returns what a token is scoped for. GitHub reports it on any
-// authenticated response, so this costs one request against the API root and
-// never touches a repository.
+// githubTokenScopes reads a token's scopes with one request to the API root.
 func githubTokenScopes(ctx context.Context, client *http.Client, token, apiBaseURL string) ([]string, bool) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
@@ -135,11 +110,8 @@ func githubTokenScopes(ctx context.Context, client *http.Client, token, apiBaseU
 	return parseGitHubScopesHeader(resp.Header)
 }
 
-// parseGitHubScopesHeader reads the scopes GitHub reports on a response.
-//
-// A missing header is not an empty scope list: a fine-grained PAT or a GitHub
-// App token reports no OAuth scopes at all, which is a different permission
-// model rather than an absence of permission, so it declines to answer.
+// parseGitHubScopesHeader declines to answer without the header: fine-grained
+// PATs and App tokens report no OAuth scopes.
 func parseGitHubScopesHeader(header http.Header) ([]string, bool) {
 	raw, ok := header[http.CanonicalHeaderKey(githubOAuthScopesHeader)]
 	if !ok {

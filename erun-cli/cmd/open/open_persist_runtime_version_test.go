@@ -4,19 +4,13 @@ import (
 	"io"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestDeployRuntimeHealsPersistedVersionOnCachedNoOp guards a real gotcha: a
-// cached no-op deploy mints a runtime version that was never pushed, so
-// persisting it would point the env config at a phantom the deploy picker can
-// never offer. The open flow instead heals to what the release is actually
-// running, and leaves the persisted value untouched when that can't be read.
-//
-// This side effect is unreachable from the dry-run integration binary, so this
-// white-box test owns the contract.
+// A cached no-op deploy mints an unpushed version, so open heals to the running one.
 func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608164914" // minted by the cached resolve; never pushed
@@ -24,7 +18,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 
-	newRunner := func(resolver common.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
+	newRunner := func(resolver seam.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
 		return &resolvedOpenRunner{
 			ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
 			result: config.OpenResult{
@@ -35,13 +29,13 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 			resolveDeployedVersion: resolver,
 		}
 	}
-	skipHelmExecution := common.DeploySpec{
+	skipHelmExecution := deploy.DeploySpec{
 		Target: config.OpenResult{
 			Tenant:    tenant,
 			EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 		},
 		SkipHelm: true,
-		Deploy: common.HelmDeploySpec{
+		Deploy: deploy.HelmDeploySpec{
 			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
@@ -77,16 +71,6 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	})
 }
 
-// TestDeployRuntimeHealsPersistedRuntimeImage pins the open-command twin of
-// the deploy-command RuntimeImage persistence fix: a deploy that resolves an
-// operator-stated runtime image must persist it, or the override installs
-// correctly this one time and is silently forgotten on the next plain
-// open/deploy. deployRuntime used to hand-roll its own persistence covering
-// only RuntimeVersion/RuntimeRegistry; it now delegates to the same
-// common.PersistRuntimeVersionFromDeploySpecs writer erun deploy/upgrade use,
-// so this asserts that wiring actually reaches RuntimeImage rather than
-// re-testing PersistRuntimeVersionFromDeploySpecs itself (already covered in
-// erun-common).
 func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 	const tenant = "frs"
 	const version = "1.0.86"
@@ -105,13 +89,10 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 		}},
 		resolveDeployedVersion: func(core.Context, string, string, string) (string, error) { return version, nil },
 	}
-	// SkipHelm bypasses RunDeploySpec's real helm/kubectl work (as the cached-
-	// no-op test above does) so this stays a persistence-only unit test; the
-	// resolver above stands in for the running release's own reported version.
-	execution := common.DeploySpec{
+	execution := deploy.DeploySpec{
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
-		Deploy: common.HelmDeploySpec{
+		Deploy: deploy.HelmDeploySpec{
 			ReleaseName:          config.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",

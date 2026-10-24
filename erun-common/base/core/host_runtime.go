@@ -4,19 +4,12 @@ import (
 	"os"
 	"runtime"
 	"strings"
-)
 
-type HostOS string
-
-const (
-	HostOSDarwin  HostOS = "darwin"
-	HostOSLinux   HostOS = "linux"
-	HostOSWindows HostOS = "windows"
-	HostOSUnknown HostOS = "unknown"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type HostInfo struct {
-	OS      HostOS
+	OS      model.HostOS
 	Arch    string
 	HomeDir string
 }
@@ -37,27 +30,25 @@ func DetectHost() HostInfo {
 	}
 }
 
-// ResolveDetectedHostOS honors ERUN_HOST_OS_OVERRIDE as a test seam so the
-// integration suite can pin platform-dependent goldens on any host; production
-// must never set it.
-func ResolveDetectedHostOS() HostOS {
+// ResolveDetectedHostOS honors ERUN_HOST_OS_OVERRIDE as a test seam; production never sets it.
+func ResolveDetectedHostOS() model.HostOS {
 	if override := strings.ToLower(strings.TrimSpace(HostOSOverEnv())); override != "" {
-		if classified := classifyHostOS(override); classified != HostOSUnknown {
+		if classified := classifyHostOS(override); classified != model.HostOSUnknown {
 			return classified
 		}
 	}
 	return classifyHostOS(currentGOOS())
 }
 
-func classifyHostOS(goos string) HostOS {
+func classifyHostOS(goos string) model.HostOS {
 	switch goos {
 	case "darwin":
-		return HostOSDarwin
+		return model.HostOSDarwin
 	case "linux":
-		return HostOSLinux
+		return model.HostOSLinux
 	case "windows":
-		return HostOSWindows
+		return model.HostOSWindows
 	default:
-		return HostOSUnknown
+		return model.HostOSUnknown
 	}
 }

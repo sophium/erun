@@ -10,11 +10,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// auditEventColumns deliberately omits cli_parameters, mcp_tool_parameters,
-// and api_parameters: those columns are where a CLI/MCP/API audit caller
-// serializes caller-supplied text, and a tool such as
-// cloud_inject_aws_credentials takes credentials as arguments. The read path
-// must never select them.
+// auditEventColumns omits the *_parameters columns: they can hold
+// caller-supplied credentials and must never be read back.
 const auditEventColumns = `audit_event_id, tenant_id, erun_user_id, external_user_id, external_issuer_id, external_org_id, type, api_method, api_path, cli_command, mcp_tool, created_at`
 
 const (
@@ -30,11 +27,8 @@ func NewAuditEventRepository(txs *TxManager) *AuditEventRepository {
 	return &AuditEventRepository{txs: txs}
 }
 
-// AuditEventCursor identifies a row's position in the newest-first
-// (created_at DESC, audit_event_id DESC) ordering that List always uses. The
-// zero value means "start from the newest row" — audit_events is append-only
-// and unbounded, so offset pagination would degrade as it grows and would
-// skip or repeat rows as new events are appended ahead of a later page.
+// AuditEventCursor is a keyset position in List's (created_at DESC,
+// audit_event_id DESC) order; the zero value starts at the newest row.
 type AuditEventCursor struct {
 	CreatedAt    time.Time
 	AuditEventID string
@@ -44,8 +38,7 @@ func (c AuditEventCursor) isZero() bool {
 	return c.CreatedAt.IsZero() && c.AuditEventID == ""
 }
 
-// String encodes the cursor as an opaque token for a caller to hand back to
-// resume after the last row it saw.
+// String encodes the cursor as an opaque token.
 func (c AuditEventCursor) String() string {
 	if c.isZero() {
 		return ""
@@ -53,8 +46,7 @@ func (c AuditEventCursor) String() string {
 	return c.CreatedAt.UTC().Format(time.RFC3339Nano) + "," + c.AuditEventID
 }
 
-// ParseAuditEventCursor decodes a token previously returned by List. An empty
-// token decodes to the zero cursor.
+// ParseAuditEventCursor decodes a cursor token; empty decodes to the zero cursor.
 func ParseAuditEventCursor(token string) (AuditEventCursor, error) {
 	if token == "" {
 		return AuditEventCursor{}, nil
@@ -70,10 +62,7 @@ func ParseAuditEventCursor(token string) (AuditEventCursor, error) {
 	return AuditEventCursor{CreatedAt: parsed, AuditEventID: auditEventID}, nil
 }
 
-// AuditEventFilter narrows a page of the caller's tenant audit trail. Every
-// field is optional; the zero filter lists the newest page of the tenant's
-// whole trail. Since/Until/ErunUserID and the (Type, APIMethod, APIPath)
-// combination are the filters the three audit_events indexes were built for.
+// AuditEventFilter narrows a page of the caller's tenant audit trail.
 type AuditEventFilter struct {
 	Since      time.Time
 	Until      time.Time
@@ -82,13 +71,10 @@ type AuditEventFilter struct {
 	APIMethod  string
 	APIPath    string
 	Cursor     AuditEventCursor
-	// Limit caps the page size; non-positive defaults to defaultAuditEventLimit
-	// and any value above maxAuditEventLimit is capped there.
-	Limit int
+	Limit      int
 }
 
-// AuditEventPage is one newest-first page of a tenant's audit trail.
-// NextCursor is empty when the page reached the end of the trail.
+// AuditEventPage is one newest-first page; NextCursor is empty at the end.
 type AuditEventPage struct {
 	Events     []model.AuditEvent
 	NextCursor string
@@ -137,10 +123,8 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 	})
 }
 
-// List returns one page of the caller's tenant audit trail, newest first.
-// Scoped explicitly by tenant_id from the security context rather than left
-// to RLS: erun_operations' policy is unconditional, so an OPERATIONS caller
-// would otherwise read every tenant's audit trail.
+// List returns one page of the tenant's audit trail, newest first. tenant_id is
+// filtered explicitly because erun_operations' RLS policy is unconditional.
 func (r *AuditEventRepository) List(ctx context.Context, filter AuditEventFilter) (AuditEventPage, error) {
 	limit := filter.Limit
 	switch {
@@ -172,9 +156,7 @@ func (r *AuditEventRepository) List(ctx context.Context, filter AuditEventFilter
 	return page, nil
 }
 
-// auditEventListQuery builds the SELECT for List. It fetches one row beyond
-// limit so a next page can be reported without a second round trip; List
-// trims that extra row back off.
+// auditEventListQuery fetches limit+1 rows so List can detect a next page.
 func auditEventListQuery(tenantID string, filter AuditEventFilter, limit int) (string, []any) {
 	query := `SELECT ` + auditEventColumns + ` FROM audit_events WHERE tenant_id = ?`
 	args := []any{tenantID}

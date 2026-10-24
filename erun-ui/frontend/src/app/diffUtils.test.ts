@@ -27,11 +27,6 @@ function diffOf(...paths: string[]): DiffResult {
 
 const FILES = ['pkg/f00.ts', 'pkg/f01.ts', 'pkg/f29.ts'];
 
-// The panel reloads every environment's diff on a 5s timer, so this runs on
-// every tick. Re-selecting files[0] unconditionally is what reset the
-// changed-files tree's active node five seconds after a scroll put it there:
-// the tree marks `aria-current` only for the selected file, and once the diff
-// stopped scrolling nothing re-derived the selection.
 test('chooseSelectedDiffPath keeps the current file so a periodic reload does not reset the selection', () => {
   assert.equal(chooseSelectedDiffPath(diffOf(...FILES), 'pkg/f29.ts'), 'pkg/f29.ts');
 });

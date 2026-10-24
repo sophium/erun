@@ -7,12 +7,10 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// requireLoneRestartPreviewNotice fails unless the preview names only id, with
-// a notice carrying every one of wants.
-func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestartReopen, id string, wants ...string) {
+func requireLoneRestartPreviewNotice(t *testing.T, preview []model.DesktopRestartReopen, id string, wants ...string) {
 	t.Helper()
 	if len(preview) != 1 || preview[0].OrchestratorID != id {
 		t.Fatalf("expected one row for %s, got %+v", id, preview)
@@ -24,10 +22,6 @@ func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestart
 	}
 }
 
-// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the agent keeps
-// running through a restart, but a desktop that refuses to reopen it leaves the
-// operator without a terminal on it, so the preview says so while it can still
-// be fixed.
 func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	var credentialErr error
@@ -57,7 +51,7 @@ func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	}
 
 	credentialErr = nil
-	app.deps.store.(stubUIStore).config.OpenRouter = nil
+	stubStore(app).config.OpenRouter = nil
 	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
 		"no gateway catalog is configured", "configure the gateway catalog")
 }

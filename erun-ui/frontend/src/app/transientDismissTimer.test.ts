@@ -4,16 +4,12 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { scheduleTransientDismiss } from './transientDismissTimer';
 
-// scheduleTransientDismiss touches window/document only inside its body,
-// never at module scope, so a per-test shim is enough to drive the real
-// function against mocked timers.
 let listeners: Record<string, (() => void)[]> = {};
 let focused = true;
 
 function installWindow(): void {
   listeners = { blur: [], focus: [] };
   const windowShim = {
-    // Unqualified globals, resolved at call time, so mock.timers is what runs.
     setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms) as unknown as number,
     clearTimeout: (id: number) => {
       clearTimeout(id);
@@ -59,8 +55,6 @@ test('runs onDismiss once the duration elapses while the window stays focused', 
   assert.equal(dismissed, 1);
 });
 
-// The whole point of this module: a report that popped while the operator
-// was in another application must not have silently ticked down to "read".
 test('pauses while the window is blurred and only resumes counting down after focus returns', () => {
   let dismissed = 0;
   scheduleTransientDismiss(3200, () => {
@@ -69,7 +63,6 @@ test('pauses while the window is blurred and only resumes counting down after fo
   vi.advanceTimersByTime(1000);
   focused = false;
   fire('blur');
-  // Far past the original duration -- none of this time may count.
   vi.advanceTimersByTime(60_000);
   assert.equal(dismissed, 0, 'time spent blurred must never count toward the countdown');
 

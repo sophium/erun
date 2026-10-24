@@ -1,6 +1,4 @@
-// Package provision runs the durable live provisioning of a tenant's cloud
-// context as a DBOS workflow, so a control-plane restart resumes from the last
-// completed step instead of re-running the whole bootstrap.
+// Package provision runs tenant context provisioning as a durable DBOS workflow.
 package provision
 
 import (
@@ -14,12 +12,11 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// ProvisionInput is the workflow input DBOS checkpoints. Because the checkpoint
-// is persisted, it carries only tenant identity and operator-authored bootstrap
-// parameters — never a secret.
+// ProvisionInput is the workflow input DBOS checkpoints; it must never carry a secret.
 type ProvisionInput struct {
 	TenantID           string `json:"tenantId"`
 	TenantType         string `json:"tenantType"`
@@ -40,9 +37,8 @@ type ProvisionResult struct {
 	Status     string `json:"status"`
 }
 
-// bootstrapResult is deliberately non-secret: the k3s admin token is custodied
-// inside the step and never returned, so it never lands in DBOS's plaintext
-// step-output checkpoint.
+// bootstrapResult is non-secret: the k3s admin token stays inside the step so
+// it never lands in DBOS's plaintext checkpoint.
 type bootstrapResult struct {
 	InstanceID string `json:"instanceId"`
 	PublicIP   string `json:"publicIp"`
@@ -65,8 +61,7 @@ type Provisioner struct {
 	workflowFn  func(dbos.DBOSContext, ProvisionInput) (ProvisionResult, error)
 }
 
-// NewProvisioner builds the provisioner and registers its workflow with DBOS.
-// Call before dbos.Launch.
+// NewProvisioner builds the provisioner and registers its workflow; call before dbos.Launch.
 func NewProvisioner(
 	dbosCtx dbos.DBOSContext,
 	contexts *repository.ContextRepository,
@@ -83,18 +78,13 @@ func NewProvisioner(
 		cipher:      cipher,
 		awsEndpoint: awsEndpoint,
 	}
-	// Stored once so RegisterWorkflow (here) and RunWorkflow (in Start) share one
-	// stable function value, which is how DBOS names the workflow and recovers it
-	// across restarts.
+	// DBOS names and recovers the workflow by this stable function value.
 	p.workflowFn = p.provisionWorkflow
 	dbos.RegisterWorkflow(dbosCtx, p.workflowFn)
 	return p
 }
 
-// Start kicks off provisioning asynchronously so the HTTP handler returns
-// immediately while the durable workflow runs the minutes-long bootstrap. The
-// context id is the idempotency key, so a retried request does not start a
-// second bootstrap.
+// Start runs provisioning asynchronously; the context id is the idempotency key.
 func (p *Provisioner) Start(input ProvisionInput) error {
 	_, err := dbos.RunWorkflow(p.dbosCtx, p.workflowFn, input, dbos.WithWorkflowID("provision-"+input.ContextID))
 	return err
@@ -105,8 +95,8 @@ func (p *Provisioner) provisionWorkflow(dctx dbos.DBOSContext, input ProvisionIn
 		return p.bootstrapAndCustody(c, input)
 	})
 	if err != nil {
-		// Record the failure in its own checkpointed step so the console sees it
-		// even if the workflow is not retried.
+		// Its own checkpointed step, so the failure is recorded even if the
+		// workflow is never retried.
 		_, _ = dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
 			return "", p.markFailed(c, input, err)
 		})
@@ -120,8 +110,7 @@ func (p *Provisioner) provisionWorkflow(dctx dbos.DBOSContext, input ProvisionIn
 	return ProvisionResult{InstanceID: boot.InstanceID, PublicIP: boot.PublicIP, Status: statusRunning}, nil
 }
 
-// bootstrapAndCustody does the bootstrap and token custody in a single DBOS step
-// so the k3s admin token never becomes a step-output checkpoint.
+// bootstrapAndCustody is one step so the k3s admin token never becomes a step output.
 func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInput) (bootstrapResult, error) {
 	sc := p.scoped(c, input)
 	alias, err := p.aliases.Get(sc, input.CloudProviderAlias)
@@ -139,7 +128,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}
-	params := cloud.InitCloudContextParams{
+	params := model.InitCloudContextParams{
 		Name:               input.Name,
 		CloudProviderAlias: input.CloudProviderAlias,
 		Region:             input.Region,
@@ -150,10 +139,8 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 	status, err := cloud.InitCloudContext(ectx, store, params, cloud.CloudContextDependencies{
 		RunAWS:     runner.runAWS(c),
 		RunKubectl: func(core.Context, []string) error { return nil },
-		// Deterministic token from the context id: a crash-resumed re-run (reusing
-		// the existing tagged instance) re-derives the SAME token the instance
-		// already baked, so custody stays idempotent. Domain-separated from
-		// encryption.
+		// Deterministic per context so a crash-resumed re-run re-derives the
+		// token the instance already baked.
 		NewToken: func() string { return p.cipher.DeriveToken("k3s-admin-token:" + input.ContextID) },
 	})
 	if err != nil {
@@ -173,8 +160,8 @@ func (p *Provisioner) markFailed(c context.Context, input ProvisionInput, cause 
 	return p.contexts.UpdateProvisioningResult(p.scoped(c, input), input.ContextID, statusFailed, "", "", cause.Error())
 }
 
-// scoped rebuilds the request-scoped security context inside a workflow step so
-// the repositories' RLS transaction wiring binds to the right tenant.
+// scoped rebuilds the tenant security context inside a workflow step so RLS
+// binds repository writes to the right tenant.
 func (p *Provisioner) scoped(c context.Context, input ProvisionInput) context.Context {
 	return security.WithContext(c, security.Context{
 		TenantID:   input.TenantID,
@@ -183,9 +170,8 @@ func (p *Provisioner) scoped(c context.Context, input ProvisionInput) context.Co
 	})
 }
 
-// aliasStore is the minimal CloudContextStore InitCloudContext needs to resolve
-// the provider for an alias. SaveERunConfig is intentionally a no-op: the
-// provisioner writes the returned identity to the contexts table itself.
+// aliasStore resolves an alias's provider; SaveERunConfig is a no-op because
+// the provisioner writes the identity to the contexts table itself.
 type aliasStore struct {
 	alias    string
 	provider string
@@ -193,7 +179,7 @@ type aliasStore struct {
 
 func (s aliasStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	return config.ERunConfig{
-		CloudProviders: []config.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
+		CloudProviders: []model.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
 	}, "", nil
 }
 

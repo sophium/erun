@@ -1,7 +1,5 @@
 @import 'erun-kit/theme.css';
-/* erun-kit ships Tailwind utility classes in its component source, which lives
-   under node_modules via the workspace symlink and is excluded from Tailwind's
-   default content scan; @source opts it back in so those classes still emit. */
+/* erun-kit's source sits under node_modules, which Tailwind's content scan skips. */
 @source '../../../../erun-kit/src';
 @import './app-theme.css';
 @import './base.css';

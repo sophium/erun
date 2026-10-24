@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// OIDCDiscovery is the subset of an OIDC provider's
-// /.well-known/openid-configuration document the device and PKCE flows need.
+// OIDCDiscovery is the subset of the OIDC discovery document the device and PKCE flows need.
 type OIDCDiscovery struct {
 	Issuer                      string `json:"issuer"`
 	AuthorizationEndpoint       string `json:"authorization_endpoint"`
@@ -28,9 +28,7 @@ type OIDCDiscovery struct {
 	DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint,omitempty"`
 }
 
-// ERunDeviceAuthorization is a device authorization grant's initial response
-// (RFC 8628 section 3.2): what the operator is told to visit, and what the
-// poller then presents at the token endpoint.
+// ERunDeviceAuthorization is a device authorization grant's initial response (RFC 8628 3.2).
 type ERunDeviceAuthorization struct {
 	DeviceCode              string
 	UserCode                string
@@ -47,25 +45,15 @@ type ERunTokens struct {
 	ExpiresIn    time.Duration
 }
 
-// erunOAuthScope requests both an id/access token and a refresh token, since a
-// CLI/agent session needs to outlive one access token's short lifetime.
+// erunOAuthScope includes offline_access so a session outlives one access token.
 const erunOAuthScope = "openid offline_access"
 
-// erunOrgClaimScope asks the shipped Zitadel IdP to include the org
-// (resourceowner) claim erun's tenant resolution reads for a shared,
-// org-scoped issuer. Requested by default on every erun login so a token
-// actually carries the discriminator, rather than requiring an operator to
-// know to pass --scope by hand. A dedicated/BYO issuer (the common case) has
-// never heard of this scope; erunCloudProviderLogin retries once without it
-// when the issuer refuses the request, so login still succeeds exactly as it
-// did before this default was added.
+// erunOrgClaimScope asks Zitadel for the resourceowner claim tenant resolution reads;
+// issuers that reject it are retried without it.
 const erunOrgClaimScope = "urn:zitadel:iam:user:resourceowner"
 
-// erunLoginScope appends any operator-requested scopes to the baseline. A
-// provider's reserved scopes are frequently absent from its discovery
-// document's scopes_supported (Zitadel's urn:zitadel:* family is), so there is
-// nothing to negotiate against — the caller has to be able to ask for them by
-// name. Duplicates and blanks are dropped so the request stays well-formed.
+// erunLoginScope appends operator scopes, deduplicated; reserved scopes are often
+// missing from scopes_supported, so they must be requestable by name.
 func erunLoginScope(extra []string) string {
 	scopes := strings.Fields(erunOAuthScope)
 	seen := map[string]bool{}
@@ -92,28 +80,21 @@ var (
 	errERunInvalidScope         = errors.New("invalid_scope")
 )
 
-// isERunInvalidScopeError reports whether a login attempt failed because the
-// issuer rejected a requested scope. The device/token-endpoint path surfaces
-// this through oauthTokenError's errERunInvalidScope sentinel; the
-// Authorization Code + PKCE path instead learns it from the redirect's own
-// error query parameter (erunCallbackHandler), which is a plain wrapped
-// string rather than that sentinel.
+// isERunInvalidScopeError covers both the token-endpoint sentinel and the PKCE
+// redirect's error parameter, which arrives as a plain string.
 func isERunInvalidScopeError(err error) bool {
 	return err != nil && (errors.Is(err, errERunInvalidScope) || strings.Contains(err.Error(), "invalid_scope"))
 }
 
-// defaultFetchPlatformInfo delegates to PlatformClient — the same
-// unauthenticated GET /v1/platform call a caller makes once it has a
-// PlatformClient of its own, so the two never drift.
-func defaultFetchPlatformInfo(ctx core.Context, apiURL string) (platformclient.PlatformInfo, error) {
+func defaultFetchPlatformInfo(ctx core.Context, apiURL string) (model.PlatformInfo, error) {
 	target := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	ctx.Trace("GET " + target + "/v1/platform")
 	if ctx.DryRun {
-		return platformclient.PlatformInfo{}, nil
+		return model.PlatformInfo{}, nil
 	}
 	info, err := platformclient.NewPlatformClient(target, nil).Platform(context.Background())
 	if err != nil {
-		return platformclient.PlatformInfo{}, fmt.Errorf("fetch erun platform info: %w", err)
+		return model.PlatformInfo{}, fmt.Errorf("fetch erun platform info: %w", err)
 	}
 	return info, nil
 }
@@ -168,10 +149,7 @@ func defaultStartERunDeviceAuthorization(ctx core.Context, discovery OIDCDiscove
 	}, nil
 }
 
-// pollERunDeviceToken polls the token endpoint until the device flow
-// completes, honoring RFC 8628's authorization_pending/slow_down/expired_token
-// responses. auth.Interval and auth.ExpiresIn are read directly (not
-// re-defaulted here) so a caller — including a test — controls the pacing.
+// pollERunDeviceToken uses auth.Interval and auth.ExpiresIn as given so callers control pacing.
 func pollERunDeviceToken(ctx core.Context, discovery OIDCDiscovery, clientID string, auth ERunDeviceAuthorization) (ERunTokens, error) {
 	if ctx.DryRun {
 		return ERunTokens{}, nil
@@ -214,25 +192,9 @@ func exchangeERunDeviceCode(tokenEndpoint, clientID, deviceCode string) (ERunTok
 	return postFormForTokens(tokenEndpoint, form)
 }
 
-// defaultClientCredentialsERunTokens runs the client_credentials grant a
-// provisioned machine identity authenticates with. It is the machine half of
-// the same token endpoint the refresh-token path uses, and the difference is
-// the whole point: nothing here is a session, so nothing here expires into a
-// signed-out state a human has to clear.
-//
-// Credentials travel in the request's Authorization header rather than the
-// form body, because the application erun provisions is created with Zitadel's
-// API_AUTH_METHOD_TYPE_BASIC — the two have to agree, and only one of the two
-// supported client-authentication methods puts a long-lived secret somewhere a
-// proxy or an access log is likely to retain.
-//
-// The org-claim scope is requested for exactly the reason login requests it:
-// where the issuer is org-scoped, erun resolves the tenant from the claim it
-// names, and a token that omits the scope authenticates at the IdP and then
-// resolves to no tenant at the API. An issuer that has never heard of the
-// scope — a tenant's own BYO IdP — is retried once without it, so an identity
-// minted somewhere erun's own IdP is not still authenticates as it would have
-// before this grant existed.
+// defaultClientCredentialsERunTokens runs the client_credentials grant for a machine identity.
+// Credentials go in the Authorization header to match the BASIC auth method erun provisions.
+// The org-claim scope is retried without it for issuers that reject it.
 func defaultClientCredentialsERunTokens(ctx core.Context, discovery OIDCDiscovery, clientID string, clientSecret string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.TokenEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise a token endpoint", discovery.Issuer)
@@ -291,11 +253,7 @@ func defaultRefreshERunTokens(ctx core.Context, discovery OIDCDiscovery, clientI
 	return tokens, nil
 }
 
-// runERunAuthorizationCodeLogin is the Authorization Code + PKCE fallback for
-// an issuer that does not advertise a device authorization endpoint. It opens
-// a loopback listener for the redirect, attempts to launch the operator's
-// default browser at the authorize URL, and exchanges the returned code for
-// tokens.
+// runERunAuthorizationCodeLogin is the Authorization Code + PKCE flow on a loopback listener.
 func runERunAuthorizationCodeLogin(ctx core.Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.AuthorizationEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise an authorization endpoint", discovery.Issuer)
@@ -332,12 +290,8 @@ func runERunAuthorizationCodeLogin(ctx core.Context, discovery OIDCDiscovery, cl
 	return exchangeERunAuthorizationCode(discovery.TokenEndpoint, clientID, redirectURI, verifier, code)
 }
 
-// erunLoginCallbackTimeout bounds the wait for the browser half of the
-// authorization-code flow. It is generous on purpose: an orchestrator or
-// operator hands the URL to a person, who may open it minutes later, and the
-// previous 5 minutes routinely expired under a sign-in that then had nowhere
-// to land. A local listener costs nothing to keep open, so the bound exists
-// only to stop a forgotten command waiting forever.
+// erunLoginCallbackTimeout is generous because the URL may be handed to a person
+// who opens it minutes later.
 const erunLoginCallbackTimeout = 15 * time.Minute
 
 type erunCallbackResult struct {
@@ -345,23 +299,14 @@ type erunCallbackResult struct {
 	err  error
 }
 
-// awaitERunOIDCCallback does not close the server itself: closing it as soon
-// as resultCh receives would race the handler's in-flight response write
-// against the shutdown and could hand the browser an aborted connection.
-// runERunAuthorizationCodeLogin's own listener.Close(), deferred until after
-// the token exchange completes, is what stops it.
-// timeout is a parameter rather than a read of the constant so the expiry
-// branch is reachable from a test; production passes erunLoginCallbackTimeout.
+// awaitERunOIDCCallback does not close the server: closing on receipt would race the
+// handler's response write. timeout is a parameter so tests can reach the expiry branch.
 func awaitERunOIDCCallback(ctx core.Context, listener net.Listener, state string, authURL string, timeout time.Duration) (string, error) {
 	resultCh := make(chan erunCallbackResult, 1)
 	server := &http.Server{Handler: erunCallbackHandler(state, resultCh)}
 	go func() { _ = server.Serve(listener) }()
 
-	// The trace and prompt must report what actually happened, not the
-	// action attempted: a launch failure (no browser installed, a headless
-	// pod, an unattended agent run) is non-fatal, since the printed URL still
-	// works, but the operator must be told to use it rather than wait on a
-	// browser that never opened.
+	// A launch failure is non-fatal; the printed URL still works.
 	if err := openERunLoginBrowser(authURL); err != nil {
 		ctx.Trace("could not open a browser: " + err.Error())
 		writeERunLoginPrompt(ctx, fmt.Sprintf("Could not open a browser automatically (%s). Open the following URL to sign in:\n\n  %s\n\n", err.Error(), authURL))
@@ -380,41 +325,27 @@ func awaitERunOIDCCallback(ctx core.Context, listener net.Listener, state string
 		}
 		return result.code, nil
 	case <-time.After(timeout):
-		// The wait is asynchronous by nature: the URL goes to a person who may
-		// not be at the keyboard. Naming the listener matters because the
-		// visible symptom is on the browser's side -- the sign-in completes and
-		// the redirect lands on a closed port, which reads as a broken redirect
-		// URI rather than an expired wait. And it is why this message does not
-		// repeat the URL: once the listener is gone that URL cannot complete,
-		// so re-running the login is the only fix.
+		// The URL is not repeated: once the listener is gone it cannot complete.
 		return "", fmt.Errorf("timed out after %s waiting for the browser sign-in to complete; the loopback listener that receives the redirect only lives for the duration of this command, so a sign-in finished after that lands on a closed port (the browser shows a connection refused). Re-run the login and complete the sign-in while it waits", timeout)
 	}
 }
 
-// erunLoginBrowserCommand resolves the platform-appropriate command to open a
-// URL in the operator's default browser, mirroring the equivalents already
-// used for host paths (erun-ui/host_open_path.go) and IDE URIs
-// (erun-cli/cmd/open_ide.go): open on darwin, xdg-open on linux, and cmd's
-// start verb on windows (the empty title argument keeps cmd from parsing the
-// URL itself as the window title).
-func erunLoginBrowserCommand(hostOS core.HostOS, url string) (string, []string, error) {
+// erunLoginBrowserCommand returns the URL opener per OS; on windows the empty title
+// argument keeps start from treating the URL as the window title.
+func erunLoginBrowserCommand(hostOS model.HostOS, url string) (string, []string, error) {
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return "open", []string{url}, nil
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		return "xdg-open", []string{url}, nil
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", url}, nil
-	default:
-		return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
+	case model.HostOSUnknown:
 	}
+	return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
 }
 
-// openERunLoginBrowser launches the operator's default browser at url and
-// detaches immediately (Start, then Release) so a browser that hangs, or a
-// host with no display at all, can never block the callback wait that
-// follows. Uses the same ERUN_<NAME>_BIN override Command already wires, so
-// a test can redirect the opener to a stub without a live desktop session.
+// openERunLoginBrowser detaches immediately so a hung browser cannot block the callback wait.
 func openERunLoginBrowser(url string) error {
 	executable, args, err := erunLoginBrowserCommand(core.DetectHost().OS, url)
 	if err != nil {
@@ -430,10 +361,8 @@ func openERunLoginBrowser(url string) error {
 	return nil
 }
 
-// erunCallbackHandler writes its response fully before signaling resultCh.
-// The receiver tears the server down as soon as it reads from resultCh, so
-// signaling first would race the in-flight response write against that
-// shutdown and could hand the browser an aborted connection.
+// erunCallbackHandler writes its response before signaling resultCh, because the
+// receiver shuts the server down on receipt.
 func erunCallbackHandler(state string, resultCh chan<- erunCallbackResult) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -479,7 +408,6 @@ func erunAuthorizationCodeURL(discovery OIDCDiscovery, clientID, redirectURI, st
 	return discovery.AuthorizationEndpoint + "?" + values.Encode()
 }
 
-// erunPKCEVerifier generates an RFC 7636 code_verifier.
 func erunPKCEVerifier() (string, error) {
 	return erunRandomURLSafeString(32)
 }
@@ -539,8 +467,7 @@ func doERunRequest(req *http.Request, out any) error {
 	return json.Unmarshal(body, out)
 }
 
-// postFormForTokens is the shared token-endpoint response shape for the
-// device, authorization-code, and refresh-token grants.
+// postFormForTokens is shared by the device, authorization-code, and refresh-token grants.
 func postFormForTokens(tokenEndpoint string, form url.Values) (ERunTokens, error) {
 	var payload struct {
 		AccessToken  string `json:"access_token"`
@@ -557,9 +484,7 @@ func postFormForTokens(tokenEndpoint string, form url.Values) (ERunTokens, error
 	}, nil
 }
 
-// oauthTokenError maps a non-2xx token-endpoint response to one of the RFC
-// 8628/6749 error sentinels when recognized, or a generic error carrying the
-// server's own message otherwise.
+// oauthTokenError maps a token-endpoint error to an RFC 8628/6749 sentinel when recognized.
 func oauthTokenError(status int, body []byte) error {
 	var payload struct {
 		Error            string `json:"error"`

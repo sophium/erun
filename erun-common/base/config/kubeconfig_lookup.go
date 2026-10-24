@@ -11,8 +11,7 @@ import (
 
 var kubeconfigUserHomeDir = os.UserHomeDir
 
-// erun-managed cloud contexts always store a literal bearer token, so only
-// that field matters here; the exec/auth-provider variants never appear.
+// erun-managed cloud contexts always store a literal bearer token.
 type kubeconfigUser struct {
 	Token string `yaml:"token,omitempty"`
 }
@@ -26,12 +25,8 @@ type kubeconfigDocument struct {
 	Users []kubeconfigUserEntry `yaml:"users"`
 }
 
-// LookupKubeContextBearerToken returns the static bearer token stored for the
-// given context name, with ok=false when there is none (missing file, missing
-// user, or a non-static auth method). Lookup matches on context name because
-// configureCloudKubeContext keys each user entry by its context name. Only the
-// first KUBECONFIG path is read: a single token suffices, and a merged
-// kubeconfig can list the same context in more than one file.
+// LookupKubeContextBearerToken returns the static bearer token for contextName,
+// or ok=false. Only the first KUBECONFIG path is read.
 func LookupKubeContextBearerToken(contextName string) (string, bool, error) {
 	contextName = strings.TrimSpace(contextName)
 	if contextName == "" {

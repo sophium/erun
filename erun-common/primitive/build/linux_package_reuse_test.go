@@ -1,0 +1,125 @@
+package build
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
+)
+
+// Keep tests off the operator's real record and off a real docker daemon.
+func init() {
+	LinuxPackageTestRecordDir = func() (string, error) {
+		return "", errors.New("linux package test records are off in this test binary unless a test points them at its own directory")
+	}
+	LinuxPackageDaemonPlatform = func() (string, error) { return "linux/arm64", nil }
+}
+
+func useLinuxPackageTestRecordDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "package-tests")
+	previous := LinuxPackageTestRecordDir
+	LinuxPackageTestRecordDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { LinuxPackageTestRecordDir = previous })
+	return dir
+}
+
+func useLinuxPackageTestRecordClock(t *testing.T, now time.Time) *time.Time {
+	t.Helper()
+	clock := now
+	previous := linuxPackageTestRecordNow
+	linuxPackageTestRecordNow = func() time.Time { return clock }
+	t.Cleanup(func() { linuxPackageTestRecordNow = previous })
+	return &clock
+}
+
+func TestReleaseNeverReusesARecordedPass(t *testing.T) {
+	useLinuxPackageTestRecordDir(t)
+	spec := linuxPackageReleaseSpec(t, "1.4.2")
+	for _, pkg := range spec.LinuxPackages {
+		if pkg.Reuse || pkg.Fingerprint != "" {
+			t.Fatalf("a release package must carry no reuse decision, got %+v", pkg)
+		}
+		target, err := linuxPackageCheckTarget(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := linuxPackageCheckFingerprint(pkg, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := RecordLinuxPackageTestPass(pkg.Name, fingerprint, "linux/arm64"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dockerLog := fakeDockerRecorder(t, "0")
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	if err := ExportReleaseLinuxPackages(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	if calls := readLines(t, dockerLog); len(calls) != 2*len(spec.LinuxPackages) {
+		t.Fatalf("a release must build every package's dist for both platforms, got:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+func readPassedFingerprints(t *testing.T, name string) []string {
+	t.Helper()
+	record, _, err := readLinuxPackageTestRecord(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprints := make([]string, 0, len(record.Passed))
+	for _, pass := range record.Passed {
+		fingerprints = append(fingerprints, pass.Fingerprint)
+	}
+	return fingerprints
+}
+
+func TestLinuxPackageTestRecordKeepsTheMostRecentPasses(t *testing.T) {
+	useLinuxPackageTestRecordDir(t)
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := useLinuxPackageTestRecordClock(t, start)
+	var want []string
+	for i := range linuxPackageTestRecordsKept + 3 {
+		*clock = start.Add(time.Duration(i) * time.Hour)
+		fingerprint := "fp" + string(rune('a'+i))
+		if err := RecordLinuxPackageTestPass("app", fingerprint, "linux/amd64"); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, fingerprint)
+	}
+	want = want[len(want)-linuxPackageTestRecordsKept:]
+	if got := readPassedFingerprints(t, "app"); !slices.Equal(got, want) {
+		t.Fatalf("passes = %v, want the %d most recent %v", got, linuxPackageTestRecordsKept, want)
+	}
+	if linuxPackageTestPassed("app", "fpa", "linux/amd64") || !linuxPackageTestPassed("app", "fpk", "linux/amd64") {
+		t.Fatal("a pruned pass must not be reused and the latest must be")
+	}
+}
+
+func TestLinuxPackageTestRecordExpiresOldPasses(t *testing.T) {
+	dir := useLinuxPackageTestRecordDir(t)
+	clock := useLinuxPackageTestRecordClock(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err := RecordLinuxPackageTestPass("app", "old", "linux/amd64"); err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(linuxPackageTestRecordMaxAge + time.Minute)
+	if linuxPackageTestPassed("app", "old", "linux/amd64") {
+		t.Fatal("an expired pass must not be reused")
+	}
+	if err := RecordLinuxPackageTestPass("app", "fresh", "linux/amd64"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readPassedFingerprints(t, "app"); !slices.Equal(got, []string{"fresh"}) {
+		t.Fatalf("expired passes must be pruned on write, got %v", got)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 {
+		t.Fatalf("expected one record file per package, got %v, %v", entries, err)
+	}
+}

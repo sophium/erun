@@ -17,3 +17,13 @@ func NormalizeEnvironmentJobSignal(signal string) (string, error) {
 		return "", fmt.Errorf("unsupported signal %q: expected TERM, INT, HUP, or KILL", signal)
 	}
 }
+
+// FirstNonEmptyString returns the first non-empty value, or "" if all are.
+func FirstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}

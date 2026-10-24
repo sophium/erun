@@ -80,15 +80,8 @@ func (s *unixTerminalSession) Pid() int {
 	return s.cmd.Process.Pid
 }
 
-// Alive probes the process with signal 0. POSIX has no EDR OpenProcess block,
-// so a signal-0 send is a reliable liveness check: nil means running and EPERM
-// means the process exists but belongs to another user, while ESRCH means it is
-// gone.
-//
-// A process this session already reaped is a third, separate case: once Wait has
-// run, Process.Signal answers os.ErrProcessDone rather than ESRCH for a process
-// that is demonstrably gone. Naming that error is what keeps a closed session
-// from reading as alive to every caller that gates cleanup on this probe.
+// Alive probes with signal 0: EPERM means alive, ESRCH and os.ErrProcessDone
+// (after Wait has reaped it) mean gone.
 func (s *unixTerminalSession) Alive() bool {
 	if s == nil || s.cmd == nil || s.cmd.Process == nil {
 		return false
@@ -108,10 +101,8 @@ func (s *unixTerminalSession) Close() error {
 		return nil
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
-		// Kill the whole process group, not just `erun open`: its kubectl exec
-		// child otherwise orphans and holds the exec stream open, leaving a stale
-		// dtach client attached in the pod after every close. pty.Start made the
-		// child a session leader, so a negative-pid kill reaps the full chain.
+		// Kill the whole process group: the kubectl exec grandchild otherwise orphans and
+		// holds the exec stream open. pty.Start made the child a session leader.
 		if pid := s.cmd.Process.Pid; pid > 0 {
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}

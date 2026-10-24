@@ -1,47 +1,26 @@
 CREATE TABLE builds (
   build_id UUID PRIMARY KEY DEFAULT uuidv7(),
   tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
-  -- NULL for an ordinary `erun build` that reports itself with no review
-  -- attached (erun#1954) -- a review association is one reason a build
-  -- happened, not its identity.
+  -- NULL for a build reported with no review attached.
   review_id UUID,
-  -- The environment the build ran in, when the caller reports one. NULL for
-  -- a review-linked build (builds reported through the review-nested route
-  -- carry no environment today) and SET NULL if the
-  -- environment is later deleted -- an append-only build history should
-  -- outlive the row it described, the same choice usage_events.environment_id
-  -- already made. The reference carries tenant_id (builds_tenant_environment_fkey
-  -- below), so it can only ever name the tenant's own environment; a
-  -- single-column reference accepted another tenant's id, which made this
-  -- route able to tell a caller whether any tenant holds a given environment
-  -- id.
+  -- SET NULL on environment delete so build history outlives it; the composite FK keeps
+  -- the reference within the tenant.
   environment_id UUID,
-  -- Every build written today is RECORDED and names the version it minted,
-  -- including the merge queue's build of a prepared merge commit. GATE is a
-  -- retired value the API no longer writes; historical GATE rows (no version,
-  -- always review-linked) stay valid under the CHECKs below and must never be
-  -- deleted or rewritten -- reviews.last_merged_build_id points at them, and
-  -- the next queue merge anchors its verification on that pointer.
+  -- GATE is retired; historical GATE rows must never be deleted or rewritten, because
+  -- reviews.last_merged_build_id anchors queue verification on them.
   kind TEXT NOT NULL DEFAULT 'RECORDED',
   successful BOOLEAN NOT NULL,
   commit_id TEXT NOT NULL,
   version TEXT,
-  -- An optional account of why a failed build failed, in the reporting
-  -- build's own words. Historical failed GATE rows always carry one.
+  -- Why a failed build failed, in the reporter's words; historical failed GATE rows always have one.
   failure_detail TEXT,
-  -- The bounded per-build profile a caller self-reports alongside its
-  -- outcome -- a duration/CPU/throttle/IO summary plus the top costliest
-  -- steps, never the full step tree. NULL when the caller collected none
-  -- (an older erun version, or a build outside a runtime pod).
+  -- Bounded self-reported profile summary, never the full step tree; NULL when none was collected.
   profile JSONB,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
   FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
-  -- ON DELETE SET NULL names environment_id alone: deleting an environment
-  -- clears the build's reference to it and nothing else. A bare SET NULL over
-  -- the whole composite key would try to null tenant_id too, which is NOT
-  -- NULL, and the delete would fail instead.
+  -- SET NULL (environment_id) only: nulling the whole key would violate tenant_id NOT NULL.
   CONSTRAINT builds_tenant_environment_fkey
     FOREIGN KEY (tenant_id, environment_id) REFERENCES environments (tenant_id, environment_id)
     ON DELETE SET NULL (environment_id),

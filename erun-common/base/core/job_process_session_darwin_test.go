@@ -11,9 +11,6 @@ import (
 	"testing"
 )
 
-// The columns Darwin can be trusted for: pid, ppid, pgid, and the state that
-// tells a zombie apart from a process still running. The session is the column
-// that cannot be read here, which is why the builder pairs this with getsid(2).
 func TestParsePSProcessTableReadsPidsAndZombies(t *testing.T) {
 	procs := parsePSProcessTable([]byte("" +
 		"  101     1   101 Ss\n" +
@@ -38,8 +35,6 @@ func TestParsePSProcessTableReadsPidsAndZombies(t *testing.T) {
 	}
 }
 
-// The fixture above is only as good as its resemblance to what ps prints, so
-// the real table must contain this test process with its real parent and group.
 func TestPlatformSessionProcessesReadsThisProcessFromRealPS(t *testing.T) {
 	procs, ok := platformSessionProcesses()
 	if !ok {
@@ -65,11 +60,7 @@ func TestPlatformSessionProcessesReadsThisProcessFromRealPS(t *testing.T) {
 	t.Fatalf("this process (pid %d) is missing from %d parsed ps rows", want.Pid, len(procs))
 }
 
-// Darwin is where the session check has to be native, so this exercises the
-// real table — ps's pid and stat columns paired with getsid(2) — rather than
-// substituting one: the session column ps reports here is 0 for every process,
-// and a job that backgrounds its work into a fresh process group is invisible
-// to any scan keyed on it.
+// Exercises the real Darwin table, whose ps session column is 0 for every process.
 func TestDarwinSessionScanFindsBackgroundedWorkInAFreshProcessGroup(t *testing.T) {
 	backgroundLog := filepath.Join(t.TempDir(), "background.log")
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("set -m; sleep 5 </dev/null >%s 2>&1 & exit 0", backgroundLog))
@@ -88,9 +79,6 @@ func TestDarwinSessionScanFindsBackgroundedWorkInAFreshProcessGroup(t *testing.T
 	}
 }
 
-// The other half of the same contract: a job that exits having started nothing
-// must not read as having left a survivor behind, or every clean job would be
-// reported as abandoned work.
 func TestDarwinSessionScanSeesNoMemberInACleanJob(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "exit 0")
 	DetachEnvironmentJobChild(cmd)

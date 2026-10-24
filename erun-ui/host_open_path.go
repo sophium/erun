@@ -9,16 +9,14 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// hostOpenCommand and hostRevealCommand return the OS opener invocation for a
-// host path, passed to exec as a discrete argument -- never interpolated into
-// a shell command line, since the path can originate from untrusted terminal
-// output (see erun-ui/AGENTS.md's HideConsoleWindow discipline for the same
-// reasoning applied to every other non-PTY child this module spawns).
+// hostOpenCommand passes the path as a discrete exec argument, never
+// shell-interpolated: it can come from untrusted terminal output.
 func hostOpenCommand(goos, target string) (string, []string, error) {
 	switch goos {
 	case "darwin":
@@ -32,9 +30,8 @@ func hostOpenCommand(goos, target string) (string, []string, error) {
 	}
 }
 
-// hostRevealCommand reveals a path in the OS file manager. Linux has no
-// portable file-select primitive, so it falls back to opening the containing
-// directory.
+// hostRevealCommand opens the parent directory on Linux, which has no portable
+// file-select primitive.
 func hostRevealCommand(goos, target string) (string, []string, error) {
 	switch goos {
 	case "darwin":
@@ -48,10 +45,7 @@ func hostRevealCommand(goos, target string) (string, []string, error) {
 	}
 }
 
-// launchHostOpenerDetached starts the OS opener and detaches it, mirroring
-// launchHostArtifactDetached's discipline: HideConsoleWindow suppresses the
-// console flash a windowless desktop child gets on Windows, and Release()
-// lets the opener outlive this process.
+// Release lets the opener outlive this process.
 func launchHostOpenerDetached(executable string, args []string) error {
 	cmd := exec.Command(executable, args...)
 	core.HideConsoleWindow(cmd)
@@ -64,10 +58,8 @@ func launchHostOpenerDetached(executable string, args []string) error {
 	return nil
 }
 
-// OpenHostPath opens a host-machine file or directory with the OS handler.
-// Callers must already know this is a host path -- a path from a pod-side
-// terminal tab is resolved via ResolveEnvironmentHostPath first, never passed
-// here directly.
+// OpenHostPath opens a host path with the OS handler; pod paths must go through
+// ResolveEnvironmentHostPath first.
 func (a *App) OpenHostPath(hostPath string) error {
 	hostPath = strings.TrimSpace(hostPath)
 	if hostPath == "" {
@@ -83,8 +75,7 @@ func (a *App) OpenHostPath(hostPath string) error {
 	return a.deps.launchHostOpener(executable, args)
 }
 
-// RevealHostPath opens the host file manager focused on the given path (or
-// its containing directory, on platforms with no file-select primitive).
+// RevealHostPath opens the host file manager focused on the given path.
 func (a *App) RevealHostPath(hostPath string) error {
 	hostPath = strings.TrimSpace(hostPath)
 	if hostPath == "" {
@@ -100,27 +91,17 @@ func (a *App) RevealHostPath(hostPath string) error {
 	return a.deps.launchHostOpener(executable, args)
 }
 
-// podPathResolution is what ResolveEnvironmentHostPath reports for a path
-// printed inside an environment's pod-side terminal: whether it has a host
-// equivalent this desktop can open, and if not, why not. A pod path must
-// never be resolved against a same-named host file (erun-ui/AGENTS.md and
-// issue #1354) -- "unresolved" is always the safe default.
+// A pod path must never resolve to a same-named host file; "unresolved" is the
+// safe default.
 type podPathResolution struct {
-	// Kind is "mirror" (the env's synced worktree), "artifact" (the synced
-	// outputs mirror), or "unresolved".
+	// Kind is "mirror", "artifact", or "unresolved".
 	Kind     string `json:"kind"`
 	HostPath string `json:"hostPath,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }
 
-// ResolveEnvironmentHostPath maps a path an environment's pod-side terminal
-// printed onto its host-side equivalent, when one exists: under the pod's
-// outputs directory it resolves via the synced .erun-outputs mirror; under the
-// pod's worktree root it resolves via the same host workspace OpenHostIDE and
-// LoadHostDiff already use (the local-agent worktree itself, or the
-// remote-agent workspace-sync mirror). Anything else -- including an
-// environment with no host workspace at all -- comes back unresolved with a
-// stated reason rather than guessing at a same-named host file.
+// ResolveEnvironmentHostPath maps a pod-side terminal path onto its host
+// equivalent via the outputs mirror or host workspace, else unresolved.
 func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) (podPathResolution, error) {
 	selection = normalizeSelection(selection)
 	podPath = strings.TrimSpace(podPath)
@@ -132,17 +113,17 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 	}
 	result, hostRoot, err := a.resolveHostWorkspace(selection)
 	if err != nil {
-		return podPathResolution{Kind: "unresolved", Reason: err.Error()}, nil
+		return podPathResolution{Kind: "unresolved", Reason: fmt.Sprint(err)}, nil
 	}
 	cleanPodPath := path.Clean(filepath.ToSlash(podPath))
-	if rel, ok := relUnderPodDir(cleanPodPath, eruncommon.DefaultRuntimeOutputsDir); ok {
+	if rel, ok := relUnderPodDir(cleanPodPath, core.DefaultRuntimeOutputsDir); ok {
 		return resolveHostMirrorPath(
 			"artifact",
 			filepath.Join(hostRoot, workspace.WorkspaceSyncArtifactsSubdir, filepath.FromSlash(rel)),
 			"no matching file has synced to this environment's outputs yet",
 		), nil
 	}
-	podRoot := eruncommon.RemoteShellWorktreePath(eruncommon.ShellLaunchParamsFromResult(result))
+	podRoot := open.RemoteShellWorktreePath(cloud.ShellLaunchParamsFromResult(result))
 	if rel, ok := relUnderPodDir(cleanPodPath, podRoot); ok {
 		return resolveHostMirrorPath(
 			"mirror",
@@ -156,9 +137,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 	}, nil
 }
 
-// relUnderPodDir reports the slash-separated path of podPath relative to dir
-// (POSIX join rules, since pod paths are always Linux) when podPath falls
-// under dir, and whether it does.
+// Pod paths are always Linux, so POSIX rules apply.
 func relUnderPodDir(podPath, dir string) (string, bool) {
 	dir = path.Clean(dir)
 	if podPath == dir {

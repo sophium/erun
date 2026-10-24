@@ -13,5 +13,8 @@ func decodeJSON(r *http.Request, target any) error {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		// The status is already sent, so a failed body write has no one left to report to.
+		return
+	}
 }

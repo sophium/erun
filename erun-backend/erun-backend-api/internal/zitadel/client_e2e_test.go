@@ -3,6 +3,7 @@ package zitadel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,18 +12,8 @@ import (
 	"time"
 )
 
-// TestClientAgainstRealZitadel proves this client's request/response shapes
-// against a real Zitadel v4 core instance -- the exact concern a mocked
-// httptest server cannot settle, since every field name here (userName,
-// forceMfa, minLength as a JSON *string*, the _deactivate/_reactivate path
-// shape, the human/machine "state initial can only be deleted" business
-// rule) was originally guessed from Zitadel's public API and then verified
-// live before being committed.
-//
-// Opt-in and skipped by default (this repository's convention for a gate
-// that needs real infrastructure beyond a database). Stand
-// up a Zitadel core + Postgres (core only, not the separate Login V2
-// container, since this test drives the Management API directly):
+// TestClientAgainstRealZitadel verifies request/response shapes against a real
+// Zitadel v4 core, which a mocked server cannot. Opt-in; to run:
 //
 //	docker network create erun-zitadel-e2e-net
 //	docker volume create erun-zitadel-e2e-bootstrap
@@ -59,9 +50,7 @@ import (
 //	ERUN_E2E_ZITADEL_PAT_PATH=/tmp/admin-sa.pat \
 //	  go test ./internal/zitadel/... -run TestClientAgainstRealZitadel -v
 //
-// Two more variables (issue #1168) additionally exercise the SMTP
-// configuration path against a real local SMTP sink, e.g. mailhog on the
-// same docker network as the Zitadel core container above:
+// The SMTP path additionally needs a local SMTP sink:
 //
 //	docker run -d --name mailhog --network erun-zitadel-e2e-net mailhog/mailhog
 //	ERUN_E2E_ZITADEL_SMTP_HOST=mailhog:1025 \
@@ -89,12 +78,8 @@ func TestClientAgainstRealZitadel(t *testing.T) {
 	e2eCrossOrgListAndDeactivate(t, ctx, client)
 }
 
-// e2eCrossOrgListAndDeactivate proves the actual bug this issue reports,
-// against a real instance: a user created in another org (via
-// CreateHumanUserParams.OrgID, the same as enrolling a tenant's first
-// admin) must be listable and deactivatable by naming that same org again --
-// and must NOT show up in, or be reachable through, the credential's own
-// org, which is exactly the silent wrong-org behaviour before this fix.
+// e2eCrossOrgListAndDeactivate: a user created in another org is reachable only
+// by naming that org, never through the credential's own.
 func e2eCrossOrgListAndDeactivate(t *testing.T, ctx context.Context, client *Client) {
 	t.Helper()
 	orgName := fmt.Sprintf("erun-e2e-org-%d", time.Now().UnixNano())
@@ -160,16 +145,15 @@ func e2eCreateAndListUser(t *testing.T, ctx context.Context, client *Client) Use
 	return created
 }
 
-// e2eRefusesDeactivatingAnInitialUser locks a real business rule: a freshly
-// invited user is USER_STATE_INITIAL, which Zitadel refuses to deactivate
-// ("can only be deleted not deactivated").
+// Zitadel refuses to deactivate a USER_STATE_INITIAL user ("can only be deleted").
 func e2eRefusesDeactivatingAnInitialUser(t *testing.T, ctx context.Context, client *Client, userID string) {
 	t.Helper()
 	err := client.DeactivateUser(ctx, "", userID)
 	if err == nil {
 		t.Fatal("want DeactivateUser to refuse a USER_STATE_INITIAL user")
 	}
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok || !strings.Contains(apiErr.Body, "initial") {
 		t.Fatalf("DeactivateUser error = %v, want Zitadel's state-precondition message", err)
 	}
@@ -200,19 +184,8 @@ func e2eUpdatesOrgSettings(t *testing.T, ctx context.Context, client *Client) {
 	}
 }
 
-// e2eConfiguresSMTPAndSkipsTheEmailFlow proves GetSMTPStatus/UpdateSMTPConfig
-// against a real Zitadel Admin API (issue #1168): the instance this test
-// runs against starts with no SMTP config at all (Zitadel's own 404, the
-// issue's exact starting point), so this converges one against
-// ERUN_E2E_ZITADEL_SMTP_HOST (point it at a local SMTP sink such as
-// mailhog, e.g. "localhost:1025") and confirms GetSMTPStatus reports it
-// active. When ERUN_E2E_ZITADEL_SMTP_SINK_API also names that sink's own
-// message API (mailhog's "http://localhost:8025"), it additionally proves an
-// actual message was produced and accepted -- not merely that a config
-// object was written -- by creating a real invite and polling the sink for
-// the resulting message. Both are optional and skip cleanly when unset,
-// matching this repository's convention for a gate that needs real
-// infrastructure.
+// e2eConfiguresSMTPAndSkipsTheEmailFlow converges SMTP config against
+// ERUN_E2E_ZITADEL_SMTP_HOST; skipped when unset.
 func e2eConfiguresSMTPAndSkipsTheEmailFlow(t *testing.T, ctx context.Context, client *Client) {
 	t.Helper()
 	smtpHost := strings.TrimSpace(os.Getenv("ERUN_E2E_ZITADEL_SMTP_HOST"))
@@ -236,10 +209,7 @@ func e2eConfiguresSMTPAndSkipsTheEmailFlow(t *testing.T, ctx context.Context, cl
 		t.Fatalf("UpdateSMTPConfig result = %+v, want Configured with host %q", updated, smtpHost)
 	}
 
-	// Zitadel's query side is eventually consistent with the command that
-	// just activated this config (confirmed live: a read immediately after
-	// activation can still 404 for a few seconds), so this polls rather than
-	// asserting on the first read.
+	// Zitadel's query side is eventually consistent: a read right after activation can 404.
 	if !e2ePollUntil(t, 15*time.Second, func() bool {
 		status, err := client.GetSMTPStatus(ctx)
 		return err == nil && status.Configured
@@ -250,10 +220,8 @@ func e2eConfiguresSMTPAndSkipsTheEmailFlow(t *testing.T, ctx context.Context, cl
 	e2eVerifiesSMTPSinkDelivery(t, ctx, client)
 }
 
-// e2eVerifiesSMTPSinkDelivery proves an actual message was produced and
-// accepted, not merely that a config object was written: it creates a real
-// invite and polls the sink's own message API for the resulting message.
-// Skips cleanly when ERUN_E2E_ZITADEL_SMTP_SINK_API is unset.
+// e2eVerifiesSMTPSinkDelivery checks a real invite reaches the sink; skipped when
+// ERUN_E2E_ZITADEL_SMTP_SINK_API is unset.
 func e2eVerifiesSMTPSinkDelivery(t *testing.T, ctx context.Context, client *Client) {
 	t.Helper()
 	sinkAPI := strings.TrimSpace(os.Getenv("ERUN_E2E_ZITADEL_SMTP_SINK_API"))
@@ -273,8 +241,6 @@ func e2eVerifiesSMTPSinkDelivery(t *testing.T, ctx context.Context, client *Clie
 	}
 }
 
-// e2ePollUntil polls condition every 500ms until it reports true or timeout
-// elapses, returning whether it ever did.
 func e2ePollUntil(t *testing.T, timeout time.Duration, condition func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -289,8 +255,7 @@ func e2ePollUntil(t *testing.T, timeout time.Duration, condition func() bool) bo
 	}
 }
 
-// e2eSinkReceivedMessageFor queries a mailhog-shaped sink's v2 message API
-// for any message addressed to recipient.
+// e2eSinkReceivedMessageFor queries a mailhog-shaped v2 message API.
 func e2eSinkReceivedMessageFor(t *testing.T, sinkAPI string, recipient string) bool {
 	t.Helper()
 	resp, err := http.Get(strings.TrimRight(sinkAPI, "/") + "/api/v2/messages")

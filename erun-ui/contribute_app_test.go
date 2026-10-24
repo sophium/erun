@@ -15,11 +15,6 @@ import (
 	"time"
 )
 
-// These tests pin the respawn-on-early-exit contract: kubectl port-forward can
-// die before the in-pod listener binds during the CLI rebuild window, and the
-// contribute-app open flow must respawn rather than give up before the headless
-// erun-app finishes.
-
 func skipIfNoSh(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -27,15 +22,14 @@ func skipIfNoSh(t *testing.T) {
 	}
 }
 
-// freeTCPPort returns a port that was bindable a moment ago; the race between
-// this call and a later re-bind is acceptable for test use.
+// freeTCPPort returns a port that was bindable a moment ago.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
+	port := tcpListenerPort(t, ln)
 	_ = ln.Close()
 	return port
 }
@@ -69,8 +63,7 @@ func shrinkContributeAppTimings(t *testing.T, deadline, poll time.Duration) {
 
 type spawnPlan struct {
 	script string
-	// The real kubectl streams stderr while running; the fake subprocess does
-	// not, so the test pre-populates what exitedWithError will surface.
+	// The fake does not stream stderr, so it is pre-populated.
 	stderr  string
 	onSpawn func()
 }
@@ -89,9 +82,7 @@ func installFakeContributeSpawn(t *testing.T, plan func(n int) spawnPlan, counte
 		if err := cmd.Start(); err != nil {
 			return nil, nil, err
 		}
-		// Reaping is owned by the forward (startReap), not the spawn
-		// fake — match the production shape so the race detector sees
-		// the same synchronisation discipline.
+		// The forward reaps (startReap), as in production.
 		return cmd, bytes.NewBufferString(p.stderr), nil
 	}
 	t.Cleanup(func() { spawnContributeAppForwardCmd = orig })
@@ -107,9 +98,6 @@ func initialContributeSpawn(t *testing.T, port int) (*contributeAppForward, []st
 	return newContributeAppForward(cmd, stderr, port), args
 }
 
-// TestWaitForContributeAppReachableSucceedsWhenAlreadyServing covers
-// the reuse path: something is already listening on the local port
-// so the wait just polls HTTP without owning any kubectl process.
 func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
 	shrinkContributeAppTimings(t, 2*time.Second, 25*time.Millisecond)
 	port := freeTCPPort(t)
@@ -121,11 +109,7 @@ func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
 	}
 }
 
-// TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit locks
-// the bug. The first kubectl spawn dies immediately
-// (simulating kubectl's "lost connection to pod" when the in-pod
-// listener has not yet bound during the CLI rebuild window). The
-// loop must respawn and succeed once the in-pod side is up.
+// The first kubectl dies immediately, as when the in-pod listener has not bound yet.
 func TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit(t *testing.T) {
 	skipIfNoSh(t)
 	shrinkContributeAppTimings(t, 5*time.Second, 25*time.Millisecond)
@@ -163,11 +147,7 @@ func TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit(t *testing.T) {
 	}
 }
 
-// TestWaitForContributeAppReachableTimesOutPreservesLastExit covers
-// the deadline path. kubectl keeps dying (a real failure mode: wrong
-// context, deployment missing, host port busy on the pod side). The
-// deadline error must include the last captured kubectl stderr so
-// the user sees the cause, not just a 5-minute timeout banner.
+// The deadline error must include the last kubectl stderr.
 func TestWaitForContributeAppReachableTimesOutPreservesLastExit(t *testing.T) {
 	skipIfNoSh(t)
 	shrinkContributeAppTimings(t, 250*time.Millisecond, 25*time.Millisecond)
@@ -197,11 +177,6 @@ func TestWaitForContributeAppReachableTimesOutPreservesLastExit(t *testing.T) {
 	}
 }
 
-// TestStopAbortsRespawn covers the race where the user toggles
-// contribute mode off (or the env closes) while the wait is mid-
-// respawn. forward.adopt must refuse to install the new cmd, the
-// freshly-spawned kubectl must be killed, and the wait must return a
-// "stopped" error rather than burning the full deadline.
 func TestStopAbortsRespawn(t *testing.T) {
 	skipIfNoSh(t)
 	shrinkContributeAppTimings(t, 5*time.Second, 25*time.Millisecond)
@@ -234,10 +209,6 @@ func TestStopAbortsRespawn(t *testing.T) {
 	}
 }
 
-// TestAdoptRefusesAfterStop is the unit-level invariant behind
-// TestStopAbortsRespawn: once stop() has set the stopped flag,
-// subsequent adopt calls must return false so the caller can kill
-// the orphaned kubectl.
 func TestAdoptRefusesAfterStop(t *testing.T) {
 	forward := &contributeAppForward{}
 	forward.stop()

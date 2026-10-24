@@ -5,10 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,16 +20,10 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 	return "write the erun config for " + boot.tenant() + "/" + boot.environment() + " under " + filepath.Join(boot.configHome(), configpkg.ConfigRoot)
 }
 
-// writeRuntimeBootConfig writes the pod's erun config from the environment the
-// chart injects: the root config's default tenant and infrastructure cloud
-// provider/context, the tenant's default environment, and the environment's
-// projection (type, contexts, registries, idle policy) plus its repository path.
-// The projection is ResolveInjectedRuntimeConfig, the same one `erun doctor
-// --sync-config` reconciles against, so a freshly booted pod is in sync by
-// construction. Keys the injection does not carry are preserved, as every
-// config writer preserves them.
+// writeRuntimeBootConfig writes ResolveInjectedRuntimeConfig's projection, the one
+// `erun doctor --sync-config` checks, so a booted pod is in sync by construction.
 func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
-	injected, ok := eruncommon.ResolveInjectedRuntimeConfig(boot.env)
+	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(boot.env)
 	if !ok {
 		return nil
 	}
@@ -39,17 +34,17 @@ func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 	if err := writeRuntimeBootTenantConfig(configHome, injected); err != nil {
 		return err
 	}
-	env, _, err := eruncommon.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
+	env, _, err := configpkg.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
 	if err != nil {
 		env = configpkg.EnvConfig{}
 	}
-	env = eruncommon.OverlayInjectedEnvConfig(env, injected.Env)
+	env = cloudconfig.OverlayInjectedEnvConfig(env, injected.Env)
 	env.LocalRepoPath = boot.repoDir()
-	return writeRuntimeBootYAML(eruncommon.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
+	return writeRuntimeBootYAML(configpkg.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
 }
 
-func writeRuntimeBootRootConfig(configHome string, injected eruncommon.InjectedRuntimeConfig) error {
-	root, _, err := eruncommon.LoadRuntimeRootConfigForSync(configHome)
+func writeRuntimeBootRootConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
+	root, _, err := configpkg.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = configpkg.ERunConfig{}
 	}
@@ -60,15 +55,15 @@ func writeRuntimeBootRootConfig(configHome string, injected eruncommon.InjectedR
 	for _, context := range injected.Contexts {
 		root.CloudContexts = cloud.UpsertCloudContext(root.CloudContexts, context)
 	}
-	return writeRuntimeBootYAML(eruncommon.RuntimeRootConfigPath(configHome), root)
+	return writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(configHome), root)
 }
 
-func writeRuntimeBootTenantConfig(configHome string, injected eruncommon.InjectedRuntimeConfig) error {
+func writeRuntimeBootTenantConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
 	path := filepath.Join(configHome, configpkg.ConfigRoot, injected.Tenant, configpkg.ConfigFile)
-	tenant := configpkg.TenantConfig{}
+	tenant := model.TenantConfig{}
 	if data, err := os.ReadFile(path); err == nil {
 		if yaml.Unmarshal(data, &tenant) != nil {
-			tenant = configpkg.TenantConfig{}
+			tenant = model.TenantConfig{}
 		}
 	}
 	tenant.Name = injected.Tenant
@@ -76,9 +71,7 @@ func writeRuntimeBootTenantConfig(configHome string, injected eruncommon.Injecte
 	return writeRuntimeBootYAML(path, tenant)
 }
 
-// writeRuntimeBootYAML writes a config file, keeping keys this binary's types do
-// not declare. A file that does not parse is replaced: the boot is where a pod's
-// config is rebuilt from what the chart says it is.
+// writeRuntimeBootYAML keeps undeclared keys and replaces a file that does not parse.
 func writeRuntimeBootYAML(path string, config any) error {
 	existing, _ := os.ReadFile(path)
 	var probe yaml.Node

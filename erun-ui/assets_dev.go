@@ -9,8 +9,7 @@ import (
 
 var assets fs.FS = os.DirFS("frontend/dist")
 
-// A non-production build normally serves from the vite dev server, but
-// `--headless` has no such server and still needs a concrete FS to serve.
+// `--headless` has no vite dev server and still needs a concrete FS.
 func frontendDistFS() fs.FS {
 	return assets
 }

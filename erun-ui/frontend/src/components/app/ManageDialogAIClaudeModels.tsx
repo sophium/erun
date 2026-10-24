@@ -5,10 +5,7 @@ import { addClaudeModelId, isClaudeModelToken } from '@/components/app/claudeMod
 import type { effectiveClaudeModelDefaults } from '@/components/app/ManageDialog.helpers';
 import type { UIEnvironmentConfig } from '@/types';
 
-// ClaudeAddModelField types a model id the erun-level list does not offer. The
-// catalog is the curated set, but a gateway serves ids the operator has not
-// curated, and typing one is a supported act — refusing it here would leave no
-// way to reach a model the gateway serves.
+// ClaudeAddModelField accepts ids the catalog does not list, since a gateway may serve them.
 export function ClaudeAddModelField({
   value,
   known,
@@ -34,8 +31,7 @@ export function ClaudeAddModelField({
     if (!canAdd) {
       return;
     }
-    // The base is what the user sees checked, so appending to it preserves any
-    // catalog entries they have ticked rather than replacing the list.
+    // Append to what is checked so ticked catalog entries are preserved.
     const base = overridden ? value : defaults.models;
     onChange(addClaudeModelId({ base, known, id: trimmed }));
     setText('');
@@ -96,10 +92,7 @@ export function ClaudeDefaultModelField({
   disabled?: boolean;
   onChange: (value: string | undefined) => void;
 }): React.ReactElement {
-  // The selectable models mirror what launch-side resolution honours, so an
-  // operator can never pick a model the env does not expose: the gateway
-  // catalog's models when the gateway applies, else the env's own available
-  // set. A stored model outside that set stays visible as a flagged option.
+  // Mirrors launch-side resolution; a stored model outside the set stays visible, flagged.
   const { available, defaultLaunchModel, viaGateway } = effective;
   const options = [
     {
@@ -111,8 +104,6 @@ export function ClaudeDefaultModelField({
   if (claude.defaultModel && !available.includes(claude.defaultModel)) {
     options.push({
       value: claude.defaultModel,
-      // The gateway launch honours an id the catalog does not list; the
-      // env's own sign-in only launches one of its available models.
       label: viaGateway
         ? `${claude.defaultModel} (not in the gateway catalog)`
         : `${claude.defaultModel} (not in available models — ignored at launch)`,

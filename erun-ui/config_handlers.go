@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -34,13 +35,10 @@ func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	} else if err != nil {
 		return uiERunConfig{}, err
 	}
-	// Preserve every field this dialog does not edit (cloud providers/contexts,
-	// runtime registry, orchestrators) — a scoped save must not drop config the
-	// user manages elsewhere. Only DefaultTenant is editable here.
+	// Preserve fields this dialog does not edit; only DefaultTenant changes here.
 	updated := existing
 	updated.DefaultTenant = strings.TrimSpace(config.DefaultTenant)
-	// Only replace the catalog when the dialog sent one, so a caller that does
-	// not edit it cannot silently drop the operator's gateway configuration.
+	// Replace the catalog only when sent, so other callers cannot drop it.
 	if config.OpenRouter != nil {
 		updated.OpenRouter = openRouterConfigFromUI(config.OpenRouter)
 		if err := validateGatewayCatalogModelIDs(updated.OpenRouter); err != nil {
@@ -71,7 +69,7 @@ func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
 }
 
 func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextStatus, error) {
-	status, err := cloud.InitCloudContext(core.Context{}, a.deps.store, cloud.InitCloudContextParams{
+	status, err := cloud.InitCloudContext(core.Context{}, a.deps.store, model.InitCloudContextParams{
 		Name:               strings.TrimSpace(input.Name),
 		CloudProviderAlias: strings.TrimSpace(input.CloudProviderAlias),
 		Region:             strings.TrimSpace(input.Region),
@@ -91,11 +89,8 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Record Stop intent before the AWS call so shouldRespawnForCloudContext
-	// already sees the marker by the time the kubectl session dies and
-	// the reconnect loop fires. If the AWS call fails the cluster is
-	// still up — clear the marker so a transient stop error does not
-	// silently disable reconnect.
+	// Mark the stop before the AWS call so the reconnect gate sees it when the session
+	// dies; clear it on failure so a stop error does not disable reconnect.
 	a.markIntentionalStopForCloudContext(name)
 	status, err := a.deps.stopCloudContext(ctx, name)
 	if err != nil {
@@ -103,16 +98,13 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 		return uiCloudContextStatus{}, err
 	}
 	a.setCloudContextStatusInCache(status.Name, status.Status)
-	// Best-effort: surface the manual stop in each linked env's History
-	// tab alongside the in-pod monitor's auto-stops. Failures are ignored
-	// because the AWS stop already succeeded — the user-visible action is
-	// complete.
+	// Best-effort History entry; the stop already succeeded.
 	a.recordManualStopForCloudContext(ctx, status.Name)
 	return cloudContextStatusToUI(status), nil
 }
 
 func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
-	status, err := cloud.StartCloudContext(core.Context{}, a.deps.store, cloud.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
+	status, err := cloud.StartCloudContext(core.Context{}, a.deps.store, model.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
@@ -122,11 +114,9 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 	return cloudContextStatusToUI(status), nil
 }
 
-// DisableCloudContextApiStop turns on AWS stop protection — the recovery
-// lever an operator reaches for when auto-stop is racing against an
-// unhealthy env.
+// DisableCloudContextApiStop turns on AWS stop protection.
 func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
-	status, err := cloud.SetCloudContextStopProtection(core.Context{}, a.deps.store, cloud.CloudContextStopProtectionParams{
+	status, err := cloud.SetCloudContextStopProtection(core.Context{}, a.deps.store, model.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: true,
 	}, a.deps.cloudContextDeps)
@@ -136,10 +126,9 @@ func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, err
 	return cloudContextStatusToUI(status), nil
 }
 
-// EnableCloudContextApiStop turns AWS stop protection back off so normal
-// auto-stop and manual stop resume.
+// EnableCloudContextApiStop turns AWS stop protection off.
 func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
-	status, err := cloud.SetCloudContextStopProtection(core.Context{}, a.deps.store, cloud.CloudContextStopProtectionParams{
+	status, err := cloud.SetCloudContextStopProtection(core.Context{}, a.deps.store, model.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: false,
 	}, a.deps.cloudContextDeps)
@@ -149,10 +138,7 @@ func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, erro
 	return cloudContextStatusToUI(status), nil
 }
 
-// DescribeCloudContextApiStop reads live AWS stop-protection state on
-// demand: the bulk status refresh deliberately skips it to avoid an AWS
-// round-trip per env on every poll, so the titlebar lock toggle reads it
-// lazily instead.
+// DescribeCloudContextApiStop reads stop protection on demand; the bulk refresh skips it.
 func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, error) {
 	status, err := cloud.DescribeCloudContextStopProtection(core.Context{}, a.deps.store, name, a.deps.cloudContextDeps)
 	if err != nil {
@@ -162,7 +148,7 @@ func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, er
 }
 
 func (a *App) SaveAWSCloudProviderAlias(input uiAWSCloudAliasInput) (uiCloudProviderStatus, error) {
-	provider, err := cloud.SaveCloudProviderConfig(a.deps.store, configpkg.CloudProviderConfig{
+	provider, err := cloud.SaveCloudProviderConfig(a.deps.store, model.CloudProviderConfig{
 		Alias:         strings.TrimSpace(input.Alias),
 		Provider:      configpkg.CloudProviderAWS,
 		Username:      strings.TrimSpace(input.Username),
@@ -182,7 +168,7 @@ func (a *App) InitAWSCloudProvider(input uiAWSCloudAliasInput) (uiCloudProviderS
 	if strings.TrimSpace(input.Username) != "" || strings.TrimSpace(input.AccountID) != "" {
 		return a.SaveAWSCloudProviderAlias(input)
 	}
-	provider, err := cloud.InitAWSCloudProvider(core.Context{}, a.deps.store, cloud.InitAWSCloudProviderParams{
+	provider, err := cloud.InitAWSCloudProvider(core.Context{}, a.deps.store, model.InitAWSCloudProviderParams{
 		Profile:       strings.TrimSpace(input.Profile),
 		OIDCIssuerURL: strings.TrimSpace(input.OIDCIssuerURL),
 	}, a.deps.cloudDeps)
@@ -200,22 +186,13 @@ func (a *App) LoginCloudProvider(alias string) (uiCloudProviderStatus, error) {
 	return cloudProviderStatusToUI(status), nil
 }
 
-// desktopCloudLoginParams is the flow a Wails-bound sign-in runs under.
-// Authorization code + PKCE is requested rather than left to auto: the
-// desktop completes it by opening the operator's own browser, whereas the
-// device grant's whole instruction is a code this app has no surface to show,
-// so auto's device-first ordering left the button apparently inert until the
-// grant expired and the auth-code fallback finally ran.
-func (a *App) desktopCloudLoginParams(alias string) cloud.CloudLoginParams {
-	return cloud.CloudLoginParams{Alias: alias, Flow: cloud.ERunLoginFlowAuthCode}
+// desktopCloudLoginParams forces auth code + PKCE: the desktop has no surface to show
+// a device-grant code, so auto's device-first ordering looked inert.
+func (a *App) desktopCloudLoginParams(alias string) model.CloudLoginParams {
+	return model.CloudLoginParams{Alias: alias, Flow: cloud.ERunLoginFlowAuthCode}
 }
 
-// desktopCloudLoginContext routes an interactive grant's own instructions
-// somewhere the operator can read them. Every prompt the login writes (the URL
-// the browser was sent to, or the URL to open by hand when no browser could be
-// launched) otherwise goes to a nil Stdout and the sign-in looks like a button
-// that does nothing for as long as it waits. The message center keeps that
-// instruction reachable instead of silent.
+// desktopCloudLoginContext sends the login's instructions to the message center instead of a nil Stdout.
 func (a *App) desktopCloudLoginContext() core.Context {
 	return core.Context{Stdout: desktopLoginPromptWriter{app: a}}
 }
@@ -232,21 +209,15 @@ func (w desktopLoginPromptWriter) Write(p []byte) (int, error) {
 }
 
 func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
-	status, err := cloud.LogoutCloudProviderAlias(core.Context{}, a.deps.store, cloud.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
+	status, err := cloud.LogoutCloudProviderAlias(core.Context{}, a.deps.store, model.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
 	return cloudProviderStatusToUI(status), nil
 }
 
-// SwitchCloudProviderIdentity re-authenticates an already-connected alias as a
-// different account. LoginCloudProvider short-circuits without starting a new
-// sign-in whenever the stored session is still active, so switching needs
-// Force: true to reach the real OIDC flow at all; erunCloudProviderLogin only
-// overwrites the stored refresh/access tokens once that flow actually
-// succeeds, so a cancelled or failed switch leaves the previous identity
-// signed in rather than landing the alias signed out with nothing to show
-// for it.
+// SwitchCloudProviderIdentity re-authenticates an alias as another account. Force
+// bypasses the active-session short-circuit; a failed switch keeps the old identity.
 func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, error) {
 	params := a.desktopCloudLoginParams(alias)
 	params.Force = true
@@ -258,7 +229,7 @@ func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, 
 }
 
 func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error) {
-	status, _, err := cloud.SetupCloudProviderOIDC(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
+	status, _, err := cloud.SetupCloudProviderOIDC(core.Context{}, a.deps.store, model.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
@@ -266,7 +237,7 @@ func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error
 }
 
 func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerToken, error) {
-	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: strings.TrimSpace(alias)}, a.deps.cloudDeps)
+	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, model.CloudBearerParams{Alias: strings.TrimSpace(alias)}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderBearerToken{}, err
 	}
@@ -321,15 +292,12 @@ func (a *App) erunConfigToUI(config configpkg.ERunConfig) uiERunConfig {
 		CloudProviders: cloudProviderStatusesToUI(a.statusesForCloudProviders(config.CloudProviders)),
 		CloudContexts:  cloudContextStatusesToUI(statusesForCloudContexts(config.CloudContexts)),
 		OpenRouter:     openRouterConfigToUI(config.OpenRouter),
-		// Best-effort: a machine with no user settings file has no gateway to
-		// offer, and an unreadable one must not stop the settings dialog opening.
+		// Best-effort: an unreadable settings file must not block the dialog.
 		OpenRouterDefaults: a.hostGatewayDefaults(),
 	}
 }
 
-// hostGatewayDefaults reports this machine's own Claude Code gateway, or nil
-// when there is none to offer. The read is best-effort by design: it supplies a
-// pre-fill, and a pre-fill that cannot be read is the unconfigured case.
+// hostGatewayDefaults reports this machine's Claude Code gateway, or nil; best-effort pre-fill.
 func (a *App) hostGatewayDefaults() *uiHostGatewayDefaults {
 	defaults, err := a.LoadHostGatewayDefaults()
 	if err != nil || defaults.BaseURL == "" {
@@ -377,19 +345,19 @@ func validateGatewayCatalogModelIDs(catalog *configpkg.OpenRouterConfig) error {
 		return nil
 	}
 	for _, m := range catalog.Models {
-		if err := eruncommon.ValidateClaudeModelID(m.ID); err != nil {
+		if err := orchestrator.ValidateClaudeModelID(m.ID); err != nil {
 			return fmt.Errorf("cannot save the gateway catalog: %w", err)
 		}
 	}
 	if def := catalog.DefaultModel; def != "" {
-		if err := eruncommon.ValidateClaudeModelID(def); err != nil {
+		if err := orchestrator.ValidateClaudeModelID(def); err != nil {
 			return fmt.Errorf("cannot save the gateway catalog: default %w", err)
 		}
 	}
 	return nil
 }
 
-func (a *App) tenantConfigToUI(config configpkg.TenantConfig, fallbackName string) uiTenantConfig {
+func (a *App) tenantConfigToUI(config model.TenantConfig, fallbackName string) uiTenantConfig {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -405,7 +373,7 @@ func (a *App) tenantConfigToUI(config configpkg.TenantConfig, fallbackName strin
 	return result
 }
 
-func tenantConfigFromUI(config uiTenantConfig, existing configpkg.TenantConfig) configpkg.TenantConfig {
+func tenantConfigFromUI(config uiTenantConfig, existing model.TenantConfig) model.TenantConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
 	existing.APIURL = strings.TrimSpace(config.APIURL)
@@ -413,15 +381,15 @@ func tenantConfigFromUI(config uiTenantConfig, existing configpkg.TenantConfig) 
 	return configpkg.NormalizeTenantConfig(existing)
 }
 
-func (a *App) statusesForCloudProviders(providers []configpkg.CloudProviderConfig) []cloud.CloudProviderStatus {
-	statuses := make([]cloud.CloudProviderStatus, 0, len(providers))
+func (a *App) statusesForCloudProviders(providers []model.CloudProviderConfig) []model.CloudProviderStatus {
+	statuses := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		statuses = append(statuses, cloud.CloudProviderTokenStatus(provider, a.deps.cloudDeps))
 	}
 	return statuses
 }
 
-func cloudProviderStatusesToUI(statuses []cloud.CloudProviderStatus) []uiCloudProviderStatus {
+func cloudProviderStatusesToUI(statuses []model.CloudProviderStatus) []uiCloudProviderStatus {
 	result := make([]uiCloudProviderStatus, 0, len(statuses))
 	for _, status := range statuses {
 		result = append(result, cloudProviderStatusToUI(status))
@@ -429,7 +397,7 @@ func cloudProviderStatusesToUI(statuses []cloud.CloudProviderStatus) []uiCloudPr
 	return result
 }
 
-func cloudProviderStatusToUI(status cloud.CloudProviderStatus) uiCloudProviderStatus {
+func cloudProviderStatusToUI(status model.CloudProviderStatus) uiCloudProviderStatus {
 	return uiCloudProviderStatus{
 		Alias:         strings.TrimSpace(status.Alias),
 		Provider:      strings.TrimSpace(status.Provider),
@@ -442,27 +410,27 @@ func cloudProviderStatusToUI(status cloud.CloudProviderStatus) uiCloudProviderSt
 	}
 }
 
-func statusesForCloudProvidersFromStore(store configpkg.CloudReadStore, deps cloud.CloudDependencies) []cloud.CloudProviderStatus {
+func statusesForCloudProvidersFromStore(store configpkg.CloudReadStore, deps cloud.CloudDependencies) []model.CloudProviderStatus {
 	providers, err := cloud.ListCloudProviders(store)
 	if err != nil {
 		return nil
 	}
-	statuses := make([]cloud.CloudProviderStatus, 0, len(providers))
+	statuses := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		statuses = append(statuses, cloud.CloudProviderTokenStatus(provider, deps))
 	}
 	return statuses
 }
 
-func statusesForCloudContexts(contexts []configpkg.CloudContextConfig) []configpkg.CloudContextStatus {
-	statuses := make([]configpkg.CloudContextStatus, 0, len(contexts))
+func statusesForCloudContexts(contexts []model.CloudContextConfig) []model.CloudContextStatus {
+	statuses := make([]model.CloudContextStatus, 0, len(contexts))
 	for _, context := range contexts {
-		statuses = append(statuses, configpkg.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(context)})
+		statuses = append(statuses, model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(context)})
 	}
 	return statuses
 }
 
-func cloudContextStatusesToUI(statuses []configpkg.CloudContextStatus) []uiCloudContextStatus {
+func cloudContextStatusesToUI(statuses []model.CloudContextStatus) []uiCloudContextStatus {
 	result := make([]uiCloudContextStatus, 0, len(statuses))
 	for _, status := range statuses {
 		result = append(result, cloudContextStatusToUI(status))
@@ -470,7 +438,7 @@ func cloudContextStatusesToUI(statuses []configpkg.CloudContextStatus) []uiCloud
 	return result
 }
 
-func cloudContextStatusToUI(status configpkg.CloudContextStatus) uiCloudContextStatus {
+func cloudContextStatusToUI(status model.CloudContextStatus) uiCloudContextStatus {
 	context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
 	return uiCloudContextStatus{
 		Name:                strings.TrimSpace(context.Name),
@@ -490,12 +458,7 @@ func cloudContextStatusToUI(status configpkg.CloudContextStatus) uiCloudContextS
 	}
 }
 
-// emitAppStatus narrates a long-running busy indicator (a spinner plus what
-// it is doing). It carries no class and never represents an outcome: every
-// call site that used to report a finished/failed state through here now
-// posts a classified notification instead (emitAppNotification/
-// emitEnvNotification), so this stays the one channel for "still working",
-// never for "here is what happened".
+// emitAppStatus narrates a busy indicator; outcomes go through notifications instead.
 func (a *App) emitAppStatus(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -503,11 +466,7 @@ func (a *App) emitAppStatus(message string) {
 	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: true})
 }
 
-// emitAppNotification pushes a transient toast-style notification, classified
-// by kind (success | warning | error | info | debug — see AppNotification in
-// the frontend). Use this for one-shot events with no env/orchestrator
-// identity to tag; emitEnvNotification/emitOrchestratorNotification are the
-// identity-carrying siblings.
+// emitAppNotification pushes a toast with no env/orchestrator identity.
 func (a *App) emitAppNotification(kind, message string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -515,72 +474,36 @@ func (a *App) emitAppNotification(kind, message string) {
 	a.emit(appNotificationEvent, appNotificationPayload{Kind: kind, Message: message})
 }
 
-// notificationSourceRuntimeUnreachable tags the "Could not reach the runtime …"
-// warning so the deploy lifecycle can clear it. Must match the
-// string the frontend compares in dismissNotificationForEnv.
+// notificationSourceRuntimeUnreachable must match dismissNotificationForEnv in the frontend.
 const notificationSourceRuntimeUnreachable = "runtime-unreachable"
 
-// notificationSourceForwardOutage tags the "…/… is unreachable: its port-forward
-// …" warning the activity sweep posts once a bounded repair has failed, so the
-// same lifecycle clear retires it when the forward starts carrying traffic
-// again. Kept apart from notificationSourceRuntimeUnreachable because the two
-// describe different failures: that one is a reconnect that could not run, this
-// one is a reconnect that ran and did not help.
+// notificationSourceForwardOutage tags a port-forward repair that ran and did not help,
+// unlike notificationSourceRuntimeUnreachable.
 const notificationSourceForwardOutage = "port-forward-outage"
 
-// notificationSourceDeployFailed tags the "Deploy of …/… failed" error so the
-// same lifecycle clear retires it once a new deploy for the env starts or the
-// runtime becomes reachable.
 const notificationSourceDeployFailed = "deploy-failed"
 
-// notificationSourceOrchestratorEdgeUnreachable tags the "wired tools for …,
-// but its edge is not answering" warning an orchestrator launch posts for a
-// linked environment whose edge failed its reachability probe. Posted once per
-// such environment and tagged with that env, so each one carries the deploy
-// action for the env it names and each is cleared by its own env's lifecycle.
+// notificationSourceOrchestratorEdgeUnreachable is posted per linked env, carrying that env's deploy action.
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
 
-// notificationSourceMCPUnreachable tags the "the local MCP endpoint isn't
-// reachable, reconnecting…" warning ensureMCPAvailable posts before attempting
-// its own reconnect, so a later success for the same env is free to clear it
-// through the generic wildcard clear in env_ensure.go.
 const notificationSourceMCPUnreachable = "mcp-unreachable"
 
-// notificationSourceCredentialRefreshFailed tags a host credential refresh
-// failure for the env it was refreshing on behalf of.
 const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
 
-// notificationSourceWorkspaceSyncNoPath tags the "workspace sync has no local
-// path" warning, posted once per sync start attempt for the env it names.
 const notificationSourceWorkspaceSyncNoPath = "workspace-sync-no-path"
 
-// notificationSourceWorkspaceSyncFailed tags a workspace sync failure for the
-// env it was syncing.
 const notificationSourceWorkspaceSyncFailed = "workspace-sync-failed"
 
-// notificationActionDeploy tags a notification whose remedy the frontend can
-// perform directly — opening the tagged env's deploy dialog. Passed as the
-// action to emitEnvNotification; "" means the notification carries no action.
+// notificationActionDeploy opens the tagged env's deploy dialog; "" means no action.
 const notificationActionDeploy = "deploy"
 
-// notificationActionRestartOrchestrator tags a notification the frontend can
-// resolve by restarting the named orchestrator directly, via
-// emitOrchestratorNotification.
 const notificationActionRestartOrchestrator = "restart-orchestrator"
 
-// notificationActionInstallAndRestartOrchestrator is the executable-missing
-// variant of notificationActionRestartOrchestrator: the orchestrator also
-// needs the erun CLI installed first, so the frontend renders a link to the
-// install docs alongside the restart control rather than leaving "install the
-// CLI" as prose the desktop cannot act on.
+// notificationActionInstallAndRestartOrchestrator also links the CLI install docs.
 const notificationActionInstallAndRestartOrchestrator = "install-and-restart-orchestrator"
 
-// emitEnvNotification posts a notification tagged with the env it describes and
-// a stable source, so a later emitClearEnvNotification for the same
-// (source, tenant, environment) can dismiss it. Use it for env-scoped, state-
-// backed notifications (not one-shot toasts). action names a control the
-// frontend can render to perform the message's own remedy directly ("" for
-// none — see notificationActionDeploy).
+// emitEnvNotification posts an env-scoped notification that emitClearEnvNotification
+// can dismiss by (source, tenant, environment).
 func (a *App) emitEnvNotification(kind, tenant, environment, source, message, action string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -595,10 +518,7 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message, ac
 	})
 }
 
-// emitOrchestratorNotification posts a notification tagged with the orchestrator
-// it describes, so the frontend can render an action that operates on that
-// orchestrator directly (restarting it) rather than leaving a named remedy with
-// no way to perform it.
+// emitOrchestratorNotification tags the orchestrator so the frontend can act on it.
 func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -611,10 +531,7 @@ func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action
 	})
 }
 
-// emitClearEnvNotification asks the frontend to dismiss a notification posted by
-// emitEnvNotification, but only when its source/tenant/environment all match.
-// Fired when the state a notification described has moved on: a
-// deploy for the env starts, or the runtime becomes reachable again.
+// emitClearEnvNotification dismisses an emitEnvNotification matching source, tenant, and environment.
 func (a *App) emitClearEnvNotification(tenant, environment, source string) {
 	a.emit(appNotificationClearEvent, appNotificationClearPayload{
 		Tenant:      tenant,
@@ -623,7 +540,7 @@ func (a *App) emitClearEnvNotification(tenant, environment, source string) {
 	})
 }
 
-func cloudContextDisplayName(status configpkg.CloudContextStatus) string {
+func cloudContextDisplayName(status model.CloudContextStatus) string {
 	if name := strings.TrimSpace(status.KubernetesContext); name != "" {
 		return name
 	}

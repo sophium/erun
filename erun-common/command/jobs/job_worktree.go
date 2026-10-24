@@ -7,54 +7,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
-// An agent job's working tree is the one thing its own exit status says
-// nothing about: a clean exit and a tree with 1,200 uncommitted lines look
-// identical to a caller reading only State and ExitCode. This is that gap,
-// closed the same way gate-incomplete was — a check the supervisor makes on
-// every agent job's own finish, folded into the record it already writes,
-// rather than a prompt instruction the agent has to remember under turn
-// pressure.
-//
-// The supervisor does not just observe. Where it is safe to, it also makes a
-// machine-authored checkpoint commit and pushes it, because the agent that
-// would otherwise do this by hand is already gone by the time anyone reads
-// the record. "Safe" is deliberately narrow: a real branch (not detached
-// HEAD, where a commit is unreachable the moment HEAD moves), not a branch
-// this job treats as protected (main/master/develop, or the remote's actual
-// default), and not mid-merge/rebase/cherry-pick (where committing over the
-// operation's own state could corrupt it). Outside that envelope the
-// supervisor only reports what it saw; it never guesses its way into a
-// commit that could do more harm than the dirty tree it was trying to save.
-//
-// A dirty tree is also not necessarily this job's own: an environment's
-// worktree is shared by every job that runs in it, so `git status` at this
-// job's finish can be entirely another, still-running job's uncommitted work
-// — a job cancelled seconds after starting, having never touched git, can
-// still see a fully dirty tree that belongs to a concurrent sibling.
-// Checkpointing then would misattribute that work and, worse, snapshot it
-// mid-write with no coordination from the job actually producing it. So this
-// job checkpoints only when it is the only live job pointed at this
-// worktree; otherwise it leaves the tree alone and says why, on the theory
-// that whichever job is still running is the one actually entitled to decide
-// what happens to it.
+// An agent job's exit status says nothing about its working tree, so the
+// supervisor checks it on finish and, where safe (a real unprotected branch, no
+// git operation in progress, no other live job on the worktree), checkpoints
+// and pushes it. Otherwise it only reports.
 
-// agentJobWorktreeCommitMessage marks a checkpoint commit as machine-authored
-// so nobody mistakes it for the agent's own work.
+// agentJobWorktreeCommitMessage marks a checkpoint commit as machine-authored.
 const agentJobWorktreeCommitMessage = "WIP: checkpoint by the erun job supervisor\n\n" +
 	"The agent job that produced this working tree ended without committing\n" +
 	"its own changes. This commit exists only to keep that work from being\n" +
 	"lost, not as a finished change — rewrite, amend, or squash it freely."
 
-// environmentJobWorktreeOutcome is what an agent job's finish observed about
-// its working tree and, best-effort, did about it. The zero value means
-// "nothing to report": either the job was not an agent job, its Dir was not a
-// git working tree, or the tree was clean.
+// environmentJobWorktreeOutcome is the zero value when there is nothing to report.
 type environmentJobWorktreeOutcome struct {
 	dirty    bool
 	branch   string
@@ -65,7 +37,7 @@ type environmentJobWorktreeOutcome struct {
 	reason   string
 }
 
-func (o environmentJobWorktreeOutcome) apply(job *eruncommon.EnvironmentJob) {
+func (o environmentJobWorktreeOutcome) apply(job *jobstate.EnvironmentJob) {
 	job.WorktreeDirty = o.dirty
 	job.WorktreeBranch = o.branch
 	job.WorktreeDetached = o.detached
@@ -75,18 +47,7 @@ func (o environmentJobWorktreeOutcome) apply(job *eruncommon.EnvironmentJob) {
 	job.WorktreeReason = o.reason
 }
 
-// captureAgentJobWorktreeOutcome is called once, at the same point the
-// supervisor resolves the rest of a finished job's outcome. It runs plain git
-// plumbing directly rather than through a caller-supplied Context, because the
-// supervisor has none of its own beyond a discarded stdout/stderr — this is
-// not a user-facing trace, it is the same kind of internal bookkeeping call
-// finishEnvironmentJob already makes.
-//
-// jobsDir is the same job-records directory finishEnvironmentJob already
-// writes this job's own outcome into; it is what lets
-// agentJobWorktreeContender look at every sibling job sharing this
-// environment without needing tenant/environment threaded through separately.
-func captureAgentJobWorktreeOutcome(job eruncommon.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
+func captureAgentJobWorktreeOutcome(job jobstate.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
 	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
 	if !dirty {
@@ -106,16 +67,9 @@ func captureAgentJobWorktreeOutcome(job eruncommon.EnvironmentJob, jobsDir strin
 	return checkpointAgentJobWorktree(ctx, dir, branch, outcome)
 }
 
-// agentJobWorktreeContender reports the id of another job in jobsDir that is
-// still live and points at the same working tree as job, if any. Read through
-// reconcileEnvironmentJob so a sibling whose supervisor already died reads as
-// finished here too, exactly like every other job read — a genuinely dead
-// contender has nothing left to lose from a checkpoint racing it.
-//
-// This is deliberately not scoped to agent jobs only: a plain command job
-// (e.g. a detached `git`/build invocation) sharing this worktree is just as
-// much a concurrent writer as another agent job would be.
-func agentJobWorktreeContender(jobsDir string, job eruncommon.EnvironmentJob, now time.Time) (string, bool) {
+// agentJobWorktreeContender reports another live job of any kind on the same
+// worktree; dead siblings reconcile as finished.
+func agentJobWorktreeContender(jobsDir string, job jobstate.EnvironmentJob, now time.Time) (string, bool) {
 	dir := strings.TrimSpace(job.Dir)
 	if jobsDir == "" || dir == "" {
 		return "", false
@@ -124,7 +78,7 @@ func agentJobWorktreeContender(jobsDir string, job eruncommon.EnvironmentJob, no
 	if err != nil {
 		return "", false
 	}
-	hostname := eruncommon.CurrentJobHostname()
+	hostname := build.CurrentJobHostname()
 	for _, entry := range entries {
 		if other, live := agentJobWorktreeContenderCandidate(jobsDir, entry, job.ID, dir, now, hostname); live {
 			return other, true
@@ -133,10 +87,6 @@ func agentJobWorktreeContender(jobsDir string, job eruncommon.EnvironmentJob, no
 	return "", false
 }
 
-// agentJobWorktreeContenderCandidate resolves one directory entry into a
-// verdict for agentJobWorktreeContender's loop: whether it is a sibling job
-// still live on the same worktree, kept separate only to stay under the
-// cyclomatic complexity budget a single loop body would otherwise exceed.
 func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfID, dir string, now time.Time, hostname string) (string, bool) {
 	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 		return "", false
@@ -144,7 +94,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if strings.TrimSuffix(entry.Name(), ".json") == selfID {
 		return "", false
 	}
-	other, err := eruncommon.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
+	other, err := jobstate.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
@@ -155,10 +105,9 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	return other.ID, true
 }
 
-// agentJobDirtyWorktree reports whether job is a finished agent job whose Dir
-// is a git working tree with uncommitted changes, and if so, its directory
-// and current branch ("HEAD" literal when detached).
-func agentJobDirtyWorktree(ctx core.Context, job eruncommon.EnvironmentJob) (dir, branch string, dirty bool) {
+// agentJobDirtyWorktree returns the dir and branch ("HEAD" when detached) of an
+// agent job's dirty git worktree.
+func agentJobDirtyWorktree(ctx core.Context, job jobstate.EnvironmentJob) (dir, branch string, dirty bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", "", false
 	}
@@ -169,7 +118,7 @@ func agentJobDirtyWorktree(ctx core.Context, job eruncommon.EnvironmentJob) (dir
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", "", false
 	}
-	if inside, err := gitIsInsideWorkTree(ctx, dir); err != nil || !inside {
+	if !gitIsInsideWorkTree(ctx, dir) {
 		return "", "", false
 	}
 	changed, err := gitx.GitChangedWorkingTreeFiles(ctx, dir)
@@ -183,11 +132,7 @@ func agentJobDirtyWorktree(ctx core.Context, job eruncommon.EnvironmentJob) (dir
 	return dir, branch, true
 }
 
-// refuseAgentJobWorktreeCheckpoint reports whether an automatic checkpoint
-// commit in dir on branch would be unsafe, and if so, why: a detached HEAD
-// (unreachable the moment HEAD moves), a merge/rebase/cherry-pick/revert in
-// progress (committing over it could corrupt that operation's own state), or
-// a branch this job treats as protected.
+// refuseAgentJobWorktreeCheckpoint reports why a checkpoint commit would be unsafe.
 func refuseAgentJobWorktreeCheckpoint(ctx core.Context, dir, branch string) (string, bool) {
 	if branch == "HEAD" {
 		return "the working tree had uncommitted changes when the job ended, but HEAD was detached; " +
@@ -205,20 +150,12 @@ func refuseAgentJobWorktreeCheckpoint(ctx core.Context, dir, branch string) (str
 	return "", false
 }
 
-// checkpointAgentJobWorktree makes the machine-authored commit and pushes it,
-// folding whichever step fails into outcome.reason so a caller always learns
-// what the supervisor actually managed to preserve.
+// checkpointAgentJobWorktree commits and pushes, recording any failure in outcome.reason.
 func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
-	commitResult, err := gitx.CommitWorkingTree(ctx, dir, gitx.CommitWorkingTreeParams{
+	commitResult, err := gitx.CommitWorkingTree(ctx, dir, model.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
-		// The checkpoint is this run's last act, and it is the only thing
-		// standing between a killed job's in-flight work and its loss. A
-		// repository hook that rejects it does not veto a commit, it discards
-		// work: observed live as a lint finding about an unused constant —
-		// mid-edit code being exactly what a linter objects to — turning into an
-		// unrecoverable working tree. Bypass hooks here and nowhere else; a
-		// human-authored commit still runs them.
+		// A rejecting hook would discard the work, not veto the commit.
 		SkipHooks: true,
 	}, gitx.CommitWorkingTreeDependencies{})
 	if err != nil {
@@ -228,7 +165,7 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 	}
 	outcome.commit = commitResult.Commit
 
-	pushResult, err := gitx.PushWorkingTreeBranch(ctx, dir, gitx.PushWorkingTreeBranchParams{Branch: branch}, gitx.PushWorkingTreeBranchDependencies{})
+	pushResult, err := gitx.PushWorkingTreeBranch(ctx, dir, model.PushWorkingTreeBranchParams{Branch: branch}, gitx.PushWorkingTreeBranchDependencies{})
 	if err != nil {
 		outcome.reason = fmt.Sprintf("the job made a checkpoint commit (%s) for its uncommitted changes but could "+
 			"not push it: %v; that commit is only as safe as this one working tree", commitResult.Commit, err)
@@ -239,23 +176,13 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 	return outcome
 }
 
-// gitIsInsideWorkTree reports whether dir sits inside a git working tree at
-// all — an agent job's Dir is not guaranteed to be one, and this is what lets
-// every other check in this file no-op cleanly instead of misreading git's
-// own "not a git repository" error as some other failure.
-func gitIsInsideWorkTree(ctx core.Context, dir string) (bool, error) {
+func gitIsInsideWorkTree(ctx core.Context, dir string) bool {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--is-inside-work-tree")
 	output, err := core.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output()
-	if err != nil {
-		return false, nil
-	}
-	return strings.TrimSpace(string(output)) == "true", nil
+	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
-// gitResolveGitDir resolves dir's actual .git directory, following the
-// pointer file a linked worktree uses instead of a real .git directory, so the
-// in-progress-operation check below looks in the right place for a lane
-// checked out as a worktree rather than a plain clone.
+// gitResolveGitDir follows a linked worktree's .git pointer file.
 func gitResolveGitDir(ctx core.Context, dir string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--git-dir")
 	output, err := core.Command("git", "-C", dir, "rev-parse", "--git-dir").Output()
@@ -272,8 +199,6 @@ func gitResolveGitDir(ctx core.Context, dir string) (string, error) {
 	return resolved, nil
 }
 
-// gitOperationInProgressMarkers are the state files git leaves in the git dir
-// while a merge, rebase, cherry-pick, or revert is unresolved.
 var gitOperationInProgressMarkers = []string{
 	"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply",
 }
@@ -287,14 +212,10 @@ func gitOperationInProgress(gitDir string) bool {
 	return false
 }
 
-// environmentJobWorktreeIsProtectedBranch reports whether branch is one this
-// job refuses to leave an automatic checkpoint commit on. The remote's own
-// default branch is authoritative when it can be read; the common names cover
-// the case where origin/HEAD's symref was never set locally (e.g. a shallow
-// or single-branch fetch), which is a real layout this repository's own lanes
-// use.
+// environmentJobWorktreeIsProtectedBranch prefers the remote's default branch;
+// the common names cover clones without an origin/HEAD symref.
 func environmentJobWorktreeIsProtectedBranch(ctx core.Context, dir, branch string) bool {
-	if def, ok := eruncommon.GitRemoteDefaultBranch(ctx, dir, "origin"); ok {
+	if def, ok := gitx.GitRemoteDefaultBranch(ctx, dir, "origin"); ok {
 		return branch == def
 	}
 	switch branch {

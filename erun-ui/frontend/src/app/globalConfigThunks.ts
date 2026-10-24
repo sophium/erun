@@ -12,11 +12,6 @@ import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// The controller is reserved for imperative xterm/PTY work; thunks otherwise
-// operate purely on Redux state.
-
-// Cloud provider/context thunks live in ./globalConfigCloudThunks to keep
-// this file under eslint's max-lines; re-exported so no call site changes.
 export * from './globalConfigCloudThunks';
 
 export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
@@ -105,10 +100,7 @@ export const loadGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, 
     const currentDraft = getState().globalConfigDialog.cloudContextDraft;
     dispatch(
       patchGlobalConfigDialog({
-        // A catalog left unconfigured opens filled from this machine's own
-        // Claude Code gateway, so an endpoint and model already configured once
-        // are not typed again. The dialog is only pre-filled: nothing is stored
-        // until the operator saves.
+        // Pre-filled from this machine's Claude Code gateway; nothing is stored until save.
         config: seedOpenRouterCatalog(result),
         cloudContextDraft: cloudContextDraftForConfig(result, currentDraft),
         configLoading: false,
@@ -146,8 +138,6 @@ export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch
     );
     dispatch(showNotification('success', 'Saved ERun config.'));
     dispatch(closeGlobalConfigDialog());
-    // The gateway reaches a pod only through a redeploy, so a save is when to
-    // say which running environments are still routed the old way.
     void dispatch(checkGatewayRedeploy());
   } catch (error) {
     const message = readError(error);

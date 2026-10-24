@@ -6,22 +6,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// deleteSSHConfigStore is a minimal DeleteStore over an in-memory environment
-// list, enough to exercise the local-state teardown RunDeleteEnvironment runs.
 type deleteSSHConfigStore struct {
 	envs map[string][]configpkg.EnvConfig
 }
 
-func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (configpkg.TenantConfig, string, error) {
-	return configpkg.TenantConfig{Name: tenant}, "", nil
+func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{Name: tenant}, "", nil
 }
 
-func (s *deleteSSHConfigStore) SaveTenantConfig(configpkg.TenantConfig) error { return nil }
+func (s *deleteSSHConfigStore) SaveTenantConfig(model.TenantConfig) error { return nil }
 
 func (s *deleteSSHConfigStore) DeleteTenantConfig(string) error { return nil }
 
@@ -55,9 +54,7 @@ func (s *deleteSSHConfigStore) DeleteEnvConfig(tenant, environment string) error
 	return nil
 }
 
-// sandboxSSHConfig points HOME (and XDG, which the port-forward state files
-// use) at a temp dir and returns the ssh config path inside it, so a test never
-// touches the machine's real ~/.ssh/config.
+// sandboxSSHConfig points HOME and XDG at a temp dir and returns the ssh config path.
 func sandboxSSHConfig(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
@@ -68,7 +65,7 @@ func sandboxSSHConfig(t *testing.T) string {
 
 func writeSSHConfigBlock(t *testing.T, path, alias string, port int) {
 	t.Helper()
-	if err := configpkg.UpsertSSHConfig(path, configpkg.SSHHostEntry{
+	if err := configpkg.UpsertSSHConfig(path, model.SSHHostEntry{
 		Alias:        alias,
 		HostKeyAlias: alias,
 		HostName:     "127.0.0.1",
@@ -88,27 +85,21 @@ func readSSHConfig(t *testing.T, path string) string {
 	return string(data)
 }
 
-// The removal itself, including that a sibling env's block and a
-// hand-maintained entry survive it, is pinned end to end through the compiled
-// binary by
-// erun-integration TestDelete/real_run_removes_the_deleted_envs_ssh_config_block.
-// What stays here are the decisions that scenario cannot isolate: the
-// alias-ownership guard, the dry-run preview, and the content-level rules.
+// The end-to-end removal is covered in erun-integration TestDelete.
 
 func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
-	// Two names that sanitize to one alias: deleting dev_1 must not strip the
-	// block that live env dev-1 resolves through.
-	alias := eruncommon.SSHHostAlias("team", "dev_1")
-	if alias != eruncommon.SSHHostAlias("team", "dev-1") {
-		t.Fatalf("expected dev_1 and dev-1 to share an alias, got %q and %q", alias, eruncommon.SSHHostAlias("team", "dev-1"))
+	// Two names that sanitize to one alias.
+	alias := open.SSHHostAlias("team", "dev_1")
+	if alias != open.SSHHostAlias("team", "dev-1") {
+		t.Fatalf("expected dev_1 and dev-1 to share an alias, got %q and %q", alias, open.SSHHostAlias("team", "dev-1"))
 	}
 	writeSSHConfigBlock(t, configPath, alias, 17022)
 
 	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{
 		"team": {{Name: "dev_1"}, {Name: "dev-1"}},
 	}}
-	result, err := RunDeleteEnvironment(core.Context{}, DeleteEnvironmentParams{
+	result, err := RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev_1",
 	}, store, nil)
 	if err != nil {
@@ -124,10 +115,10 @@ func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T
 
 func TestDeleteEnvironmentDryRunReportsBlockWithoutRemovingIt(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
-	writeSSHConfigBlock(t, configPath, eruncommon.SSHHostAlias("team", "dev"), 17022)
+	writeSSHConfigBlock(t, configPath, open.SSHHostAlias("team", "dev"), 17022)
 
 	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{"team": {{Name: "dev"}}}}
-	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, DeleteEnvironmentParams{
+	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, model.DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev",
 	}, store, nil)
 	if err != nil {

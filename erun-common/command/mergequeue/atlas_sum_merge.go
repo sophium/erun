@@ -8,31 +8,16 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-// atlasSumBasename is the file name Atlas writes for a migration directory's
-// integrity checksum (erun-backend-db/AGENTS.md's "Atlas Workflow"). It is a
-// hash chain over every migration file in that directory, so two branches
-// that each add a migration necessarily produce a different final line —
-// this file conflicts on every concurrent pair of migrations by
-// construction, and the conflict carries no information about which side is
-// "right". The only correct resolution is always to regenerate it from the
-// migration files that actually land on disk, the same integrity check
-// `atlas migrate apply`/`validate` perform at deploy time — never to
-// hand-merge the hash lines, which produces a file that looks resolved and
-// then fails at migration time instead of at merge time.
+// atlasSumBasename is a hash chain over its directory's migrations, so it conflicts on
+// every concurrent migration pair; always regenerate it from disk, never hand-merge.
 const atlasSumBasename = "atlas.sum"
 
-// AtlasMigrateHashRunnerFunc regenerates one Atlas migration directory's
-// atlas.sum from the .sql files actually present there. Injectable so tests
-// can fake atlas without a live install.
+// AtlasMigrateHashRunnerFunc regenerates one migration directory's atlas.sum.
 type AtlasMigrateHashRunnerFunc func(root, migrationsDir string) error
 
-// runAtlasMigrateHash shells out to the real `atlas migrate hash` — the same
-// tool `atlas migrate apply`/`validate` trust to detect tampering — so a
-// regenerated atlas.sum is exactly what atlas itself would have written for
-// the migration files on disk, never an approximation erun invents.
 func runAtlasMigrateHash(root, migrationsDir string) error {
 	cmd := core.Command("atlas", "migrate", "hash", "--dir", "file://"+filepath.ToSlash(migrationsDir))
 	cmd.Dir = root
@@ -44,15 +29,9 @@ func runAtlasMigrateHash(root, migrationsDir string) error {
 	return nil
 }
 
-// resolveAtlasSumConflicts regenerates and stages every conflicted atlas.sum
-// among conflicted, returning whatever conflicts remain (empty once every
-// conflict was an atlas.sum this could regenerate). A conflicted atlas.sum
-// needs only its own directory of .sql files to regenerate correctly, and
-// those are already the real merge result on disk: the squash/merge that
-// produced the conflict already checked out every non-conflicting file from
-// both sides before reporting failure, so regenerating from disk can never
-// disagree with what actually landed.
-func resolveAtlasSumConflicts(root string, runGit gitx.GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
+// resolveAtlasSumConflicts regenerates and stages each conflicted atlas.sum, returning
+// the other conflicts. The .sql files on disk are already the merge result.
+func resolveAtlasSumConflicts(root string, runGit seam.GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
 	var remaining []string
 	for _, file := range conflicted {
 		if filepath.Base(file) != atlasSumBasename {

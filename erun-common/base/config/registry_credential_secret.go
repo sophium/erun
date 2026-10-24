@@ -1,8 +1,6 @@
 package config
 
-// DockerConfigJSONSecretKey is the auths-document key kubectl itself uses in a
-// dockerconfigjson Secret (`kubectl create secret docker-registry`), shared by
-// every Secret this package renders or reads back in that shape.
+// DockerConfigJSONSecretKey is kubectl's dockerconfigjson Secret key.
 const DockerConfigJSONSecretKey = ".dockerconfigjson"
 
 type DockerConfigJSONAuthEntry struct {

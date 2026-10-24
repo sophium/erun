@@ -30,9 +30,7 @@ function orchestrator(id: string, sessionId: number): OrchestratorInfo {
   };
 }
 
-// Only the four slices selectSidebarFocus reads; the rest of RootState is
-// irrelevant here and constructing it would make the test about the store's
-// shape instead of the derivation.
+// Only the slices selectSidebarFocus reads.
 function stateWith(fields: {
   dashboardTenant?: string;
   sessionId?: number;
@@ -47,15 +45,8 @@ function stateWith(fields: {
   } as unknown as RootState;
 }
 
-// #1204: the tenant dashboard, an orchestrator's session, and an
-// environment's session used to be three independently-computed "active"
-// booleans across three components. selectSidebarFocus is the single value
-// they must all derive from instead, so at most one of them is ever true.
-
 test('an open tenant dashboard wins even over a stale active session', () => {
-  // A dashboard opened while an orchestrator's session was still the last
-  // thing focused: terminal.sessionId still matches that orchestrator, but
-  // the dashboard must still be what's reported as focused.
+  // terminal.sessionId still matches the orchestrator, but the dashboard wins.
   const state = stateWith({
     dashboardTenant: 'acme',
     sessionId: 42,

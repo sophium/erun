@@ -12,11 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-// orchestratorLinkForwardTestApp wires the same frs/dev remote-agent env
-// newOrchestratorStubStore uses, plus an injectable reconnectMCP/
-// readRuntimeRunState seam, so a test can observe whether linking an
-// environment triggered ensureEnvRuntimeOnce's underlying `erun open
-// --reconnect` and how its outcome surfaced -- without a live cluster.
 func orchestratorLinkForwardTestApp(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
@@ -28,10 +23,7 @@ func orchestratorLinkForwardTestApp(
 	t.Setenv("HOME", home)
 	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
 	emits := newCapturedEmits()
-	// ResolveOpen (unlike the review-directory/MCP-port wiring the other
-	// orchestrator tests exercise) requires a resolvable repo path even for a
-	// remote-agent env, so frs/dev needs a LocalRepoPath here that
-	// newOrchestratorStubStore's default does not set.
+	// ResolveOpen needs a resolvable repo path even for a remote-agent env.
 	store := newOrchestratorStubStore(t.TempDir())
 	devEnv := store.envs["frs/dev"]
 	devEnv.LocalRepoPath = t.TempDir()
@@ -55,9 +47,6 @@ func orchestratorLinkForwardTestApp(
 	return app, emits
 }
 
-// countingReconnect returns a reconnectMCP stub that records every call
-// ("<tenant>/<environment>") and answers with err, so a test can assert both
-// that the ensure ran and what its outcome was.
 func countingReconnect(mu *sync.Mutex, calls *[]string, err error) func(context.Context, config.OpenResult, func(string)) error {
 	return func(_ context.Context, result config.OpenResult, _ func(string)) error {
 		mu.Lock()
@@ -85,12 +74,6 @@ func waitForReconnectCalls(t *testing.T, mu *sync.Mutex, calls *[]string, want i
 	t.Fatalf("reconnect calls = %d, want >= %d", got, want)
 }
 
-// TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen locks the fix:
-// linking a healthy environment to an orchestrator must make it reachable on
-// its own -- the operator is never told a manual `erun open` is the reason
-// their tools work. Before the fix, CreateOrchestrator wired the review
-// directory and nothing else, so an environment nobody had opened by hand
-// stayed unreachable for the whole session.
 func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
@@ -111,10 +94,6 @@ func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 	}
 }
 
-// TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv is the
-// UpdateOrchestrator half of the same fix: relinking an orchestrator to add a
-// new environment must open that environment's forward too, not only the
-// ones it started with.
 func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
@@ -150,13 +129,6 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	}
 }
 
-// TestLinkingAStoppedEnvironmentDoesNotForceStartIt locks the second
-// acceptance criterion: a stopped environment must be left stopped, not
-// silently started because it got linked to an orchestrator. The forward
-// ensure runs `erun open --reconnect`, which refuses to wake a stopped
-// runtime by design (erun-common/stop.go's DecideRuntimeWake); linking must
-// inherit that refusal rather than bypass it, and the operator must see the
-// environment reported as stopped, not failed or running.
 func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 	app, emits := orchestratorLinkForwardTestApp(t,
 		func(context.Context, config.OpenResult, func(string)) error {
@@ -181,11 +153,6 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 	}
 }
 
-// TestLinkingAnEnvironmentSurfacesAForwardOpenFailure locks the third
-// acceptance criterion: if opening the forward fails for a reason other than
-// "stopped" or "genuinely undeployed", the failure must be visible on the
-// sidebar and as a notification -- never silent, leaving a configured MCP
-// entry pointed at nothing with no clue why.
 func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 	app, emits := orchestratorLinkForwardTestApp(t,
 		func(context.Context, config.OpenResult, func(string)) error {

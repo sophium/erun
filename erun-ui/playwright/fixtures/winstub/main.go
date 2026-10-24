@@ -1,10 +1,5 @@
-// Command winstub is the Windows equivalent of the POSIX shell stubs in
-// seedRoot.ts. Windows CreateProcess cannot exec a "#!/bin/sh" file or a
-// .cmd/.bat batch file, so the backend (and every erun/shell child it spawns)
-// needs a real PE executable on PATH. This single binary is copied to
-// kubectl.exe / helm.exe / docker.exe / aws.exe / erun.exe / claude.exe in the
-// isolated stub dir and dispatches on its own base name. Keep its behaviour in
-// lockstep with writeStubBinary in fixtures/seedRoot.ts.
+// Command winstub is a PE stand-in for seedRoot.ts's POSIX stubs, dispatching on its base name.
+// Keep in lockstep with writeStubBinary in fixtures/seedRoot.ts.
 package main
 
 import (
@@ -15,23 +10,15 @@ import (
 	"time"
 )
 
-// blockForever keeps the stub process alive like the POSIX `exec sleep` does.
-// It must NOT use `select{}` / `<-make(chan)`: with no other goroutines the Go
-// runtime's deadlock detector treats those as a fatal deadlock and crashes the
-// process the instant the prompt is printed, so the desktop sees the session
-// exit and spins into reconnect/respawn churn. An infinite timer sleep parks a
-// live process the runtime never flags.
+// blockForever must not use select{}: the runtime would flag a deadlock and crash.
 func blockForever() {
 	for {
 		time.Sleep(time.Hour)
 	}
 }
 
-// registerStub records this process's pid, and which stub it is, in the
-// harness's stub registry, so a session the suite opened and never closed can be
-// reaped (fixtures/stubProcesses.ts). Best-effort: outside the harness there is
-// no registry in the environment and the stub must still run. Keep in lockstep
-// with the POSIX register_stub preamble in fixtures/seedRoot.ts.
+// registerStub records the pid so the harness can reap leaked stubs; best-effort.
+// Keep in lockstep with the POSIX register_stub preamble in seedRoot.ts.
 func registerStub(name string) {
 	registry := os.Getenv("ERUN_PLAYWRIGHT_STUB_REGISTRY")
 	if registry == "" {
@@ -45,9 +32,7 @@ func registerStub(name string) {
 	_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), name)
 }
 
-// waitForTabSetupRelease holds an interactive tab short of its setup-complete
-// marker while a spec holds `<tenant>.<environment>` in the hold directory, the
-// same as the POSIX stub (holdTabSetup in fixtures/seedRoot.ts).
+// waitForTabSetupRelease blocks while the spec holds `<tenant>.<environment>`.
 func waitForTabSetupRelease(args []string) {
 	dir := os.Getenv("ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS")
 	if dir == "" || len(args) < 3 {
@@ -72,15 +57,12 @@ func main() {
 	case "claude":
 		runClaudeStub(name, args)
 	case "kubectl":
-		// Answer the context listing with an empty set (the dialog's
-		// deterministic empty state); report everything else as unreachable.
 		if strings.Contains(strings.Join(args, " "), "config get-contexts") {
 			os.Exit(0)
 		}
 		fmt.Fprintln(os.Stderr, "kubectl stub: no cluster in the Playwright harness")
 		os.Exit(1)
 	case "explorer":
-		// The desktop's host opener: record the request and open nothing.
 		recordOpenerRequest(args)
 		os.Exit(0)
 	default:
@@ -89,26 +71,14 @@ func main() {
 	}
 }
 
-// runErunStub answers the desktop's erun invocations: a probe exits, and an
-// interactive tab session blocks like a live shell.
 func runErunStub(name string, args []string) {
 	if len(args) >= 1 && args[0] == "open" {
 		joined := strings.Join(args, " ")
-		// `erun open --no-shell` is a non-interactive probe the desktop runs to
-		// (re)establish the env's MCP/port-forwards or sshd — reconnectMCP /
-		// ensureEnvRuntime / the idle probe (see runOpenForReconnect,
-		// ensureSSHDViaOpenCommand). The real CLI sets things up and EXITS; the
-		// caller waits on that exit. Blocking it here would hang env-runtime
-		// ensure and spin the sidebar into perpetual "reconnecting" busy. So the
-		// probe form completes successfully and exits.
+		// `--no-shell` is a probe the caller waits on; blocking it would hang env-runtime ensure.
 		if strings.Contains(joined, "--no-shell") {
 			os.Exit(0)
 		}
-		// An interactive tab session (ERun/AI, `--app-session`) is the desktop's
-		// long-lived shell. Print the shell-prompt line the action runner treats
-		// as the setup-complete marker (see signalSessionReadyOnLine in
-		// activity_queue_app.go), then block so the tab behaves like a healthy,
-		// quiet, killable session.
+		// Print the setup-complete marker, then block like a live shell.
 		registerStub(name)
 		waitForTabSetupRelease(args)
 		fmt.Print("erun@playwright:~$ \n")
@@ -118,16 +88,9 @@ func runErunStub(name string, args []string) {
 	os.Exit(0)
 }
 
-// runClaudeStub answers the desktop's claude invocations.
 func runClaudeStub(name string, args []string) {
-	// A persisted orchestrator runs as a background agent the desktop
-	// lists, creates, stops, removes and attaches to through this binary,
-	// so those commands are answered from the stub's agent file, the same
-	// as the POSIX stub. An orchestrator row reads "running" only while
-	// the session the desktop spawned is live, and the real binary cannot
-	// stay up on a harness host (no TTY, no credentials) — so `attach`,
-	// and a transient session, block instead, printing the same
-	// setup-complete marker the POSIX stub does.
+	// Background-agent commands answer from the agent file; attach and transient sessions
+	// block, since a row reads "running" only while its session is live.
 	if claudeAgentCommand(args) {
 		os.Exit(0)
 	}
@@ -137,8 +100,6 @@ func runClaudeStub(name string, args []string) {
 	blockForever() // stay alive like `exec sleep`; ended by the harness reap or session close
 }
 
-// recordOpenerRequest appends the opener's arguments to the log the harness
-// reads back, mirroring the POSIX open/xdg-open stubs.
 func recordOpenerRequest(args []string) {
 	log := os.Getenv("ERUN_PLAYWRIGHT_OPENER_LOG")
 	if log == "" {
@@ -152,9 +113,8 @@ func recordOpenerRequest(args []string) {
 	_ = f.Close()
 }
 
-// claudeAgentsFile is the stub's stand-in for Claude Code's background service:
-// one line per agent, `<id> <run|stopped> <name>`. Keep in lockstep with the
-// POSIX claude stub and claudeAgentsPath in fixtures/seedRoot.ts.
+// claudeAgentsFile stands in for Claude Code's agent service: `<id> <run|stopped> <name>` per line.
+// Keep in lockstep with claudeAgentsPath in seedRoot.ts.
 func claudeAgentsFile() string {
 	if path := os.Getenv("ERUN_PLAYWRIGHT_CLAUDE_AGENTS"); path != "" {
 		return path
@@ -188,7 +148,6 @@ func writeClaudeStubAgents(agents []claudeStubAgent) {
 	_ = os.WriteFile(claudeAgentsFile(), []byte(b.String()), 0o644)
 }
 
-// setClaudeStubAgentState moves one agent to state, or drops it for "gone".
 func setClaudeStubAgentState(id, state string) {
 	agents := readClaudeStubAgents()
 	kept := agents[:0]
@@ -204,9 +163,7 @@ func setClaudeStubAgentState(id, state string) {
 	writeClaudeStubAgents(kept)
 }
 
-// claudeAgentCommand answers a background-agent lifecycle command and reports
-// whether it was one; `attach` marks the agent running and then falls through
-// to the blocking session.
+// claudeAgentCommand reports whether args were a lifecycle command; `attach` falls through to block.
 func claudeAgentCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -237,7 +194,6 @@ func claudeAgentCommand(args []string) bool {
 	return false
 }
 
-// printClaudeStubAgents answers `claude agents` from the stub's agent file.
 func printClaudeStubAgents() {
 	parts := make([]string, 0)
 	for _, agent := range readClaudeStubAgents() {
@@ -250,7 +206,6 @@ func printClaudeStubAgents() {
 	fmt.Println("[" + strings.Join(parts, ",") + "]")
 }
 
-// startClaudeStubAgent answers `claude --bg -n <name>` by recording a running agent.
 func startClaudeStubAgent(args []string) {
 	name := ""
 	for i := 0; i+1 < len(args); i++ {

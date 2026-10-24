@@ -74,12 +74,6 @@ func TestIdentityServiceEnrollHappyPath(t *testing.T) {
 	}
 }
 
-// TestIdentityServiceEnrollFallsBackToATemporaryPasswordWithNoMail locks the
-// no-SMTP fallback (issue #1168): the platform's IdP cannot send the usual
-// invite email, so Enroll must not create the usual passwordless account --
-// stuck in USER_STATE_INITIAL forever, waiting on a link nothing will ever
-// send -- and must instead report a temporary password the caller can hand
-// to the enrollee directly.
 func TestIdentityServiceEnrollFallsBackToATemporaryPasswordWithNoMail(t *testing.T) {
 	admin := &stubIdentityAdmin{
 		created:    zitadel.User{ID: "idp-3", Username: "carol", Email: "carol@example.com"},
@@ -103,10 +97,6 @@ func TestIdentityServiceEnrollFallsBackToATemporaryPasswordWithNoMail(t *testing
 	}
 }
 
-// TestIdentityServiceEnrollTreatsAnUncheckableSMTPStatusAsUnconfigured locks
-// that a failed status check defaults to the safe fallback rather than
-// assuming mail works: claiming success on an invite email that was never
-// actually confirmed deliverable is the exact dead end this issue is about.
 func TestIdentityServiceEnrollTreatsAnUncheckableSMTPStatusAsUnconfigured(t *testing.T) {
 	admin := &stubIdentityAdmin{
 		created:       zitadel.User{ID: "idp-4", Username: "dave", Email: "dave@example.com"},
@@ -154,10 +144,6 @@ func TestIdentityServiceEnrollReportsOrphanedIdPUserOnMappingFailure(t *testing.
 	}
 }
 
-// Enrolling into another tenant's org is what makes a freshly created tenant
-// reachable: without it every identity lands in the platform's own org, so
-// the new tenant never receives a token that resolves to it, never gets a
-// first user, and can never own an environment.
 func TestIdentityServiceEnrollTargetsAnotherOrg(t *testing.T) {
 	admin := &stubIdentityAdmin{
 		created:    zitadel.User{ID: "idp-9", Username: "bob", Email: "bob@example.com"},
@@ -176,9 +162,7 @@ func TestIdentityServiceEnrollTargetsAnotherOrg(t *testing.T) {
 	if admin.gotParams.OrgID != "388520359030161586" {
 		t.Fatalf("OrgID reached the IdP as %q", admin.gotParams.OrgID)
 	}
-	// The erun row would land under the caller's tenant, not the new user's,
-	// so it is deliberately not written — the target tenant's own first-user
-	// bootstrap enrols them on first sign-in.
+	// Deliberately not written: RLS would file the row under the caller's tenant.
 	if users.createCalls != 0 {
 		t.Fatalf("createCalls = %d, want no erun user written for a cross-org enrollment", users.createCalls)
 	}
@@ -190,8 +174,6 @@ func TestIdentityServiceEnrollTargetsAnotherOrg(t *testing.T) {
 	}
 }
 
-// The default path is unchanged: no org means the platform's own, and the
-// erun mapping is still written.
 func TestIdentityServiceEnrollWithoutOrgStillWritesTheMapping(t *testing.T) {
 	admin := &stubIdentityAdmin{
 		created:    zitadel.User{ID: "idp-10", Username: "carol"},

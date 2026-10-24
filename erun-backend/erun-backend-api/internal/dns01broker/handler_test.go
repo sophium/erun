@@ -99,8 +99,7 @@ func TestBrokerRejectsInvalidToken(t *testing.T) {
 	}
 }
 
-// TestBrokerRejectsCrossTenant is the impersonation guard end to end: a valid
-// token for tenant acme cannot write another tenant's challenge — 403, no write.
+// TestBrokerRejectsCrossTenant: a valid acme token cannot write another tenant's challenge.
 func TestBrokerRejectsCrossTenant(t *testing.T) {
 	writer := &fakeWriter{}
 	audit := &fakeAudit{}

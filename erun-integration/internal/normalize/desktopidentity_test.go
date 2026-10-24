@@ -15,13 +15,8 @@ func TestDesktopControlPathIsHostIndependent(t *testing.T) {
 	}
 }
 
-// TestDesktopIdentityPathIsHostIndependent locks that the desktop identity path
-// collapses to one token on every host. It resolves through os.UserConfigDir(),
-// which the harness cannot pin the way ERUN_HOST_OS_OVERRIDE pins a code branch:
-// darwin returns "$HOME/Library/Application Support" and Linux the XDG dir. The
-// generic temp-dir rule stops at that space, so before this rule the scenario
-// recorded one golden on darwin and a different one on Linux — and whichever
-// host did not record it went red. Drives Apply directly so it runs everywhere.
+// TestDesktopIdentityPathIsHostIndependent: os.UserConfigDir differs by host and
+// the darwin one contains a space, so it needs its own rule.
 func TestDesktopIdentityPathIsHostIndependent(t *testing.T) {
 	const want = "no desktop identity at <DESKTOP_IDENTITY>; open an environment from the ERun desktop app once\n"
 	cases := []struct{ name, path string }{

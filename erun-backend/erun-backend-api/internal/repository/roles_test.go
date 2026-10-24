@@ -75,10 +75,6 @@ func TestRolePermissionInputValidate(t *testing.T) {
 	}
 }
 
-// TestTenantHasGrantCapableUserReusesRuleMatcher locks in that the lockout
-// guard shares rulesAllow with Authorize: a role permitting the grant route
-// (exactly or via a pattern that covers it) makes the tenant grant-capable,
-// and one that does not, does not.
 func TestTenantHasGrantCapableUserReusesRuleMatcher(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string

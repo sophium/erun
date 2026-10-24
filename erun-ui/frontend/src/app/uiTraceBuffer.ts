@@ -1,8 +1,4 @@
-// The Diagnostics console's in-app stand-in for Redux DevTools, which the
-// packaged WebView cannot provide.
-// Deliberately NOT Redux state: recording into the store would make every
-// recorded action dispatch another write — a feedback loop — so the console
-// polls this module instead.
+// Not Redux state: recording actions into the store would feed back into itself.
 
 export interface UITraceEntry {
   at: number;
@@ -23,8 +19,6 @@ export function recordUITraceEntry(entry: UITraceEntry): void {
   generation++;
 }
 
-// uiTraceGeneration lets the console cheaply detect "anything new?" without
-// copying the buffer on every poll tick.
 export function uiTraceGeneration(): number {
   return generation;
 }
@@ -38,7 +32,6 @@ export function clearUITrace(): void {
   generation++;
 }
 
-// formatUITrace renders the history as paste-ready text for an error report.
 export function formatUITrace(list: UITraceEntry[]): string {
   return list
     .map((entry) => {

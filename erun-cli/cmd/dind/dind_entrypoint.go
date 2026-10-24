@@ -1,14 +1,14 @@
 package dind
 
 import (
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
 
-// NewDindEntrypointCmd is the erun-dind sidecar's entrypoint. The runtime
-// chart's prepare-volumes init container copies this binary into a volume the
-// sidecar mounts, because the stock docker:dind image carries no erun.
+// NewDindEntrypointCmd is the erun-dind sidecar's entrypoint; an init container
+// copies this binary in because docker:dind carries no erun.
 func NewDindEntrypointCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dind-entrypoint [-- DOCKERD_ARGS...]",
@@ -29,9 +29,9 @@ func NewDindEntrypointCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return podruntime.RunDindEntrypoint(shared.CommandContext(cmd), podruntime.DindEntrypointParams{DockerdArgs: args})
+			return podruntime.RunDindEntrypoint(clicmd.CommandContext(cmd), model.DindEntrypointParams{DockerdArgs: args})
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

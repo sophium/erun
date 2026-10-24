@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ScopeSelector } from './ScopeSelector';
 
-// beginLogin is mocked the same way TenantSwitcher.test.tsx mocks it, so a
-// test here can assert the negative: unlike TenantSwitcher, picking a target
-// tenant must never reach the OIDC redirect path at all.
+// Picking a scope target must never reach the OIDC redirect.
 vi.mock('../auth/auth', () => ({
   beginLogin: vi.fn(),
 }));
@@ -107,11 +105,6 @@ describe('ScopeSelector', () => {
     expect(screen.getByText(/Acme/)).toBeInTheDocument();
   });
 
-  // The selector renders on every section, but its claim that
-  // scope applies must not -- a section whose own panel never threads
-  // scopeTenantId server-side (e.g. Tenants, an OPERATIONS-only action with
-  // no per-tenant scope of its own) must say so plainly instead of
-  // asserting a reach it does not have.
   it('does not claim scope applies on a section that does not honour it', () => {
     render(
       <ScopeSelector

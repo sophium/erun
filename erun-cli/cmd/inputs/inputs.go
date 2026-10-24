@@ -3,26 +3,27 @@ package inputs
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/inputs"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-// NewInputsCmd has no in-pod MCP counterpart: the edge in erun-mcp runs
-// inside the pod and cannot read a path on the operator's host. An
-// MCP-connected orchestrator reaches the same transfer through the
-// inputs_upload local tool erun mcp proxy serves (see mcp_proxy.go),
-// mirroring how workspace_sync is host-served rather than edge-served.
-func NewInputsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
-	return shared.NewCommandGroup(
+// NewInputsCmd has no in-pod MCP counterpart: the edge cannot read host paths.
+// erun mcp proxy serves the inputs_upload local tool instead.
+func NewInputsCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"inputs",
 		"Place a host file inside the runtime pod",
 		newInputsUploadCmd(resolveOpen),
 	)
 }
 
-func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newInputsUploadCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "upload <local-path> <remote-path>",
@@ -40,31 +41,31 @@ func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInputsUploadCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), args[0], args[1], common.RunRemoteCommandWithStdin)
+			return runInputsUploadCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), args[0], args[1], inputs.RunRemoteCommandWithStdin)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	return cmd
 }
 
-func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, localPath, remotePath string, run inputs.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	out, err := common.UploadRuntimeInput(ctx, req, common.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
+	req := cloud.ShellLaunchParamsFromResult(result)
+	out, err := inputs.UploadRuntimeInput(ctx, req, model.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
 	if err != nil {
 		return err
 	}
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(out)
 	}
-	ctx.Info(fmt.Sprintf("Uploaded %s (%s, sha256 %s) to %s", localPath, shared.FormatOutputSize(out.Bytes), out.SHA256, out.RemotePath))
+	ctx.Info(fmt.Sprintf("Uploaded %s (%s, sha256 %s) to %s", localPath, textfmt.FormatOutputSize(out.Bytes), out.SHA256, out.RemotePath))
 	return nil
 }

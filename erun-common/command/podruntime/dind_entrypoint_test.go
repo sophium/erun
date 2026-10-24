@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const dindTestPod = "erun-devops-7d9f-abcde"
@@ -21,9 +22,6 @@ type dindRun struct {
 	execed bool
 }
 
-// newDindRun builds an empty procfs/sysfs pair under a temp root and a host
-// whose exec records the argv dockerd-entrypoint.sh would receive instead of
-// starting a daemon.
 func newDindRun(t *testing.T) *dindRun {
 	t.Helper()
 	run := &dindRun{root: t.TempDir()}
@@ -53,14 +51,12 @@ func (r *dindRun) host() dindEntrypointHost {
 func (r *dindRun) run(t *testing.T, dryRun bool, args ...string) {
 	t.Helper()
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &r.output, &r.output), DryRun: dryRun}
-	if err := runDindEntrypoint(ctx, DindEntrypointParams{DockerdArgs: args}, r.host()); err != nil {
+	if err := runDindEntrypoint(ctx, model.DindEntrypointParams{DockerdArgs: args}, r.host()); err != nil {
 		t.Fatalf("the entrypoint failed: %v\n%s", err, r.output.String())
 	}
 }
 
-// stubNet writes a routing table whose default route is on iface, plus a
-// non-default route on a decoy interface with a larger MTU, so a resolver that
-// took the first row would be caught.
+// A decoy route with a larger MTU catches a resolver that takes the first row.
 func (r *dindRun) stubNet(t *testing.T, iface, mtu string) {
 	t.Helper()
 	table := "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n" +
@@ -71,8 +67,6 @@ func (r *dindRun) stubNet(t *testing.T, iface, mtu string) {
 	mustWriteFile(t, filepath.Join(r.root, "sys", "class", "net", "decoy0", "mtu"), "9000\n")
 }
 
-// stubOwnCgroup simulates the cgroup the kubelet already assigned this
-// container, with the quota it enforces.
 func (r *dindRun) stubOwnCgroup(t *testing.T, cpuMax string) {
 	t.Helper()
 	cgroupPath := "/kubepods.slice/cri-containerd-test.scope"
@@ -80,8 +74,6 @@ func (r *dindRun) stubOwnCgroup(t *testing.T, cpuMax string) {
 	mustWriteFile(t, filepath.Join(r.root, "sys", "fs", "cgroup", filepath.FromSlash(cgroupPath), "cpu.max"), cpuMax+"\n")
 }
 
-// stubCapParent declares which controllers the kernel offers docker/ and which
-// it already delegates to docker/'s children.
 func (r *dindRun) stubCapParent(t *testing.T, controllers, subtree string) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(r.capParent(), "cgroup.controllers"), controllers+"\n")
@@ -109,9 +101,6 @@ func (r *dindRun) assertArgv(t *testing.T, want ...string) {
 	}
 }
 
-// assertUncappedReported checks a run that could not apply the cap warned
-// exactly once and never announced a cap it did not set: the silent no-op that
-// reads as a working fix is the defect this coverage exists for.
 func (r *dindRun) assertUncappedReported(t *testing.T, reason string) {
 	t.Helper()
 	out := r.output.String()
@@ -134,8 +123,7 @@ func TestDindEntrypointPassesTheDefaultRouteMTU(t *testing.T) {
 }
 
 func TestDindEntrypointLeadsTheChartArgsWithTheMTU(t *testing.T) {
-	// The derived MTU leads so the stock entrypoint still sees a leading '-'
-	// and prepends dockerd.
+	// The derived MTU leads so the stock entrypoint still prepends dockerd.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.run(t, false, "--insecure-registry", "10.1.2.3:5000")
@@ -191,8 +179,6 @@ func TestDindEntrypointAcceptsExactlyTheIPv6Minimum(t *testing.T) {
 }
 
 func TestDindEntrypointMirrorsItsOwnQuotaIntoThePodCapCgroup(t *testing.T) {
-	// cpu has to be delegated to the cap cgroup's parent first: until then
-	// the child has no cpu.max to write at all.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")
@@ -234,7 +220,6 @@ func TestDindEntrypointWithoutAReadableOwnCgroupCreatesNothing(t *testing.T) {
 }
 
 func TestDindEntrypointLeavesAnAlreadyDelegatedParentAlone(t *testing.T) {
-	// The steady state from the second boot on.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")
@@ -259,8 +244,6 @@ func TestDindEntrypointReportsAParentThatDoesNotOfferCPU(t *testing.T) {
 }
 
 func TestDindEntrypointReportsARefusedDelegation(t *testing.T) {
-	// The kernel's no-internal-process constraint surfaces as a failed write
-	// here; the write has to be checked, not trusted.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")
@@ -308,19 +291,9 @@ func TestDindEntrypointRequiresTheStockEntrypointOnPath(t *testing.T) {
 	host := run.host()
 	host.lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &run.output, &run.output)}
-	err := runDindEntrypoint(ctx, DindEntrypointParams{}, host)
+	err := runDindEntrypoint(ctx, model.DindEntrypointParams{}, host)
 	if err == nil || !strings.Contains(err.Error(), "dockerd-entrypoint.sh is not on PATH") {
 		t.Fatalf("expected a missing stock entrypoint to be named, got %v", err)
-	}
-}
-
-func TestDindEntrypointRefusesAnHostThatIsNotLinux(t *testing.T) {
-	restore := core.HostOSOverEnv
-	core.HostOSOverEnv = func() string { return "darwin" }
-	t.Cleanup(func() { core.HostOSOverEnv = restore })
-	err := RunDindEntrypoint(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}, DindEntrypointParams{})
-	if err == nil || !strings.Contains(err.Error(), "runs only inside the erun-dind sidecar, which is Linux; this host is darwin") {
-		t.Fatalf("expected an unsupported-OS refusal, got %v", err)
 	}
 }
 

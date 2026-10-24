@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-// TestRuntimeSizingFromOutputParsesActions covers the happy path: the resize
-// command's own "resize: tenant/env resource from -> to" trace lines (printed
-// at default verbosity via ctx.Trace) are what the Runtime tab's sizing
-// preview and apply calls parse out of the combined kubectl-exec output,
-// since the JSON output would otherwise interleave unpredictably with trace
-// text once both share one captured stream.
 func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
 	output := "resize: myapp/prod cpu 4 -> 6\n" +
 		"resize: myapp/prod memory 8916Mi -> 12288Mi\n" +
@@ -42,8 +36,6 @@ func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
 	}
 }
 
-// TestRuntimeSizingFromOutputParsesNoOp covers the case that must NOT deploy:
-// the resolved recommendation already matches the current size.
 func TestRuntimeSizingFromOutputParsesNoOp(t *testing.T) {
 	output := "resize: myapp/prod is already sized at cpu=4 memory=8916Mi; no change\n"
 
@@ -54,11 +46,7 @@ func TestRuntimeSizingFromOutputParsesNoOp(t *testing.T) {
 	}
 }
 
-// TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp is the reported
-// defect itself: a no-op resolves to "already sized as recommended" with no
-// actions to show, so the verdict/evidence lines are the only way the tab can
-// explain why -- e.g. a peak comfortably under the shrink boundary that the
-// window is too short to act on.
+// On a no-op, verdict/evidence lines are the only explanation the tab can show.
 func TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp(t *testing.T) {
 	output := "resize: myapp/prod sizing: memory insufficient-evidence from 23552Mi (peak 12153Mi of 23552Mi (52%), but only 1h12m observed of the 24h0m a shrink needs)\n" +
 		"resize: myapp/prod sizing: cpu insufficient-evidence from 12 (0.00% of scheduling periods throttled (0 of 376556), but only 1h12m observed of the 24h0m a shrink needs)\n" +
@@ -83,9 +71,6 @@ func TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp(t *testing.T) {
 	}
 }
 
-// TestRuntimeSizingFromOutputHandlesUnrecognisedOutput covers a version drift
-// or a truly empty successful run: no known line survives, so the tab reports
-// "nothing available" rather than a blank success.
 func TestRuntimeSizingFromOutputHandlesUnrecognisedOutput(t *testing.T) {
 	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, "some unrelated line\n")
 
@@ -106,10 +91,7 @@ func TestShellSingleQuoteEscapesEmbeddedQuotes(t *testing.T) {
 }
 
 func TestFriendlyRuntimeResizeErrorStripsWrapper(t *testing.T) {
-	// Mirrors kubectlText's fmt.Errorf("%w: %s", err, text) wrapping: the
-	// "exit status 1: " prefix lands only on the first line of the pod's own
-	// multi-line combined output, with the trace lines printed before the
-	// refusal preserved on their own lines above it.
+	// Mirrors kubectlText's "%w: %s" wrapping, which prefixes only the first line.
 	wrapped := &wrappedError{msg: "exit status 1: resize: myapp/prod cpu 4 -> 6\n" +
 		"resize refused: this environment is held by user jane"}
 	got := friendlyRuntimeResizeError(wrapped)
@@ -122,11 +104,6 @@ type wrappedError struct{ msg string }
 
 func (e *wrappedError) Error() string { return e.msg }
 
-// TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled is the reported defect
-// for the sizing panel: with the app's own context already past its deadline,
-// LoadRuntimeSizing's derived ctx reads as already timed out, so the panel
-// must name that timeout rather than the "signal: killed" text the mocked
-// exec below deliberately returns.
 func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
@@ -152,9 +129,6 @@ func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout covers a kill
-// this probe did not cause, which must read differently from the
-// self-inflicted timeout above and must never name the bare signal either.
 func TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("signal-terminated exec is a POSIX concept")
