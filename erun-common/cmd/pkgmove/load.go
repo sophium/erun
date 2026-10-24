@@ -29,6 +29,9 @@ type world struct {
 	sites   map[siteKey]site
 	links   map[string]string
 	goos    string
+	// declared lists, per package directory, the package-level names already
+	// declared there, filled the first time a copy is considered.
+	declared map[string]map[string]bool
 	// twins maps a package-level name to the first declaration seen for it:
 	// files built for different platforms declare one name once each, and a
 	// rename has to reach every one of them.

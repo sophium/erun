@@ -30,6 +30,28 @@ type fragment struct {
 	dup     bool
 	needs   map[string]bool
 	edits   []edit
+	// resident marks the whole of an unchanged file that moved code is
+	// appended to: it keeps every import it had, module ones included.
+	resident bool
+	// out is the fragment's text in order: source ranges, with literal glue
+	// where a grouped declaration is split and reopened in another package.
+	out []piece
+}
+
+// piece is a source range of a fragment, or literal text between ranges.
+type piece struct {
+	rg  [2]int
+	lit string
+	raw bool
+}
+
+func (f *fragment) addRange(rg [2]int) {
+	f.ranges = append(f.ranges, rg)
+	f.out = append(f.out, piece{rg: rg})
+}
+
+func (f *fragment) addLit(text string) {
+	f.out = append(f.out, piece{lit: text, raw: true})
 }
 
 func apply(w *world, m packageMap, opts options, out io.Writer) error {
@@ -49,7 +71,11 @@ func apply(w *world, m packageMap, opts options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "rewrote %d files\n", written)
+	suites, err := writeSuiteMains(w.rootDir)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "rewrote %d files, gave %d packages a TestMain\n", written, suites)
 	return nil
 }
 
@@ -82,8 +108,9 @@ func (r *rewriter) importPath(dir string) string {
 func (r *rewriter) planFragments() {
 	for name, sf := range r.w.files {
 		if !sf.inModule {
-			body := [][2]int{{r.bodyStart(sf), len(sf.src)}}
-			r.frags[name] = []*fragment{{dir: "ext", ranges: body, primary: true, needs: map[string]bool{}}}
+			f := &fragment{dir: "ext", primary: true, needs: map[string]bool{}}
+			f.addRange([2]int{r.bodyStart(sf), len(sf.src)})
+			r.frags[name] = []*fragment{f}
 			continue
 		}
 		r.frags[name] = r.fileFragments(sf)
@@ -95,56 +122,129 @@ func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 	// One fragment per package: a declaration that moves there and a test
 	// helper copied there end up in the same file, never two that overwrite
 	// each other.
-	byDir := map[string]*fragment{}
-	var order []*fragment
+	p := &fragmentPlan{byDir: map[string]*fragment{}}
 	prev := r.bodyStart(sf)
-	for _, decl := range r.d.decls[sf.path] {
-		if genImport(sf, decl.start) {
+	entries := r.d.decls[sf.path]
+	for i := 0; i < len(entries); {
+		e := entries[i]
+		if e.group == 0 {
+			p.place(e, [2]int{prev, e.end})
+			prev = e.end
+			i++
 			continue
 		}
-		rg := [2]int{prev, decl.end}
-		prev = decl.end
-		order = addRange(byDir, order, decl.dir, rg, false)
-		for _, dir := range sortedKeys(decl.dups) {
-			order = addRange(byDir, order, dir, rg, true)
+		j := i
+		for j < len(entries) && entries[j].group == e.group {
+			j++
 		}
+		prev = p.placeGroup(sf, entries[i:j], prev)
+		i = j
 	}
-	primary := byDir[home]
+	primary := p.byDir[home]
 	if primary == nil {
-		if len(order) == 0 {
-			primary = &fragment{dir: home, needs: map[string]bool{}}
-			order = append(order, primary)
+		if len(p.order) == 0 {
+			primary = p.get(home, false)
 		} else {
-			primary = order[0]
+			primary = p.order[0]
 		}
 	}
 	primary.primary = true
-	primary.ranges = append(primary.ranges, [2]int{prev, len(sf.src)})
-	for _, f := range order {
-		sort.Slice(f.ranges, func(i, j int) bool { return f.ranges[i][0] < f.ranges[j][0] })
-	}
-	return order
+	primary.addRange([2]int{prev, len(sf.src)})
+	return p.order
 }
 
-func addRange(byDir map[string]*fragment, order []*fragment, dir string, rg [2]int, dup bool) []*fragment {
-	f := byDir[dir]
+// fragmentPlan collects one file's fragments, one per package directory, in
+// the order their first text appears.
+type fragmentPlan struct {
+	byDir map[string]*fragment
+	order []*fragment
+}
+
+func (p *fragmentPlan) get(dir string, dup bool) *fragment {
+	f := p.byDir[dir]
 	if f == nil {
 		f = &fragment{dir: dir, dup: dup, needs: map[string]bool{}}
-		byDir[dir] = f
-		order = append(order, f)
+		p.byDir[dir] = f
+		p.order = append(p.order, f)
 	}
 	f.dup = f.dup && dup
-	f.ranges = append(f.ranges, rg)
-	return order
+	return f
 }
 
-func genImport(sf *sourceFile, start int) bool {
-	for _, decl := range sf.ast.Decls {
-		if g, ok := decl.(*ast.GenDecl); ok && sf.fset.Position(g.Pos()).Offset == start {
-			return g.Tok.String() == "import"
+// place puts one declaration's text in its package and in every package a
+// copy of it goes to.
+func (p *fragmentPlan) place(e declTarget, rg [2]int) {
+	p.get(e.dir, false).addRange(rg)
+	for _, dir := range sortedKeys(e.dups) {
+		p.get(dir, true).addRange(rg)
+	}
+}
+
+// placeGroup places a grouped declaration whose specs may go to different
+// packages: the package of its first spec keeps the group's own opening and
+// doc comment, every other package reopens the group around its specs. It
+// returns where the group's text ends.
+func (p *fragmentPlan) placeGroup(sf *sourceFile, specs []declTarget, prev int) int {
+	group := genDeclAt(sf, specs[0].group)
+	end := sf.fset.Position(group.End()).Offset
+	dirs := groupDirs(specs)
+	if len(dirs) == 1 {
+		p.get(dirs[0], false).addRange([2]int{prev, end})
+		return end
+	}
+	for _, dir := range dirs {
+		f := p.get(dir, !specsIn(specs, dir))
+		if dir == specs[0].dir {
+			f.addRange([2]int{prev, specs[0].start})
+		} else {
+			f.addLit("\n\n" + specs[0].tok + " (")
+		}
+		for _, spec := range specs {
+			if spec.dir == dir || spec.dups[dir] {
+				f.addRange([2]int{spec.start, spec.end})
+			}
+		}
+		f.addLit("\n)")
+	}
+	return end
+}
+
+func specsIn(specs []declTarget, dir string) bool {
+	for _, spec := range specs {
+		if spec.dir == dir {
+			return true
 		}
 	}
 	return false
+}
+
+// groupDirs are the packages a group's specs and their copies go to, in the
+// order they first appear.
+func groupDirs(specs []declTarget) []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(dir string) {
+		if !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	for _, spec := range specs {
+		add(spec.dir)
+		for _, dir := range sortedKeys(spec.dups) {
+			add(dir)
+		}
+	}
+	return dirs
+}
+
+func genDeclAt(sf *sourceFile, offset int) *ast.GenDecl {
+	for _, decl := range sf.ast.Decls {
+		if g, ok := decl.(*ast.GenDecl); ok && sf.fset.Position(g.Pos()).Offset == offset {
+			return g
+		}
+	}
+	return nil
 }
 
 // bodyStart is where a file's declarations begin: after its imports, or
@@ -258,9 +358,43 @@ func (r *rewriter) otherImport(sf *sourceFile, name string) bool {
 
 // write renders every changed file into its new place and removes the
 // originals that moved away.
+// part is one fragment bound for a file.
+type part struct {
+	sf *sourceFile
+	f  *fragment
+}
+
 func (r *rewriter) write() (int, error) {
+	byTarget, removed, err := r.collectParts()
+	if err != nil {
+		return 0, err
+	}
 	written := 0
-	targets := map[string]string{}
+	for _, target := range sortedKeys(byTarget) {
+		parts, err := r.withResident(target, byTarget[target])
+		if err != nil {
+			return written, err
+		}
+		if err := r.writeParts(target, parts); err != nil {
+			return written, err
+		}
+		written++
+	}
+	for _, name := range removed {
+		if _, rewritten := byTarget[name]; !rewritten {
+			if err := os.Remove(name); err != nil {
+				return written, err
+			}
+		}
+	}
+	return written, nil
+}
+
+// collectParts groups every changed fragment by the file it is written to, and
+// lists the source files no fragment stays in.
+func (r *rewriter) collectParts() (map[string][]part, []string, error) {
+	byTarget := map[string][]part{}
+	var removed []string
 	for _, name := range sortedKeys(r.frags) {
 		sf := r.w.files[name]
 		frags := r.frags[name]
@@ -268,39 +402,95 @@ func (r *rewriter) write() (int, error) {
 			continue
 		}
 		if usesCgo(sf) {
-			return written, fmt.Errorf("%s uses cgo, whose import preamble a rewrite would drop; move its references by hand", sf.path)
+			return nil, nil, fmt.Errorf("%s uses cgo, whose import preamble a rewrite would drop; move its references by hand", sf.path)
 		}
-		n, err := r.writeFile(sf, frags, targets)
-		written += n
-		if err != nil {
-			return written, err
+		for _, f := range frags {
+			target := r.targetPath(sf, f)
+			byTarget[target] = append(byTarget[target], part{sf: sf, f: f})
+		}
+		if sf.inModule && !r.keepsOriginal(sf, frags) {
+			removed = append(removed, sf.path)
 		}
 	}
-	return written, nil
+	return byTarget, removed, nil
 }
 
-// writeFile writes every fragment of one source file and removes the source
-// when none of them stays at its path. targets records every path written in
-// this run, so two fragments can never land on one file.
-func (r *rewriter) writeFile(sf *sourceFile, frags []*fragment, targets map[string]string) (int, error) {
-	written := 0
-	moved := false
-	for _, f := range frags {
-		target := r.targetPath(sf, f)
-		if from, ok := targets[target]; ok {
-			return written, fmt.Errorf("%s and %s would both be written to %s; add a rename to the map", from, sf.path, target)
-		}
-		targets[target] = sf.path
-		moved = moved || target != sf.path
-		if err := r.writeFragment(sf, f, target); err != nil {
-			return written, err
-		}
-		written++
+// withResident orders the parts bound for one file, the file already living
+// at that path first: declarations moved into a file of a package that
+// already has one are appended to it, never written over it.
+func (r *rewriter) withResident(target string, parts []part) ([]part, error) {
+	sort.SliceStable(parts, func(i, j int) bool { return parts[i].sf.path == target && parts[j].sf.path != target })
+	if parts[0].sf.path == target {
+		return parts, nil
 	}
-	if moved && !r.keepsOriginal(sf, frags) {
-		return written, os.Remove(sf.path)
+	resident, ok := r.w.files[target]
+	if !ok {
+		if _, err := os.Stat(target); err == nil {
+			return nil, fmt.Errorf("%s already exists and no load saw it; add a rename to the map", target)
+		}
+		return parts, nil
 	}
-	return written, nil
+	whole := &fragment{dir: path.Dir(resident.rel), primary: true, resident: true, needs: map[string]bool{}}
+	whole.addRange([2]int{r.bodyStart(resident), len(resident.src)})
+	return append([]part{{sf: resident, f: whole}}, parts...), nil
+}
+
+// writeParts renders the parts bound for one file into it: the first part's
+// header and package clause, every part's imports, every part's text.
+func (r *rewriter) writeParts(target string, parts []part) error {
+	first := parts[0]
+	for _, p := range parts[1:] {
+		if buildConstraint(p.sf) != buildConstraint(first.sf) {
+			return fmt.Errorf("%s and %s carry different build constraints and cannot share %s; add a rename to the map", first.sf.path, p.sf.path, target)
+		}
+	}
+	var std, other []string
+	var body strings.Builder
+	for _, p := range parts {
+		s, o := r.importLines(p.sf, p.f)
+		std, other = append(std, s...), append(other, o...)
+		for _, pc := range p.f.out {
+			if pc.raw {
+				body.WriteString(pc.lit)
+				continue
+			}
+			body.WriteString(applyEdits(p.sf, p.f, pc.rg))
+		}
+	}
+	text := r.header(first.sf, first.f) + "package " + r.packageClause(first.sf, first.f) +
+		renderImports(dedupe(std), dedupe(other)) + body.String()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	src, err := format.Source([]byte(text))
+	if err != nil {
+		return fmt.Errorf("format %s: %w", target, err)
+	}
+	return os.WriteFile(target, src, 0o644)
+}
+
+// buildConstraint is a file's //go:build line, which every part sharing a
+// file has to agree on.
+func buildConstraint(sf *sourceFile) string {
+	header := string(sf.src[:sf.fset.Position(sf.ast.Package).Offset])
+	for _, line := range strings.Split(header, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//go:build") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+func dedupe(lines []string) []string {
+	seen := map[string]bool{}
+	out := lines[:0]
+	for _, l := range lines {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func (r *rewriter) changed(sf *sourceFile, frags []*fragment) bool {
@@ -324,28 +514,6 @@ func (r *rewriter) targetPath(sf *sourceFile, f *fragment) string {
 		return sf.path
 	}
 	return filepath.Join(r.w.rootDir, filepath.FromSlash(f.dir), filepath.Base(sf.path))
-}
-
-func (r *rewriter) writeFragment(sf *sourceFile, f *fragment, target string) error {
-	var b strings.Builder
-	b.WriteString(r.header(sf, f))
-	b.WriteString("package ")
-	b.WriteString(r.packageClause(sf, f))
-	b.WriteString(r.imports(sf, f))
-	for _, rg := range f.ranges {
-		b.WriteString(applyEdits(sf, f, rg))
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	if existing, err := os.ReadFile(target); err == nil && target != sf.path {
-		return fmt.Errorf("%s already exists (%d bytes); add a rename to the map", target, len(existing))
-	}
-	src, err := format.Source([]byte(b.String()))
-	if err != nil {
-		return fmt.Errorf("format %s: %w", target, err)
-	}
-	return os.WriteFile(target, src, 0o644)
 }
 
 func (r *rewriter) packageClause(sf *sourceFile, f *fragment) string {
@@ -389,11 +557,10 @@ func applyEdits(sf *sourceFile, f *fragment, rg [2]int) string {
 	return b.String()
 }
 
-// imports renders a fragment's import block: every import of the original
-// file its code still names, minus module packages it no longer refers to,
-// plus the module packages it refers to now.
-func (r *rewriter) imports(sf *sourceFile, f *fragment) string {
-	var std, other []string
+// importLines are a fragment's imports: every import of the original file its
+// code still names, minus module packages it no longer refers to, plus the
+// module packages it refers to now.
+func (r *rewriter) importLines(sf *sourceFile, f *fragment) (std, other []string) {
 	add := func(line, p string) {
 		if strings.Contains(strings.SplitN(p, "/", 2)[0], ".") {
 			other = append(other, line)
@@ -403,6 +570,10 @@ func (r *rewriter) imports(sf *sourceFile, f *fragment) string {
 	}
 	for _, spec := range sf.ast.Imports {
 		p, _ := strconv.Unquote(spec.Path.Value)
+		if f.resident {
+			add(r.specText(sf, spec), p)
+			continue
+		}
 		if r.w.inModulePath(p) {
 			continue
 		}
@@ -418,7 +589,7 @@ func (r *rewriter) imports(sf *sourceFile, f *fragment) string {
 		}
 		add(line, r.importPath(dir))
 	}
-	return renderImports(std, other)
+	return std, other
 }
 
 func (r *rewriter) specText(sf *sourceFile, spec *ast.ImportSpec) string {

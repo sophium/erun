@@ -99,6 +99,10 @@ type declTarget struct {
 	// dups are the other packages a test-only declaration is copied into,
 	// because tests there use it: a _test.go declaration cannot be exported.
 	dups map[string]bool
+	// group is the offset of the grouped declaration a spec belongs to, and
+	// tok its keyword; zero for a declaration that is not one spec of a group.
+	group int
+	tok   string
 }
 
 func (w *world) decide(m packageMap) decisions {
@@ -109,6 +113,7 @@ func (w *world) decide(m packageMap) decisions {
 		}
 	}
 	w.placeMethods(m, d)
+	w.keepCopiesInPlace(d)
 	for _, key := range sortedKeys(w.objects) {
 		d.dir[key] = w.objectDir(key, m, d)
 	}
@@ -153,6 +158,22 @@ func (w *world) duplicateTestHelpers(d decisions) {
 		}
 	}
 	w.relocateUnusedTestHelpers(d)
+	w.methodsFollowTheirTypes(d)
+	w.debugDecls(d)
+}
+
+// debugDecls prints where every declaration named debugName goes.
+func (w *world) debugDecls(d decisions) {
+	if debugName == "" {
+		return
+	}
+	for file, decls := range d.decls {
+		for _, decl := range decls {
+			if sf := w.files[file]; sf != nil && strings.Contains(string(sf.src[decl.start:decl.end]), debugName) {
+				_, _ = fmt.Fprintf(os.Stderr, "decl %s@%d-%d dir=%q dups=%v\n", sf.rel, decl.start, decl.end, decl.dir, sortedKeys(decl.dups))
+			}
+		}
+	}
 }
 
 // relocateUnusedTestHelpers moves, rather than copies, a test-only helper its
@@ -165,7 +186,7 @@ func (w *world) relocateUnusedTestHelpers(d decisions) {
 		for _, decls := range d.decls {
 			for i := range decls {
 				od := &decls[i]
-				if len(od.dups) == 0 || usedAtHome[od] {
+				if len(od.dups) == 0 || usedAtHome[od] || od.method != "" {
 					continue
 				}
 				home := sortedKeys(od.dups)[0]
@@ -199,6 +220,9 @@ func (w *world) dupForSite(s site, d decisions) bool {
 	}
 	changed := false
 	for _, from := range w.siteDirs(s, d) {
+		if w.alreadyDeclares(from, o) {
+			continue
+		}
 		if from != od.dir && !strings.HasPrefix(from, "ext:") && !od.dups[from] {
 			if od.dups == nil {
 				od.dups = map[string]bool{}
@@ -284,8 +308,15 @@ func offsetOf(key string) int {
 func declTargets(sf *sourceFile, m packageMap) []declTarget {
 	var out []declTarget
 	for _, decl := range sf.ast.Decls {
+		if g, ok := decl.(*ast.GenDecl); ok && g.Tok == token.IMPORT {
+			continue
+		}
 		start := sf.fset.Position(decl.Pos()).Offset
 		end := sf.fset.Position(decl.End()).Offset
+		if g, ok := decl.(*ast.GenDecl); ok && g.Lparen.IsValid() && len(g.Specs) > 1 {
+			out = append(out, specTargets(sf, m, g, start)...)
+			continue
+		}
 		target := declTarget{start: start, end: end, dir: m.declDir(sf.rel, declName(decl))}
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv != nil {
 			target.method = fmt.Sprintf("%s:%d", sf.path, sf.fset.Position(fn.Name.Pos()).Offset)
@@ -293,6 +324,79 @@ func declTargets(sf *sourceFile, m packageMap) []declTarget {
 		out = append(out, target)
 	}
 	return out
+}
+
+// specTargets places each spec of a grouped declaration on its own, so one
+// `type ( ... )` block can be split between packages. A spec's range starts
+// where the previous one ended, carrying the comments between them, and runs
+// to the end of its last line. A const group that repeats an expression
+// implicitly or counts with iota stays whole: splitting it would change the
+// values the later specs get.
+func specTargets(sf *sourceFile, m packageMap, g *ast.GenDecl, group int) []declTarget {
+	keepWhole := g.Tok == token.CONST && constGroupIsPositional(g)
+	firstDir := m.declDir(sf.rel, specName(g.Specs[0]))
+	prev := sf.fset.Position(g.Lparen).Offset + 1
+	out := make([]declTarget, 0, len(g.Specs))
+	for _, spec := range g.Specs {
+		end := lineEnd(sf.src, sf.fset.Position(spec.End()).Offset)
+		dir := m.declDir(sf.rel, specName(spec))
+		if keepWhole {
+			dir = firstDir
+		}
+		out = append(out, declTarget{start: prev, end: end, dir: dir, group: group, tok: g.Tok.String()})
+		prev = end
+	}
+	return out
+}
+
+func specName(spec ast.Spec) string {
+	switch s := spec.(type) {
+	case *ast.TypeSpec:
+		return s.Name.Name
+	case *ast.ValueSpec:
+		return s.Names[0].Name
+	}
+	return ""
+}
+
+func constGroupIsPositional(g *ast.GenDecl) bool {
+	for _, spec := range g.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		if len(vs.Values) == 0 {
+			return true
+		}
+		for _, v := range vs.Values {
+			if mentionsIota(v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mentionsIota(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == "iota" {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// lineEnd is the offset of the newline ending the line offset is on, or the
+// end of src.
+func lineEnd(src []byte, offset int) int {
+	for i := offset; i < len(src); i++ {
+		if src[i] == '\n' {
+			return i
+		}
+	}
+	return len(src)
 }
 
 func declName(decl ast.Decl) string {
@@ -533,4 +637,89 @@ func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 		}
 	}
 	return used
+}
+
+// methodsFollowTheirTypes puts every method where its receiver type ended up,
+// copied wherever the type is copied: Go keeps methods with their type, so a
+// method is never placed on its own.
+func (w *world) methodsFollowTheirTypes(d decisions) {
+	for _, decls := range d.decls {
+		for i := range decls {
+			o, ok := w.objects[decls[i].method]
+			if !ok || o.owner == "" {
+				continue
+			}
+			ownerObj, ok := w.objects[o.owner]
+			if !ok {
+				continue
+			}
+			owner := d.declAt(ownerObj.file, offsetOf(o.owner))
+			if owner == nil {
+				continue
+			}
+			decls[i].dir = owner.dir
+			decls[i].dups = map[string]bool{}
+			for dir := range owner.dups {
+				decls[i].dups[dir] = true
+			}
+			w.redirectDeclObjects(&decls[i], d)
+		}
+	}
+}
+
+// alreadyDeclares reports whether a package already has its own declaration of
+// o's name -- a copy an earlier step made -- in which case it needs no other.
+func (w *world) alreadyDeclares(dir string, o *object) bool {
+	if w.declared == nil {
+		w.declared = map[string]map[string]bool{}
+		for _, other := range w.objects {
+			sf := w.files[other.file]
+			if other.member || sf == nil || !sf.inModule {
+				continue
+			}
+			home := path.Dir(sf.rel)
+			if w.declared[home] == nil {
+				w.declared[home] = map[string]bool{}
+			}
+			w.declared[home][other.name] = true
+		}
+	}
+	sf := w.files[o.file]
+	return sf != nil && path.Dir(sf.rel) != dir && w.declared[dir][o.name]
+}
+
+// keepCopiesInPlace leaves a test-only declaration where it is when the
+// package its file's rule sends it to already declares every name it does:
+// it is a copy an earlier step made, and that package has its own. This is
+// what makes re-running a step's map after rebasing onto it change nothing.
+func (w *world) keepCopiesInPlace(d decisions) {
+	for file, decls := range d.decls {
+		sf := w.files[file]
+		if sf == nil || !strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		home := path.Dir(sf.rel)
+		for i := range decls {
+			if decls[i].dir != home && w.declaresAllIn(&decls[i], file, decls[i].dir) {
+				decls[i].dir = home
+			}
+		}
+	}
+}
+
+func (w *world) declaresAllIn(decl *declTarget, file, dir string) bool {
+	found := false
+	for key, o := range w.objects {
+		if o.file != file || o.member {
+			continue
+		}
+		if off := offsetOf(key); off < decl.start || off >= decl.end {
+			continue
+		}
+		if !w.alreadyDeclares(dir, o) {
+			return false
+		}
+		found = true
+	}
+	return found
 }

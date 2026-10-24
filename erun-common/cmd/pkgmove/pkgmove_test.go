@@ -89,6 +89,19 @@ func TestApplyMovesAFileAndExportsWhatCrossesTheBoundary(t *testing.T) {
 	}
 	goIn(t, dir, "vet", "./...")
 	goIn(t, dir, "test", "./...")
+
+	requireReapplyChangesNothing(t, dir)
+}
+
+// requireReapplyChangesNothing re-runs a map on the tree it already moved: a
+// branch that predates a move re-runs that map after rebasing onto it, so on
+// a moved tree it has to change nothing.
+func requireReapplyChangesNothing(t *testing.T, dir string) {
+	t.Helper()
+	out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map"))
+	if err != nil || !strings.Contains(out, "rewrote 0 files") {
+		t.Fatalf("re-applying the map to the moved tree must change nothing: %v\n%s", err, out)
+	}
 }
 
 // TestPlanRefusesAMapThatMakesAnImportCycle pins the gate apply relies on:
@@ -157,5 +170,106 @@ func TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(dir, "sub", "thing_test.go")), "func TestThing(") {
 		t.Error("the moved package lost TestThing")
 	}
+	goIn(t, dir, "test", "./...")
+}
+
+// TestApplySplitsAGroupedDeclarationBetweenPackages pins the split a grouped
+// declaration needs: one `type ( ... )` block whose specs go to two packages
+// is reopened in the second, and an iota const group stays whole because
+// splitting it would renumber the specs after the cut.
+func TestApplySplitsAGroupedDeclarationBetweenPackages(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"types.go":     "package fixture\n\n// Shared types.\ntype (\n\t// Kept stays.\n\tKept int\n\t// Moved goes.\n\tMoved string\n)\n\nconst (\n\tFirst = iota\n\tSecond\n)\n",
+		"use.go":       "package fixture\n\nfunc Use() (Kept, Moved, int) { return 1, \"x\", Second }\n",
+		"packages.map": "sub types.go:Moved\nsub types.go:Second\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	root := readFile(t, filepath.Join(dir, "types.go"))
+	sub := readFile(t, filepath.Join(dir, "sub", "types.go"))
+	if !strings.Contains(root, "Kept int") || strings.Contains(root, "Moved string") {
+		t.Errorf("the root keeps Kept and loses Moved:\n%s", root)
+	}
+	if !strings.Contains(sub, "type (") || !strings.Contains(sub, "// Moved goes.") || !strings.Contains(sub, "Moved string") {
+		t.Errorf("the second package reopens the group around Moved, with its comment:\n%s", sub)
+	}
+	if !strings.Contains(root, "Second") || strings.Contains(sub, "Second") {
+		t.Errorf("an iota group stays whole where its first spec is:\nroot:\n%s\nsub:\n%s", root, sub)
+	}
+	goIn(t, dir, "vet", "./...")
+}
+
+// TestApplyAppendsToAFileAPackageAlreadyHas is the shape every step after the
+// first takes: declarations pulled out of a root file into a package that
+// already holds a file of that name are added to it, keeping what was there.
+func TestApplyAppendsToAFileAPackageAlreadyHas(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"sub/cloud.go": "package sub\n\nimport (\n\t\"strings\"\n\n\t\"example.com/fixture/base\"\n)\n\n// Earlier came first.\nfunc Earlier() string { return strings.ToUpper(base.A) }\n",
+		"base/base.go": "package base\n\nconst A = \"a\"\n",
+		"cloud.go":     "package fixture\n\nimport \"strconv\"\n\nfunc Later() string { return strconv.Itoa(1) }\n\nfunc Stays() string { return Later() }\n",
+		"packages.map": "sub cloud.go:Later\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	merged := readFile(t, filepath.Join(dir, "sub", "cloud.go"))
+	for _, want := range []string{"// Earlier came first.", "func Earlier()", "func Later()", `"strings"`, `"strconv"`, `"example.com/fixture/base"`} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("sub/cloud.go is missing %q:\n%s", want, merged)
+		}
+	}
+	if strings.Index(merged, "func Earlier") > strings.Index(merged, "func Later") {
+		t.Errorf("what the file already held stays first:\n%s", merged)
+	}
+	goIn(t, dir, "vet", "./...")
+}
+
+// TestApplyMovesAHelperTypeWithItsMethods is the reproduction of a copied stub
+// that lost its methods: a test-only type used both at home and by a moved
+// test is copied, and its methods have to be copied with it -- Go keeps
+// methods with their type, so a copy without them stops implementing the
+// interface its users pass it as.
+func TestApplyMovesAHelperTypeWithItsMethods(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
+		"stub_test.go":  "package fixture\n\ntype stub struct{}\n\nfunc (stub) Load() int { return 3 }\n",
+		"store_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestRead(t *testing.T) {\n\tif Read(stub{}) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"root_test.go":  "package fixture\n\nimport \"testing\"\n\nfunc TestRootStub(t *testing.T) {\n\tif (stub{}).Load() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub store.go\nsub store_test.go\nsub stub_test.go\n. stub_test.go:stub\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
+
+// TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain pins the guard
+// the root package's TestMain gives its tests -- no runtime pod identity, no
+// real timing history, no browser, no git maintenance -- for every package the
+// split creates: tests moved out of the root package must not lose it.
+func TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"base/core/timing.go":      "package core\n\nconst TimingRecordDirEnv = \"FIXTURE_TIMING_DIR\"\n",
+		"base/core/timing_test.go": "package core\n\nimport \"testing\"\n\nfunc TestSeam(t *testing.T) {\n\tif TimingRecordDirEnv == \"\" {\n\t\tt.Fatal()\n\t}\n}\n",
+		"infra/x/x.go":             "package x\n\nfunc X() int { return 1 }\n",
+		"infra/x/x_test.go":        "package x\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestIsolated(t *testing.T) {\n\tif os.Getenv(\"ERUN_TENANT\") != \"\" || os.Getenv(\"FIXTURE_TIMING_DIR\") == \"\" {\n\t\tt.Fatal(\"the suite is not isolated\")\n\t}\n}\n",
+		"root.go":                  "package fixture\n",
+		"root_test.go":             "package fixture\n\nimport \"testing\"\n\nfunc TestRoot(t *testing.T) {}\n",
+		"packages.map":             "# nothing moves\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	for _, rel := range []string{"base/core/suite_main_test.go", "infra/x/suite_main_test.go"} {
+		if !strings.Contains(readFile(t, filepath.Join(dir, filepath.FromSlash(rel))), "func TestMain(") {
+			t.Errorf("%s has no TestMain", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "suite_main_test.go")); !os.IsNotExist(err) {
+		t.Error("the root package keeps its own TestMain; none is generated for it")
+	}
+	t.Setenv("ERUN_TENANT", "leaked")
 	goIn(t, dir, "test", "./...")
 }
