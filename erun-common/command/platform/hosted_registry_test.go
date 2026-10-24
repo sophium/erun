@@ -9,7 +9,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/setup"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -22,7 +21,7 @@ func TestHostedRegistryProbeTreatsUnauthorizedAsAvailable(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(status)
 		}))
-		got := orchestration.ProbeHostedRegistryAt(context.Background(), server.Client(), server.URL+"/v2/", config.HostedRegistryHost)
+		got := setup.ProbeHostedRegistryAt(context.Background(), server.Client(), server.URL+"/v2/", config.HostedRegistryHost)
 		server.Close()
 		if !got.Available {
 			t.Fatalf("status %d: expected the registry to read as available, got %+v", status, got)
@@ -36,7 +35,7 @@ func TestHostedRegistryProbeTreatsUnauthorizedAsAvailable(t *testing.T) {
 // TestHostedRegistryProbeNamesAnUnresolvableHost checks the dead-end rule: an
 // unavailable status must name what it observed and carry a way forward.
 func TestHostedRegistryProbeNamesAnUnresolvableHost(t *testing.T) {
-	got := orchestration.ProbeHostedRegistryAt(context.Background(), nil, "https://registry.invalid.erun-does-not-exist./v2/", config.HostedRegistryHost)
+	got := setup.ProbeHostedRegistryAt(context.Background(), nil, "https://registry.invalid.erun-does-not-exist./v2/", config.HostedRegistryHost)
 	if got.Available {
 		t.Fatal("expected an unresolvable host to read as unavailable")
 	}
@@ -58,8 +57,8 @@ func TestHostedRegistryProbeNamesAnUnresolvableHost(t *testing.T) {
 // host that is not there.
 func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 	runner := setup.BootstrapRunner{BootstrapInitDependencies: setup.BootstrapInitDependencies{
-		ProbeHostedRegistry: func(context.Context) orchestration.HostedRegistryStatus {
-			return orchestration.HostedRegistryStatus{
+		ProbeHostedRegistry: func(context.Context) setup.HostedRegistryStatus {
+			return setup.HostedRegistryStatus{
 				Host:     config.HostedRegistryHost,
 				Reason:   "does not resolve",
 				Recovery: "Choose a different registry instead.",
@@ -84,8 +83,8 @@ func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 // working case.
 func TestErunRegistryAcceptedWhenAvailable(t *testing.T) {
 	runner := setup.BootstrapRunner{BootstrapInitDependencies: setup.BootstrapInitDependencies{
-		ProbeHostedRegistry: func(context.Context) orchestration.HostedRegistryStatus {
-			return orchestration.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: true}
+		ProbeHostedRegistry: func(context.Context) setup.HostedRegistryStatus {
+			return setup.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: true}
 		},
 	}}
 	registry, err := runner.ResolveContainerRegistry(open.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)

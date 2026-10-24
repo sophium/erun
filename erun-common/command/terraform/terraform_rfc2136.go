@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -145,7 +145,7 @@ func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Re
 // which is more precise than erun guessing at who attempted the read.
 func terraformRFC2136ReadError(requirement terraformRFC2136Requirement, stderr string, err error) error {
 	contextLabel := terraformKubernetesContextLabel(requirement.KubernetesContext)
-	if orchestration.IsKubectlNotFound(stderr) {
+	if clusterread.IsKubectlNotFound(stderr) {
 		return fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s does not exist, read via %s — create it (e.g. via the erun-powerdns chart) or point issuer_name/env_namespace in the resolved .tfvars at where it actually lives",
 			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, contextLabel)
 	}

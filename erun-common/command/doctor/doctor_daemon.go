@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -341,12 +341,12 @@ func formatDockerStoreBytes(bytes uint64) string {
 
 // runDoctorDockerSteps runs steps against daemon through the transport that
 // daemon is reachable by, and returns both the output and the store readings.
-func runDoctorDockerSteps(ctx core.Context, runner orchestration.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}
 	script := doctorDockerScript(steps)
-	preview := orchestration.PreviewRuntimeContainerCommand(req, daemon.Container, script)
+	preview := diagnosis.PreviewRuntimeContainerCommand(req, daemon.Container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
@@ -357,7 +357,7 @@ func runDoctorDockerSteps(ctx core.Context, runner orchestration.RuntimeContaine
 		return DoctorDockerResult{Daemon: daemon}, nil
 	}
 	if runner == nil {
-		runner = orchestration.RunRuntimeContainerCommand
+		runner = diagnosis.RunRuntimeContainerCommand
 	}
 	result, err := runner(req, daemon.Container, script)
 	if err != nil {

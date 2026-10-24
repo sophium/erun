@@ -1,4 +1,4 @@
-package orchestration
+package diagnosis
 
 import (
 	"bytes"

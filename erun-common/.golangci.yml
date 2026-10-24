@@ -21,8 +21,16 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
     - depguard
   settings:
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
     # The package layers of #2741 (AGENTS.md "Package layers"): every package
     # may import only the layers below it. Each rule denies the whole module
     # and allows what lies beneath, so a new package is held to the table the
@@ -141,6 +149,22 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: infra/mcp may import base/* and infra/kube
+        infra-remoteinit:
+          list-mode: lax
+          files: ["**/erun-common/infra/remoteinit/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/remoteinit may import base/* and no other infra package
+        infra-codesign:
+          list-mode: lax
+          files: ["**/erun-common/infra/codesign/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/codesign may import base/* and no other infra package
         command:
           list-mode: lax
           files: ["**/erun-common/command/**/*.go", "!$test"]
@@ -149,9 +173,10 @@ linters:
             - github.com/sophium/erun/erun-common/infra/
             - github.com/sophium/erun/erun-common/primitive/
             - github.com/sophium/erun/erun-common/orchestration$
+            - github.com/sophium/erun/erun-common/orchestration/
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: a command package may import base/*, infra/*, primitive/* and orchestration, never another command package
+              desc: a command package may import base/*, infra/*, primitive/* and orchestration/*, never another command package
         primitive-shared:
           list-mode: lax
           files: ["**/erun-common/primitive/shared/*.go"]
@@ -173,7 +198,7 @@ linters:
               desc: a primitive may import base/*, infra/* and primitive/shared, never another primitive; composing primitives is orchestration's job
         orchestration:
           list-mode: lax
-          files: ["**/erun-common/orchestration/*.go"]
+          files: ["**/erun-common/orchestration/*.go", "**/erun-common/orchestration/*/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
 // TestAISessionHookBindingsResolveToTheStateTheyClaim pins the mapping to the
@@ -21,7 +21,7 @@ func TestAISessionHookBindingsResolveToTheStateTheyClaim(t *testing.T) {
 		model.AISessionEventExit:      model.AISessionStateExited,
 	}
 	reported := map[model.AISessionEventKind]bool{}
-	for _, binding := range orchestration.AISessionHookBindings() {
+	for _, binding := range podruntime.AISessionHookBindings() {
 		state, ok := wantState[binding.ModelEvent]
 		if !ok {
 			t.Fatalf("binding %s reports %q, which no hook can produce a state for", binding.ToolEvent, binding.ModelEvent)

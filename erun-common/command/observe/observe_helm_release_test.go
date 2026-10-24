@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
 // writeHelmObserveStub points ERUN_HELM_BIN at a script that dispatches on
@@ -52,7 +52,7 @@ func TestFetchObservedHelmReleaseReadsChartFromHelmList(t *testing.T) {
 		`"chart":"erun-devops-1.0.206","app_version":"1.0.206"}]`
 	writeHelmObserveStub(t, statusStdout, listStdout, 0, "")
 
-	release := orchestration.FetchObservedHelmRelease([]string{"status", "erun-devops"}, []string{"list"}, "erun-devops", "erun-ux")
+	release := clusterread.FetchObservedHelmRelease([]string{"status", "erun-devops"}, []string{"list"}, "erun-devops", "erun-ux")
 
 	if !release.Found {
 		t.Fatalf("expected release to be found")
@@ -81,7 +81,7 @@ func TestFetchObservedHelmReleaseChartUnreadableReportsError(t *testing.T) {
 	statusStdout := `{"name":"erun-devops","namespace":"erun-ux","version":675,"info":{"status":"deployed"},"config":{}}`
 	writeHelmObserveStub(t, statusStdout, "[]", 0, "")
 
-	release := orchestration.FetchObservedHelmRelease([]string{"status", "erun-devops"}, []string{"list"}, "erun-devops", "erun-ux")
+	release := clusterread.FetchObservedHelmRelease([]string{"status", "erun-devops"}, []string{"list"}, "erun-devops", "erun-ux")
 
 	if !release.Found {
 		t.Fatalf("expected release to be found (helm status succeeded)")

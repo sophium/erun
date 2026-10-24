@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func waitForRuntimeCondition(t *testing.T, what string, condition func() bool) {
@@ -43,7 +42,7 @@ func TestRuntimeAISessionHookCommandReachesTheReportVerb(t *testing.T) {
 	bin := t.TempDir()
 	argvFile := filepath.Join(t.TempDir(), "erun-argv")
 	writeRuntimeStub(t, bin, "erun", "cat >/dev/null\nprintf '%s\\n' \"$*\" >>"+argvFile+"\n")
-	for _, binding := range orchestration.AISessionHookBindings() {
+	for _, binding := range AISessionHookBindings() {
 		command := runtimeAISessionHookCommand(binding.ModelEvent)
 		run := func(env ...string) string {
 			_ = os.Remove(argvFile)

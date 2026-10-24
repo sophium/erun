@@ -11,8 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
@@ -139,7 +139,7 @@ type outputsDownloadCLIResult struct {
 	ArchiveFormat string `json:"archiveFormat,omitempty"`
 	// Signing is present only when host-side ad-hoc code signing had something to
 	// report; see common.SignHostArtifact.
-	Signing *orchestration.HostArtifactSigning `json:"signing,omitempty"`
+	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
@@ -163,7 +163,7 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 	// The download is the point where a cross-built artifact becomes a file the
 	// operator runs, so it is where a darwin binary gets the signature macOS
 	// demands. A signing problem is reported, never fatal: the file has arrived.
-	signing := orchestration.SignHostArtifact(destPath)
+	signing := codesign.SignHostArtifact(destPath)
 	if ctx.Output == core.OutputJSON {
 		result := outputsDownloadCLIResult{
 			Name:          out.Name,

@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/infra/remoteinit"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -132,7 +132,7 @@ type BootstrapInitDependencies struct {
 }
 
 // HostedRegistryProbeFunc reports the hosted registry's current availability.
-type HostedRegistryProbeFunc func(context.Context) orchestration.HostedRegistryStatus
+type HostedRegistryProbeFunc func(context.Context) HostedRegistryStatus
 
 type BootstrapRunner struct {
 	BootstrapInitDependencies
@@ -1230,7 +1230,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 	if s.params.Bootstrap {
 		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + configpkg.DevopsComponentName + " chart")
 	}
-	return s.runner.writeRemoteInitMarker(req, orchestration.RemoteInitMarker{
+	return s.runner.writeRemoteInitMarker(req, remoteinit.RemoteInitMarker{
 		Tenant:             s.tenant,
 		Environment:        s.envName,
 		ProjectRoot:        projectRoot,
@@ -1749,11 +1749,11 @@ type projectContext struct {
 
 // probeHostedRegistry runs the availability probe the hosted-registry choice is
 // gated on, defaulting to the real one when no dependency was injected.
-func (s BootstrapRunner) probeHostedRegistry() orchestration.HostedRegistryStatus {
+func (s BootstrapRunner) probeHostedRegistry() HostedRegistryStatus {
 	probe := s.ProbeHostedRegistry
 	if probe == nil {
-		probe = func(ctx context.Context) orchestration.HostedRegistryStatus {
-			return orchestration.ProbeHostedRegistry(ctx, nil)
+		probe = func(ctx context.Context) HostedRegistryStatus {
+			return ProbeHostedRegistry(ctx, nil)
 		}
 	}
 	return probe(context.Background())

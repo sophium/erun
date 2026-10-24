@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
 
 // TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory pins the same
@@ -15,7 +15,7 @@ import (
 // the git clone must not create the project root it would clone into.
 func TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory(t *testing.T) {
 	projectRoot := filepath.Join(t.TempDir(), "unborn-checkout")
-	err := finishRemoteInitGitCheckout(core.Context{DryRun: true}, projectRoot, "", orchestration.RemoteRepositorySpec{URL: "git@example.test:acme/repo.git"})
+	err := finishRemoteInitGitCheckout(core.Context{DryRun: true}, projectRoot, "", remoteinit.RemoteRepositorySpec{URL: "git@example.test:acme/repo.git"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

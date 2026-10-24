@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
 
 // RemoteInitInspectionStatus categorizes one expected artifact's state.
@@ -33,7 +33,7 @@ type RemoteInitInspectionItem struct {
 // filesystem artifacts match that intent.
 type RemoteInitInspection struct {
 	MarkerPresent bool
-	Marker        orchestration.RemoteInitMarker
+	Marker        remoteinit.RemoteInitMarker
 
 	// HomeDir, Tenant, Environment, ProjectRoot are the resolved values
 	// doctor is operating against. When the marker is missing the fields
@@ -85,7 +85,7 @@ func InspectRemoteInit(homeDir string, env func(string) string) (RemoteInitInspe
 	}
 	tenant := strings.TrimSpace(env("ERUN_TENANT"))
 	environment := strings.TrimSpace(env("ERUN_ENVIRONMENT"))
-	marker, present, err := orchestration.LoadRemoteInitMarker(homeDir, tenant, environment)
+	marker, present, err := remoteinit.LoadRemoteInitMarker(homeDir, tenant, environment)
 	if err != nil {
 		return RemoteInitInspection{}, err
 	}
@@ -139,7 +139,7 @@ func inspectProjectRoot(projectRoot string) RemoteInitInspectionItem {
 	return item
 }
 
-func inspectGitCheckout(projectRoot string, marker orchestration.RemoteInitMarker, markerPresent bool) RemoteInitInspectionItem {
+func inspectGitCheckout(projectRoot string, marker remoteinit.RemoteInitMarker, markerPresent bool) RemoteInitInspectionItem {
 	gitDir := ""
 	if projectRoot != "" {
 		gitDir = filepath.Join(projectRoot, ".git")
@@ -164,7 +164,7 @@ func inspectGitCheckout(projectRoot string, marker orchestration.RemoteInitMarke
 	return item
 }
 
-func inspectSSHKey(homeDir string, marker orchestration.RemoteInitMarker, markerPresent bool) RemoteInitInspectionItem {
+func inspectSSHKey(homeDir string, marker remoteinit.RemoteInitMarker, markerPresent bool) RemoteInitInspectionItem {
 	keyPath := filepath.Join(homeDir, ".ssh", "id_ed25519")
 	item := RemoteInitInspectionItem{
 		Label: "SSH keypair",
@@ -187,7 +187,7 @@ func inspectSSHKey(homeDir string, marker orchestration.RemoteInitMarker, marker
 // missing or did not record CodeCommit, the inspection omits this row
 // — doctor falls back to detecting CodeCommit from the resolved URL
 // inside RunRemoteInitFinish and generates the RSA key on the fly.
-func inspectCodeCommitSSHKey(homeDir string, marker orchestration.RemoteInitMarker, markerPresent bool) (RemoteInitInspectionItem, bool) {
+func inspectCodeCommitSSHKey(homeDir string, marker remoteinit.RemoteInitMarker, markerPresent bool) (RemoteInitInspectionItem, bool) {
 	if !markerPresent || marker.NoGit || strings.TrimSpace(marker.CodeCommitHost) == "" {
 		return RemoteInitInspectionItem{}, false
 	}
@@ -212,7 +212,7 @@ func bakedSkillsRoot(env func(string) string) string {
 			return override
 		}
 	}
-	return orchestration.RuntimeBakedSkillsDir
+	return core.RuntimeBakedSkillsDir
 }
 
 // inspectSkills reports whether every baked agent skill is installed into
@@ -333,7 +333,7 @@ func resolveRemoteInitRepositoryURL(ctx core.Context, inspection RemoteInitInspe
 	return repositoryURL, nil
 }
 
-func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, repository orchestration.RemoteRepositorySpec, homeDir string) []RemoteInitInspectionItem {
+func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, repository remoteinit.RemoteRepositorySpec, homeDir string) []RemoteInitInspectionItem {
 	if repository.CodeCommitHost == "" || remoteInitMissingItem(missing, "CodeCommit SSH keypair") {
 		return missing
 	}
@@ -397,7 +397,7 @@ func applyRemoteInitMissingItem(ctx core.Context, inspection RemoteInitInspectio
 
 // runRemoteInitGitCheckout clones the project using the resolved keys. It may
 // update repository in place with a resolved CodeCommit SSH key ID.
-func runRemoteInitGitCheckout(ctx core.Context, inspection RemoteInitInspection, repository *orchestration.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
+func runRemoteInitGitCheckout(ctx core.Context, inspection RemoteInitInspection, repository *remoteinit.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
 	codeCommitKeyPath := state.codeCommitKeyPath
 	if repository.CodeCommitHost != "" {
 		if codeCommitKeyPath == "" {
@@ -416,7 +416,7 @@ func runRemoteInitGitCheckout(ctx core.Context, inspection RemoteInitInspection,
 	return finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, state.sshKeyPath, *repository)
 }
 
-func saveRemoteInitCompletionMarker(ctx core.Context, inspection RemoteInitInspection, repository orchestration.RemoteRepositorySpec, repositoryURL string) (RemoteInitInspection, error) {
+func saveRemoteInitCompletionMarker(ctx core.Context, inspection RemoteInitInspection, repository remoteinit.RemoteRepositorySpec, repositoryURL string) (RemoteInitInspection, error) {
 	updated := inspection
 	updated.Marker.Tenant = inspection.Tenant
 	updated.Marker.Environment = inspection.Environment
@@ -430,11 +430,11 @@ func saveRemoteInitCompletionMarker(ctx core.Context, inspection RemoteInitInspe
 	updated.MarkerPresent = true
 
 	if !ctx.DryRun {
-		if err := orchestration.SaveRemoteInitMarker(inspection.HomeDir, updated.Marker); err != nil {
+		if err := remoteinit.SaveRemoteInitMarker(inspection.HomeDir, updated.Marker); err != nil {
 			return inspection, err
 		}
 	} else {
-		ctx.TraceCommand("", "write-yaml", orchestration.RemoteInitMarkerPath(inspection.HomeDir, updated.Marker.Tenant, updated.Marker.Environment))
+		ctx.TraceCommand("", "write-yaml", remoteinit.RemoteInitMarkerPath(inspection.HomeDir, updated.Marker.Tenant, updated.Marker.Environment))
 	}
 	return updated, nil
 }
@@ -444,7 +444,7 @@ func saveRemoteInitCompletionMarker(ctx core.Context, inspection RemoteInitInspe
 // before prompting, because IAM only issues the key ID after the user uploads
 // that public key — asking for the ID first would leave the user hunting for a
 // value they cannot yet obtain.
-func resolveCodeCommitSSHKeyID(ctx core.Context, repository *orchestration.RemoteRepositorySpec, codeCommitKeyPath, tenant, environment, paramKeyID string, prompt RemoteInitFinishPrompt) error {
+func resolveCodeCommitSSHKeyID(ctx core.Context, repository *remoteinit.RemoteRepositorySpec, codeCommitKeyPath, tenant, environment, paramKeyID string, prompt RemoteInitFinishPrompt) error {
 	if repository.CodeCommitSSHKeyID != "" || ctx.DryRun {
 		return nil
 	}
@@ -454,11 +454,11 @@ func resolveCodeCommitSSHKeyID(ctx core.Context, repository *orchestration.Remot
 		if err != nil {
 			return err
 		}
-		ctx.Info(orchestration.CodeCommitSetupDetails(*repository, publicKey, "<SSH public key ID>"))
+		ctx.Info(remoteinit.CodeCommitSetupDetails(*repository, publicKey, "<SSH public key ID>"))
 		if prompt == nil {
 			return errors.New("CodeCommit SSH public key ID is required to finish git checkout")
 		}
-		value, err := prompt(orchestration.CodeCommitSSHKeyIDLabel(tenant, environment))
+		value, err := prompt(remoteinit.CodeCommitSSHKeyIDLabel(tenant, environment))
 		if err != nil {
 			return err
 		}
@@ -475,17 +475,17 @@ func resolveCodeCommitSSHKeyID(ctx core.Context, repository *orchestration.Remot
 // doctor's CodeCommit detection stays in lockstep with init. A blank URL —
 // possible in dry-run when neither flag nor marker provides one — yields a
 // zero spec, and recovery proceeds as if the repository were plain SSH.
-func resolveRemoteInitRepositorySpec(repositoryURL string, marker orchestration.RemoteInitMarker) orchestration.RemoteRepositorySpec {
+func resolveRemoteInitRepositorySpec(repositoryURL string, marker remoteinit.RemoteInitMarker) remoteinit.RemoteRepositorySpec {
 	repositoryURL = strings.TrimSpace(repositoryURL)
 	if repositoryURL == "" {
-		return orchestration.RemoteRepositorySpec{
+		return remoteinit.RemoteRepositorySpec{
 			CodeCommitHost:     strings.TrimSpace(marker.CodeCommitHost),
 			CodeCommitSSHKeyID: strings.TrimSpace(marker.CodeCommitSSHKeyID),
 		}
 	}
-	parsed, err := orchestration.ParseRemoteRepositorySpec(repositoryURL)
+	parsed, err := remoteinit.ParseRemoteRepositorySpec(repositoryURL)
 	if err != nil {
-		return orchestration.RemoteRepositorySpec{URL: repositoryURL}
+		return remoteinit.RemoteRepositorySpec{URL: repositoryURL}
 	}
 	if parsed.CodeCommitHost != "" && parsed.CodeCommitSSHKeyID == "" {
 		parsed.CodeCommitSSHKeyID = strings.TrimSpace(marker.CodeCommitSSHKeyID)
@@ -493,7 +493,7 @@ func resolveRemoteInitRepositorySpec(repositoryURL string, marker orchestration.
 	return parsed
 }
 
-func remoteInitMarkerRepositoryURL(repository orchestration.RemoteRepositorySpec, fallback string) string {
+func remoteInitMarkerRepositoryURL(repository remoteinit.RemoteRepositorySpec, fallback string) string {
 	if strings.TrimSpace(repository.URL) != "" {
 		return repository.URL
 	}
@@ -620,7 +620,7 @@ func finishRemoteInitCodeCommitSSHKey(ctx core.Context, path string) error {
 // identity to authenticate as and CodeCommit rejects the connection. The
 // contents come from codeCommitSSHConfig, the same helper init uses, so the
 // file is identical whether init or doctor produced it.
-func finishRemoteInitCodeCommitSSHConfig(ctx core.Context, homeDir string, repository orchestration.RemoteRepositorySpec) error {
+func finishRemoteInitCodeCommitSSHConfig(ctx core.Context, homeDir string, repository remoteinit.RemoteRepositorySpec) error {
 	if repository.CodeCommitHost == "" {
 		return nil
 	}
@@ -632,7 +632,7 @@ func finishRemoteInitCodeCommitSSHConfig(ctx core.Context, homeDir string, repos
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
 	}
-	content := orchestration.CodeCommitSSHConfig(repository, repository.CodeCommitSSHKeyID) + "\n"
+	content := remoteinit.CodeCommitSSHConfig(repository, repository.CodeCommitSSHKeyID) + "\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		return err
 	}
@@ -661,7 +661,7 @@ func ensureRemoteInitSSHKeyPermissions(path string) error {
 	return nil
 }
 
-func finishRemoteInitGitCheckout(ctx core.Context, projectRoot, sshKeyPath string, repository orchestration.RemoteRepositorySpec) error {
+func finishRemoteInitGitCheckout(ctx core.Context, projectRoot, sshKeyPath string, repository remoteinit.RemoteRepositorySpec) error {
 	if strings.TrimSpace(repository.URL) == "" {
 		return errors.New("repository URL is required to finish git checkout")
 	}
@@ -684,7 +684,7 @@ func finishRemoteInitGitCheckout(ctx core.Context, projectRoot, sshKeyPath strin
 // git host, then polls `git ls-remote` until access is active. This mirrors
 // init's key-import wait so the operator sees the same trace and poll cadence
 // whether recovering from inside the pod (doctor) or outside (init).
-func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath string, repository orchestration.RemoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep core.SleepFunc) error {
+func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath string, repository remoteinit.RemoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep core.SleepFunc) error {
 	sshCommand := doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath)
 	if ctx.DryRun {
 		ctx.TraceCommand("", "git", "-c", "core.sshCommand="+sshCommand, "ls-remote", repository.URL, "HEAD")
@@ -704,7 +704,7 @@ func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath s
 		if codeCommitKeyJustGenerated {
 			ctx.Info("Generated CodeCommit SSH keypair.")
 		}
-		ctx.Info(orchestration.CodeCommitSetupDetails(repository, publicKey, repository.CodeCommitSSHKeyID))
+		ctx.Info(remoteinit.CodeCommitSetupDetails(repository, publicKey, repository.CodeCommitSSHKeyID))
 	} else {
 		if err := ensureRemoteInitSSHKeyPermissions(sshKeyPath); err != nil {
 			return err
@@ -751,7 +751,7 @@ func defaultRemoteInitCodeCommitSSHKeyPath(homeDir string) string {
 // would reject the auth. For plain SSH hosts it pins the ed25519 identity so
 // ssh does not fall back to other keys in ~/.ssh, with accept-new for the
 // first connection.
-func doctorRemoteInitGitSSHCommandFor(repository orchestration.RemoteRepositorySpec, sshKeyPath string) string {
+func doctorRemoteInitGitSSHCommandFor(repository remoteinit.RemoteRepositorySpec, sshKeyPath string) string {
 	if repository.CodeCommitHost != "" {
 		return `ssh -F "$HOME/.ssh/config"`
 	}
@@ -764,7 +764,7 @@ func WriteRemoteInitInspectionReport(ctx core.Context, inspection RemoteInitInsp
 	if _, err := fmt.Fprintf(ctx.Stdout, "Remote init checks for %s/%s:\n", remoteInitOrUnknown(inspection.Tenant), remoteInitOrUnknown(inspection.Environment)); err != nil {
 		return err
 	}
-	markerPath := orchestration.RemoteInitMarkerPath(inspection.HomeDir, inspection.Tenant, inspection.Environment)
+	markerPath := remoteinit.RemoteInitMarkerPath(inspection.HomeDir, inspection.Tenant, inspection.Environment)
 	if !inspection.MarkerPresent {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  marker file                 MISSING %s\n", quotedPathForReport(markerPath)); err != nil {
 			return err

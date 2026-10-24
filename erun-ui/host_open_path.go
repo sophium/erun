@@ -12,7 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -137,7 +136,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 		return podPathResolution{Kind: "unresolved", Reason: err.Error()}, nil
 	}
 	cleanPodPath := path.Clean(filepath.ToSlash(podPath))
-	if rel, ok := relUnderPodDir(cleanPodPath, orchestration.DefaultRuntimeOutputsDir); ok {
+	if rel, ok := relUnderPodDir(cleanPodPath, core.DefaultRuntimeOutputsDir); ok {
 		return resolveHostMirrorPath(
 			"artifact",
 			filepath.Join(hostRoot, workspace.WorkspaceSyncArtifactsSubdir, filepath.FromSlash(rel)),

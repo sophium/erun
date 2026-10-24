@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -94,10 +94,10 @@ func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (Work
 	// A missing or unreachable outputs dir is the normal case for an environment
 	// that has cross-built nothing yet, so it reports zero rather than failing the
 	// preview.
-	artifacts, _ := remoteOutputsFiles(ctx, params.HostAlias, orchestration.DefaultRuntimeOutputsDir)
+	artifacts, _ := remoteOutputsFiles(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir)
 	artifactsLocal := filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir)
 	artifactsToFetch := changedOutputsPaths(artifacts,
-		remoteOutputsFileHashes(ctx, params.HostAlias, orchestration.DefaultRuntimeOutputsDir, artifacts),
+		remoteOutputsFileHashes(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir, artifacts),
 		localArtifactFileHashes(artifactsLocal, artifacts))
 	return WorkspaceSyncResult{
 		FilesCopied:     len(toFetch),

@@ -15,11 +15,11 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -2255,7 +2255,7 @@ func orchestratorSessionEnv(id string, launchEnv []string) []string {
 	// has nowhere its deliverables are expected, and the operator has no way to
 	// see them. A transient session has no id and so no directory of its own.
 	if outputsDir, err := ensureOrchestratorOutputsDir(id); err == nil {
-		env = append(env, orchestration.RuntimeOutputsDirEnvVar+"="+outputsDir)
+		env = append(env, core.RuntimeOutputsDirEnvVar+"="+outputsDir)
 	} else if strings.TrimSpace(id) != "" {
 		log.Printf("erun-app: orchestrator outputs dir for %s: %v", id, err)
 	}

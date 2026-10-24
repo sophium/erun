@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -91,7 +91,7 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	// The download already signed the source, and an ad-hoc signature travels
 	// inside the Mach-O — but the saved copy still lands 0644, so it needs the
 	// execute bit this seam applies.
-	a.reportHostArtifactSigning(orchestration.SignHostArtifact(dest))
+	a.reportHostArtifactSigning(codesign.SignHostArtifact(dest))
 	return dest, nil
 }
 
@@ -113,6 +113,6 @@ func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 		return fmt.Errorf("output %q is a directory", name)
 	}
 	exePath := filepath.Join(dir, entry.Name)
-	a.reportHostArtifactSigning(orchestration.SignHostArtifact(exePath))
+	a.reportHostArtifactSigning(codesign.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }

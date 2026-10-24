@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -61,7 +60,7 @@ func ResolveOrchestratorLaunch(orchestrator config.OrchestratorConfig, catalog *
 	model := resolveOrchestratorModel(strings.TrimSpace(orchestrator.Model), gateway)
 	// The model is spliced unquoted into a host shell line, so the resolved
 	// value is checked as well as the recorded one.
-	if err := orchestration.ValidateClaudeModelID(model); err != nil {
+	if err := ValidateClaudeModelID(model); err != nil {
 		return OrchestratorLaunch{}, orchestratorLaunchSettingError{kind: orchestratorLaunchSettingBadModel, reason: err.Error()}
 	}
 	return OrchestratorLaunch{
@@ -138,7 +137,7 @@ func ValidateOrchestratorLaunchSettings(orchestrator config.OrchestratorConfig, 
 			reason: fmt.Sprintf("invalid model %q: it is the token for clearing the model, not a model id", model),
 		}
 	}
-	if err := orchestration.ValidateClaudeModelID(model); err != nil {
+	if err := ValidateClaudeModelID(model); err != nil {
 		return orchestratorLaunchSettingError{kind: orchestratorLaunchSettingBadModel, reason: err.Error()}
 	}
 	if orchestrator.UseGateway && catalog.RequiresReasoningEcho(model) {

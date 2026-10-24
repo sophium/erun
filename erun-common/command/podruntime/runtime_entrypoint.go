@@ -12,7 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // The runtime entrypoint is what the erun-devops image runs as PID 1. It prepares
@@ -85,7 +84,7 @@ func newRuntimeBoot(params RuntimeEntrypointParams) runtimeBoot {
 		serviceAccountDir:      "/var/run/secrets/kubernetes.io/serviceaccount",
 		registryCredentialPath: "/etc/erun/registry-credential/.dockerconfigjson",
 		platformAliasDir:       "/etc/erun/platform-alias",
-		skillsRoot:             orchestration.RuntimeBakedSkillsDir,
+		skillsRoot:             core.RuntimeBakedSkillsDir,
 		agentsRoot:             RuntimeBakedAgentsDir,
 		releaseDir:             RuntimeReleaseDir,
 		procRoot:               activity.DefaultProcRoot,

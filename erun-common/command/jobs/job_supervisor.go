@@ -17,7 +17,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -774,7 +773,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		// own child process is given below), so a value here means this job
 		// was started from inside another job's work rather than from
 		// outside any job.
-		StartedByJobID: orchestration.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(shared.EnvironmentJobIDEnvVar))),
+		StartedByJobID: core.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(shared.EnvironmentJobIDEnvVar))),
 		Handoff:        params.Handoff,
 		Exclusive:      params.Exclusive,
 	}

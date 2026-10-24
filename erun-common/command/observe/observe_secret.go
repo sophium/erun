@@ -3,7 +3,7 @@ package observe
 import (
 	"encoding/json"
 
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -30,7 +30,7 @@ func fetchObservedSecretCheck(args []string, check ObserveSecretCheck) ObservedS
 	result := ObservedSecretCheck{Name: check.Name, Key: check.Key}
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		if orchestration.IsKubectlNotFound(stderr) {
+		if clusterread.IsKubectlNotFound(stderr) {
 			return result
 		}
 		result.Error = deploy.KubectlErrorMessage(err, stderr).Error()

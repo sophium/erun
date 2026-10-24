@@ -9,7 +9,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 const (
@@ -21,7 +20,7 @@ const (
 // tabs prepend to PATH so child processes (claude, codex, etc.) resolve
 // the local ERun build script instead of the system-wide binary.
 func ContributeShimPath(homeDir string) (string, error) {
-	resolved, err := orchestration.ResolveContributeHomeDir(homeDir)
+	resolved, err := core.ResolveContributeHomeDir(homeDir)
 	if err != nil {
 		return "", err
 	}
@@ -31,7 +30,7 @@ func ContributeShimPath(homeDir string) (string, error) {
 // ContributeRunScriptPath returns the path to erun-cli/run.sh inside the
 // contribute clone, which the shim forwards to.
 func ContributeRunScriptPath(homeDir string) (string, error) {
-	clone, err := orchestration.ContributeClonePath(homeDir)
+	clone, err := core.ContributeClonePath(homeDir)
 	if err != nil {
 		return "", err
 	}
@@ -63,7 +62,7 @@ type RemoveFunc func(path string) error
 // clone target and reports whether it already exists. Pure inspection;
 // no side effects.
 func ResolveContributeCloneStatus(homeDir string, runGit gitx.GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
-	target, err := orchestration.ContributeClonePath(homeDir)
+	target, err := core.ContributeClonePath(homeDir)
 	if err != nil {
 		return ContributeCloneStatus{}, err
 	}
@@ -83,7 +82,7 @@ func ResolveContributeCloneStatus(homeDir string, runGit gitx.GitCommandRunnerFu
 	stdout := new(strings.Builder)
 	stderr := new(strings.Builder)
 	if err := runGit(target, AsWriter(stdout), AsWriter(stderr), "remote", "get-url", "origin"); err != nil {
-		return status, fmt.Errorf("git remote get-url origin (in %s): %w%s", target, err, orchestration.FormatGitCommandStderr(stderr.String()))
+		return status, fmt.Errorf("git remote get-url origin (in %s): %w%s", target, err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	status.AlreadyCloned = true
 	status.ExistingRemote = strings.TrimSpace(stdout.String())
@@ -162,7 +161,7 @@ func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit gitx.GitC
 			stdout := new(strings.Builder)
 			stderr := new(strings.Builder)
 			if err := runGit(status.ParentDir, AsWriter(stdout), AsWriter(stderr), "clone", ContributeRepoHTTPS, status.Target); err != nil {
-				return fmt.Errorf("git clone: %w%s", err, orchestration.FormatGitCommandStderr(stderr.String()))
+				return fmt.Errorf("git clone: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
 			}
 			ctx.Info(fmt.Sprintf("==> Cloned ERun for contribute mode at %s", status.Target))
 		} else {

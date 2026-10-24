@@ -10,8 +10,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/spf13/cobra"
 )
 
@@ -123,7 +123,7 @@ func resolveAISessionHookTarget(cmd *cobra.Command, tenant, environment string) 
 // typo in a settings file is refused rather than recorded as an unsupported
 // event on every turn boundary.
 func validAISessionHookEvent(event string) bool {
-	for _, kind := range orchestration.AISessionHookBindings() {
+	for _, kind := range podruntime.AISessionHookBindings() {
 		if string(kind.ModelEvent) == event {
 			return true
 		}

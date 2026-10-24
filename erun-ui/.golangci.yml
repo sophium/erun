@@ -28,7 +28,15 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
   settings:
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
     funlen:
       lines: 100
       statements: 50

@@ -16,7 +16,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // reconcile_bypass.go implements the read half of the recorded decision on
@@ -677,7 +676,7 @@ func OriginRemoteURL() (string, error) {
 	stderr := new(strings.Builder)
 	if err := gitx.GitCommandRunner("", AsWriter(stdout), AsWriter(stderr), "remote", "get-url", "origin"); err != nil {
 		return "", fmt.Errorf("remote-url is required: no --remote-url given and reading origin failed: %w%s",
-			err, orchestration.FormatGitCommandStderr(stderr.String()))
+			err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	remote := strings.TrimSpace(stdout.String())
 	if remote == "" {

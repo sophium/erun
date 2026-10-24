@@ -16,7 +16,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -300,7 +299,7 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 		State: lifecycle.EnvironmentLifecycleRunning,
 		Idle:  &activity.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
 		Health: &lifecycle.EnvironmentHealth{
-			RootConfig: orchestration.RootConfigInspection{ConfigStatus: orchestration.RootConfigStatusOK},
+			RootConfig: config.RootConfigInspection{ConfigStatus: config.RootConfigStatusOK},
 			Deploy:     deploy.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
 		},
 	}

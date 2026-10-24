@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
@@ -164,10 +164,10 @@ type RuntimeUsageParams struct {
 // the pod on (runtime_pod_requests.go) and attaches them as Requests. That is
 // a second source by necessity, not by preference: the numbers above are cgroup
 // readings, and no cgroup file records a request. It too fails soft.
-func RunRuntimeUsage(ctx core.Context, runner orchestration.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params RuntimeUsageParams) (config.RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params RuntimeUsageParams) (config.RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
-	result, err := orchestration.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
+	result, err := diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
 	if err != nil {
 		return config.RuntimeUsage{}, err
 	}
@@ -175,7 +175,7 @@ func RunRuntimeUsage(ctx core.Context, runner orchestration.RuntimeContainerComm
 	var dindResult kube.RemoteCommandResult
 	var dindErr error
 	if usesDind {
-		dindResult, dindErr = orchestration.RunTracedRuntimeContainerCommand(ctx, runner, req, build.RuntimeDindContainerName, "usage-dind", script)
+		dindResult, dindErr = diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, build.RuntimeDindContainerName, "usage-dind", script)
 	}
 	// Read after the execs so a dry run's trace lists the actions in the order
 	// they would run, and never fails the call: a pod spec that cannot be read
@@ -213,7 +213,7 @@ func RunRuntimeUsage(ctx core.Context, runner orchestration.RuntimeContainerComm
 // only kills the current container does not account for are added, so a live
 // warning is never repeated.
 func applyRetainedUsageWarnings(usage config.RuntimeUsage) config.RuntimeUsage {
-	history, err := orchestration.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
+	history, err := deploy.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
 	if err != nil {
 		// No readable history is "nothing observed yet", not a warning: a host
 		// that has never monitored this environment must not manufacture one.

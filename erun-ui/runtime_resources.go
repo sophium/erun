@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/command/setup"
 )
 
 func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
@@ -49,7 +49,7 @@ func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
 }
 
 func loadHostedRegistry(ctx context.Context) uiHostedRegistryStatus {
-	status := orchestration.ProbeHostedRegistry(ctx, nil)
+	status := setup.ProbeHostedRegistry(ctx, nil)
 	return uiHostedRegistryStatus{
 		Host:      status.Host,
 		Available: status.Available,

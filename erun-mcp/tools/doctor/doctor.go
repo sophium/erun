@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
+	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -225,7 +225,7 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 // state that must stop the flow before tenant/env work even when more was
 // requested — for example, the file is corrupted and no repair input was supplied.
 func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*sharedpkg.DoctorRootConfigReport, bool, error) {
-	inspection, err := orchestration.InspectRootConfig(runtime.Store)
+	inspection, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return nil, false, err
 	}
@@ -256,7 +256,7 @@ func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorIn
 	return report, false, nil
 }
 
-func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, inspection orchestration.RootConfigInspection, selector string, report *sharedpkg.DoctorRootConfigReport) (orchestration.RootConfigInspection, error) {
+func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, inspection config.RootConfigInspection, selector string, report *sharedpkg.DoctorRootConfigReport) (config.RootConfigInspection, error) {
 	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
 	if err != nil {
 		return inspection, err
@@ -274,24 +274,24 @@ func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx c
 	return refreshDoctorInspection(runtime, report)
 }
 
-func refreshDoctorInspection(runtime sharedpkg.RuntimeConfig, report *sharedpkg.DoctorRootConfigReport) (orchestration.RootConfigInspection, error) {
-	refreshed, err := orchestration.InspectRootConfig(runtime.Store)
+func refreshDoctorInspection(runtime sharedpkg.RuntimeConfig, report *sharedpkg.DoctorRootConfigReport) (config.RootConfigInspection, error) {
+	refreshed, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
-		return orchestration.RootConfigInspection{}, err
+		return config.RootConfigInspection{}, err
 	}
 	report.Inspection = refreshed
 	return refreshed, nil
 }
 
-func doctorRootConfigBlocks(inspection orchestration.RootConfigInspection, input DoctorInput) bool {
-	if inspection.ConfigStatus != orchestration.RootConfigStatusOK {
+func doctorRootConfigBlocks(inspection config.RootConfigInspection, input DoctorInput) bool {
+	if inspection.ConfigStatus != config.RootConfigStatusOK {
 		return true
 	}
 	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
-func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection orchestration.RootConfigInspection, report *sharedpkg.DoctorRootConfigReport) error {
-	byAlias := make(map[string]orchestration.OrphanedAlias, len(inspection.OrphanedAliases))
+func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection config.RootConfigInspection, report *sharedpkg.DoctorRootConfigReport) error {
+	byAlias := make(map[string]config.OrphanedAlias, len(inspection.OrphanedAliases))
 	for _, orphan := range inspection.OrphanedAliases {
 		byAlias[orphan.Alias] = orphan
 	}
@@ -322,7 +322,7 @@ func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, r
 	return nil
 }
 
-func resolveDoctorBackupSelector(inspection orchestration.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
+func resolveDoctorBackupSelector(inspection config.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
 		return config.ConfigBackup{Path: selector}, true, nil
 	}
@@ -333,7 +333,7 @@ func resolveDoctorBackupSelector(inspection orchestration.RootConfigInspection, 
 	return backup, ok, nil
 }
 
-func preferredRegionForOrphanAlias(orphan orchestration.OrphanedAlias) string {
+func preferredRegionForOrphanAlias(orphan config.OrphanedAlias) string {
 	for _, ref := range orphan.ReferencedByCloudContexts {
 		region := strings.TrimSpace(ref.Region)
 		if region != "" {
@@ -509,7 +509,7 @@ func resolveDoctorOpenResult(runtime sharedpkg.RuntimeConfig, input DoctorInput)
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return orchestration.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	return diagnosispkg.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 }
 
 func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {

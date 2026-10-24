@@ -9,7 +9,6 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -28,7 +27,7 @@ type ListResult struct {
 	// the one it wrote, so a block left by a rename, a deleted environment or a
 	// turned-off sshd survives indefinitely and can start resolving into
 	// whichever environment inherits its local port.
-	OrphanedSSHAliases []orchestration.SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
+	OrphanedSSHAliases []SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
 }
 
 // ListOrchestratorResult is the read-model view of one persisted
@@ -160,18 +159,18 @@ func ResolveListResult(store ListStore, findProjectRoot shared.ProjectFinderFunc
 // environments just resolved. A config that cannot be read is silence, not a
 // failure: the aliases say something about a file the operator may never have
 // had, and nothing about the environments this command exists to print.
-func listOrphanedSSHAliases(tenants []ListTenantResult) []orchestration.SSHOrphanedAlias {
+func listOrphanedSSHAliases(tenants []ListTenantResult) []SSHOrphanedAlias {
 	entries, err := configpkg.ReadDefaultSSHHostEntries()
 	if err != nil {
 		return nil
 	}
-	environments := make([]orchestration.SSHEnvironmentAlias, 0, 4)
+	environments := make([]SSHEnvironmentAlias, 0, 4)
 	for _, tenant := range tenants {
 		for _, env := range tenant.Environments {
 			if !env.SSH.Enabled {
 				continue
 			}
-			environments = append(environments, orchestration.SSHEnvironmentAlias{
+			environments = append(environments, SSHEnvironmentAlias{
 				Tenant:      tenant.Name,
 				Environment: env.Name,
 				Alias:       env.SSH.HostAlias,
@@ -179,7 +178,7 @@ func listOrphanedSSHAliases(tenants []ListTenantResult) []orchestration.SSHOrpha
 			})
 		}
 	}
-	return orchestration.FindOrphanedSSHAliases(entries, environments)
+	return FindOrphanedSSHAliases(entries, environments)
 }
 
 func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []configpkg.TenantConfig) ListResult {
@@ -467,7 +466,7 @@ func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *RuntimeImageLineMism
 // (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
 // must not fail over it.
 func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *deploy.RuntimeSizingRecommendation {
-	history, err := orchestration.LoadRuntimeUsageHistory(tenant, env.Name)
+	history, err := deploy.LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return nil
 	}

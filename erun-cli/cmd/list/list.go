@@ -10,7 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/orchestration"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
@@ -515,7 +514,7 @@ func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
 // The remedy is deliberately manual. erun wrote these blocks, but it cannot
 // tell one it wrote from one an operator hand-maintained under the same naming
 // convention, and a prune that guessed would delete an alias someone relies on.
-func writeOrphanedSSHAliases(ctx core.Context, orphans []orchestration.SSHOrphanedAlias) error {
+func writeOrphanedSSHAliases(ctx core.Context, orphans []lifecycle.SSHOrphanedAlias) error {
 	if len(orphans) == 0 {
 		return nil
 	}
@@ -538,7 +537,7 @@ func sshConfigLocationLabel() string {
 	return "~/.ssh/config"
 }
 
-func orphanedSSHAliasLine(orphan orchestration.SSHOrphanedAlias) string {
+func orphanedSSHAliasLine(orphan lifecycle.SSHOrphanedAlias) string {
 	line := orphan.Alias + ": no environment claims it"
 	if orphan.ReachesEnvironment != "" {
 		target := orphan.ReachesTenant + "/" + orphan.ReachesEnvironment

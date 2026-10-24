@@ -6,7 +6,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -99,7 +98,7 @@ func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (PinBaseFresh
 		return PinBaseFreshness{}, false
 	}
 	remoteRead := refreshPinBaseTrackingRef(ctx, projectRoot, remoteBranch)
-	behind, err := orchestration.GitCommitsAhead(ctx, projectRoot, "HEAD", ref)
+	behind, err := shared.GitCommitsAhead(ctx, projectRoot, "HEAD", ref)
 	if err != nil {
 		return PinBaseFreshness{}, false
 	}
@@ -112,7 +111,7 @@ func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (PinBaseFresh
 // branch to fetch on that remote, empty when the ref cannot be fetched by name.
 func pinBaseTrackingRef(ctx core.Context, projectRoot, branch string) (ref, remoteBranch string, ok bool) {
 	if branch != "" && branch != "HEAD" {
-		upstream, found := orchestration.ResolveBranchUpstreamCandidate(ctx, projectRoot, branch)
+		upstream, found := shared.ResolveBranchUpstreamCandidate(ctx, projectRoot, branch)
 		if !found {
 			return "", "", false
 		}

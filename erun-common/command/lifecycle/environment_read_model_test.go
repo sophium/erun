@@ -6,7 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -133,7 +132,7 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
 	idle := &activity.EnvironmentIdleStatus{StopEligible: false}
-	resolvedHealth := ResolveEnvironmentHealth(orchestration.RootConfigInspection{}, deploy.DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
+	resolvedHealth := ResolveEnvironmentHealth(config.RootConfigInspection{}, deploy.DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
 	health := &resolvedHealth
 
 	model := AssembleEnvironmentReadModel("acme", entry, nil, idle, health)

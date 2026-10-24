@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
@@ -107,7 +107,7 @@ func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList)
 // way the Service names them and bare where kubectl reports none -- a
 // single-port Service is the common case and the reason a picker cannot rely
 // on names alone.
-func formatServicePorts(ports []orchestration.ObservedServicePort) string {
+func formatServicePorts(ports []clusterread.ObservedServicePort) string {
 	rendered := make([]string, 0, len(ports))
 	for _, port := range ports {
 		if strings.TrimSpace(port.Name) != "" {

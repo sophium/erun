@@ -1,4 +1,4 @@
-package orchestration
+package codesign
 
 import (
 	"encoding/binary"

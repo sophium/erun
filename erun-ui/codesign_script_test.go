@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/orchestration"
+	codesignpkg "github.com/sophium/erun/erun-common/infra/codesign"
 )
 
 // securityStubFailure makes one `security` subcommand fail the way the real one
@@ -90,7 +90,7 @@ func newCodesignScriptHarness(t *testing.T) *codesignScriptHarness {
 }
 
 func (h *codesignScriptHarness) keychain() string {
-	return filepath.Join(h.home, "Library", "Keychains", orchestration.LocalCodesignKeychainFile)
+	return filepath.Join(h.home, "Library", "Keychains", codesignpkg.LocalCodesignKeychainFile)
 }
 
 // loginKeychain stands in for what a developer's search list already holds, so
@@ -205,7 +205,7 @@ func TestCodesignScriptCreatesTheLocalIdentityOnce(t *testing.T) {
 	if run.exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d:\n%s", run.exitCode, run.output)
 	}
-	if !strings.Contains(run.output, "code signing: creating identity "+orchestration.LocalCodesignIdentity) {
+	if !strings.Contains(run.output, "code signing: creating identity "+codesignpkg.LocalCodesignIdentity) {
 		t.Fatalf("expected the creation to be visible in the output, got:\n%s", run.output)
 	}
 	for _, call := range []string{"create-keychain", "import", "set-key-partition-list"} {
@@ -213,13 +213,13 @@ func TestCodesignScriptCreatesTheLocalIdentityOnce(t *testing.T) {
 			t.Fatalf("expected the identity created with %s, got security calls:\n%s", call, run.security)
 		}
 	}
-	if !strings.Contains(run.codesign, "--sign "+orchestration.LocalCodesignIdentity) {
+	if !strings.Contains(run.codesign, "--sign "+codesignpkg.LocalCodesignIdentity) {
 		t.Fatalf("expected the artifact signed with the local identity, got codesign calls:\n%s", run.codesign)
 	}
 	if !strings.Contains(run.codesign, "--keychain "+harness.keychain()) {
 		t.Fatalf("expected the identity taken from erun's own keychain, got codesign calls:\n%s", run.codesign)
 	}
-	if !strings.Contains(run.output, "code signing: signed "+artifact+" as "+orchestration.LocalCodesignIdentity) {
+	if !strings.Contains(run.output, "code signing: signed "+artifact+" as "+codesignpkg.LocalCodesignIdentity) {
 		t.Fatalf("expected the signer named per artifact, got:\n%s", run.output)
 	}
 }
@@ -236,10 +236,10 @@ func TestCodesignScriptGivesThePKCS12APasswordBothToolsAgreeOn(t *testing.T) {
 	if run.exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d:\n%s", run.exitCode, run.output)
 	}
-	if !strings.Contains(run.openssl, "-passout pass:"+orchestration.LocalCodesignKeychainPassword) {
+	if !strings.Contains(run.openssl, "-passout pass:"+codesignpkg.LocalCodesignKeychainPassword) {
 		t.Fatalf("expected the PKCS#12 exported under a non-empty password, got openssl calls:\n%s", run.openssl)
 	}
-	if !strings.Contains(run.security, "-P "+orchestration.LocalCodesignKeychainPassword) {
+	if !strings.Contains(run.security, "-P "+codesignpkg.LocalCodesignKeychainPassword) {
 		t.Fatalf("expected the import to read the same password, got security calls:\n%s", run.security)
 	}
 	for _, empty := range []string{"-passout pass:\n", "-passout pass: ", "-P  ", "-P \n"} {
@@ -355,7 +355,7 @@ func TestCodesignScriptReusesAnIdentityThatAlreadyExists(t *testing.T) {
 	if run.exitCode != 0 {
 		t.Fatalf("expected exit 0 on the second build, got %d:\n%s", run.exitCode, run.output)
 	}
-	if !strings.Contains(run.output, "code signing: using identity "+orchestration.LocalCodesignIdentity) {
+	if !strings.Contains(run.output, "code signing: using identity "+codesignpkg.LocalCodesignIdentity) {
 		t.Fatalf("expected the second build to reuse the identity, got:\n%s", run.output)
 	}
 	if strings.Contains(run.security, "create-keychain") {
@@ -437,9 +437,9 @@ func TestCodesignScriptDefersToAnOperatorSuppliedIdentity(t *testing.T) {
 func TestLocalSigningIdentityMatchesTheSharedContract(t *testing.T) {
 	script := readBuildScript(t, "codesign.sh")
 	for _, value := range []string{
-		orchestration.LocalCodesignIdentity,
-		orchestration.LocalCodesignKeychainFile,
-		orchestration.LocalCodesignKeychainPassword,
+		codesignpkg.LocalCodesignIdentity,
+		codesignpkg.LocalCodesignKeychainFile,
+		codesignpkg.LocalCodesignKeychainPassword,
 	} {
 		if !strings.Contains(script, value) {
 			t.Errorf("codesign.sh does not use %q; the desktop build and erun-common's host signing would sign with different identities", value)

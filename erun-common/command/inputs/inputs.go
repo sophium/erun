@@ -14,7 +14,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // UploadRuntimeInputParams selects the file `inputs upload` places inside the
@@ -128,14 +127,14 @@ func verifyRuntimeInputUpload(target, localSHA string, localSize int64, stdout s
 // the directory the script writes into and the sanitized entry name, reusing
 // the same path validation outputs relies on for its own pod-side paths.
 func splitRuntimeInputDestination(remotePath string) (dir, name string, err error) {
-	cleaned, err := orchestration.ValidateAbsolutePodPath(remotePath, "remote path")
+	cleaned, err := core.ValidateAbsolutePodPath(remotePath, "remote path")
 	if err != nil {
 		return "", "", err
 	}
 	if cleaned == "/" {
 		return "", "", fmt.Errorf("remote path must include a file name: %q", remotePath)
 	}
-	name, err = orchestration.SanitizeOutputEntryName(path.Base(cleaned))
+	name, err = core.SanitizeOutputEntryName(path.Base(cleaned))
 	if err != nil {
 		return "", "", err
 	}

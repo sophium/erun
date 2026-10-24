@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/observe"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
 // installReadNamingKubectl points ERUN_KUBECTL_BIN at a stub that answers every
@@ -48,7 +48,7 @@ func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 	installReadNamingKubectl(t, "ingress")
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "dev", Namespace: "frs-dev"}
 
-	_, err := orchestration.ListExposedServices(req)
+	_, err := clusterread.ListExposedServices(req)
 	if err == nil {
 		t.Fatal("expected the failing ingress read to surface")
 	}
@@ -72,22 +72,22 @@ func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 // with an already-Ready certificate: nothing here changes for an env whose
 // TLS has already issued, the case every exposed service eventually reaches.
 func TestFilterExposedServicesKeepsOnlyExposeIngresses(t *testing.T) {
-	ingresses := []orchestration.ObservedIngress{
+	ingresses := []clusterread.ObservedIngress{
 		{Name: "expose-api", Hosts: []string{"api.frs-prod.services.test"}},
 		{Name: "some-other-ingress", Hosts: []string{"other.frs-prod.services.test"}},
 		{
 			Name:  "expose-web",
 			Hosts: []string{"web.frs-prod.services.test"},
-			TLS:   []orchestration.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
+			TLS:   []clusterread.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
 		},
 		// No host at all -- nothing to route or display.
 		{Name: "expose-broken", Hosts: nil},
 	}
-	certs := []orchestration.ObservedCertificate{{Name: "wildcard", Ready: true, SecretName: "frs-prod-wildcard-tls"}}
+	certs := []clusterread.ObservedCertificate{{Name: "wildcard", Ready: true, SecretName: "frs-prod-wildcard-tls"}}
 
-	got := orchestration.FilterExposedServices(ingresses, certs)
+	got := clusterread.FilterExposedServices(ingresses, certs)
 
-	want := []orchestration.ExposedService{
+	want := []clusterread.ExposedService{
 		{Service: "api", Hostname: "api.frs-prod.services.test", Scheme: "http"},
 		{Service: "web", Hostname: "web.frs-prod.services.test", Scheme: "https", TLSReady: true},
 	}
@@ -97,7 +97,7 @@ func TestFilterExposedServicesKeepsOnlyExposeIngresses(t *testing.T) {
 }
 
 func TestFilterExposedServicesEmptyWhenNoneMatch(t *testing.T) {
-	got := orchestration.FilterExposedServices([]orchestration.ObservedIngress{{Name: "some-other-ingress", Hosts: []string{"x"}}}, nil)
+	got := clusterread.FilterExposedServices([]clusterread.ObservedIngress{{Name: "some-other-ingress", Hosts: []string{"x"}}}, nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no exposed services, got %+v", got)
 	}
@@ -110,21 +110,21 @@ func TestFilterExposedServicesEmptyWhenNoneMatch(t *testing.T) {
 // not a valid cert. TLSNotReadyReason surfaces the Certificate's own
 // condition here since the chain walk found nothing more specific.
 func TestFilterExposedServicesReportsPendingCertificateHonestly(t *testing.T) {
-	ingresses := []orchestration.ObservedIngress{
+	ingresses := []clusterread.ObservedIngress{
 		{
 			Name:  "expose-web",
 			Hosts: []string{"web.frs-prod.services.test"},
-			TLS:   []orchestration.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
+			TLS:   []clusterread.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
 		},
 	}
-	certs := []orchestration.ObservedCertificate{{
+	certs := []clusterread.ObservedCertificate{{
 		Name: "wildcard", Ready: false, Reason: "Issuing", Message: "waiting for order to complete",
 		SecretName: "frs-prod-wildcard-tls",
 	}}
 
-	got := orchestration.FilterExposedServices(ingresses, certs)
+	got := clusterread.FilterExposedServices(ingresses, certs)
 
-	want := []orchestration.ExposedService{{
+	want := []clusterread.ExposedService{{
 		Service: "web", Hostname: "web.frs-prod.services.test", Scheme: "https",
 		TLSReady: false, TLSNotReadyReason: "Issuing: waiting for order to complete",
 	}}
@@ -138,24 +138,24 @@ func TestFilterExposedServicesReportsPendingCertificateHonestly(t *testing.T) {
 // reason (e.g. a webhook solver's RBAC denial) is the one that actually
 // explains a stuck issuance, not the Certificate's generic top-level reason.
 func TestFilterExposedServicesWalksChallengeChainForTheRealBlocker(t *testing.T) {
-	ingresses := []orchestration.ObservedIngress{
+	ingresses := []clusterread.ObservedIngress{
 		{
 			Name:  "expose-web",
 			Hosts: []string{"web.frs-prod.services.test"},
-			TLS:   []orchestration.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
+			TLS:   []clusterread.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
 		},
 	}
-	certs := []orchestration.ObservedCertificate{{
+	certs := []clusterread.ObservedCertificate{{
 		Name: "wildcard", Ready: false, Reason: "Issuing", SecretName: "frs-prod-wildcard-tls",
-		Orders: []orchestration.ObservedCertificateOrder{{
+		Orders: []clusterread.ObservedCertificateOrder{{
 			Name: "wildcard-order-1", Reason: "Pending",
-			Challenges: []orchestration.ObservedCertificateChallenge{{
+			Challenges: []clusterread.ObservedCertificateChallenge{{
 				Name: "wildcard-chal-1", Reason: "presenting DNS-01 challenge: RBAC denied for webhook solver",
 			}},
 		}},
 	}}
 
-	got := orchestration.FilterExposedServices(ingresses, certs)
+	got := clusterread.FilterExposedServices(ingresses, certs)
 
 	if len(got) != 1 || got[0].TLSNotReadyReason != "presenting DNS-01 challenge: RBAC denied for webhook solver" {
 		t.Fatalf("filterExposedServices() = %+v, want the Challenge's own reason", got)
@@ -167,15 +167,15 @@ func TestFilterExposedServicesWalksChallengeChainForTheRealBlocker(t *testing.T)
 // wildcard cert deleted out from under a still-live Ingress, for instance).
 // Absence must read as "not ready", never as an assumed success.
 func TestFilterExposedServicesReportsMissingCertificateHonestly(t *testing.T) {
-	ingresses := []orchestration.ObservedIngress{
+	ingresses := []clusterread.ObservedIngress{
 		{
 			Name:  "expose-web",
 			Hosts: []string{"web.frs-prod.services.test"},
-			TLS:   []orchestration.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
+			TLS:   []clusterread.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
 		},
 	}
 
-	got := orchestration.FilterExposedServices(ingresses, nil)
+	got := clusterread.FilterExposedServices(ingresses, nil)
 
 	if len(got) != 1 || got[0].TLSReady || got[0].TLSNotReadyReason == "" {
 		t.Fatalf("filterExposedServices() = %+v, want TLSReady false with a named reason", got)

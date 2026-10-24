@@ -13,7 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // runtimeOutputChunkBytes bounds how much payload one `kubectl exec` carries.
@@ -54,7 +53,7 @@ func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, param
 	if err != nil {
 		return RuntimeOutputResult{}, err
 	}
-	name, err := orchestration.SanitizeOutputEntryName(params.Name)
+	name, err := core.SanitizeOutputEntryName(params.Name)
 	if err != nil {
 		return RuntimeOutputResult{}, err
 	}

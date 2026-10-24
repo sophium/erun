@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
 // computeObserveDrift diffs the live release and the pods it produced against
@@ -20,7 +20,7 @@ import (
 // as `[]` and can only mean "compared, nothing disagreed", while a dry run
 // returns nil, which serializes as `null` and means "not determined". See
 // ObserveResult.Drift for why a consumer cannot be left to guess between them.
-func computeObserveDrift(req config.ShellLaunchParams, release *orchestration.ObservedHelmRelease, pods []ObservedPod) []string {
+func computeObserveDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
 	if release == nil {
 		return nil
 	}
@@ -51,7 +51,7 @@ func computeObserveDrift(req config.ShellLaunchParams, release *orchestration.Ob
 	return findings
 }
 
-func unreadableReleaseDrift(req config.ShellLaunchParams, release *orchestration.ObservedHelmRelease, recordedVersion string) []string {
+func unreadableReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -60,7 +60,7 @@ func unreadableReleaseDrift(req config.ShellLaunchParams, release *orchestration
 		recordedVersion, release.Name, req.Namespace, release.Error)}
 }
 
-func missingReleaseDrift(req config.ShellLaunchParams, release *orchestration.ObservedHelmRelease, recordedVersion string) []string {
+func missingReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -69,7 +69,7 @@ func missingReleaseDrift(req config.ShellLaunchParams, release *orchestration.Ob
 		recordedVersion, release.Name, req.Namespace)}
 }
 
-func foundReleaseDrift(req config.ShellLaunchParams, release *orchestration.ObservedHelmRelease, recordedVersion string) []string {
+func foundReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
 	var findings []string
 	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
 		findings = append(findings, fmt.Sprintf(
@@ -93,7 +93,7 @@ func foundReleaseDrift(req config.ShellLaunchParams, release *orchestration.Obse
 // possible (a container is named after its imageOverrides key, e.g.
 // "erun-devops"), and the exact finding #1448 exists for: a helm release can
 // name one image while the cluster runs another, hand-patched one.
-func runningImageDrift(release *orchestration.ObservedHelmRelease, pods []ObservedPod) []string {
+func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
 	if len(release.ImageOverrides) == 0 {
 		return nil
 	}
@@ -136,7 +136,7 @@ func runningImageDrift(release *orchestration.ObservedHelmRelease, pods []Observ
 // reasoning the recordedVersion/runtimeImage checks above already apply — so
 // each field compares only when the config actually recorded one, instead of
 // diffing the release against a manufactured default nobody configured.
-func runtimePodDrift(req config.ShellLaunchParams, release *orchestration.ObservedHelmRelease) []string {
+func runtimePodDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease) []string {
 	if release.RuntimePod == (config.RuntimePodResources{}) {
 		return nil
 	}

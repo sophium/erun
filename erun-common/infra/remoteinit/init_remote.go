@@ -1,4 +1,4 @@
-package orchestration
+package remoteinit
 
 import (
 	"fmt"

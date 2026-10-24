@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/expose"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-mcp/tools/services"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -91,10 +91,10 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 	// derived name -- the exposure's label is "validator", which no
 	// <tenant>-<service> derivation would produce from it.
 	want := []expose.EnvironmentService{
-		{Name: "frs-web", Type: "ClusterIP", Ports: []orchestration.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
+		{Name: "frs-web", Type: "ClusterIP", Ports: []clusterread.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
 		{
 			Name: "pw-api", Type: "ClusterIP",
-			Ports:    []orchestration.ObservedServicePort{{Name: "http", Port: 8080, Protocol: "TCP"}},
+			Ports:    []clusterread.ObservedServicePort{{Name: "http", Port: 8080, Protocol: "TCP"}},
 			Exposure: &expose.ServiceExposure{Label: "validator", Hostname: "validator.frs-dev.services.example.com", Scheme: "https"},
 		},
 	}

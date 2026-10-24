@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
+	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -123,16 +123,16 @@ func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLif
 // action RecommendedDeployRecovery would suggest layered on top so a caller
 // does not need to re-run that classification itself.
 type EnvironmentHealth struct {
-	RootConfig          orchestration.RootConfigInspection `json:"rootConfig"`
-	Deploy              deploypkg.DeployDiagnosisResult    `json:"deploy"`
-	RecommendedRecovery deploypkg.DeployRecoveryAction     `json:"recommendedRecovery,omitempty"`
+	RootConfig          config.RootConfigInspection     `json:"rootConfig"`
+	Deploy              deploypkg.DeployDiagnosisResult `json:"deploy"`
+	RecommendedRecovery deploypkg.DeployRecoveryAction  `json:"recommendedRecovery,omitempty"`
 }
 
 // ResolveEnvironmentHealth composes the doctor pieces callers already have
 // (RootConfigInspection and DeployDiagnosisResult) into one health view. It
 // runs no commands of its own; the caller is responsible for having run a
 // real diagnosis -- see EnvironmentHealth's doc comment.
-func ResolveEnvironmentHealth(rootConfig orchestration.RootConfigInspection, deploy deploypkg.DeployDiagnosisResult) EnvironmentHealth {
+func ResolveEnvironmentHealth(rootConfig config.RootConfigInspection, deploy deploypkg.DeployDiagnosisResult) EnvironmentHealth {
 	recovery, _ := deploypkg.RecommendedDeployRecovery(deploy)
 	return EnvironmentHealth{RootConfig: rootConfig, Deploy: deploy, RecommendedRecovery: recovery}
 }
@@ -245,11 +245,11 @@ func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, envi
 
 	var health *EnvironmentHealth
 	if !ctx.DryRun {
-		rootConfig, err := orchestration.InspectRootConfig(store)
+		rootConfig, err := config.InspectRootConfig(store)
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
-		openResult, err := orchestration.ResolveDoctorTarget(store, shared.OpenParams{Tenant: tenant, Environment: environment})
+		openResult, err := diagnosispkg.ResolveDoctorTarget(store, shared.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}

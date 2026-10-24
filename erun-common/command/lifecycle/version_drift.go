@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
 // EnvironmentVersionStatus is one environment's erun version, compared
@@ -245,15 +245,15 @@ func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env ListEnvi
 		KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 	}
 	releaseName := config.RuntimeReleaseName(tenant)
-	statusArgs := orchestration.ObserveHelmStatusArgs(req)
-	listArgs := orchestration.ObserveHelmListArgs(req, releaseName)
+	statusArgs := clusterread.ObserveHelmStatusArgs(req)
+	listArgs := clusterread.ObserveHelmListArgs(req, releaseName)
 	ctx.Trace("list: " + tenant + "/" + env.Name + "'s runtime version is not recorded locally -- checking its deployed release live")
 	ctx.TraceCommand("", "helm", statusArgs...)
 	ctx.TraceCommand("", "helm", listArgs...)
 	if ctx.DryRun {
 		return environmentVersionResolution{UnresolvedReason: "not checked in a dry run"}
 	}
-	release := orchestration.FetchObservedHelmRelease(statusArgs, listArgs, releaseName, req.Namespace)
+	release := clusterread.FetchObservedHelmRelease(statusArgs, listArgs, releaseName, req.Namespace)
 	if release.Error != "" {
 		return environmentVersionResolution{UnresolvedReason: "could not read the deployed release: " + release.Error}
 	}

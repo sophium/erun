@@ -18,8 +18,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // MaxRuntimeOutputBytes caps a single download: the whole payload is buffered in
@@ -60,7 +60,7 @@ type RuntimeOutputResult struct {
 	// Signing is set only when host-side ad-hoc code signing had something to
 	// report — see SignHostArtifact. It is nil on the common paths (a non-darwin
 	// host, a payload that is not a Mach-O, an artifact already signed).
-	Signing *orchestration.HostArtifactSigning `json:"signing,omitempty"`
+	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 // RuntimeOutputsParams selects which directory `outputs list` reads.
@@ -87,9 +87,9 @@ type RuntimeOutputsRunner func(req config.ShellLaunchParams, script string) (kub
 func resolveOutputsDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return orchestration.DefaultRuntimeOutputsDir, nil
+		return core.DefaultRuntimeOutputsDir, nil
 	}
-	return orchestration.ValidateAbsolutePodPath(dir, "outputs path")
+	return core.ValidateAbsolutePodPath(dir, "outputs path")
 }
 
 // ResolveRuntimeOutputs lists one directory in the env's runtime pod,
@@ -281,7 +281,7 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 	// Sign before reading so the bytes the caller receives are the runnable ones:
 	// an ad-hoc signature lives inside the Mach-O, so every copy made from here
 	// inherits it.
-	signing := orchestration.SignHostArtifact(target)
+	signing := codesign.SignHostArtifact(target)
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return RuntimeOutputResult{}, err
@@ -298,7 +298,7 @@ func resolveLocalOutputTarget(params RuntimeOutputDownloadParams) (dir, name, ta
 	if err != nil {
 		return "", "", "", err
 	}
-	name, err = orchestration.SanitizeOutputEntryName(params.Name)
+	name, err = core.SanitizeOutputEntryName(params.Name)
 	if err != nil {
 		return "", "", "", err
 	}

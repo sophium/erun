@@ -7,7 +7,6 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // RepairOrphanedAliasParams carries the fields needed to re-init a
@@ -15,7 +14,7 @@ import (
 // context when available; SSORegion / SSOStartURL come from the
 // caller because they are not derivable from any persisted state.
 type RepairOrphanedAliasParams struct {
-	Orphan        orchestration.OrphanedAlias
+	Orphan        configpkg.OrphanedAlias
 	SSORegion     string
 	SSOStartURL   string
 	RoleName      string

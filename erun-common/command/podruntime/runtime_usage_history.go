@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -106,7 +105,7 @@ func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.Runt
 }
 
 func SaveRuntimeUsageHistory(tenant, environment string, history deploy.RuntimeUsageHistory) error {
-	path, err := orchestration.RuntimeUsageHistoryPath(tenant, environment)
+	path, err := deploy.RuntimeUsageHistoryPath(tenant, environment)
 	if err != nil {
 		return err
 	}

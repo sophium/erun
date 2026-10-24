@@ -8,7 +8,6 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -151,7 +150,7 @@ func NewInstallSkillsCmd() *cobra.Command {
 			return runInstallSkillsCommand(shared.CommandContext(cmd), skillsDir, agentsDir)
 		},
 	}
-	cmd.Flags().StringVar(&skillsDir, "skills-dir", orchestration.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
+	cmd.Flags().StringVar(&skillsDir, "skills-dir", core.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
 	cmd.Flags().StringVar(&agentsDir, "agents-dir", podruntime.RuntimeBakedAgentsDir, "Directory holding one <name>.md per agent")
 	shared.AddDryRunFlag(cmd)
 	return cmd
