@@ -17,7 +17,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/activityrec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // MCP is request/response, so a live PTY gets a WebSocket beside it. The
@@ -55,23 +58,23 @@ type AttachOutcomeMessage struct {
 
 // RegisterAttachHandler serves the WebSocket attach edge at path behind bearer
 // auth; the erun:attach capability is checked before Upgrade.
-func RegisterAttachHandler(mux *http.ServeMux, path string, authCfg shared.McpAuthConfig, runtime shared.RuntimeConfig) {
-	mux.Handle("GET "+path, shared.WsAttachAuthHTTPMiddleware(authCfg, attachHTTPHandler(runtime)))
+func RegisterAttachHandler(mux *http.ServeMux, path string, authCfg edgeauth.McpAuthConfig, runtime runtimecfg.RuntimeConfig) {
+	mux.Handle("GET "+path, edgeauth.WsAttachAuthHTTPMiddleware(authCfg, attachHTTPHandler(runtime)))
 }
 
 var attachUpgrader = websocket.Upgrader{
 	// The bearer token is the gate; native clients have no Origin to check.
 	CheckOrigin: func(*http.Request) bool { return true },
 	// Echo the auth subprotocol scheme, never the token (RFC 6455).
-	Subprotocols: []string{shared.AttachAuthSubprotocol},
+	Subprotocols: []string{edgeauth.AttachAuthSubprotocol},
 }
 
-func attachHTTPHandler(runtime shared.RuntimeConfig) http.Handler {
+func attachHTTPHandler(runtime runtimecfg.RuntimeConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		identity := shared.AuthIdentityFrom(r.Context())
+		identity := callerid.AuthIdentityFrom(r.Context())
 		if !identity.Capabilities.Allows(mcptools.MCPCapabilityAttach) {
-			shared.AuditToolDecision(identity, attachToolName, false)
-			shared.WriteForbidden(w, fmt.Sprintf("attach requires the %s capability", mcptools.MCPCapabilityAttach))
+			callerid.AuditToolDecision(identity, attachToolName, false)
+			edgeauth.WriteForbidden(w, fmt.Sprintf("attach requires the %s capability", mcptools.MCPCapabilityAttach))
 			return
 		}
 		session := strings.TrimSpace(r.PathValue("session"))
@@ -86,8 +89,8 @@ func attachHTTPHandler(runtime shared.RuntimeConfig) http.Handler {
 			// Upgrade already wrote its own HTTP error response.
 			return
 		}
-		shared.AuditToolDecision(identity, attachToolName, true)
-		shared.RecordRuntimeActivity(runtime, config.ActivityKindMCP, false)
+		callerid.AuditToolDecision(identity, attachToolName, true)
+		activityrec.RecordRuntimeActivity(runtime, config.ActivityKindMCP, false)
 		runAttachSession(conn, runtime, session, cols, rows)
 	})
 }
@@ -105,7 +108,7 @@ func attachInitialSize(r *http.Request) (cols, rows int) {
 
 // runAttachSession runs dtach under a real PTY (dtach needs a controlling
 // terminal), bridges bytes, and reports the outcome before closing.
-func runAttachSession(conn *websocket.Conn, runtime shared.RuntimeConfig, session string, cols, rows int) {
+func runAttachSession(conn *websocket.Conn, runtime runtimecfg.RuntimeConfig, session string, cols, rows int) {
 	defer func() { _ = conn.Close() }()
 
 	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)

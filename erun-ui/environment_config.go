@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -141,7 +141,7 @@ func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current stri
 	})
 }
 
-func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot shared.ProjectFinderFunc) string {
+func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot projectseam.ProjectFinderFunc) string {
 	if findProjectRoot == nil {
 		return ""
 	}

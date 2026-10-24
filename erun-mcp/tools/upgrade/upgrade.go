@@ -11,8 +11,11 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type UpgradeInput struct {
@@ -20,14 +23,14 @@ type UpgradeInput struct {
 	Force     bool   `json:"force,omitempty" jsonschema:"when true, bypass the fingerprint cache and re-run helm upgrade even when no source change is detected"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the upgrade plan (channel, current -> target) without deploying"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
 // UpgradeTool redeploys the runtime's environment only when it opts into
 // autoupgrade and lags its channel latest.
-func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+func UpgradeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			target := model.UpgradeTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
@@ -41,10 +44,10 @@ func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 
 			deployer := func(ctx core.Context, item model.UpgradePlanItem) error {
 				findProjectRoot := func() (string, string, error) {
-					return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
+					return toolio.RuntimeFindProjectRoot(runtime.Context, workDir)
 				}
 				resolveBuildContext := func() (model.DockerBuildContext, error) {
-					return shared.DockerBuildContextAtDir(workDir)
+					return dockerspec.DockerBuildContextAtDir(workDir)
 				}
 				resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 					return deploy.KubernetesDeployContextAtDir(workDir), nil
@@ -76,7 +79,7 @@ func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 			}
 			return nil
 		})
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "upgrade", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "upgrade", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

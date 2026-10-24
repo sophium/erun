@@ -16,30 +16,32 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-mcp/tools/attach"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // newAttachTestRuntime uses a unique tenant/environment and creates the socket directory
 // the pod's session-start script would.
-func newAttachTestRuntime(t *testing.T) shared.RuntimeConfig {
+func newAttachTestRuntime(t *testing.T) runtimecfg.RuntimeConfig {
 	t.Helper()
 	if err := os.MkdirAll(activity.RemoteAppSessionSocketDir, 0o700); err != nil {
 		t.Fatalf("create session socket dir: %v", err)
 	}
-	return shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
+	return runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
 }
 
 // newAuthedAttachServer serves the production mux with a trusted issuer.
-func newAuthedAttachServer(t *testing.T, runtime shared.RuntimeConfig, issuer, tenant string) *httptest.Server {
+func newAuthedAttachServer(t *testing.T, runtime runtimecfg.RuntimeConfig, issuer, tenant string) *httptest.Server {
 	t.Helper()
 	trusted, err := json.Marshal(map[string]string{issuer: tenant})
 	if err != nil {
 		t.Fatalf("marshal trusted issuers: %v", err)
 	}
-	t.Setenv(shared.EnvMCPTrustedIssuers, string(trusted))
-	t.Setenv(shared.EnvMCPTrustedIssuer, "")
-	t.Setenv(shared.EnvMCPAudience, "erun-mcp")
-	t.Setenv(shared.EnvTenant, tenant)
+	t.Setenv(edgeauth.EnvMCPTrustedIssuers, string(trusted))
+	t.Setenv(edgeauth.EnvMCPTrustedIssuer, "")
+	t.Setenv(edgeauth.EnvMCPAudience, "erun-mcp")
+	t.Setenv(edgeauth.EnvTenant, tenant)
 
 	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
 	t.Cleanup(server.Close)
@@ -67,7 +69,7 @@ func dialAttach(baseURL, session, token string) (*websocket.Conn, *http.Response
 // dialAttachViaSubprotocol authenticates only via Sec-WebSocket-Protocol, as a browser must.
 func dialAttachViaSubprotocol(baseURL, session, token string) (*websocket.Conn, *http.Response, error) {
 	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = []string{shared.AttachAuthSubprotocol, token}
+	dialer.Subprotocols = []string{edgeauth.AttachAuthSubprotocol, token}
 	return dialer.Dial(attachWSURL(baseURL, session), nil)
 }
 
@@ -285,8 +287,8 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != shared.AttachAuthSubprotocol {
-		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, shared.AttachAuthSubprotocol)
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != edgeauth.AttachAuthSubprotocol {
+		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, edgeauth.AttachAuthSubprotocol)
 	}
 
 	writeBinary(t, conn, "echo SUBPROTOCOL_MARKER\n")

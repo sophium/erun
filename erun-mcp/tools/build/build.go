@@ -13,8 +13,12 @@ import (
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/push"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type BuildInput struct {
@@ -26,7 +30,7 @@ type BuildInput struct {
 	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Jobs          int      `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
 	Verbosity     int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
 type PushInput struct {
@@ -34,16 +38,16 @@ type PushInput struct {
 	Version   string `json:"version" jsonschema:"required version to publish (produced by the build tool); push publishes this version's images and chart and never mints one"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
 var ErrMissingPushVersion = fmt.Errorf("push requires a version: it publishes a built version's images and chart (capture the version from the build tool's result) and never mints one — set the version input")
 
-func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-		execute := func(preview bool, log io.Writer) (sharedpkg.CommandOutput, error) {
+func BuildTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		execute := func(preview bool, log io.Writer) (toolio.CommandOutput, error) {
 			var result *model.BuildResult
-			output, err := sharedpkg.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
+			output, err := runcmd.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				runCtx.BuildJobs = input.Jobs
 				runCtx.MCPTool = "build"
 				component := strings.TrimSpace(input.Component)
@@ -54,7 +58,7 @@ func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 				}
 				// build is a pure primitive that only builds and mints the version;
 				// MCP composes primitives itself rather than exposing a deploy switch.
-				if err := executepkg.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime), runtime.Store, sharedpkg.CloudDependencies()); err != nil {
+				if err := executepkg.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, RuntimePushFunc(runtime), runtime.Store, clouddeps.CloudDependencies()); err != nil {
 					return err
 				}
 				built := buildrun.NewBuildResult(execution)
@@ -66,31 +70,31 @@ func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 			}
 			return output, err
 		}
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "build", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "build", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
 
-func PushTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
+func PushTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
 		if strings.TrimSpace(input.Version) == "" {
-			return nil, sharedpkg.JobEnvelopeOutput{}, ErrMissingPushVersion
+			return nil, jobenvelope.JobEnvelopeOutput{}, ErrMissingPushVersion
 		}
-		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			execution, err := resolveRuntimePushExecution(runCtx, runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version))
 			if err != nil {
 				return err
 			}
 			return push.RunPushCommand(runCtx, func(runCtx core.Context) error {
-				return buildrun.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime))
+				return buildrun.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, RuntimePushFunc(runtime))
 			})
 		})
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
 
-func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (shared.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(ctx core.Context, runtime runtimecfg.RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (dockerspec.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := model.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
@@ -101,26 +105,26 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeCon
 		Platforms:       platforms,
 	}
 	findProjectRoot := func() (string, string, error) {
-		return sharedpkg.RuntimeFindProjectRoot(runtime.Context, projectRoot)
+		return toolio.RuntimeFindProjectRoot(runtime.Context, projectRoot)
 	}
 	resolveBuildContext := func() (model.DockerBuildContext, error) {
-		return shared.DockerBuildContextAtDir(projectRoot)
+		return dockerspec.DockerBuildContextAtDir(projectRoot)
 	}
 
 	if component != "" {
 		target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
 		if err != nil {
-			return shared.BuildExecutionSpec{}, err
+			return dockerspec.BuildExecutionSpec{}, err
 		}
 
 		build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
 		if err != nil {
-			return shared.BuildExecutionSpec{}, err
+			return dockerspec.BuildExecutionSpec{}, err
 		}
 		if build == nil {
-			return shared.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
+			return dockerspec.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]shared.DockerBuildSpec{*build})
+		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]dockerspec.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = buildrun.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
@@ -130,41 +134,41 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeCon
 	return buildrun.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 }
 
-func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConfig, projectRoot, component, versionOverride string) (shared.DockerPushExecutionSpec, error) {
+func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeConfig, projectRoot, component, versionOverride string) (dockerspec.DockerPushExecutionSpec, error) {
 	target := model.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     strings.TrimSpace(runtime.Context.Environment),
 		VersionOverride: versionOverride,
 	}
 	findProjectRoot := func() (string, string, error) {
-		return sharedpkg.RuntimeFindProjectRoot(runtime.Context, projectRoot)
+		return toolio.RuntimeFindProjectRoot(runtime.Context, projectRoot)
 	}
 	resolveBuildContext := func() (model.DockerBuildContext, error) {
-		return shared.DockerBuildContextAtDir(projectRoot)
+		return dockerspec.DockerBuildContextAtDir(projectRoot)
 	}
 
 	if component == "" {
 		pushInput, buildInput, err := buildrun.ResolveDockerPushSpec(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 		if err != nil {
-			return shared.DockerPushExecutionSpec{}, err
+			return dockerspec.DockerPushExecutionSpec{}, err
 		}
-		builds := make([]shared.DockerBuildSpec, 0, 1)
+		builds := make([]dockerspec.DockerBuildSpec, 0, 1)
 		if buildInput != nil {
 			builds = append(builds, *buildInput)
 		}
-		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []shared.DockerPushSpec{pushInput}), nil
+		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []dockerspec.DockerPushSpec{pushInput}), nil
 	}
 
 	build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
 	if err != nil {
-		return shared.DockerPushExecutionSpec{}, err
+		return dockerspec.DockerPushExecutionSpec{}, err
 	}
 	if build == nil {
-		return shared.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
+		return dockerspec.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 	}
 	build.Push = true
 
-	return buildrun.DockerPushExecutionSpecFromSpecs([]shared.DockerBuildSpec{*build}, []shared.DockerPushSpec{
+	return buildrun.DockerPushExecutionSpecFromSpecs([]dockerspec.DockerBuildSpec{*build}, []dockerspec.DockerPushSpec{
 		buildpkg.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

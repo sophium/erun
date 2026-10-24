@@ -6,7 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 )
 
 // AnnotatePinPlanBaseFreshness is best-effort: an unreadable branch, ref, or remote leaves the
@@ -36,7 +36,7 @@ func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (model.PinBas
 		return model.PinBaseFreshness{}, false
 	}
 	remoteRead := refreshPinBaseTrackingRef(ctx, projectRoot, remoteBranch)
-	behind, err := shared.GitCommitsAhead(ctx, projectRoot, "HEAD", ref)
+	behind, err := gitref.GitCommitsAhead(ctx, projectRoot, "HEAD", ref)
 	if err != nil {
 		return model.PinBaseFreshness{}, false
 	}
@@ -47,7 +47,7 @@ func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (model.PinBas
 // when the ref cannot be fetched by name.
 func pinBaseTrackingRef(ctx core.Context, projectRoot, branch string) (ref, remoteBranch string, ok bool) {
 	if branch != "" && branch != "HEAD" {
-		upstream, found := shared.ResolveBranchUpstreamCandidate(ctx, projectRoot, branch)
+		upstream, found := gitref.ResolveBranchUpstreamCandidate(ctx, projectRoot, branch)
 		if !found {
 			return "", "", false
 		}
@@ -57,7 +57,7 @@ func pinBaseTrackingRef(ctx core.Context, projectRoot, branch string) (ref, remo
 		// A non-origin upstream is still counted, just not refreshed.
 		return upstream, "", true
 	}
-	if _, resolved, err := shared.GitResolvedRef(ctx, projectRoot, "origin/HEAD"); err != nil || !resolved {
+	if _, resolved, err := gitref.GitResolvedRef(ctx, projectRoot, "origin/HEAD"); err != nil || !resolved {
 		return "", "", false
 	}
 	return "origin/HEAD", strings.TrimPrefix(pinBaseRemoteHeadBranch(ctx, projectRoot), "origin/"), true

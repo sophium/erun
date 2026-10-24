@@ -5,18 +5,18 @@ import (
 	"testing"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // forceStdinSeams pins both halves of the "can this run ask?" question.
 func forceStdinSeams(t *testing.T, terminal, hasAnswer bool) {
 	t.Helper()
-	prevTerminal, prevAnswer := shared.StdinIsTerminal, tenantPromptHasAnswer
-	shared.StdinIsTerminal = func() bool { return terminal }
+	prevTerminal, prevAnswer := promptpkg.StdinIsTerminal, tenantPromptHasAnswer
+	promptpkg.StdinIsTerminal = func() bool { return terminal }
 	tenantPromptHasAnswer = func() bool { return hasAnswer }
 	t.Cleanup(func() {
-		shared.StdinIsTerminal, tenantPromptHasAnswer = prevTerminal, prevAnswer
+		promptpkg.StdinIsTerminal, tenantPromptHasAnswer = prevTerminal, prevAnswer
 	})
 }
 

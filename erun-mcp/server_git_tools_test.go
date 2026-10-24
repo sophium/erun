@@ -11,7 +11,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/diff"
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
@@ -28,8 +30,8 @@ func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
 		t.Fatalf("write app.txt: %v", err)
 	}
 
-	handler := diff.DiffTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := diff.DiffTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 	_, output, err := handler(context.Background(), nil, diff.DiffInput{})
 	if err != nil {
@@ -62,8 +64,8 @@ const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'q
 func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 
-	handler := exectool.WriteTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.WriteTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 	_, output, err := handler(context.Background(), nil, exectool.WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
 	if err != nil {
@@ -109,8 +111,8 @@ func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	handler := exectool.WriteTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.WriteTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 	_, _, err := handler(context.Background(), nil, exectool.WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
 	if err == nil {
@@ -131,8 +133,8 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 		t.Fatalf("write app.txt: %v", err)
 	}
 
-	handler := exectool.CommitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
 	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "not-main", Message: dangerousExecContent})
@@ -147,7 +149,7 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 	assertCommitToolOutput(t, output, projectRoot)
 }
 
-func assertCommitToolOutput(t *testing.T, output sharedpkg.JobEnvelopeOutput, projectRoot string) {
+func assertCommitToolOutput(t *testing.T, output jobenvelope.JobEnvelopeOutput, projectRoot string) {
 	t.Helper()
 
 	if output.Commit == nil {
@@ -204,8 +206,8 @@ func seedCommitToolScopedPathsRepo(t *testing.T) string {
 
 func TestCommitToolScopedPathsRefusesUnrelatedDirtyFile(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := exectool.CommitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
 	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
@@ -225,8 +227,8 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	if err := os.Remove(filepath.Join(projectRoot, "unrelated.txt")); err != nil {
 		t.Fatalf("remove unrelated.txt: %v", err)
 	}
-	handler := exectool.CommitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
 	_, output, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
@@ -244,8 +246,8 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 // Blank-only Paths must not degrade to committing everything.
 func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := exectool.CommitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
 	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})

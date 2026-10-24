@@ -8,15 +8,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 	"github.com/sophium/erun/erun-mcp/tools/upgrade"
 )
 
 func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 	t.Setenv(lifecycle.UpgradeVersionsOverrideEnv, "stable=3.0.0")
 	projectRoot := t.TempDir()
-	handler := upgrade.UpgradeTool(normalizeRuntimeConfig(shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
+	handler := upgrade.UpgradeTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
 		Store: listToolStore{
 			toolConfig:    config.ERunConfig{DefaultTenant: "tenant-a"},
 			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},

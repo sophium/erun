@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -18,8 +20,8 @@ import (
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
 
-func LaunchIntelliJ(ctx core.Context, result config.OpenResult, _ shared.PromptRunner) error {
-	hostOS := shared.CurrentHostOS()
+func LaunchIntelliJ(ctx core.Context, result config.OpenResult, _ prompt.PromptRunner) error {
+	hostOS := desktop.CurrentHostOS()
 	if err := ensureLocalSSHDKnownHostFunc(ctx, result); err != nil {
 		return err
 	}
@@ -178,7 +180,7 @@ func intelliJGatewayDarwinLaunchCommand(ctx core.Context, optionsDir string, uri
 
 func intelliJGatewayClassPath(contentsDir string, pluginDir string) (string, error) {
 	entries := intelliJGatewayStandaloneJars(pluginDir)
-	libJars, err := shared.IdeGlob(filepath.Join(contentsDir, "lib", "*.jar"))
+	libJars, err := desktop.IdeGlob(filepath.Join(contentsDir, "lib", "*.jar"))
 	if err != nil {
 		return "", err
 	}
@@ -298,7 +300,7 @@ func resolveInstalledIntelliJAttempt(hostOS model.HostOS) (jetbrainsBootstrapAtt
 }
 
 func resolvableIntelliJOptionsDir(hostOS model.HostOS) (string, bool) {
-	optionsDir, err := shared.ResolveIntelliJOptionsDir(hostOS)
+	optionsDir, err := desktop.ResolveIntelliJOptionsDir(hostOS)
 	return optionsDir, err == nil
 }
 
@@ -307,20 +309,20 @@ func resolveInstalledIntelliJContentsDir(hostOS model.HostOS) (string, error) {
 		return "", fmt.Errorf("IntelliJ IDEA app discovery is unsupported on %s", hostOS)
 	}
 	// ~/Applications shadows /Applications.
-	homeDir, _ := shared.IdeUserHomeDir()
+	homeDir, _ := desktop.IdeUserHomeDir()
 	patterns := make([]string, 0, 2)
 	if strings.TrimSpace(homeDir) != "" {
 		patterns = append(patterns, filepath.Join(homeDir, "Applications", "IntelliJ IDEA*.app", "Contents"))
 	}
 	patterns = append(patterns, "/Applications/IntelliJ IDEA*.app/Contents")
 	for _, pattern := range patterns {
-		matches, err := shared.IdeGlob(pattern)
+		matches, err := desktop.IdeGlob(pattern)
 		if err != nil {
 			continue
 		}
 		slices.Sort(matches)
 		for _, match := range matches {
-			info, err := shared.IdeStat(match)
+			info, err := desktop.IdeStat(match)
 			if err == nil && info.IsDir() {
 				return match, nil
 			}
@@ -348,7 +350,7 @@ func emitIntelliJManualOpenGuidance(ctx core.Context, result config.OpenResult) 
 			"  project: %s\n",
 		info.HostAlias,
 		info.User,
-		shared.ValueOrNone(info.PrivateKeyPath),
+		textfmt.ValueOrNone(info.PrivateKeyPath),
 		info.WorkspacePath,
 	)
 }
@@ -382,7 +384,7 @@ func resolveIntelliJGatewayOptionsDir(optionsDir string) (string, error) {
 	if strings.TrimSpace(versionDir) == "" || versionDir == "." || versionDir == string(filepath.Separator) {
 		return "", fmt.Errorf("IntelliJ version directory not found for %s", optionsDir)
 	}
-	homeDir, err := shared.IdeUserHomeDir()
+	homeDir, err := desktop.IdeUserHomeDir()
 	if err != nil {
 		return "", err
 	}
@@ -402,7 +404,7 @@ func ensureIntelliJGatewayConfigDir(ctx core.Context, optionsDir string) (string
 		}
 	}
 	infoPath := filepath.Join(gatewayConfigDir, "info.xml")
-	if _, err := shared.IdeStat(infoPath); err == nil {
+	if _, err := desktop.IdeStat(infoPath); err == nil {
 		return gatewayConfigDir, nil
 	}
 	ctx.TraceCommand("", "write-xml", infoPath)
@@ -416,7 +418,7 @@ func ensureIntelliJGatewayConfigDir(ctx core.Context, optionsDir string) (string
 
 func intelliJGatewayLogDir(optionsDir string) (string, error) {
 	versionDir := filepath.Base(filepath.Dir(filepath.Clean(optionsDir)))
-	homeDir, err := shared.IdeUserHomeDir()
+	homeDir, err := desktop.IdeUserHomeDir()
 	if err != nil {
 		return "", err
 	}

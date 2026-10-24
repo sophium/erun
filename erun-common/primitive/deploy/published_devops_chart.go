@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
 
 // PublishedChartProbeOverrideEnv is a test-only seam answering the chart probe
@@ -21,12 +21,12 @@ const PublishedChartProbeOverrideEnv = "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE"
 
 func publishedChartOverrideHasVersion(override, containerRegistry, chartName, version string) bool {
 	for _, entry := range strings.Split(override, ",") {
-		coordinate, ver, ok := shared.CutLast(strings.TrimSpace(entry), ":")
+		coordinate, ver, ok := dockerregistry.CutLast(strings.TrimSpace(entry), ":")
 		ver = strings.TrimSpace(ver)
 		if !ok || (ver != "*" && ver != version) {
 			continue
 		}
-		registry, name, qualified := shared.CutLast(strings.TrimSpace(coordinate), "/")
+		registry, name, qualified := dockerregistry.CutLast(strings.TrimSpace(coordinate), "/")
 		if !qualified {
 			registry, name = "", coordinate
 		}

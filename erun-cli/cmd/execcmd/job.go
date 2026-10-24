@@ -6,12 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +28,7 @@ const (
 
 // newJobCmd builds the job verbs for `erun exec job` and the deprecated `erun job`.
 // supervise is excluded: it is only re-exec'd at the canonical path.
-func newJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job",
 		Short: "Start long work in the environment and observe it by handle",
@@ -53,7 +55,7 @@ func newJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 }
 
 // DeprecatedTopLevelJobCmd mounts the job verbs as `erun job` for one release.
-func DeprecatedTopLevelJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func DeprecatedTopLevelJobCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd := newJobCmd(resolveOpen)
 	cmd.Deprecated = "use `erun exec job` instead; this command will be removed in a future release"
 	return cmd
@@ -108,7 +110,7 @@ const jobStartLongHelp = "The command keeps running after this call returns and 
 	"the environment. Work this job itself starts is exempt -- a nested job runs\n" +
 	"under this claim instead of being refused by it."
 
-func newJobStartCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobStartCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -174,7 +176,7 @@ func newJobStartCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim the environment for this job's lifetime; while it is held, every other job start here is refused and told which job holds it")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -194,11 +196,11 @@ func parseJobEnvFlags(pairs []string) (map[string]string, error) {
 	return out, nil
 }
 
-func runJobStart(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jobspkg.StartEnvironmentJobParams) error {
+func runJobStart(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params jobspkg.StartEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	job, resolved, err := startJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -214,24 +216,24 @@ func runJobStart(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	return ctx.WriteResult(job)
 }
 
-func startJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func startJob(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params jobspkg.StartEnvironmentJobParams) (jobstate.EnvironmentJob, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	// An absolute supervisor path keeps the job independent of the caller's PATH.
-	supervisor, err := shared.ErunExecutablePath()
+	supervisor, err := envcall.ErunExecutablePath()
 	if err != nil {
-		return sharedpkg.EnvironmentJob{}, false, err
+		return jobstate.EnvironmentJob{}, false, err
 	}
 	params.SupervisorPath = supervisor
 	job, err := jobspkg.StartEnvironmentJob(commandCtx, params)
 	if err != nil {
-		return sharedpkg.EnvironmentJob{}, false, err
+		return jobstate.EnvironmentJob{}, false, err
 	}
 	return job, !commandCtx.DryRun, nil
 }
 
-func newJobAttachCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobAttachCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -268,15 +270,15 @@ func newJobAttachCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd.Flags().IntVar(&pid, "pid", 0, "Process in the environment to track; the job resolves against this pid and nothing else")
 	cmd.Flags().StringVar(&logPath, "log", "", "File in the environment the work is already writing its output to, so job output can serve it")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL; re-attach to renew")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.AttachEnvironmentJobParams) error {
+func runJobAttach(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params model.AttachEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	job, resolved, err := attachJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -292,13 +294,13 @@ func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params mo
 	return ctx.WriteResult(job)
 }
 
-func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.AttachEnvironmentJobParams) (jobstate.EnvironmentJob, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	job, err := jobspkg.AttachEnvironmentJob(commandCtx, params)
 	if err != nil {
-		return sharedpkg.EnvironmentJob{}, false, err
+		return jobstate.EnvironmentJob{}, false, err
 	}
 	return job, !commandCtx.DryRun, nil
 }
@@ -365,7 +367,7 @@ func addJobTargetFlags(cmd *cobra.Command, tenant, environment *string) {
 }
 
 func validateJobTarget(tenant, environment string) error {
-	missing := shared.MissingTenantOrEnvironmentFlags(tenant, environment)
+	missing := envcall.MissingTenantOrEnvironmentFlags(tenant, environment)
 	if len(missing) == 0 {
 		return nil
 	}

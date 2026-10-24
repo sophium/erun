@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // orchestratorNoAskFlag denies the question tool: a question stalls an unattended
@@ -210,7 +210,7 @@ func orchestratorSessionEnv(id string, launchEnv []string) []string {
 	env := []string{
 		appSessionEnvVar + "=1",
 		// Hooks and the erun-orchestrate skill read this id; empty for transient sessions.
-		shared.OrchestratorIDEnvVar + "=" + id,
+		jobstate.OrchestratorIDEnvVar + "=" + id,
 	}
 	env = append(env, launchEnv...)
 	// An orchestrator has no pod, so $ERUN_OUTPUTS_DIR needs a host directory.

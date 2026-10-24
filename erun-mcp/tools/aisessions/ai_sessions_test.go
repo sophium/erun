@@ -7,7 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func requireEchoedTarget(t *testing.T, result AISessionsResult, tenant, environment string) {
@@ -19,7 +20,7 @@ func requireEchoedTarget(t *testing.T, result AISessionsResult, tenant, environm
 
 func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	if err := activity.RecordAISessionEvent(model.AISessionEventParams{
 		Tenant: "tenant-a", Environment: "dev", SessionID: "sess-1",
@@ -49,7 +50,7 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 
 func TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "never-touched"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "never-touched"}}
 
 	_, result, err := AiSessionsTool(runtime)(context.Background(), nil, AISessionsInput{})
 	if err != nil {
@@ -74,7 +75,7 @@ func TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull(t *testing.T) {
 
 func TestAISessionsToolUnknownSessionReadsAsIdle(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	_, result, err := AiSessionsTool(runtime)(context.Background(), nil, AISessionsInput{Session: "never-started"})
 	if err != nil {

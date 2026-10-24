@@ -8,7 +8,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobresult"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // AgentInput is the agent-mode job tool's input.
@@ -29,29 +31,29 @@ type AgentInput struct {
 	Preview         bool              `json:"preview,omitempty" jsonschema:"when true, resolve and trace the job without starting it"`
 }
 
-func AgentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, AgentInput) (*mcp.CallToolResult, shared.JobResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input AgentInput) (*mcp.CallToolResult, shared.JobResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func AgentTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, AgentInput) (*mcp.CallToolResult, jobresult.JobResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input AgentInput) (*mcp.CallToolResult, jobresult.JobResult, error) {
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, shared.JobResult{}, err
+			return nil, jobresult.JobResult{}, err
 		}
 		dir := strings.TrimSpace(input.Dir)
 		if dir == "" {
-			if dir, err = shared.RuntimeRepoPath(runtime.Context); err != nil {
-				return nil, shared.JobResult{}, err
+			if dir, err = toolio.RuntimeRepoPath(runtime.Context); err != nil {
+				return nil, jobresult.JobResult{}, err
 			}
 		}
 		// emcp is not the erun binary, so the supervisor is the environment's erun.
 		supervisor, err := jobs.ResolveErunExecutable()
 		if err != nil {
-			return nil, shared.JobResult{}, err
+			return nil, jobresult.JobResult{}, err
 		}
 		trace := new(bytes.Buffer)
-		ctx := shared.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
+		ctx := toolio.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
 		job, err := jobs.StartEnvironmentJob(ctx, jobs.StartEnvironmentJobParams{
 			Tenant:         tenant,
 			Environment:    environment,
-			Name:           shared.FirstNonEmpty(strings.TrimSpace(input.Name), "agent"),
+			Name:           toolio.FirstNonEmpty(strings.TrimSpace(input.Name), "agent"),
 			ID:             strings.TrimSpace(input.ID),
 			Agent:          input.Agent,
 			Prompt:         input.Prompt,
@@ -65,13 +67,13 @@ func AgentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallTool
 			SupervisorPath: supervisor,
 		})
 		if err != nil {
-			return nil, shared.JobResult{}, err
+			return nil, jobresult.JobResult{}, err
 		}
-		return nil, shared.JobResult{
+		return nil, jobresult.JobResult{
 			Tenant:      tenant,
 			Environment: environment,
 			Job:         job,
-			Trace:       shared.NormalizeTraceLines(trace.String()),
+			Trace:       toolio.NormalizeTraceLines(trace.String()),
 			Executed:    !input.Preview,
 		}, nil
 	}

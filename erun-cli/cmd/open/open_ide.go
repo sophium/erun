@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -36,7 +37,7 @@ var (
 
 type (
 	VSCodeLauncher   func(core.Context, config.OpenResult) error
-	IntelliJLauncher func(core.Context, config.OpenResult, shared.PromptRunner) error
+	IntelliJLauncher func(core.Context, config.OpenResult, prompt.PromptRunner) error
 )
 
 func LaunchVSCode(ctx core.Context, result config.OpenResult) error {
@@ -47,7 +48,7 @@ func launchIDEURI(ctx core.Context, result config.OpenResult, uri string) error 
 	if err := ensureLocalSSHDKnownHostFunc(ctx, result); err != nil {
 		return err
 	}
-	command, args, err := ideLaunchCommand(shared.CurrentHostOS(), uri)
+	command, args, err := ideLaunchCommand(desktop.CurrentHostOS(), uri)
 	if err != nil {
 		return err
 	}
@@ -57,7 +58,7 @@ func launchIDEURI(ctx core.Context, result config.OpenResult, uri string) error 
 	}
 	technical, err := ideOpenURIFunc(ctx, command, args)
 	if err != nil {
-		return formatIDEOpenError("IDE", shared.CurrentHostOS(), result, technical, err, "")
+		return formatIDEOpenError("IDE", desktop.CurrentHostOS(), result, technical, err, "")
 	}
 	return nil
 }

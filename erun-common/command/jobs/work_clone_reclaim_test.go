@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 )
 
 // Branches here are squash-merged and their remote branch deleted, so "no upstream"
@@ -24,9 +24,9 @@ func withFakeWorkHome(t *testing.T) (home, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir work root: %v", err)
 	}
-	original := shared.WorkCloneUserHomeDir
-	shared.WorkCloneUserHomeDir = func() (string, error) { return home, nil }
-	t.Cleanup(func() { shared.WorkCloneUserHomeDir = original })
+	original := gitref.WorkCloneUserHomeDir
+	gitref.WorkCloneUserHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { gitref.WorkCloneUserHomeDir = original })
 	return home, root
 }
 

@@ -9,12 +9,13 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/agent"
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
 	"github.com/sophium/erun/erun-mcp/tools/jobs"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // Work runs in this pod, so a foreign target must be refused.
 func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	ctx := context.Background()
 
 	// Several tools fail downstream on a foreign target, so assert the specific refusal.
@@ -59,7 +60,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	// ensureAgentJobToolAvailable resolves "claude" before the preview short-circuit.
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
-	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()
 
 	for _, tc := range []struct {

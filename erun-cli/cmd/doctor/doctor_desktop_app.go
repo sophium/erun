@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -54,14 +55,14 @@ func installedDesktopAppCandidates(hostOS model.HostOS) []string {
 	}
 
 	if dir := desktopAppExecutableDir(); dir != "" {
-		for _, layout := range shared.DesktopAppLayouts(dir, core.DesktopAppName, hostOS) {
+		for _, layout := range desktop.DesktopAppLayouts(dir, core.DesktopAppName, hostOS) {
 			add(layout.Launch)
 		}
 	}
 	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
-		add(filepath.Join(homeDir, "Applications", shared.DesktopAppBundleName))
+		add(filepath.Join(homeDir, "Applications", desktop.DesktopAppBundleName))
 	}
-	add(filepath.Join(systemApplicationsDir(), shared.DesktopAppBundleName))
+	add(filepath.Join(systemApplicationsDir(), desktop.DesktopAppBundleName))
 	return candidates
 }
 
@@ -83,7 +84,7 @@ func launchedDesktopAppPath(hostOS model.HostOS) string {
 	if dir == "" {
 		return ""
 	}
-	chosen, _ := shared.ResolveAppExecutableNear(filepath.Join(dir, core.DesktopAppName), core.DesktopAppName, hostOS)
+	chosen, _ := desktop.ResolveAppExecutableNear(filepath.Join(dir, core.DesktopAppName), core.DesktopAppName, hostOS)
 	return chosen
 }
 
@@ -150,7 +151,7 @@ func reportInstalledDesktopAppVersion(ctx core.Context) error {
 		w.Linef("erun app launches %s.", launched)
 	}
 	if len(found) > 1 {
-		w.Linef("Multiple %s bundles share the bundle id com.sophium.erun; macOS (Finder, Spotlight, the Dock) can launch either one regardless of which is current. Remove the stale copy(ies) so only the current version can be launched.", shared.DesktopAppBundleName)
+		w.Linef("Multiple %s bundles share the bundle id com.sophium.erun; macOS (Finder, Spotlight, the Dock) can launch either one regardless of which is current. Remove the stale copy(ies) so only the current version can be launched.", desktop.DesktopAppBundleName)
 	}
 	for _, app := range mismatched {
 		w.Linef("%s (%s) does not match this CLI (%s). erun has no automated updater for the installed desktop app bundle; rebuild it (./erun-ui/build.sh from a checkout at this version) or reinstall to update it.", app.Path, app.Version, cliVersion)

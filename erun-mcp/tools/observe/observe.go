@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/observe"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type ObserveSecretCheckInput struct {
@@ -28,14 +29,14 @@ type ObserveInput struct {
 }
 
 // ObserveTool only runs `kubectl get`, so it needs erun:read, not erun:admin.
-func ObserveTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, model.ObserveResult, error) {
+func ObserveTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, model.ObserveResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, model.ObserveResult, error) {
 		target, err := resolveObserveOpenResult(runtime, input)
 		if err != nil {
 			return nil, model.ObserveResult{}, err
 		}
 		req := cloud.ShellLaunchParamsFromResult(target)
-		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
+		runCtx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		result, err := observe.RunObservation(runCtx, req, model.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
 		if err != nil {
 			return nil, model.ObserveResult{}, err
@@ -53,8 +54,8 @@ func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []model.Obse
 }
 
 // resolveObserveOpenResult pins tenant/environment to this pod's environment.
-func resolveObserveOpenResult(runtime sharedpkg.RuntimeConfig, input ObserveInput) (config.OpenResult, error) {
-	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func resolveObserveOpenResult(runtime runtimecfg.RuntimeConfig, input ObserveInput) (config.OpenResult, error) {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return config.OpenResult{}, err
 	}

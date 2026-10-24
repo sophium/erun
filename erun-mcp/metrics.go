@@ -16,7 +16,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
 )
 
 // The Prometheus listener is separate from the MCP edge so a scrape never
@@ -50,9 +51,9 @@ func normalizeMetricsConfig(cfg MetricsConfig) (MetricsConfig, error) {
 	return cfg, nil
 }
 
-func newMetricsRecorder(tenant, environment string) *shared.MetricsRecorder {
+func newMetricsRecorder(tenant, environment string) *toolmetrics.MetricsRecorder {
 	labels := prometheus.Labels{"tenant": tenant, "environment": environment}
-	r := &shared.MetricsRecorder{Registry: prometheus.NewRegistry()}
+	r := &toolmetrics.MetricsRecorder{Registry: prometheus.NewRegistry()}
 
 	r.IdleEligibility = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "erun_idle_eligibility",
@@ -104,7 +105,7 @@ func (w *byteCountingResponseWriter) Flush() {
 }
 
 // trafficMeteringMiddleware counts MCP bytes, excluding idle probes.
-func trafficMeteringMiddleware(recorder *shared.MetricsRecorder, next http.Handler) http.Handler {
+func trafficMeteringMiddleware(recorder *toolmetrics.MetricsRecorder, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if recorder == nil || req.Header.Get(mcp.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
@@ -122,7 +123,7 @@ func trafficMeteringMiddleware(recorder *shared.MetricsRecorder, next http.Handl
 
 // runMetricsHTTP serves the metrics endpoint until ctx is cancelled; when
 // disabled it only waits.
-func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.MetricsRecorder) error {
+func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *toolmetrics.MetricsRecorder) error {
 	cfg, err := normalizeMetricsConfig(cfg)
 	if err != nil {
 		return err
@@ -158,7 +159,7 @@ func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.Met
 
 // startIdleMetricsTicker samples the same idle status the `idle` tool exposes,
 // once immediately so an early scrape is not read as zero.
-func startIdleMetricsTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
+func startIdleMetricsTicker(ctx context.Context, runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder) {
 	if recorder == nil {
 		return
 	}
@@ -175,7 +176,7 @@ func startIdleMetricsTicker(ctx context.Context, runtime shared.RuntimeConfig, r
 	}
 }
 
-func sampleIdleMetrics(runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
+func sampleIdleMetrics(runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder) {
 	tenant := strings.TrimSpace(runtime.Context.Tenant)
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	if tenant == "" || environment == "" {
@@ -216,7 +217,7 @@ func secondsSinceLastTerminalInput(status model.EnvironmentIdleStatus, now time.
 }
 
 // startTrafficWindowTicker reports SSH plus MCP bytes over the last completed window.
-func startTrafficWindowTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
+func startTrafficWindowTicker(ctx context.Context, runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder) {
 	if recorder == nil {
 		return
 	}
@@ -233,7 +234,7 @@ func startTrafficWindowTicker(ctx context.Context, runtime shared.RuntimeConfig,
 	}
 }
 
-func sampleTrafficWindow(runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder, lastSSHBytes, lastMCPBytes int64) (int64, int64) {
+func sampleTrafficWindow(runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder, lastSSHBytes, lastMCPBytes int64) (int64, int64) {
 	tenant := strings.TrimSpace(runtime.Context.Tenant)
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	sshBytes := lastSSHBytes

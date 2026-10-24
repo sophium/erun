@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
 // runRuntimeConfigSync applies without a prompt; --sync-config is the confirmation.
-func runRuntimeConfigSync(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions, configHome string) error {
+func runRuntimeConfigSync(ctx core.Context, promptRunner prompt.PromptRunner, options doctorOptions, configHome string) error {
 	_ = promptRunner
 	_ = options
 	inspection, err := doctor.InspectRuntimeConfigSync(configHome, os.Getenv)

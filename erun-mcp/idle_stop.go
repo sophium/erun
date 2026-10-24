@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // IdleStopCancelInput selects the env whose armed idle-stop to cancel.
@@ -24,9 +24,9 @@ type IdleStopCancelResult struct {
 	Cleared     bool   `json:"cleared"`
 }
 
-func idleStopCancelTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
+func idleStopCancelTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, IdleStopCancelResult{}, err
 		}
@@ -54,9 +54,9 @@ type IdleStopHistoryResult struct {
 	Entries     []model.EnvironmentStopHistoryEntry `json:"entries"`
 }
 
-func idleStopHistoryTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
+func idleStopHistoryTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, IdleStopHistoryResult{}, err
 		}
@@ -87,9 +87,9 @@ type IdleStopRecordResult struct {
 	StoppedAt   time.Time `json:"stoppedAt"`
 }
 
-func idleStopRecordTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
+func idleStopRecordTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, IdleStopRecordResult{}, err
 		}

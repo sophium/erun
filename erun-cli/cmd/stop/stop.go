@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -40,10 +41,10 @@ func NewStopCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), s
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStopCommand(shared.CommandContext(cmd), args, target, resolveOpen, saveEnvConfig)
+			return runStopCommand(clicmd.CommandContext(cmd), args, target, resolveOpen, saveEnvConfig)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Stop a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Stop a specific environment")
 	return cmd
@@ -51,7 +52,7 @@ func NewStopCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), s
 
 // runStopCommand skips the cloud-context preflight, which would start a stopped machine just to stop a pod.
 func runStopCommand(ctx core.Context, args []string, overrides model.OpenParams, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
-	params, err := shared.ResolveOpenParams(ctx.Command, args, overrides)
+	params, err := opentarget.ResolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err
 	}

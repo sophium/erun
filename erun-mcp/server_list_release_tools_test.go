@@ -14,7 +14,8 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/build"
 	"github.com/sophium/erun/erun-mcp/tools/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/list"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
@@ -32,8 +33,8 @@ func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 			},
 		},
 	}
-	handler := cloud.CloudSetTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{Tenant: "frs", Environment: "dev"},
+	handler := cloud.CloudSetTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "frs", Environment: "dev"},
 		Store:   store,
 	}))
 
@@ -51,8 +52,8 @@ func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 
 func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	projectRoot := t.TempDir()
-	handler := list.ListTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := list.ListTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Tenant:      "tenant-a",
 			Environment: "dev",
 			RepoPath:    projectRoot,
@@ -127,8 +128,8 @@ func TestReleaseToolPreview(t *testing.T) {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
 
-	handler := build.ReleaseTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := build.ReleaseTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			RepoPath: projectRoot,
 		},
 	}))
@@ -209,8 +210,8 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 		t.Fatalf("write Dockerfile: %v", err)
 	}
 
-	handler := build.PushTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := build.PushTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    projectRoot,
 		},
@@ -228,8 +229,8 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 
 // push publishes a built version and never mints one (erun-mcp/AGENTS.md).
 func TestPushToolRequiresVersion(t *testing.T) {
-	handler := build.PushTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := build.PushTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    t.TempDir(),
 		},

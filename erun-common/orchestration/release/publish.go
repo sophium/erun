@@ -6,12 +6,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // RunPublish copies an already-built version's images from the FROM registry to each
 // TO registry, using deploy's spec resolution but never running helm.
-func RunPublish(ctx core.Context, store deploy.DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext deploy.DeployContextResolverFunc, now shared.NowFunc, target model.DeployTarget) error {
+func RunPublish(ctx core.Context, store deploy.DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) error {
 	specs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return err

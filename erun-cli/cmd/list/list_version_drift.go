@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
@@ -144,7 +144,7 @@ func writeVersionDriftReport(ctx core.Context, drift model.TenantVersionDrift) e
 	if _, err := fmt.Fprintf(ctx.Stdout, "Version drift for tenant %s:\n", drift.Tenant); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "max version", shared.ValueOrNone(drift.MaxVersion)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "max version", textfmt.ValueOrNone(drift.MaxVersion)); err != nil {
 		return err
 	}
 	if err := writeVersionDriftEnvironments(ctx, drift.Environments); err != nil {
@@ -183,17 +183,17 @@ func versionDriftVersionValue(env model.EnvironmentVersionStatus) string {
 	if env.VersionUnresolved {
 		return "undetermined"
 	}
-	return shared.QuotedValueOrNone(env.Version)
+	return textfmt.QuotedValueOrNone(env.Version)
 }
 
 func writeVersionDriftGate(ctx core.Context, drift model.TenantVersionDrift) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "  gate:"); err != nil {
 		return err
 	}
-	if err := shared.WriteIndentedValue(ctx, 4, "environment", drift.GateEnvironment); err != nil {
+	if err := textfmt.WriteIndentedValue(ctx, 4, "environment", drift.GateEnvironment); err != nil {
 		return err
 	}
-	if err := shared.WriteIndentedValue(ctx, 4, "version", shared.ValueOrNone(drift.GateVersion)); err != nil {
+	if err := textfmt.WriteIndentedValue(ctx, 4, "version", textfmt.ValueOrNone(drift.GateVersion)); err != nil {
 		return err
 	}
 	switch {
@@ -223,11 +223,11 @@ func writeControlPlaneVersionReport(ctx core.Context, drift model.ControlPlaneVe
 		return err
 	}
 	if drift.PublishedVersionError != "" {
-		if err := shared.WriteLabeledValue(ctx, "published version", "unresolved ("+drift.PublishedVersionError+")"); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, "published version", "unresolved ("+drift.PublishedVersionError+")"); err != nil {
 			return err
 		}
 	} else {
-		if err := shared.WriteLabeledValue(ctx, "published version", shared.ValueOrNone(drift.PublishedVersion)); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, "published version", textfmt.ValueOrNone(drift.PublishedVersion)); err != nil {
 			return err
 		}
 	}
@@ -266,15 +266,15 @@ func pluralCount(n int, singular, plural string) string {
 }
 
 func writeControlPlaneVersionEntry(ctx core.Context, plane model.ControlPlaneVersionStatus) error {
-	line := "  - " + plane.Alias + " api-url=" + shared.QuotedValueOrNone(plane.APIURL)
+	line := "  - " + plane.Alias + " api-url=" + textfmt.QuotedValueOrNone(plane.APIURL)
 	if !plane.Reachable {
-		line += " reachable=no reason=" + shared.QuotedValueOrNone(plane.UnreachableReason)
+		line += " reachable=no reason=" + textfmt.QuotedValueOrNone(plane.UnreachableReason)
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
 		return writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases)
 	}
-	line += " reachable=yes version=" + shared.QuotedValueOrNone(plane.Version)
+	line += " reachable=yes version=" + textfmt.QuotedValueOrNone(plane.Version)
 	switch {
 	case plane.Behind:
 		line += " [behind published -- roll it]"
@@ -325,7 +325,7 @@ func linkedVersionSurfaces(plane model.ControlPlaneVersionStatus) []linkedVersio
 
 func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []model.ControlPlaneAliasRef) error {
 	for _, alias := range aliases {
-		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, shared.QuotedValueOrNone(alias.APIURL)); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, textfmt.QuotedValueOrNone(alias.APIURL)); err != nil {
 			return err
 		}
 	}
@@ -333,15 +333,15 @@ func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []model.Contro
 }
 
 func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface model.VersionSurfaceStatus) error {
-	line := "    " + label + ": url=" + shared.QuotedValueOrNone(surface.URL)
+	line := "    " + label + ": url=" + textfmt.QuotedValueOrNone(surface.URL)
 	if !surface.Reachable {
-		line += " reachable=no reason=" + shared.QuotedValueOrNone(surface.UnreachableReason)
+		line += " reachable=no reason=" + textfmt.QuotedValueOrNone(surface.UnreachableReason)
 		_, err := fmt.Fprintln(ctx.Stdout, line)
 		return err
 	}
-	line += " reachable=yes version=" + shared.QuotedValueOrNone(surface.Version)
+	line += " reachable=yes version=" + textfmt.QuotedValueOrNone(surface.Version)
 	if surface.Reason != "" {
-		line += " reason=" + shared.QuotedValueOrNone(surface.Reason)
+		line += " reason=" + textfmt.QuotedValueOrNone(surface.Reason)
 	}
 	switch {
 	case surface.Behind:

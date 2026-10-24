@@ -13,7 +13,7 @@ import (
 	"github.com/adrg/xdg"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // Fixtures are report shapes observed on the environment that ran out of quota.
@@ -310,7 +310,7 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	assertContainsAll(t, "job output", string(output), info.ID, "lifetime bound", "report:")
 }
 
-func soleEnvironmentJob(t *testing.T, tenant, environment string) shared.EnvironmentJob {
+func soleEnvironmentJob(t *testing.T, tenant, environment string) jobstate.EnvironmentJob {
 	t.Helper()
 	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, time.Now())
 	if err != nil {

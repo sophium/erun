@@ -9,18 +9,20 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveCurrentDockerBuildSpecs(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) ([]shared.DockerBuildSpec, error) {
-	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+func ResolveCurrentDockerBuildSpecs(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) ([]dockerspec.DockerBuildSpec, error) {
+	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
 	if err != nil {
 		return nil, err
 	}
 
-	builds := make([]shared.DockerBuildSpec, 0, len(buildContexts))
+	builds := make([]dockerspec.DockerBuildSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		build, err := ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
@@ -39,14 +41,14 @@ func NewEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
 }
 
-func BuildEnvDisablesBuildScript(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) bool {
+func BuildEnvDisablesBuildScript(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) bool {
 	env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target)
 	return env != nil && env.DisableBuildScript
 }
 
 // RecommendBuildEnvIfMissing suggests a <tenant>-devops build environment; detection failures never block.
-func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) {
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) {
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
@@ -75,8 +77,8 @@ func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 
 // TraceConfiguredBuildPaths traces configured build path overrides as dry-run decisions,
 // and warns when the project config is gitignored.
-func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) {
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) {
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
@@ -108,19 +110,19 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot shared.ProjectF
 	}
 }
 
-func BuildExecutionSpecFromDockerBuilds(builds []shared.DockerBuildSpec) shared.BuildExecutionSpec {
-	return shared.BuildExecutionSpec{DockerBuilds: builds}
+func BuildExecutionSpecFromDockerBuilds(builds []dockerspec.DockerBuildSpec) dockerspec.BuildExecutionSpec {
+	return dockerspec.BuildExecutionSpec{DockerBuilds: builds}
 }
 
-func dockerBuildsByTag(builds []shared.DockerBuildSpec) map[string]shared.DockerBuildSpec {
-	buildsByTag := make(map[string]shared.DockerBuildSpec, len(builds))
+func dockerBuildsByTag(builds []dockerspec.DockerBuildSpec) map[string]dockerspec.DockerBuildSpec {
+	buildsByTag := make(map[string]dockerspec.DockerBuildSpec, len(builds))
 	for _, build := range builds {
 		buildsByTag[strings.TrimSpace(build.Image.Tag)] = build
 	}
 	return buildsByTag
 }
 
-func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, error) {
+func ResolveDockerBuildTarget(findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, error) {
 	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
 	if !target.Release {
 		return target, nil, nil
@@ -133,7 +135,7 @@ func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target m
 	}
 
 	// A zero-value Logger drops traces.
-	releaseSpec, err := shared.ResolveReleaseSpec(core.Context{}, findProjectRoot, shared.ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
+	releaseSpec, err := ResolveReleaseSpec(core.Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return model.DockerCommandTarget{}, nil, err
 	}
@@ -141,6 +143,6 @@ func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target m
 	target.Release = false
 	target.VersionOverride = releaseSpec.Version
 	// A release builds every platform, regardless of any docker.platforms pin.
-	target.Platforms = slices.Clone(shared.MultiPlatformDockerBuilds)
+	target.Platforms = slices.Clone(dockerspec.MultiPlatformDockerBuilds)
 	return target, &releaseSpec, nil
 }

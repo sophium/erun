@@ -10,15 +10,18 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type BuildDeployStore interface {
 	DeployStore
-	shared.DockerStore
+	projectseam.DockerStore
 }
 
-func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
+func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
 	result, err := resolveDeployTargetOpenResult(command, scopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return configpkg.OpenResult{}, err
@@ -29,7 +32,7 @@ func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeploySt
 	return result, nil
 }
 
-func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
+func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	if strings.TrimSpace(target.Tenant) != "" || strings.TrimSpace(target.Environment) != "" || strings.TrimSpace(target.RepoPath) != "" {
@@ -37,7 +40,7 @@ func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, stor
 			return configpkg.OpenResult{}, fmt.Errorf("tenant and environment overrides are required together")
 		}
 
-		result, err := shared.ResolveOpenWithFinder(store, findProjectRoot, model.OpenParams{
+		result, err := opentarget.ResolveOpenWithFinder(store, findProjectRoot, model.OpenParams{
 			Tenant:      strings.TrimSpace(target.Tenant),
 			Environment: strings.TrimSpace(target.Environment),
 		})
@@ -50,7 +53,7 @@ func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, stor
 		return result, nil
 	}
 
-	return shared.ResolveOpenWithFinder(store, findProjectRoot, model.OpenParams{
+	return opentarget.ResolveOpenWithFinder(store, findProjectRoot, model.OpenParams{
 		UseDefaultTenant:          true,
 		UseDefaultEnvironment:     true,
 		Command:                   command,
@@ -69,7 +72,7 @@ func refuseHostEnvironmentOperation(operation string, target configpkg.OpenResul
 
 // ResolveDeployTargetScope names the target for diagnostics before spec resolution;
 // it never fails, degrading to whatever the target already carried.
-func ResolveDeployTargetScope(store DeployStore, findProjectRoot shared.ProjectFinderFunc, target model.DeployTarget) (string, string) {
+func ResolveDeployTargetScope(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DeployTarget) (string, string) {
 	tenant := strings.TrimSpace(target.Tenant)
 	environment := strings.TrimSpace(target.Environment)
 	if tenant != "" && environment != "" {
@@ -82,7 +85,7 @@ func ResolveDeployTargetScope(store DeployStore, findProjectRoot shared.ProjectF
 	return strings.TrimSpace(resolved.Tenant), strings.TrimSpace(resolved.Environment)
 }
 
-func normalizeDeployDependencies(store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc) (DeployStore, shared.ProjectFinderFunc, shared.BuildContextResolverFunc, DeployContextResolverFunc, shared.NowFunc) {
+func normalizeDeployDependencies(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc) (DeployStore, projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc, DeployContextResolverFunc, projectseam.NowFunc) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -90,7 +93,7 @@ func normalizeDeployDependencies(store DeployStore, findProjectRoot shared.Proje
 		findProjectRoot = configpkg.FindProjectRoot
 	}
 	if resolveDockerBuildContext == nil {
-		resolveDockerBuildContext = shared.ResolveDockerBuildContext
+		resolveDockerBuildContext = dockerspec.ResolveDockerBuildContext
 	}
 	if resolveKubernetesDeployContext == nil {
 		resolveKubernetesDeployContext = ResolveKubernetesDeployContext
@@ -101,7 +104,7 @@ func normalizeDeployDependencies(store DeployStore, findProjectRoot shared.Proje
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
 }
 
-func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc) (BuildDeployStore, shared.ProjectFinderFunc, shared.BuildContextResolverFunc, DeployContextResolverFunc, shared.NowFunc) {
+func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc) (BuildDeployStore, projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc, DeployContextResolverFunc, projectseam.NowFunc) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -109,7 +112,7 @@ func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot sh
 		findProjectRoot = configpkg.FindProjectRoot
 	}
 	if resolveDockerBuildContext == nil {
-		resolveDockerBuildContext = shared.ResolveDockerBuildContext
+		resolveDockerBuildContext = dockerspec.ResolveDockerBuildContext
 	}
 	if resolveKubernetesDeployContext == nil {
 		resolveKubernetesDeployContext = ResolveKubernetesDeployContext
@@ -122,7 +125,7 @@ func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot sh
 
 // freezeNow pins now to one instant so every snapshot version minted in one
 // deploy matches the persisted RuntimeVersion. It is idempotent.
-func freezeNow(now shared.NowFunc) shared.NowFunc {
+func freezeNow(now projectseam.NowFunc) projectseam.NowFunc {
 	if now == nil {
 		now = time.Now
 	}
@@ -130,8 +133,8 @@ func freezeNow(now shared.NowFunc) shared.NowFunc {
 	return func() time.Time { return frozen }
 }
 
-func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return model.DeployTarget{}, err
 	}
@@ -139,7 +142,7 @@ func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot 
 		return model.DeployTarget{}, fmt.Errorf("cannot determine project root for Helm deployment")
 	}
 
-	environment, err := shared.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
+	environment, err := dockerbuild.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
 	if err != nil {
 		return model.DeployTarget{}, err
 	}
@@ -171,7 +174,7 @@ func deployResetsDatabase(version string) bool {
 	return strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
 
-func resolveDeployContextForTarget(findProjectRoot shared.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, target configpkg.OpenResult, componentName string) (model.KubernetesDeployContext, error) {
+func resolveDeployContextForTarget(findProjectRoot projectseam.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, target configpkg.OpenResult, componentName string) (model.KubernetesDeployContext, error) {
 	componentName = strings.TrimSpace(componentName)
 	if componentName == "" {
 		return resolveDeployContext(findProjectRoot, resolveKubernetesDeployContext, componentName)
@@ -189,7 +192,7 @@ func resolveDeployContextForTarget(findProjectRoot shared.ProjectFinderFunc, res
 	}, nil
 }
 
-func resolveDeployContext(findProjectRoot shared.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, componentName string) (model.KubernetesDeployContext, error) {
+func resolveDeployContext(findProjectRoot projectseam.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, componentName string) (model.KubernetesDeployContext, error) {
 	componentName = strings.TrimSpace(componentName)
 	if componentName == "" {
 		context, err := resolveKubernetesDeployContext()
@@ -207,7 +210,7 @@ func resolveDeployContext(findProjectRoot shared.ProjectFinderFunc, resolveKuber
 		return context, nil
 	}
 
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 	if err != nil {
 		return model.KubernetesDeployContext{}, err
 	}
@@ -287,7 +290,7 @@ func loadDefaultTenant(store DeployStore) (string, error) {
 		return "", err
 	}
 	if toolConfig.DefaultTenant == "" {
-		return "", shared.ErrDefaultTenantNotConfigured
+		return "", opentarget.ErrDefaultTenantNotConfigured
 	}
 	return toolConfig.DefaultTenant, nil
 }

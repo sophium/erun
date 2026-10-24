@@ -3,14 +3,14 @@ package build
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 func TestParseDFDiskBytes(t *testing.T) {
 	t.Run("standard one-line output", func(t *testing.T) {
 		output := "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
 			"/dev/sda1        102400000 51200000  41943040      56% /var/lib/docker\n"
-		free, total, ok := shared.ParseDFDiskBytes(output)
+		free, total, ok := diskheadroom.ParseDFDiskBytes(output)
 		if !ok {
 			t.Fatal("expected ok=true")
 		}
@@ -26,7 +26,7 @@ func TestParseDFDiskBytes(t *testing.T) {
 		output := "Filesystem                                                          1024-blocks     Used Available Capacity Mounted on\n" +
 			"a-very-long-overlay-filesystem-identifier-that-wraps-the-data-row\n" +
 			"                                                                       102400000 51200000  20971520      51% /var/lib/docker\n"
-		free, total, ok := shared.ParseDFDiskBytes(output)
+		free, total, ok := diskheadroom.ParseDFDiskBytes(output)
 		if !ok {
 			t.Fatal("expected ok=true")
 		}
@@ -40,14 +40,14 @@ func TestParseDFDiskBytes(t *testing.T) {
 	})
 
 	t.Run("empty output is inconclusive", func(t *testing.T) {
-		if _, _, ok := shared.ParseDFDiskBytes(""); ok {
+		if _, _, ok := diskheadroom.ParseDFDiskBytes(""); ok {
 			t.Fatal("expected ok=false for empty output")
 		}
 	})
 
 	t.Run("malformed data row is inconclusive", func(t *testing.T) {
 		output := "Filesystem     1024-blocks     Used Available Capacity Mounted on\nnot enough fields\n"
-		if _, _, ok := shared.ParseDFDiskBytes(output); ok {
+		if _, _, ok := diskheadroom.ParseDFDiskBytes(output); ok {
 			t.Fatal("expected ok=false for a data row with too few fields")
 		}
 	})
@@ -58,57 +58,57 @@ func TestResolveMinDiskHeadroomBytes(t *testing.T) {
 	const largeDisk uint64 = 435 << 30 // 435 GiB -> 43.5 GiB proportional
 
 	t.Run("defaults to the absolute floor when total is unknown", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
-		if got := shared.ResolveMinDiskHeadroomBytes(0); got != shared.ReleaseMinDiskHeadroomBytes {
-			t.Fatalf("got %d, want default %d", got, shared.ReleaseMinDiskHeadroomBytes)
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
+		if got := diskheadroom.ResolveMinDiskHeadroomBytes(0); got != diskheadroom.ReleaseMinDiskHeadroomBytes {
+			t.Fatalf("got %d, want default %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
 		}
 	})
 
 	t.Run("keeps the absolute floor when it exceeds the proportional one", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
-		if got := shared.ResolveMinDiskHeadroomBytes(smallDisk); got != shared.ReleaseMinDiskHeadroomBytes {
-			t.Fatalf("got %d, want the absolute floor %d", got, shared.ReleaseMinDiskHeadroomBytes)
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
+		if got := diskheadroom.ResolveMinDiskHeadroomBytes(smallDisk); got != diskheadroom.ReleaseMinDiskHeadroomBytes {
+			t.Fatalf("got %d, want the absolute floor %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
 		}
 	})
 
 	t.Run("scales past the absolute floor on a large disk", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
-		want := largeDisk / 100 * shared.MinDiskHeadroomPercent
-		got := shared.ResolveMinDiskHeadroomBytes(largeDisk)
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
+		want := largeDisk / 100 * diskheadroom.MinDiskHeadroomPercent
+		got := diskheadroom.ResolveMinDiskHeadroomBytes(largeDisk)
 		if got != want {
 			t.Fatalf("got %d, want proportional %d", got, want)
 		}
-		if got <= shared.ReleaseMinDiskHeadroomBytes {
-			t.Fatalf("proportional floor %d should exceed the absolute floor %d", got, shared.ReleaseMinDiskHeadroomBytes)
+		if got <= diskheadroom.ReleaseMinDiskHeadroomBytes {
+			t.Fatalf("proportional floor %d should exceed the absolute floor %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
 		}
 	})
 
 	// kubelet's nodefs evictionHard defaults to 5%; a floor below it prunes only after eviction.
 	t.Run("clears kubelet's 5 percent eviction threshold", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
 		evictionThreshold := largeDisk / 100 * 5
-		if got := shared.ResolveMinDiskHeadroomBytes(largeDisk); got <= evictionThreshold {
+		if got := diskheadroom.ResolveMinDiskHeadroomBytes(largeDisk); got <= evictionThreshold {
 			t.Fatalf("floor %d must sit above the eviction threshold %d", got, evictionThreshold)
 		}
 	})
 
 	t.Run("honors a valid override outright", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "1073741824")
-		if got := shared.ResolveMinDiskHeadroomBytes(largeDisk); got != 1073741824 {
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "1073741824")
+		if got := diskheadroom.ResolveMinDiskHeadroomBytes(largeDisk); got != 1073741824 {
 			t.Fatalf("got %d, want 1073741824", got)
 		}
 	})
 
 	t.Run("falls back to the resolved floor on a malformed override", func(t *testing.T) {
-		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "not-a-number")
-		if got := shared.ResolveMinDiskHeadroomBytes(0); got != shared.ReleaseMinDiskHeadroomBytes {
-			t.Fatalf("got %d, want default %d", got, shared.ReleaseMinDiskHeadroomBytes)
+		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "not-a-number")
+		if got := diskheadroom.ResolveMinDiskHeadroomBytes(0); got != diskheadroom.ReleaseMinDiskHeadroomBytes {
+			t.Fatalf("got %d, want default %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
 		}
 	})
 }
 
 func TestFormatGiB(t *testing.T) {
-	if got, want := shared.FormatGiB(20<<30), "20.0 GiB"; got != want {
+	if got, want := diskheadroom.FormatGiB(20<<30), "20.0 GiB"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
@@ -137,7 +137,7 @@ func TestParseBuildxDuReclaimable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := shared.ParseBuildxDuReclaimable(tc.in)
+			got, ok := diskheadroom.ParseBuildxDuReclaimable(tc.in)
 			if ok != tc.ok {
 				t.Fatalf("ok = %v, want %v", ok, tc.ok)
 			}
@@ -164,7 +164,7 @@ func TestParseDockerSize(t *testing.T) {
 		{"not-a-size", 0, false},
 	}
 	for _, tc := range cases {
-		got, ok := shared.ParseDockerSize(tc.in)
+		got, ok := diskheadroom.ParseDockerSize(tc.in)
 		if ok != tc.ok {
 			t.Errorf("parseDockerSize(%q) ok = %v, want %v", tc.in, ok, tc.ok)
 			continue

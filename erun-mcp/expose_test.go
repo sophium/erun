@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-mcp/tools/expose"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // exposePreviewRuntime passes servicesZone/platformNamespace, so no project is needed.
-func exposePreviewRuntime(t *testing.T) shared.RuntimeConfig {
+func exposePreviewRuntime(t *testing.T) runtimecfg.RuntimeConfig {
 	t.Helper()
 	return servicesTestRuntime(t, "frs", "dev")
 }
 
-func exposePreviewTrace(t *testing.T, runtime shared.RuntimeConfig, input expose.ExposeInput) string {
+func exposePreviewTrace(t *testing.T, runtime runtimecfg.RuntimeConfig, input expose.ExposeInput) string {
 	t.Helper()
 	input.Preview = true
 	_, output, err := expose.ExposeTool(runtime)(context.Background(), nil, input)

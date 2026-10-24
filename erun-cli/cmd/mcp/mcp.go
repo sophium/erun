@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -31,7 +32,7 @@ type mcpLaunchContext struct {
 	Namespace         string
 }
 
-func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchMCP shared.MCPLauncher) *cobra.Command {
+func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchMCP MCPLauncher) *cobra.Command {
 	host := defaultMCPHost
 	port := defaultMCPPort
 	path := defaultMCPPath
@@ -41,8 +42,8 @@ func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), ru
 		Short: "Run ERun as an MCP server over HTTP",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
-			result, _, err := shared.ResolveOpenWithInitRetry(ctx, args, shared.ShouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
+			ctx := clicmd.CommandContext(cmd)
+			result, _, err := opentarget.ResolveOpenWithInitRetry(ctx, args, opentarget.ShouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
 			if err != nil {
 				return err
 			}
@@ -68,8 +69,8 @@ func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), ru
 		},
 	}
 
-	shared.AddCommands(cmd, newMCPCallCmd(resolveOpen), newMCPToolsCmd(resolveOpen), newMCPTokenCmd(resolveOpen), newMCPProxyCmd(resolveOpen))
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddCommands(cmd, newMCPCallCmd(resolveOpen), newMCPToolsCmd(resolveOpen), newMCPTokenCmd(resolveOpen), newMCPProxyCmd(resolveOpen))
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&host, "host", defaultMCPHost, "Host interface to bind the MCP HTTP server to")
 	cmd.Flags().IntVar(&port, "port", defaultMCPPort, "Port to bind the MCP HTTP server to")
 	cmd.Flags().StringVar(&path, "path", defaultMCPPath, "HTTP path to serve the MCP endpoint from")

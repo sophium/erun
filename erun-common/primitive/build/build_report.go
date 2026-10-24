@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 )
 
 // Build reporting is best-effort: most environments have no platform alias, and a build must
@@ -73,7 +73,7 @@ func resolveBuildReportCommitID(ctx core.Context, projectRoot string) (string, e
 	if strings.TrimSpace(projectRoot) == "" {
 		return "", nil
 	}
-	commitID, _, err := shared.GitResolvedRef(ctx, projectRoot, "HEAD")
+	commitID, _, err := gitref.GitResolvedRef(ctx, projectRoot, "HEAD")
 	return commitID, err
 }
 

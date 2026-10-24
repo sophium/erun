@@ -12,7 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/buildinfo"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type InitInput struct {
@@ -47,46 +50,46 @@ type InitInput struct {
 	Components               *[]string `json:"components,omitempty" jsonschema:"optional saved default deploy component selection for this environment — what the deploy tool rolls out with no components override of its own. Omit to leave a saved selection untouched; pass an empty array to clear one and return the environment to its repo k8s.deployments plan"`
 	Preview                  bool      `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity                int       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func InitTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, InitInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input InitInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
+func InitTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, InitInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input InitInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
 		execute, err := initToolExecute(runtime, input)
 		if err != nil {
-			return nil, shared.JobEnvelopeOutput{}, err
+			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
-		envelope, err := shared.RunJobEnvelope(runtime, "init", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "init", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
 
 // initToolExecute resolves the target synchronously so a bad input is refused
 // before an async job starts.
-func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, io.Writer) (shared.CommandOutput, error), error) {
-	workDir, err := shared.RuntimeRepoPath(runtime.Context)
+func initToolExecute(runtime runtimecfg.RuntimeConfig, input InitInput) (func(bool, io.Writer) (toolio.CommandOutput, error), error) {
+	workDir, err := toolio.RuntimeRepoPath(runtime.Context)
 	if err != nil {
 		return nil, err
 	}
-	tenant, environment, err := shared.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
+	tenant, environment, err := runtimecfg.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
 	if err != nil {
 		return nil, err
 	}
 
-	return func(preview bool, log io.Writer) (shared.CommandOutput, error) {
+	return func(preview bool, log io.Writer) (toolio.CommandOutput, error) {
 		traceOutput := new(bytes.Buffer)
-		traceSink := shared.MirrorToJobLog(traceOutput, log)
-		ctx := shared.RuntimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
+		traceSink := toolio.MirrorToJobLog(traceOutput, log)
+		ctx := toolio.RuntimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
 		ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
 
 		params := open.BootstrapInitParams{
 			Tenant:                   tenant,
 			SelectedTenant:           strings.TrimSpace(input.SelectedTenant),
 			InitializeCurrentProject: input.InitializeCurrentProject,
-			ProjectRoot:              shared.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
+			ProjectRoot:              toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
 			Environment:              environment,
 			RuntimeVersion:           strings.TrimSpace(input.Version),
-			RuntimeVersionDefault:    shared.CurrentBuildInfo().Version,
+			RuntimeVersionDefault:    buildinfo.CurrentBuildInfo().Version,
 			RuntimePod: model.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),
 				Memory: strings.TrimSpace(input.RuntimeMemory),
@@ -97,7 +100,7 @@ func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, 
 			},
 			NoGit:                   input.NoGit,
 			Bootstrap:               input.Bootstrap,
-			KubernetesContext:       shared.FirstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
+			KubernetesContext:       toolio.FirstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
 			ContainerRegistry:       strings.TrimSpace(input.ContainerRegistry),
 			ConfirmTenant:           input.ConfirmTenant,
 			ConfirmEnvironment:      input.ConfirmEnvironment,
@@ -140,20 +143,20 @@ func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, 
 		}, params)
 		if err != nil {
 			if interaction, ok := setup.AsBootstrapInitInteraction(err); ok {
-				return shared.CommandOutput{
+				return toolio.CommandOutput{
 					Executed:         false,
 					WorkingDirectory: workDir,
-					Trace:            shared.NormalizeTraceLines(traceOutput.String()),
+					Trace:            toolio.NormalizeTraceLines(traceOutput.String()),
 					Interaction:      &interaction,
 				}, nil
 			}
-			return shared.CommandOutput{}, err
+			return toolio.CommandOutput{}, err
 		}
 
-		return shared.CommandOutput{
+		return toolio.CommandOutput{
 			Executed:         !ctx.DryRun,
 			WorkingDirectory: workDir,
-			Trace:            shared.NormalizeTraceLines(traceOutput.String()),
+			Trace:            toolio.NormalizeTraceLines(traceOutput.String()),
 		}, nil
 	}, nil
 }

@@ -6,19 +6,20 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
 // NewPinCmd re-pins every recorded erun version for an environment. It only edits
 // sources; terraform apply and deploy stay separate steps.
-func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
 	target := model.OpenParams{}
@@ -38,7 +39,7 @@ func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(
 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
@@ -46,7 +47,7 @@ func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(
 			if list {
 				return runPinListCommand(cmd.Context(), ctx)
 			}
-			params, err := shared.ResolveOpenParams(cmd.CommandPath(), args, target)
+			params, err := opentarget.ResolveOpenParams(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -61,7 +62,7 @@ func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(
 			}, saveEnvConfig, listEnvConfigs, findProjectRoot)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Re-pin a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Re-pin a specific environment")
 	cmd.Flags().StringVar(&version, "version", "", "Pin to this erun version")
@@ -101,7 +102,7 @@ func orNone(value string) string {
 	return value
 }
 
-func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) error {
+func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectseam.ProjectFinderFunc) error {
 	projectRoot, viaCwdFallback, err := resolvePinProjectRoot(result, listEnvConfigs, findProjectRoot)
 	if err != nil {
 		return err
@@ -210,7 +211,7 @@ func resolvePinRegistryVersions(ctx context.Context) (model.RuntimeRegistryVersi
 
 // resolvePinProjectRoot prefers the env's own repo, then a sibling env of the same tenant,
 // then the cwd; viaCwdFallback reports the last case so the plan can say it is unverified.
-func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) (string, bool, error) {
+func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectseam.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
 		return path, false, nil
 	}

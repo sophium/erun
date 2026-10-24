@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +23,7 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 // writeRuntimeBootConfig writes ResolveInjectedRuntimeConfig's projection, the one
 // `erun doctor --sync-config` checks, so a booted pod is in sync by construction.
 func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
-	injected, ok := shared.ResolveInjectedRuntimeConfig(boot.env)
+	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(boot.env)
 	if !ok {
 		return nil
 	}
@@ -38,12 +38,12 @@ func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 	if err != nil {
 		env = configpkg.EnvConfig{}
 	}
-	env = shared.OverlayInjectedEnvConfig(env, injected.Env)
+	env = cloudconfig.OverlayInjectedEnvConfig(env, injected.Env)
 	env.LocalRepoPath = boot.repoDir()
 	return writeRuntimeBootYAML(configpkg.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
 }
 
-func writeRuntimeBootRootConfig(configHome string, injected shared.InjectedRuntimeConfig) error {
+func writeRuntimeBootRootConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
 	root, _, err := configpkg.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = configpkg.ERunConfig{}
@@ -58,7 +58,7 @@ func writeRuntimeBootRootConfig(configHome string, injected shared.InjectedRunti
 	return writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(configHome), root)
 }
 
-func writeRuntimeBootTenantConfig(configHome string, injected shared.InjectedRuntimeConfig) error {
+func writeRuntimeBootTenantConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
 	path := filepath.Join(configHome, configpkg.ConfigRoot, injected.Tenant, configpkg.ConfigFile)
 	tenant := model.TenantConfig{}
 	if data, err := os.ReadFile(path); err == nil {

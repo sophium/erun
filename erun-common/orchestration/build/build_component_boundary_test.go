@@ -9,7 +9,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 const unconsumedTestStageDockerfileContent = "" +
@@ -32,9 +33,9 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 	return projectRoot, componentDir, suiteDir
 }
 
-func boundaryResolvers(projectRoot, cwd string) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
+func boundaryResolvers(projectRoot, cwd string) (projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
-	resolveBuildContext := func() (model.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
+	resolveBuildContext := func() (model.DockerBuildContext, error) { return dockerspec.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext
 }
 
@@ -70,7 +71,7 @@ func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected erun build to refuse an e2e suite's Dockerfile")
 	}
-	if errors.Is(err, shared.ErrDockerBuildContextNotFound) {
+	if errors.Is(err, dockerspec.ErrDockerBuildContextNotFound) {
 		t.Fatalf("an e2e suite must be refused with a pointer, not read as no build context: %v", err)
 	}
 	if !strings.Contains(err.Error(), "erun e2e --component console") {

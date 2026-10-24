@@ -122,7 +122,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/cmd/shared.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd/shared.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd/shared.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
+    go build -ldflags "-X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 
 # Target-arch Go for in-pod builds; not pinned to BUILDPLATFORM since it ships and runs nothing here.
 FROM golang:1.26.0 AS goroot

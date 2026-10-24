@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 // Literal names rather than constants: if the rendered variable moves, these
@@ -199,34 +199,34 @@ func TestBuildCacheRetentionDoesNotBoundToANodeShareOfNoBytes(t *testing.T) {
 		volumeBytes = volumeGi << 30
 		cacheBytes  = 45 << 30
 	)
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(floorBytes, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(floorBytes, 10))
 	t.Setenv(nodeBytesVar, strconv.FormatUint(nodeBytes, 10))
 	t.Setenv(coTenantsVar, strconv.FormatUint(coTenants, 10))
 
 	var prunedTo uint64
 	logs := &strings.Builder{}
-	shared.EnsureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
+	diskheadroom.EnsureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
 		func() (uint64, error) { return volumeBytes, nil },
 		func(time.Duration) (uint64, error) { return cacheBytes, nil },
 		func(ceiling uint64, _ time.Duration) error { prunedTo = ceiling; return nil })
 
-	want := shared.ResolveBuildCacheBounds(volumeBytes).Ceiling
+	want := diskheadroom.ResolveBuildCacheBounds(volumeBytes).Ceiling
 	if prunedTo != want {
 		t.Fatalf("a node share with a ceiling of no bytes was reclaimed to %s, want the volume ceiling %s; output was %q",
-			shared.FormatGiB(prunedTo), shared.FormatGiB(want), logs.String())
+			diskheadroom.FormatGiB(prunedTo), diskheadroom.FormatGiB(want), logs.String())
 	}
 }
 
 // nodeReserveGi uses the disk-headroom preflight's own floor.
 func nodeReserveGi(nodeGi uint64) uint64 {
-	return shared.ResolveMinDiskHeadroomBytes(nodeGi<<30) >> 30
+	return diskheadroom.ResolveMinDiskHeadroomBytes(nodeGi<<30) >> 30
 }
 
 func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	t.Helper()
 
 	// Clear the floor override so the machine's environment cannot leak in.
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
 	t.Setenv(nodeBytesVar, "")
 	t.Setenv(coTenantsVar, "")
 	if tc.nodeGi > 0 {
@@ -245,14 +245,14 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	logs := &strings.Builder{}
 	// Capture traces: a rejected node budget is reported only as a trace.
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(logs)}
-	shared.EnsureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy,
+	diskheadroom.EnsureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy,
 		func() (uint64, error) { return tc.volumeGi << 30, nil },
 		func(time.Duration) (uint64, error) { return tc.cacheGi << 30, nil },
 		prune)
 
 	if prunedTo != tc.wantPrunedTo {
 		t.Fatalf("the cache was reclaimed to %s, want the ceiling %s; output was %q",
-			shared.FormatGiB(prunedTo), shared.FormatGiB(tc.wantPrunedTo), logs.String())
+			diskheadroom.FormatGiB(prunedTo), diskheadroom.FormatGiB(tc.wantPrunedTo), logs.String())
 	}
 	if tc.wantPrunedTo == 0 {
 		return
@@ -274,6 +274,6 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	budget := (tc.nodeGi - reserve) << 30
 	if spent := prunedTo * tc.coTenants; spent > budget {
 		t.Fatalf("the %d environments' ceilings sum to %s, past the %s a %d GiB node has above its %d GiB reserve: each environment is inside its own bound and the node fills anyway",
-			tc.coTenants, shared.FormatGiB(spent), shared.FormatGiB(budget), tc.nodeGi, reserve)
+			tc.coTenants, diskheadroom.FormatGiB(spent), diskheadroom.FormatGiB(budget), tc.nodeGi, reserve)
 	}
 }

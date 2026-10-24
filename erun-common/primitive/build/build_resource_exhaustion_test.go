@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 var errBoom = errors.New("boom")
 
 var errExitedNormally = errors.New("exit status 2")
 
-func fakePodJSONRunner(stdout string, err error) shared.OpenKubectlRunnerFunc {
+func fakePodJSONRunner(stdout string, err error) opentarget.OpenKubectlRunnerFunc {
 	return func(args []string, out, errOut io.Writer) error {
 		if err != nil {
 			return err

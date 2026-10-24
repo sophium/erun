@@ -4,16 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var backendService string
 	var servicePort int
@@ -61,7 +62,7 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 		Args:         cobra.ExactArgs(3),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExposeCommand(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
+			return runExposeCommand(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
 				tenant: args[0], environment: args[1], service: args[2],
 				targetIP: targetIP, backendService: backendService, servicePort: servicePort, noTLS: noTLS, ingressClass: ingressClass, tlsSecret: tlsSecret,
 				skipIfUnconfigured: skipIfUnconfigured, servicesZone: servicesZone, platformNamespace: platformNamespace,
@@ -70,7 +71,7 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 			})
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&targetIP, "ip", "", "Ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)")
 	cmd.Flags().StringVar(&backendService, "backend-service", "", "In-namespace Service the Ingress routes to when it is not <tenant>-<service>, e.g. a repo-native chart that names its own Service; erun services lists the candidates")
 	cmd.Flags().IntVar(&servicePort, "port", 0, "Service port to route to (default 80)")
@@ -102,7 +103,7 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func findExposeProjectRoot(findProjectRoot sharedpkg.ProjectFinderFunc) (string, error) {
+func findExposeProjectRoot(findProjectRoot projectseam.ProjectFinderFunc) (string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}
@@ -110,7 +111,7 @@ func findExposeProjectRoot(findProjectRoot sharedpkg.ProjectFinderFunc) (string,
 	return root, err
 }
 
-func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// The zone/namespace overrides let a caller with no checkout (the hosted deploy Job) run expose.

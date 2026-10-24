@@ -13,10 +13,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/build"
 	"github.com/sophium/erun/erun-mcp/tools/initenv"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
@@ -30,8 +31,8 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	}
 
 	var called bool
-	handler := build.BuildTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := build.BuildTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
@@ -45,7 +46,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 			}
 			return nil
 		},
-		BuildDockerImage: func(shared.DockerBuildSpec, io.Writer, io.Writer) error {
+		BuildDockerImage: func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
 			t.Fatal("unexpected docker build")
 			return nil
 		},
@@ -88,9 +89,9 @@ func newComponentBuildFixture(t *testing.T) string {
 func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	projectRoot := newComponentBuildFixture(t)
 
-	var captured *shared.DockerBuildSpec
-	handler := build.BuildTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	var captured *dockerspec.DockerBuildSpec
+	handler := build.BuildTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
@@ -98,7 +99,7 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 			t.Fatal("unexpected build script call: --component must resolve the docker context directly")
 			return nil
 		},
-		BuildDockerImage: func(spec shared.DockerBuildSpec, stdout, stderr io.Writer) error {
+		BuildDockerImage: func(spec dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 			captured = &spec
 			return nil
 		},
@@ -145,12 +146,12 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 		t.Fatalf("write project config: %v", err)
 	}
 
-	handler := build.BuildTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := build.BuildTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
-		BuildDockerImage: func(shared.DockerBuildSpec, io.Writer, io.Writer) error {
+		BuildDockerImage: func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
 			t.Fatal("unexpected docker build: resolution must fail before execution")
 			return nil
 		},
@@ -169,8 +170,8 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	projectRoot := t.TempDir()
 
-	handler := initenv.InitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{
+	handler := initenv.InitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{
 			Tenant:   "tenant-a",
 			RepoPath: projectRoot,
 		},
@@ -234,8 +235,8 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	stubGHCRDockerCredential(t)
 	// Confirm the runtime chart as published without reaching a registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
-	handler := initenv.InitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{},
+	handler := initenv.InitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{},
 		Store:   initInteractionStore{},
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
@@ -275,8 +276,8 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	// Confirm the runtime chart as published without reaching a registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	var deployedVersion string
-	handler := initenv.InitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
-		Context: sharedpkg.RuntimeContext{},
+	handler := initenv.InitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{},
 		Store:   initInteractionStore{},
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil

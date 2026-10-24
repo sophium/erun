@@ -21,7 +21,12 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/attach"
 	"github.com/sophium/erun/erun-mcp/tools/environment"
 	"github.com/sophium/erun/erun-mcp/tools/list"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/activityrec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/registrar"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
 	"github.com/sophium/erun/erun-mcp/tools/version"
 	"github.com/sophium/erun/erun-mcp/tools/whip"
 )
@@ -40,7 +45,7 @@ type HTTPConfig struct {
 
 // RunHTTP serves the MCP edge and the metrics listener until ctx is cancelled;
 // either one failing cancels the other.
-func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime shared.RuntimeConfig) error {
+func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
 	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
 		return err
@@ -70,7 +75,7 @@ func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsC
 	return second
 }
 
-func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) error {
+func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder) error {
 	server := &http.Server{
 		Addr:              listenAddress(cfg),
 		Handler:           newHTTPHandler(info, cfg, runtime, recorder),
@@ -92,11 +97,11 @@ func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runti
 	return err
 }
 
-func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) http.Handler {
+func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.MetricsRecorder) http.Handler {
 	cfg, _ = normalizeHTTPConfig(cfg)
 
 	// One server per capability set, so tools/list shows exactly what the caller may call.
-	servers := newCapabilityServerCache(func(identity shared.AuthIdentity) *mcp.Server {
+	servers := newCapabilityServerCache(func(identity callerid.AuthIdentity) *mcp.Server {
 		return newServer(info, runtime, identity, recorder)
 	})
 	streamable := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
@@ -106,11 +111,11 @@ func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime shared.Runtime
 	})
 	handler := withSessionKeepAlive(streamable, cfg.Path, mcpSessionTimeout)
 
-	authCfg := shared.McpAuthConfigFromEnv()
+	authCfg := edgeauth.McpAuthConfigFromEnv()
 	mux := http.NewServeMux()
 	// CORS sits outside auth because a preflight carries no Authorization header;
 	// traffic metering sits inside auth so rejected calls still count.
-	mux.Handle(cfg.Path, corsMiddleware(shared.AuthHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
+	mux.Handle(cfg.Path, corsMiddleware(edgeauth.AuthHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
 	// Not metered: byteCountingResponseWriter does not implement http.Hijacker,
 	// which the WebSocket upgrade needs.
 	attach.RegisterAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
@@ -146,15 +151,15 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func activityHTTPMiddleware(runtime shared.RuntimeConfig, next http.Handler) http.Handler {
+func activityHTTPMiddleware(runtime runtimecfg.RuntimeConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get(mcppkg.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
 			return
 		}
-		shared.RecordRuntimeActivity(runtime, config.ActivityKindMCP, false)
+		activityrec.RecordRuntimeActivity(runtime, config.ActivityKindMCP, false)
 		if requestLooksLikeCodex(req) {
-			shared.RecordRuntimeActivity(runtime, config.ActivityKindCodex, false)
+			activityrec.RecordRuntimeActivity(runtime, config.ActivityKindCodex, false)
 		}
 		next.ServeHTTP(w, req)
 	})
@@ -208,7 +213,7 @@ var mcpSessionTimeout = 5 * time.Minute
 // discard them.
 var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shared.AuthIdentity, metrics *shared.MetricsRecorder) *mcp.Server {
+func newServer(info model.BuildInfo, runtime runtimecfg.RuntimeConfig, identity callerid.AuthIdentity, metrics *toolmetrics.MetricsRecorder) *mcp.Server {
 	info = core.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
 
@@ -217,7 +222,7 @@ func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shar
 		Version: info.Version,
 	}, &mcp.ServerOptions{Logger: mcpServerLogger})
 
-	reg := shared.ToolRegistrar{Server: server, Identity: identity, Metrics: metrics}
+	reg := registrar.ToolRegistrar{Server: server, Identity: identity, Metrics: metrics}
 	registerReadModelTools(reg, info, runtime)
 	registerIdleStopTools(reg, runtime)
 	whip.RegisterWhipTools(reg, runtime)
@@ -236,9 +241,9 @@ func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shar
 // registerRemovedTools stubs each retired tool name so callers get guidance
 // naming its replacement instead of a bare "unknown tool". The stub accepts any
 // arguments so an old-shaped call reaches it instead of failing validation.
-func registerRemovedTools(reg shared.ToolRegistrar) {
+func registerRemovedTools(reg registrar.ToolRegistrar) {
 	for name, guidance := range mcptools.MCPRemovedTools() {
-		shared.AddTool(reg, &mcp.Tool{
+		registrar.AddTool(reg, &mcp.Tool{
 			Name:        name,
 			Description: fmt.Sprintf("Removed; use %s instead.", guidance),
 		}, removedTool(name, guidance))
@@ -251,17 +256,17 @@ func removedTool(name, guidance string) func(context.Context, *mcp.CallToolReque
 	}
 }
 
-func registerReadModelTools(reg shared.ToolRegistrar, info model.BuildInfo, runtime shared.RuntimeConfig) {
-	shared.AddTool(reg, &mcp.Tool{
+func registerReadModelTools(reg registrar.ToolRegistrar, info model.BuildInfo, runtime runtimecfg.RuntimeConfig) {
+	registrar.AddTool(reg, &mcp.Tool{
 		Name:        "version",
 		Description: "Return build metadata for the current erun binary",
 	}, version.VersionTool(info))
-	shared.AddTool(reg, &mcp.Tool{
+	registrar.AddTool(reg, &mcp.Tool{
 		Name: "list",
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory. " +
 			"Pass versionDriftTenant to additionally report erun-version drift across that tenant's environments, and gateEnvironment to flag whether the environment driving that tenant's merge-queue gate is running an older erun version than any environment it gates.",
 	}, list.ListTool(runtime))
-	shared.AddTool(reg, &mcp.Tool{
+	registrar.AddTool(reg, &mcp.Tool{
 		Name: "environment",
 		Description: "Return this environment's read model: its list-style summary (name, type, RuntimeVersion, default/effective markers), a resolved lifecycle state (running, idle, deploy-failed, stopped, or unknown), its idle policy + activity snapshot, its cloud-context config, and a doctor deploy diagnosis -- one call composing list/idle/doctor instead of three. " +
 			"Cloud-context power state is never refreshed live (no AWS credentials reach inside this pod), so a managed-cloud environment's state reads unknown rather than a guess unless something else already refreshed it. " +

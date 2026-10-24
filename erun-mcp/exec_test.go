@@ -9,7 +9,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestRawToolRunsFromTheGivenDir(t *testing.T) {
@@ -21,7 +22,7 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 	if err := os.Mkdir(subdir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{RepoPath: repoRoot}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{RepoPath: repoRoot}}))
 
 	_, output, err := handler(context.Background(), nil, exectool.RawInput{
 		Command: []string{"pwd"},
@@ -49,7 +50,7 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 }
 
 func TestRawToolRefusesEnvInTheForeground(t *testing.T) {
-	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{RepoPath: t.TempDir()}}))
 
 	_, _, err := handler(context.Background(), nil, exectool.RawInput{
 		Command: []string{"true"},
@@ -65,7 +66,7 @@ func TestRawToolRefusesForeignEnvironmentInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
 	}
-	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
 
 	_, _, err := handler(context.Background(), nil, exectool.RawInput{
 		Command:     []string{"true"},
@@ -85,7 +86,7 @@ func TestRawToolAcceptsItsOwnScopeInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
 	}
-	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
 
 	for _, tc := range []struct {
 		name        string

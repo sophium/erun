@@ -9,8 +9,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // ResizeInput's tenant/environment must name this server's own environment.
@@ -28,22 +32,22 @@ type ResizeInput struct {
 	Orchestrator  string `json:"orchestrator,omitempty" jsonschema:"the calling orchestrator's own id (its $ERUN_ORCHESTRATOR_ID), recorded on the resize's own lease and on the override if one was needed"`
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the planned resize (current -> target per resource, held leases, whether an override was needed) without changing anything"`
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func ResizeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ResizeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, input ResizeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func ResizeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ResizeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, input ResizeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, sharedpkg.JobEnvelopeOutput{}, err
+			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
-		identity := sharedpkg.AuthIdentityFrom(ctx)
-		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+		identity := callerid.AuthIdentityFrom(ctx)
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			findProjectRoot := func() (string, string, error) {
-				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
+				return toolio.RuntimeFindProjectRoot(runtime.Context, workDir)
 			}
 			resolveBuildContext := func() (model.DockerBuildContext, error) {
-				return shared.DockerBuildContextAtDir(workDir)
+				return dockerspec.DockerBuildContextAtDir(workDir)
 			}
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return deploy.KubernetesDeployContextAtDir(workDir), nil
@@ -74,7 +78,7 @@ func ResizeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 			})
 			return err
 		})
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "resize", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "resize", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

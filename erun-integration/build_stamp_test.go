@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-var buildStampTarget = regexp.MustCompile(`github\.com/sophium/erun/(cmd[\w/]*)\.(buildVersion|buildCommit|buildDate)\b`)
+var buildStampTarget = regexp.MustCompile(`github\.com/sophium/erun/((?:cmd|erun-mcp)[\w/]*)\.(buildVersion|buildCommit|buildDate)\b`)
 
 // A -X target naming a package that no longer declares the variable is
 // silently ignored by the linker, and the binary reports "dev".
@@ -32,8 +32,12 @@ func TestBuildStampsTargetTheVariablesTheyStamp(t *testing.T) {
 			t.Errorf("%s stamps no github.com/sophium/erun/cmd... build variable", site)
 		}
 		for _, m := range matches {
-			if !packageDeclares(t, filepath.Join(root, "erun-cli", m[1]), m[2]) {
-				t.Errorf("%s stamps %s, but erun-cli/%s declares no %s", site, m[0], m[1], m[2])
+			dir := m[1]
+			if strings.HasPrefix(dir, "cmd") {
+				dir = filepath.Join("erun-cli", dir)
+			}
+			if !packageDeclares(t, filepath.Join(root, dir), m[2]) {
+				t.Errorf("%s stamps %s, but %s declares no %s", site, m[0], dir, m[2])
 			}
 		}
 	}

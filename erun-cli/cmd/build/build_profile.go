@@ -3,7 +3,7 @@ package build
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -35,7 +35,7 @@ func newBuildProfileCmd() *cobra.Command {
 			if len(args) > 0 {
 				id = args[0]
 			}
-			return runBuildProfileCommand(shared.CommandContext(cmd), id, limit)
+			return runBuildProfileCommand(clicmd.CommandContext(cmd), id, limit)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of recent builds to list (newest-first); 0 lists all retained records")

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 )
 
 var confirmANSI = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
@@ -28,12 +28,12 @@ func confirmPromptStdin(t *testing.T, answer string, rounds int) {
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close stdin writer: %v", err)
 	}
-	previousStdin, previousInput := os.Stdin, shared.PlainPromptInput
+	previousStdin, previousInput := os.Stdin, promptpkg.PlainPromptInput
 	os.Stdin = reader
 	// One reader for the run; a fresh bufio.Reader per prompt would buffer later answers away.
-	shared.PlainPromptInput = sync.OnceValue(func() *bufio.Reader { return bufio.NewReader(reader) })
+	promptpkg.PlainPromptInput = sync.OnceValue(func() *bufio.Reader { return bufio.NewReader(reader) })
 	t.Cleanup(func() {
-		os.Stdin, shared.PlainPromptInput = previousStdin, previousInput
+		os.Stdin, promptpkg.PlainPromptInput = previousStdin, previousInput
 		_ = reader.Close()
 	})
 }
@@ -54,7 +54,7 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 
 	consumed := 0
 	for round := 0; round < rounds; round++ {
-		ok, err := shared.ConfirmPromptTo(shared.RunPrompt, "add team-dev to ~/.bashrc", writer)
+		ok, err := promptpkg.ConfirmPromptTo(promptpkg.RunPrompt, "add team-dev to ~/.bashrc", writer)
 		if err != nil {
 			t.Fatalf("round %d: confirmPromptTo: %v", round, err)
 		}
@@ -92,7 +92,7 @@ func TestConfirmPromptReachesTheInjectedRunnerWithoutATerminal(t *testing.T) {
 		shown = prompt
 		return "y", nil
 	}
-	ok, err := shared.ConfirmPromptTo(runner, "add team-dev to ~/.bashrc", nopWriteCloser{io.Discard})
+	ok, err := promptpkg.ConfirmPromptTo(runner, "add team-dev to ~/.bashrc", nopWriteCloser{io.Discard})
 	if err != nil {
 		t.Fatalf("confirmPromptTo: %v", err)
 	}

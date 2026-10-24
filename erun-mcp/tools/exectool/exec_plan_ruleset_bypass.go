@@ -7,7 +7,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // ExecPlanRulesetBypassInput plans narrowing a ruleset bypass to one queue
@@ -30,10 +31,10 @@ type PlanRulesetBypassToolResult struct {
 	Trace   []string                      `json:"trace,omitempty"`
 }
 
-func ExecPlanRulesetBypassTool(_ shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecPlanRulesetBypassInput) (*mcp.CallToolResult, PlanRulesetBypassToolResult, error) {
+func ExecPlanRulesetBypassTool(_ runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecPlanRulesetBypassInput) (*mcp.CallToolResult, PlanRulesetBypassToolResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecPlanRulesetBypassInput) (*mcp.CallToolResult, PlanRulesetBypassToolResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		result, err := review.PlanRulesetBypass(ctx, model.PlanRulesetBypassParams{
 			RemoteURL:      input.RemoteURL,
 			RulesetID:      input.RulesetID,
@@ -45,6 +46,6 @@ func ExecPlanRulesetBypassTool(_ shared.RuntimeConfig) func(context.Context, *mc
 		if err != nil {
 			return nil, PlanRulesetBypassToolResult{}, err
 		}
-		return nil, PlanRulesetBypassToolResult{Preview: input.Preview, Result: result, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlanRulesetBypassToolResult{Preview: input.Preview, Result: result, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }

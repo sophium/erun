@@ -11,7 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // The supervisor runs in a real re-entered process and is killed for real,
@@ -114,7 +115,7 @@ func startJobAliveSupervisorHelper(t *testing.T, tenant, environment, id string)
 
 func awaitFirstAliveBeat(t *testing.T, tenant, environment, id string) int {
 	t.Helper()
-	job, err := pollUntilEnvironmentJob(tenant, environment, id, 5*time.Second, func(job shared.EnvironmentJob) bool {
+	job, err := pollUntilEnvironmentJob(tenant, environment, id, 5*time.Second, func(job jobstate.EnvironmentJob) bool {
 		return job.AliveSeq > 0 && job.AliveAgeMs != nil
 	})
 	if err != nil {
@@ -140,7 +141,7 @@ func killJobAliveSupervisorHelper(t *testing.T, helper *exec.Cmd, childPID int) 
 
 func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id string) {
 	t.Helper()
-	stale, err := pollUntilEnvironmentJob(tenant, environment, id, 6*time.Second, func(job shared.EnvironmentJob) bool {
+	stale, err := pollUntilEnvironmentJob(tenant, environment, id, 6*time.Second, func(job jobstate.EnvironmentJob) bool {
 		return job.AliveAgeMs != nil && *job.AliveAgeMs > EnvironmentJobAliveStaleMs
 	})
 	if err != nil {
@@ -151,16 +152,16 @@ func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id st
 		t.Fatalf("aliveAgeMs = %v, want > %d", stale.AliveAgeMs, EnvironmentJobAliveStaleMs)
 	}
 	// State must agree with aliveAgeMs, not lag it.
-	if stale.State != shared.EnvironmentJobStateUnknown {
+	if stale.State != jobstate.EnvironmentJobStateUnknown {
 		t.Fatalf("State = %q, want unknown once the supervisor pid is confirmed gone", stale.State)
 	}
 }
 
 // pollUntilEnvironmentJob judges the record and the deadline by the same
 // instant, since a reconcile read can be slow; it may overrun by one read.
-func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Duration, want func(shared.EnvironmentJob) bool) (shared.EnvironmentJob, error) {
+func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Duration, want func(jobstate.EnvironmentJob) bool) (jobstate.EnvironmentJob, error) {
 	deadline := time.Now().Add(timeout)
-	var last shared.EnvironmentJob
+	var last jobstate.EnvironmentJob
 	for {
 		now := time.Now()
 		job, err := LoadEnvironmentJob(tenant, environment, id, now)
@@ -196,12 +197,12 @@ func TestRegisteredEnvironmentJobIsPublishedWithABeat(t *testing.T) {
 		t.Fatalf("registerEnvironmentJob: %v", err)
 	}
 
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
 	// Read through the store to see what a reader sees.
-	published, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+	published, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		t.Fatalf("read published job record: %v", err)
 	}

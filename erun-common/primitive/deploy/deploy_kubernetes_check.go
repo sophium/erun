@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,7 +25,7 @@ func ResolveKubernetesDeployContext() (model.KubernetesDeployContext, error) {
 	return KubernetesDeployContextAtDir(dir), nil
 }
 
-func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]model.KubernetesDeployContext, error) {
+func ResolveCurrentKubernetesDeployContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]model.KubernetesDeployContext, error) {
 	if resolveDeployContext == nil {
 		return nil, fmt.Errorf("helm chart not found in current directory")
 	}
@@ -42,16 +43,16 @@ func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinder
 		return []model.KubernetesDeployContext{deployContext}, nil
 	}
 
-	if deployContexts, err := shared.ResolveKubernetesDeployContextsAtDir(deployContext.Dir); err == nil {
+	if deployContexts, err := dockerbuild.ResolveKubernetesDeployContextsAtDir(deployContext.Dir); err == nil {
 		return deployContexts, nil
 	}
 
-	k8sDir, ok, err := shared.ResolveCurrentDevopsK8sDir(findProjectRoot, deployContext.Dir, projectRootOverride)
+	k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(findProjectRoot, deployContext.Dir, projectRootOverride)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
-		return shared.ResolveKubernetesDeployContextsAtDir(k8sDir)
+		return dockerbuild.ResolveKubernetesDeployContextsAtDir(k8sDir)
 	}
 
 	return nil, fmt.Errorf("helm chart not found in current directory")
@@ -64,13 +65,13 @@ func KubernetesDeployContextAtDir(dir string) model.KubernetesDeployContext {
 
 	switch parentName {
 	case "k8s":
-		if shared.HasHelmChart(filepath.Join(dir, "Chart.yaml")) {
+		if dockerbuild.HasHelmChart(filepath.Join(dir, "Chart.yaml")) {
 			context.ComponentName = componentName
 			context.ChartPath = dir
 		}
 	case "docker":
 		chartPath := filepath.Join(filepath.Dir(filepath.Dir(dir)), "k8s", componentName)
-		if shared.HasHelmChart(filepath.Join(chartPath, "Chart.yaml")) {
+		if dockerbuild.HasHelmChart(filepath.Join(chartPath, "Chart.yaml")) {
 			context.ComponentName = componentName
 			context.ChartPath = chartPath
 		}

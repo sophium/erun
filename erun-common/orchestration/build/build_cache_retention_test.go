@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 // buildCacheTestVolume is the chart's default 50 GiB docker volume.
 const buildCacheTestVolume uint64 = 50 << 30
 
-func buildCacheTestBounds() shared.BuildCacheBounds {
-	return shared.ResolveBuildCacheBounds(buildCacheTestVolume)
+func buildCacheTestBounds() diskheadroom.BuildCacheBounds {
+	return diskheadroom.ResolveBuildCacheBounds(buildCacheTestVolume)
 }
 
 type buildCacheRetentionCase struct {
@@ -99,7 +99,7 @@ func buildCacheRetentionCases() []buildCacheRetentionCase {
 		{
 			// Runtime envs have no dind volume; the common case stays quiet.
 			name:      "an environment with no docker volume is left alone and silent",
-			volumeErr: shared.ErrNoDockerVolume,
+			volumeErr: diskheadroom.ErrNoDockerVolume,
 			wantReads: 0,
 		},
 		{
@@ -133,8 +133,8 @@ func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 	t.Helper()
 
 	// Clear the node bound so an ambient declaration cannot rebind these cases.
-	t.Setenv(shared.BuildCacheNodeBytesEnv, "")
-	t.Setenv(shared.BuildCacheCoTenantsEnv, "")
+	t.Setenv(diskheadroom.BuildCacheNodeBytesEnv, "")
+	t.Setenv(diskheadroom.BuildCacheCoTenantsEnv, "")
 
 	readCalls := 0
 	readCacheBytes := func(time.Duration) (uint64, error) {
@@ -160,7 +160,7 @@ func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 
 	logs := &strings.Builder{}
 	ctx := core.Context{DryRun: tc.dryRun, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
-	shared.EnsureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy, readVolume, readCacheBytes, prune)
+	diskheadroom.EnsureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy, readVolume, readCacheBytes, prune)
 
 	if readCalls != tc.wantReads {
 		t.Fatalf("expected %d cache-size reads, got %d", tc.wantReads, readCalls)
@@ -212,8 +212,8 @@ esac`))
 	// Free space well above any floor, so only the bound can fire.
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       419430400 314572800  104857600     75% `+root+`"`))
-	t.Setenv(shared.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(1<<30, 10))
+	t.Setenv(diskheadroom.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(1<<30, 10))
 
 	logs := &strings.Builder{}
 	if err := awaitDiskHeadroomPreflight(t, core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)},
@@ -257,7 +257,7 @@ func TestBuildCacheRetentionReclaimsOnlyAtTheCeiling(t *testing.T) {
 	for size := step; size <= buildCacheTestVolume; size += step {
 		logs := &strings.Builder{}
 		pruned := false
-		shared.EnsureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
+		diskheadroom.EnsureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
 			func() (uint64, error) { return buildCacheTestVolume, nil },
 			func(time.Duration) (uint64, error) { return size, nil },
 			func(uint64, time.Duration) error { pruned = true; return nil })
@@ -292,7 +292,7 @@ func TestBuildCacheRetentionPruneNamesACommandThatAcceptsItsBound(t *testing.T) 
   system) echo "Build Cache|60GB" ;;
   *) printf '%s\n' "$@" > `+record+` ;;
 esac`))
-	t.Setenv(shared.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
+	t.Setenv(diskheadroom.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
 
 	if err := awaitBuildCacheRetention(t, buildDiskHeadroomPolicy); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -320,11 +320,11 @@ func awaitDiskHeadroomPreflight(t *testing.T, ctx core.Context, check func(core.
 }
 
 // awaitBuildCacheRetention runs the production wiring with shrunk bounds.
-func awaitBuildCacheRetention(t *testing.T, policy shared.DiskHeadroomPolicy) error {
+func awaitBuildCacheRetention(t *testing.T, policy diskheadroom.DiskHeadroomPolicy) error {
 	t.Helper()
 	policy.Limits = diskHeadroomShortLimits()
 	return awaitDiskHeadroomPreflight(t, core.Context{}, func(ctx core.Context) error {
-		shared.EnsureBuildCacheRetention(ctx, policy)
+		diskheadroom.EnsureBuildCacheRetention(ctx, policy)
 		return nil
 	})
 }

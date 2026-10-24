@@ -5,7 +5,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // ResolveRuntimeVersionLine derives the line from the image a deploy recorded,
@@ -15,7 +14,7 @@ func ResolveRuntimeVersionLine(tenant string, env config.EnvConfig) model.Runtim
 	if image == "" {
 		return model.RuntimeVersionLine{Undetermined: true}
 	}
-	registry, name, _, ok := shared.ParseDockerImageReference(image)
+	registry, name, _, ok := ParseDockerImageReference(image)
 	name = strings.TrimSpace(name)
 	if !ok || name == "" {
 		return model.RuntimeVersionLine{Undetermined: true}

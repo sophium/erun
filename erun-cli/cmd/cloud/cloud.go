@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -23,8 +25,8 @@ type cloudCommandStoreInterface interface {
 	configpkg.OpenStore
 }
 
-func NewCloudCmd(store cloudCommandStoreInterface, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+func NewCloudCmd(store cloudCommandStoreInterface, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"cloud",
 		"Cloud provider utilities",
 		newCloudInitCmd(store, promptRunner, selectRunner, deps),
@@ -57,10 +59,10 @@ func newCloudRefreshCmd(store cloudCommandStoreInterface, deps cloud.CloudDepend
 		Example: "  erun cloud refresh my-tenant prod\n" +
 			"  erun cloud refresh my-tenant prod --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCloudRefreshCommand(shared.CommandContext(cmd), store, args[0], args[1], deps)
+			return runCloudRefreshCommand(clicmd.CommandContext(cmd), store, args[0], args[1], deps)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -92,7 +94,7 @@ func writeHostCredentialsRefreshed(ctx core.Context, result configpkg.OpenResult
 	return err
 }
 
-func newCloudLoginCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudLoginCmd(store cloud.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var flow string
 	var scopes []string
@@ -103,18 +105,18 @@ func newCloudLoginCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, 
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudLoginCommand(shared.CommandContext(cmd), store, promptRunner, selectRunner, model.CloudLoginParams{Alias: alias, Flow: flow, Scopes: scopes, Force: force}, deps)
+			return runCloudLoginCommand(clicmd.CommandContext(cmd), store, promptRunner, selectRunner, model.CloudLoginParams{Alias: alias, Flow: flow, Scopes: scopes, Force: force}, deps)
 		},
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to login")
 	cmd.Flags().StringVar(&flow, "flow", "", "OIDC grant for an erun-hosted alias: \"device\", \"authcode\", or \"auto\" (default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete. Use \"authcode\" when the device page's authentication method fails — its loopback redirect reuses a browser session you already hold")
 	cmd.Flags().StringArrayVar(&scopes, "scope", nil, "Extra OAuth scope to request on top of \"openid offline_access\" and the org-claim scope requested by default (repeatable). A provider's reserved scopes are often absent from its discovery document, so they can only be asked for by name")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-authenticate even when the stored session is still active. Needed to change the requested scopes or flow on an alias that is already signed in, since an active session otherwise short-circuits the login")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
+func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
 		if ctx.DryRun {
@@ -122,7 +124,7 @@ func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner
 			_, err := fmt.Fprintln(ctx.Stdout, "Dry run: cloud login planned.")
 			return err
 		}
-		selected, err := shared.SelectCloudAliasPrompt(store, selectRunner)
+		selected, err := cloudcli.SelectCloudAliasPrompt(store, selectRunner)
 		if err != nil {
 			return err
 		}
@@ -146,8 +148,8 @@ func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner
 }
 
 // A declined login reports the unchanged status, not a failure.
-func confirmAndLoginCloudProvider(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, alias, providerAlias string, status model.CloudProviderStatus, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
-	login, err := shared.ConfirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
+func confirmAndLoginCloudProvider(ctx core.Context, store cloud.CloudStore, promptRunner prompt.PromptRunner, alias, providerAlias string, status model.CloudProviderStatus, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
+	login, err := prompt.ConfirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
 	if err != nil {
 		return err
 	}
@@ -214,7 +216,7 @@ func traceCloudLoginPlan(ctx core.Context, provider model.CloudProviderConfig) {
 	}
 }
 
-func newCloudOIDCCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudOIDCCmd(store cloud.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var audience string
 	cmd := &cobra.Command{
@@ -223,7 +225,7 @@ func newCloudOIDCCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, s
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudOIDCCommand(shared.CommandContext(cmd), store, promptRunner, selectRunner, model.CloudBearerParams{
+			return runCloudOIDCCommand(clicmd.CommandContext(cmd), store, promptRunner, selectRunner, model.CloudBearerParams{
 				Alias:    alias,
 				Audience: audience,
 			}, deps)
@@ -231,14 +233,14 @@ func newCloudOIDCCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, s
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to refresh")
 	cmd.Flags().StringVar(&audience, "audience", configpkg.CloudProviderBearerAudience, "Audience for the AWS web identity bearer token")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runCloudOIDCCommand(ctx core.Context, store cloud.CloudStore, _ shared.PromptRunner, selectRunner shared.SelectRunner, params model.CloudBearerParams, deps cloud.CloudDependencies) error {
+func runCloudOIDCCommand(ctx core.Context, store cloud.CloudStore, _ prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudBearerParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
-		selected, err := shared.SelectCloudAliasPrompt(store, selectRunner)
+		selected, err := cloudcli.SelectCloudAliasPrompt(store, selectRunner)
 		if err != nil {
 			return err
 		}
@@ -274,7 +276,7 @@ func newCloudSetCmd(store cloud.EnvironmentCloudAliasStore) *cobra.Command {
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCloudSetCommand(shared.CommandContext(cmd), store, model.SetEnvironmentCloudAliasParams{
+			return runCloudSetCommand(clicmd.CommandContext(cmd), store, model.SetEnvironmentCloudAliasParams{
 				Tenant:      args[0],
 				Environment: args[1],
 				Alias:       alias,
@@ -285,7 +287,7 @@ func newCloudSetCmd(store cloud.EnvironmentCloudAliasStore) *cobra.Command {
 	if err := cmd.MarkFlagRequired("alias"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

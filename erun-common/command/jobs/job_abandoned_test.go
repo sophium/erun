@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
@@ -38,8 +39,8 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	if !job.Succeeded {
 		t.Fatalf("job with no abandoned work did not report success: %+v", job)
 	}
-	if job.State != shared.EnvironmentJobStateExited {
-		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateExited)
+	if job.State != jobstate.EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q", job.State, jobstate.EnvironmentJobStateExited)
 	}
 }
 
@@ -64,7 +65,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	const parentID = "outer"
 	const childID = "gate"
 
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	// This test's own pid stays alive, keeping the seeded child "running".
-	child := shared.EnvironmentJob{
+	child := jobstate.EnvironmentJob{
 		ID:             childID,
 		Name:           childID,
 		State:          EnvironmentJobStateRunning,
@@ -102,8 +103,8 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	if parent.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though a job it started was still running: %+v", parent.State, parent.ExitCode, parent)
 	}
-	if parent.State != shared.EnvironmentJobStateGateIncomplete {
-		t.Fatalf("State = %q, want %q", parent.State, shared.EnvironmentJobStateGateIncomplete)
+	if parent.State != jobstate.EnvironmentJobStateGateIncomplete {
+		t.Fatalf("State = %q, want %q", parent.State, jobstate.EnvironmentJobStateGateIncomplete)
 	}
 	if !strings.Contains(parent.Reason, childID) {
 		t.Fatalf("Reason %q does not name the still-running job %q", parent.Reason, childID)
@@ -118,11 +119,11 @@ func TestAHandedOffJobIsExcludedFromItsParentsLeftoverScan(t *testing.T) {
 	const tenant = "handoff-leftover-contract"
 	const environment = "handoff-test"
 	const parent = "parent-job"
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	seeded := []shared.EnvironmentJob{
+	seeded := []jobstate.EnvironmentJob{
 		{ID: "held", Name: "held", State: EnvironmentJobStateRunning, PID: 4242, StartedByJobID: parent},
 		{ID: "released", Name: "released", State: EnvironmentJobStateRunning, PID: 4243, StartedByJobID: parent, Handoff: true},
 		{ID: "elsewhere", Name: "elsewhere", State: EnvironmentJobStateRunning, PID: 4244, StartedByJobID: "someone-else", Handoff: true},

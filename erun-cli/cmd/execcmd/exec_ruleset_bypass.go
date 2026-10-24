@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -45,7 +45,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecReconcileBypassCommand(shared.CommandContext(cmd), store, alias, model.ReconcileBypassParams{
+			return runExecReconcileBypassCommand(clicmd.CommandContext(cmd), store, alias, model.ReconcileBypassParams{
 				RemoteURL:      remoteURL,
 				RulesetID:      rulesetID,
 				TargetBranch:   targetBranch,
@@ -60,7 +60,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 	cmd.Flags().StringVar(&since, "since", "", "Narrow the GitHub lookup window: hour, day, week, or month (defaults to GitHub's own window)")
 	cmd.Flags().StringArrayVar(&expectedActors, "expected-actor", nil, "An identity allowed to hold the bypass grant; repeatable. Any other actor's bypass is reported UNEXPECTED_ACTOR")
 	cmd.Flags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -89,7 +89,7 @@ func newExecPlanRulesetBypassCmd() *cobra.Command {
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecPlanRulesetBypassCommand(shared.CommandContext(cmd), params)
+			return runExecPlanRulesetBypassCommand(clicmd.CommandContext(cmd), params)
 		},
 	}
 	cmd.Flags().StringVar(&params.RemoteURL, "remote-url", "", "The github.com remote the ruleset lives on (defaults to the current checkout's origin)")
@@ -98,7 +98,7 @@ func newExecPlanRulesetBypassCmd() *cobra.Command {
 	cmd.Flags().StringVar(&params.QueueActorType, "queue-actor-type", "User", "The queue identity's GitHub actor type: User, Integration, Team, RepositoryRole, OrganizationAdmin, or DeployKey")
 	cmd.Flags().StringVar(&params.QueueActor, "queue-actor", "", "The queue identity: a login for User, otherwise the numeric actor id (required)")
 	cmd.Flags().StringVar(&params.OutDir, "out-dir", ".", "Directory the stage1, stage2 and rollback payload files are written to")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -194,7 +194,7 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecRouteCheckCommand(shared.CommandContext(cmd), store, alias, model.RouteCheckParams{
+			return runExecRouteCheckCommand(clicmd.CommandContext(cmd), store, alias, model.RouteCheckParams{
 				RoutesDir: routesDir,
 			}, deps)
 		},
@@ -202,7 +202,7 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 	cmd.Flags().StringVar(&routesDir, "routes-dir", "",
 		"Path to erun-backend-api/internal/routes (defaults to that path under the current checkout's project root)")
 	cmd.Flags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

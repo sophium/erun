@@ -7,7 +7,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
 // OrchestratorAliasNone is the CLI token for clearing the alias, since "" already means
@@ -41,7 +41,7 @@ func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error
 	if alias == "" {
 		return nil
 	}
-	_, err := shared.ResolveERunPlatformAlias(store, alias)
+	_, err := cloudconfig.ResolveERunPlatformAlias(store, alias)
 	return err
 }
 

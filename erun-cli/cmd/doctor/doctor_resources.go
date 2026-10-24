@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -36,7 +36,7 @@ func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, resul
 		return writeDoctorResourcesNotObserved(ctx, usage)
 	}
 	report := podruntime.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
-	if err := shared.WriteUsageResult(ctx, report); err != nil {
+	if err := usageview.WriteUsageResult(ctx, report); err != nil {
 		return err
 	}
 	return writeDoctorResizeNextAction(ctx, result, report.Sizing)

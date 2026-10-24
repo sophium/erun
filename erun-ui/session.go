@@ -14,7 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // ignoreAlreadyClosed makes Close idempotent: a PTY whose process exited already
@@ -395,7 +395,7 @@ func resolveTerminalStartDir(preferred string) string {
 	return "."
 }
 
-func resolveDeployStartDir(findProjectRoot shared.ProjectFinderFunc, result config.OpenResult) string {
+func resolveDeployStartDir(findProjectRoot projectseam.ProjectFinderFunc, result config.OpenResult) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return resolveTerminalStartDir(projectRoot)

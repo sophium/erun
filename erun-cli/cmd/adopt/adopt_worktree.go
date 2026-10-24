@@ -1,7 +1,7 @@
 package adopt
 
 import (
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
@@ -27,10 +27,10 @@ func NewAdoptWorktreeCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAdoptWorktreeCommand(shared.CommandContext(cmd), args[0], args[1])
+			return runAdoptWorktreeCommand(clicmd.CommandContext(cmd), args[0], args[1])
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

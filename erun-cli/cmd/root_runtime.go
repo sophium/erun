@@ -9,6 +9,9 @@ import (
 	"github.com/sophium/erun/cmd/build"
 	"github.com/sophium/erun/cmd/initcmd"
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -19,7 +22,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/push"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +31,7 @@ import (
 type rootStore interface {
 	setup.BootstrapStore
 	config.OpenStore
-	sharedpkg.DockerStore
+	projectseam.DockerStore
 	deploy.DeployStore
 }
 
@@ -43,14 +47,14 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 		SilenceUsage:     true,
 		SilenceErrors:    true,
 		TraverseChildren: true,
-		PersistentPreRun: shared.AuditCommand,
+		PersistentPreRun: AuditCommand,
 		RunE:             runRoot,
 	}
-	shared.AddDryRunFlag(cmd)
-	shared.AddTimeFlag(cmd)
-	shared.AddOutputFlag(cmd)
-	shared.WrapCommandTreeWithElapsedTime(cmd)
-	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", shared.VerboseFlagUsage)
+	clicmd.AddDryRunFlag(cmd)
+	AddTimeFlag(cmd)
+	clicmd.AddOutputFlag(cmd)
+	clicmd.WrapCommandTreeWithElapsedTime(cmd)
+	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", VerboseFlagUsage)
 	return cmd
 }
 
@@ -71,9 +75,9 @@ func bootstrapInitExitError(err error) error {
 	return err
 }
 
-func newRunInit(store setup.BootstrapStore, findProjectRoot sharedpkg.ProjectFinderFunc, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, listKubernetesContexts shared.KubernetesContextsLister, ensureKubernetesNamespace deploy.NamespaceEnsurerFunc, waitForRemoteRuntime setup.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart deploy.HelmChartDeployerFunc) func(core.Context, open.BootstrapInitParams) error {
+func newRunInit(store setup.BootstrapStore, findProjectRoot projectseam.ProjectFinderFunc, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, listKubernetesContexts prompt.KubernetesContextsLister, ensureKubernetesNamespace deploy.NamespaceEnsurerFunc, waitForRemoteRuntime setup.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart deploy.HelmChartDeployerFunc) func(core.Context, open.BootstrapInitParams) error {
 	return func(ctx core.Context, params open.BootstrapInitParams) error {
-		ctx = shared.WithCloudContextPreflight(ctx, store)
+		ctx = cloudcli.WithCloudContextPreflight(ctx, store)
 		params.RuntimeVersionDefault = shared.CurrentBuildInfo().Version
 		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
 			Store:           setup.TraceBootstrapStore(ctx, store),
@@ -83,7 +87,7 @@ func newRunInit(store setup.BootstrapStore, findProjectRoot sharedpkg.ProjectFin
 			},
 			TenantSelectionUnavailable: initcmd.TenantSelectionUnavailable(),
 			Confirm: func(label string) (bool, error) {
-				return shared.ConfirmPrompt(promptRunner, label)
+				return prompt.ConfirmPrompt(promptRunner, label)
 			},
 			PromptKubernetesContext: func(label string) (string, error) {
 				return initcmd.KubernetesContextPrompt(promptRunner, selectRunner, listKubernetesContexts, label)
@@ -125,7 +129,7 @@ func newRunInit(store setup.BootstrapStore, findProjectRoot sharedpkg.ProjectFin
 	}
 }
 
-func resolveRuntimeDeploySpecForOpen(ctx core.Context, store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveDockerBuildContext sharedpkg.BuildContextResolverFunc, resolveKubernetesDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildInfo model.BuildInfo, target config.OpenResult, allowLocalBuilds bool) (deploy.DeploySpec, error) {
+func resolveRuntimeDeploySpecForOpen(ctx core.Context, store deploy.DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, buildInfo model.BuildInfo, target config.OpenResult, allowLocalBuilds bool) (deploy.DeploySpec, error) {
 	spec, err := deploy.ResolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 	if err != nil {
 		return deploy.DeploySpec{}, err
@@ -156,12 +160,12 @@ func newRunInitForOpen(store config.OpenStore, runInit func(core.Context, open.B
 	}
 }
 
-func newPushOperation(pushDockerImage sharedpkg.DockerImagePusherFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner) buildpkg.DockerPushFunc {
-	return func(ctx core.Context, pushInput sharedpkg.DockerPushSpec) error {
+func newPushOperation(pushDockerImage dockerspec.DockerImagePusherFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner) buildpkg.DockerPushFunc {
+	return func(ctx core.Context, pushInput dockerspec.DockerPushSpec) error {
 		return build.RunDockerPushWithRetry(
 			ctx,
 			pushInput,
-			func(ctx core.Context, pushInput sharedpkg.DockerPushSpec) error {
+			func(ctx core.Context, pushInput dockerspec.DockerPushSpec) error {
 				return push.RunDockerPush(ctx, pushInput, pushDockerImage)
 			},
 			loginToDockerRegistry,
@@ -170,7 +174,7 @@ func newPushOperation(pushDockerImage sharedpkg.DockerImagePusherFunc, loginToDo
 	}
 }
 
-func hasOptionalBuildCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc) bool {
+func hasOptionalBuildCmd(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc) bool {
 	hasScript, err := buildpkg.HasProjectBuildScript(findProjectRoot, model.DockerCommandTarget{})
 	if err == nil && hasScript {
 		return true
@@ -184,12 +188,12 @@ func hasOptionalBuildCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBui
 	buildContexts, err := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, model.DockerCommandTarget{})
 	if err != nil {
 		// A misconfigured build setup is a hard error that `erun build` must surface; only not-found means no build.
-		return !errors.Is(err, sharedpkg.ErrDockerBuildContextNotFound)
+		return !errors.Is(err, dockerspec.ErrDockerBuildContextNotFound)
 	}
 	return len(buildContexts) > 0
 }
 
-func hasOptionalPushCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc) bool {
+func hasOptionalPushCmd(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc) bool {
 	buildContext, err := resolveBuildContext()
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" {
 		return true
@@ -197,13 +201,13 @@ func hasOptionalPushCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuil
 	// push attaches wherever build does so the two stay symmetric.
 	buildContexts, contextErr := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, model.DockerCommandTarget{})
 	if contextErr != nil {
-		return !errors.Is(contextErr, sharedpkg.ErrDockerBuildContextNotFound)
+		return !errors.Is(contextErr, dockerspec.ErrDockerBuildContextNotFound)
 	}
 	return len(buildContexts) > 0
 }
 
 // buildShortTarget honours an env's build.sh opt-out in the build command's short help.
-func buildShortTarget(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc) model.DockerCommandTarget {
+func buildShortTarget(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc) model.DockerCommandTarget {
 	target := model.DockerCommandTarget{}
 	if env := buildpkg.ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {
 		target.DisableBuildScriptDiscovery = true
@@ -211,7 +215,7 @@ func buildShortTarget(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Pro
 	return target
 }
 
-func optionalBuildCmdShort(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc) string {
+func optionalBuildCmdShort(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc) string {
 	target := buildShortTarget(store, findProjectRoot)
 
 	hasRootScript, err := hasProjectRootBuildScript(findProjectRoot, target.DisableBuildScriptDiscovery)
@@ -239,12 +243,12 @@ func optionalBuildCmdShort(store sharedpkg.DockerStore, findProjectRoot sharedpk
 	return "Build the project's container images"
 }
 
-func hasLinuxPackageContexts(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc) bool {
+func hasLinuxPackageContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc) bool {
 	linuxContexts, err := buildpkg.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, model.DockerCommandTarget{})
 	return err == nil && len(linuxContexts) > 0
 }
 
-func dockerBuildCmdShort(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, buildContexts []model.DockerBuildContext) string {
+func dockerBuildCmdShort(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, buildContexts []model.DockerBuildContext) string {
 	buildContext, err := resolveBuildContext()
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
 		return "Build the project's container images"
@@ -255,12 +259,12 @@ func dockerBuildCmdShort(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBui
 	return "Build and push the devops container images for the current project"
 }
 
-func currentBuildContextIsProjectRoot(findProjectRoot sharedpkg.ProjectFinderFunc, buildContext model.DockerBuildContext) bool {
+func currentBuildContextIsProjectRoot(findProjectRoot projectseam.ProjectFinderFunc, buildContext model.DockerBuildContext) bool {
 	projectRoot, err := projectRootForHelp(findProjectRoot)
 	return err == nil && projectRoot != "" && filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot
 }
 
-func hasProjectRootBuildScript(findProjectRoot sharedpkg.ProjectFinderFunc, disabled bool) (bool, error) {
+func hasProjectRootBuildScript(findProjectRoot projectseam.ProjectFinderFunc, disabled bool) (bool, error) {
 	if disabled {
 		return false, nil
 	}
@@ -278,7 +282,7 @@ func hasProjectRootBuildScript(findProjectRoot sharedpkg.ProjectFinderFunc, disa
 	return false, err
 }
 
-func optionalPushCmdShort(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc) string {
+func optionalPushCmdShort(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc) string {
 	buildContexts, err := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, model.DockerCommandTarget{})
 	if err != nil {
 		return "Build and push the current container image"
@@ -296,7 +300,7 @@ func optionalPushCmdShort(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBu
 	return "Build and push the current container image"
 }
 
-func projectRootForHelp(findProjectRoot sharedpkg.ProjectFinderFunc) (string, error) {
+func projectRootForHelp(findProjectRoot projectseam.ProjectFinderFunc) (string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // An agent job's exit status says nothing about its working tree, so the
@@ -37,7 +37,7 @@ type environmentJobWorktreeOutcome struct {
 	reason   string
 }
 
-func (o environmentJobWorktreeOutcome) apply(job *shared.EnvironmentJob) {
+func (o environmentJobWorktreeOutcome) apply(job *jobstate.EnvironmentJob) {
 	job.WorktreeDirty = o.dirty
 	job.WorktreeBranch = o.branch
 	job.WorktreeDetached = o.detached
@@ -47,7 +47,7 @@ func (o environmentJobWorktreeOutcome) apply(job *shared.EnvironmentJob) {
 	job.WorktreeReason = o.reason
 }
 
-func captureAgentJobWorktreeOutcome(job shared.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
+func captureAgentJobWorktreeOutcome(job jobstate.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
 	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
 	if !dirty {
@@ -69,7 +69,7 @@ func captureAgentJobWorktreeOutcome(job shared.EnvironmentJob, jobsDir string) e
 
 // agentJobWorktreeContender reports another live job of any kind on the same
 // worktree; dead siblings reconcile as finished.
-func agentJobWorktreeContender(jobsDir string, job shared.EnvironmentJob, now time.Time) (string, bool) {
+func agentJobWorktreeContender(jobsDir string, job jobstate.EnvironmentJob, now time.Time) (string, bool) {
 	dir := strings.TrimSpace(job.Dir)
 	if jobsDir == "" || dir == "" {
 		return "", false
@@ -94,7 +94,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if strings.TrimSuffix(entry.Name(), ".json") == selfID {
 		return "", false
 	}
-	other, err := shared.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
+	other, err := jobstate.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
@@ -107,7 +107,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 
 // agentJobDirtyWorktree returns the dir and branch ("HEAD" when detached) of an
 // agent job's dirty git worktree.
-func agentJobDirtyWorktree(ctx core.Context, job shared.EnvironmentJob) (dir, branch string, dirty bool) {
+func agentJobDirtyWorktree(ctx core.Context, job jobstate.EnvironmentJob) (dir, branch string, dirty bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", "", false
 	}

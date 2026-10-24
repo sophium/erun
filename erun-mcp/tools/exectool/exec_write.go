@@ -8,7 +8,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // WriteInput takes file content as data — never a shell — mirroring `erun
@@ -18,14 +21,14 @@ type WriteInput struct {
 	Content   string `json:"content" jsonschema:"file content, written verbatim byte-for-byte; never shell-interpreted"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the write without performing it"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func WriteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WriteInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input WriteInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		execute := func(preview bool, log io.Writer) (shared.CommandOutput, error) {
+func WriteTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WriteInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input WriteInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		execute := func(preview bool, log io.Writer) (toolio.CommandOutput, error) {
 			var written *model.WriteWorkingTreeFileResult
-			output, err := shared.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
+			output, err := runcmd.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				result, err := gitx.WriteWorkingTreeFile(runCtx, workDir, model.WriteWorkingTreeFileParams{
 					Path:    input.Path,
 					Content: input.Content,
@@ -41,7 +44,7 @@ func WriteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallTool
 			}
 			return output, err
 		}
-		envelope, err := shared.RunJobEnvelope(runtime, "exec_write", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "exec_write", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

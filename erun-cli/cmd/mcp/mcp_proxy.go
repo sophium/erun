@@ -7,6 +7,10 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/inputs"
@@ -16,7 +20,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newMCPProxyCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -38,16 +42,16 @@ func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPProxyCommand(cmd.Context(), shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runMCPProxyCommand(cmd.Context(), clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addMCPEdgeScopeFlags(cmd, &tenant, &environment)
 	return cmd
 }
 
-func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
+func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
@@ -59,12 +63,12 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 
 	return mcp.RunMCPStdioProxy(ctx, mcp.MCPStdioProxyParams{
 		Endpoint:      target.Endpoint,
-		MintToken:     shared.McpEdgeTokenMinter(target),
+		MintToken:     envcall.McpEdgeTokenMinter(target),
 		ClientVersion: shared.CurrentBuildInfo().Version,
 		In:            commandCtx.Stdin,
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
-		DescribeError: func(err error) string { return shared.McpEdgeError(target, err).Error() },
+		DescribeError: func(err error) string { return envcall.McpEdgeError(target, err).Error() },
 		LocalTools: []mcp.MCPLocalTool{
 			sshdSyncLocalTool(resolveOpen, params),
 			// Deprecated alias for one release.
@@ -82,7 +86,7 @@ func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCP
 }
 
 // inputsUploadLocalTool is host-served: the source file is on this host, out of the edge's reach.
-func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
+func inputsUploadLocalTool(resolveOpen envscope.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
@@ -124,7 +128,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params model.OpenPar
 
 // sshdSyncLocalTool is host-served because the mirror is on this host; the env
 // resolves per call so a mid-session enable is picked up.
-func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
+func sshdSyncLocalTool(resolveOpen envscope.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +
@@ -158,7 +162,7 @@ func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params model.OpenParams)
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("%s\n%s", shared.SshdSyncSummary(call.Preview, synced), syncParams.RemotePath+" -> "+syncParams.LocalPath), nil
+			return fmt.Sprintf("%s\n%s", sshdlink.SshdSyncSummary(call.Preview, synced), syncParams.RemotePath+" -> "+syncParams.LocalPath), nil
 		},
 	}
 }

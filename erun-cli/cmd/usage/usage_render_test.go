@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -45,7 +45,7 @@ func code3Reading() model.RuntimeUsage {
 
 func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 	var out bytes.Buffer
-	if err := shared.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, model.RuntimeUsageReport{
+	if err := usageview.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, model.RuntimeUsageReport{
 		RuntimeUsage: model.RuntimeUsage{CPU: model.RuntimeCPUUsage{QuotaCores: 4, UtilizationPercent: 1, IntervalSeconds: 1}},
 	}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
@@ -59,7 +59,7 @@ func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
 	usage := code3Reading()
 	usage.Requests = &model.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}
 	var out bytes.Buffer
-	if err := shared.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, model.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
+	if err := usageview.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, model.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
 	}
 	if !strings.Contains(out.String(), "Requests: unavailable (kubectl get pods: connection refused)") {

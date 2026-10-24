@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // deployComponentBaseOrder orders component chart bases so backend charts precede dependents;
@@ -28,7 +29,7 @@ const canonicalChartPrefix = "erun"
 
 // componentChartPrefix derives from RuntimeReleaseName to stay in lockstep with runtime chart naming.
 func componentChartPrefix(tenant string) string {
-	return shared.TenantResourcePrefix(tenant)
+	return opentarget.TenantResourcePrefix(tenant)
 }
 
 // publishablePlatformComponentNames are the tenant-prefixed charts a sourceless env can deploy by reference.
@@ -221,7 +222,7 @@ func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 
 // ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
 // The version, not the env's source, decides which charts exist. It never builds or pushes.
-func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
+func ResolveDeployableComponents(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 

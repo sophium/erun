@@ -10,7 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type ListInput struct {
@@ -35,10 +37,10 @@ type ListToolResult struct {
 	ControlPlaneVersionDrift *model.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
 }
 
-func ListTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ListInput) (*mcp.CallToolResult, ListToolResult, error) {
+func ListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ListInput) (*mcp.CallToolResult, ListToolResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ListInput) (*mcp.CallToolResult, ListToolResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.TraceCommand("", "erun", "list")
 
 		tenant := strings.TrimSpace(input.VersionDriftTenant)
@@ -48,13 +50,13 @@ func ListTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallTo
 			return nil, ListToolResult{}, err
 		}
 
-		workDir, err := sharedpkg.RuntimeRepoPath(runtime.Context)
+		workDir, err := toolio.RuntimeRepoPath(runtime.Context)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}
 
 		result, err := lifecycle.ResolveListResult(runtime.Store, func() (string, string, error) {
-			return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
+			return toolio.RuntimeFindProjectRoot(runtime.Context, workDir)
 		}, runtimeOpenParams(runtime.Context))
 		if err != nil {
 			return nil, ListToolResult{}, err
@@ -80,7 +82,7 @@ func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string
 func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, alias, sharedpkg.CloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, alias, clouddeps.CloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}
@@ -96,7 +98,7 @@ func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlP
 	return nil, toolResult, nil
 }
 
-func runtimeOpenParams(runtime sharedpkg.RuntimeContext) model.OpenParams {
+func runtimeOpenParams(runtime toolio.RuntimeContext) model.OpenParams {
 	tenant := strings.TrimSpace(runtime.Tenant)
 	environment := strings.TrimSpace(runtime.Environment)
 

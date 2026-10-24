@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 var (
@@ -75,7 +75,7 @@ type BootstrapInitResult struct {
 
 type BootstrapInitDependencies struct {
 	Store           BootstrapStore
-	FindProjectRoot shared.ProjectFinderFunc
+	FindProjectRoot projectseam.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
 	// TenantSelectionUnavailable means nobody can be asked: a single tenant is
@@ -87,7 +87,7 @@ type BootstrapInitDependencies struct {
 	PromptRemoteRepositoryURL  PromptValueFunc
 	PromptCodeCommitSSHKeyID   PromptValueFunc
 	EnsureKubernetesNamespace  deploy.NamespaceEnsurerFunc
-	LoadProjectConfig          shared.ProjectConfigLoaderFunc
+	LoadProjectConfig          projectseam.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
 	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
 	RunRemoteCommand           kube.RemoteCommandRunnerFunc

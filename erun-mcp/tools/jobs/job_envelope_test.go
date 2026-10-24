@@ -5,20 +5,22 @@ import (
 	"io"
 	"testing"
 
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // A synchronous call has no job and no log, and already returns everything
 // inline, so it must not be handed a nil writer the work would panic on.
 func TestJobEnvelopeGivesASynchronousCallADiscardLog(t *testing.T) {
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	envelope, err := sharedpkg.RunJobEnvelope(runtime, "build", sharedpkg.JobEnvelopeInput{}, false, func(_ bool, log io.Writer) (sharedpkg.CommandOutput, error) {
+	envelope, err := jobenvelope.RunJobEnvelope(runtime, "build", jobenvelope.JobEnvelopeInput{}, false, func(_ bool, log io.Writer) (toolio.CommandOutput, error) {
 		if log == nil {
-			return sharedpkg.CommandOutput{}, errors.New("synchronous execute was handed a nil log writer")
+			return toolio.CommandOutput{}, errors.New("synchronous execute was handed a nil log writer")
 		}
 		_, writeErr := io.WriteString(log, "ignored")
-		return sharedpkg.CommandOutput{Executed: true}, writeErr
+		return toolio.CommandOutput{Executed: true}, writeErr
 	})
 	if err != nil {
 		t.Fatalf("runJobEnvelope: %v", err)

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func RunDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec, build DockerImageBuilderFunc) error {
+func RunDockerBuild(ctx core.Context, buildInput dockerspec.DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
 	traceDockerBuild(ctx, buildInput)
@@ -20,7 +20,7 @@ func RunDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec, build D
 }
 
 // traceDockerBuild emits one build's trace lines; the dry-run goldens require dependency order.
-func traceDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec) {
+func traceDockerBuild(ctx core.Context, buildInput dockerspec.DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.TraceCommands() {
@@ -29,7 +29,7 @@ func traceDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec) {
 }
 
 // executeDockerBuild runs one build and reports its test outcome right after its output.
-func executeDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+func executeDockerBuild(ctx core.Context, buildInput dockerspec.DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	outcome, err := runDockerBuildStep(ctx, buildInput, build, stdout, stderr)
 	if err == nil {
 		reportDockerBuildTestOutcome(ctx, buildInput, outcome)
@@ -39,7 +39,7 @@ func executeDockerBuild(ctx core.Context, buildInput shared.DockerBuildSpec, bui
 
 // runDockerBuildStep runs one build against the given streams, so concurrent builds can buffer
 // per image. The returned test outcome is meaningful only when err is nil.
-func runDockerBuildStep(ctx core.Context, buildInput shared.DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) (string, error) {
+func runDockerBuildStep(ctx core.Context, buildInput dockerspec.DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) (string, error) {
 	if build == nil {
 		build = DockerImageBuilder
 	}
@@ -61,32 +61,32 @@ func runDockerBuildStep(ctx core.Context, buildInput shared.DockerBuildSpec, bui
 	return dockerBuildTestOutcome(buildInput, cache), err
 }
 
-func reportDockerBuildTestOutcome(ctx core.Context, buildInput shared.DockerBuildSpec, outcome string) {
+func reportDockerBuildTestOutcome(ctx core.Context, buildInput dockerspec.DockerBuildSpec, outcome string) {
 	ctx.Info(dockerBuildStepName(buildInput) + ": test: " + outcome)
 }
 
 // dockerBuildTestOutcome names what a successful build established about the component's tests.
 // "passed" may be served from BuildKit's layer cache, which is equally valid.
-func dockerBuildTestOutcome(buildInput shared.DockerBuildSpec, cache *core.CacheDecision) string {
-	if !shared.DockerfileDeclaresTestStage(buildInput.DockerfilePath) {
+func dockerBuildTestOutcome(buildInput dockerspec.DockerBuildSpec, cache *core.CacheDecision) string {
+	if !dockerspec.DockerfileDeclaresTestStage(buildInput.DockerfilePath) {
 		return "none declared"
 	}
 	if cache != nil {
 		if hit, _ := cache.Decision(); hit {
-			return "reused (fingerprint " + shared.FingerprintTagPrefix + buildInput.Fingerprint + ")"
+			return "reused (fingerprint " + dockerspec.FingerprintTagPrefix + buildInput.Fingerprint + ")"
 		}
 	}
 	return "passed"
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect and names the concrete rebuild trigger.
-func traceIncrementalDecision(ctx core.Context, buildInput shared.DockerBuildSpec) {
+func traceIncrementalDecision(ctx core.Context, buildInput dockerspec.DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
 		return
 	}
 	missing := missingFingerprintPlatformSet(buildInput)
 	for _, platform := range buildInput.Platforms {
-		fpTag := shared.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+		fpTag := dockerspec.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 		ctx.TraceCommand("", "docker", "image", "inspect", fpTag)
 		if _, isMissing := missing[platform]; isMissing {
 			ctx.Trace("fingerprint image not found locally: " + fpTag)
@@ -107,7 +107,7 @@ func traceIncrementalDecision(ctx core.Context, buildInput shared.DockerBuildSpe
 	}
 }
 
-func missingFingerprintPlatformSet(build shared.DockerBuildSpec) map[string]struct{} {
+func missingFingerprintPlatformSet(build dockerspec.DockerBuildSpec) map[string]struct{} {
 	if len(build.MissingFingerprintPlatforms) == 0 {
 		return nil
 	}
@@ -135,7 +135,7 @@ func describeMissingPlatforms(platforms []string) string {
 
 // RunDockerBuilds builds every discovered image, independent ones concurrently. Trace lines are
 // emitted in dependency order before anything builds, so only timing varies.
-func RunDockerBuilds(ctx core.Context, builds []shared.DockerBuildSpec, build DockerImageBuilderFunc) error {
+func RunDockerBuilds(ctx core.Context, builds []dockerspec.DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ordered := markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds))
 	dependencies, err := buildDependencies(ordered)
 	if err != nil {
@@ -170,7 +170,7 @@ func RunDockerBuilds(ctx core.Context, builds []shared.DockerBuildSpec, build Do
 
 // RunDockerBuildsSequentially builds one image at a time, for the push and deploy paths that
 // push and assemble manifests as they go.
-func RunDockerBuildsSequentially(ctx core.Context, builds []shared.DockerBuildSpec, build DockerImageBuilderFunc) error {
+func RunDockerBuildsSequentially(ctx core.Context, builds []dockerspec.DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ctx.BuildJobs = 1
 	return RunDockerBuilds(ctx, builds, build)
 }

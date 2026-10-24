@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/releaseclaim"
 )
 
 func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T) {
@@ -17,16 +17,16 @@ func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T)
 	firstPID, secondPID := os.Getpid(), os.Getpid()+1
 
 	firstHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
-	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now); err != nil {
+	if _, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now); err != nil {
 		t.Fatalf("first release's claim: %v", err)
 	}
 
 	secondHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
-	_, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, secondPID, now.Add(time.Second))
+	_, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, secondPID, now.Add(time.Second))
 	if err == nil {
 		t.Fatal("expected a second concurrent release of the same version to be refused")
 	}
-	refusal := shared.ReleaseVersionClaimRefusalError("1.0.211", err)
+	refusal := releaseclaim.ReleaseVersionClaimRefusalError("1.0.211", err)
 	if !strings.Contains(refusal.Error(), "1.0.211") {
 		t.Errorf("refusal must name the version, got: %v", refusal)
 	}
@@ -35,11 +35,11 @@ func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T)
 	}
 
 	// The claim is version-scoped, not worktree-wide.
-	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.212", secondHolder, secondPID, now.Add(time.Second)); err != nil {
+	if _, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.212", secondHolder, secondPID, now.Add(time.Second)); err != nil {
 		t.Fatalf("a release of a different version must not collide with an unrelated one in flight: %v", err)
 	}
 
-	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now.Add(2*time.Second)); err != nil {
+	if _, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("the original holder renewing its own claim must succeed: %v", err)
 	}
 }
@@ -49,14 +49,14 @@ func TestReleaseVersionClaimReclaimsAnAbandonedRelease(t *testing.T) {
 	start := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 
 	firstHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
-	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, os.Getpid(), start); err != nil {
+	if _, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, os.Getpid(), start); err != nil {
 		t.Fatalf("first release's claim: %v", err)
 	}
 
 	// A crashed holder's claim cannot be deleted from outside; it must lapse.
-	afterLapse := start.Add(shared.ReleaseVersionClaimTTL + time.Minute)
+	afterLapse := start.Add(releaseclaim.ReleaseVersionClaimTTL + time.Minute)
 	secondHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
-	claim, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, os.Getpid()+1, afterLapse)
+	claim, err := releaseclaim.TakeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, os.Getpid()+1, afterLapse)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
 	}

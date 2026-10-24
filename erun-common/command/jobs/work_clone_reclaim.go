@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // workCloneRemoveAll is a test seam: a chmod fixture proves nothing under root.
@@ -73,7 +74,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 
 // decideDetachedWorkCloneReclaim is safe only when HEAD is reachable from a remote ref.
 func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	sha, ok, err := shared.GitResolvedRef(ctx, dir, "HEAD")
+	sha, ok, err := gitref.GitResolvedRef(ctx, dir, "HEAD")
 	if err != nil || !ok {
 		decision.Reason = "detached HEAD and its commit could not be resolved"
 		return decision
@@ -90,9 +91,9 @@ func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkC
 // decideBranchWorkCloneReclaim also accepts a proven squash-merge, since squashed
 // commits are absent from upstream under their own SHAs.
 func decideBranchWorkCloneReclaim(ctx core.Context, dir, branch string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	upstream, hasUpstream := shared.ResolveBranchUpstreamCandidate(ctx, dir, branch)
+	upstream, hasUpstream := gitref.ResolveBranchUpstreamCandidate(ctx, dir, branch)
 	if hasUpstream {
-		ahead, err := shared.GitCommitsAhead(ctx, dir, upstream, branch)
+		ahead, err := gitref.GitCommitsAhead(ctx, dir, upstream, branch)
 		if err != nil {
 			decision.Reason = fmt.Sprintf("could not compare %s against its upstream %s: %v", branch, upstream, err)
 			return decision
@@ -129,7 +130,7 @@ func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBr
 		return "", "", false
 	}
 	defaultRef := "origin/" + defaultBranch
-	if _, exists, err := shared.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
+	if _, exists, err := gitref.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
 		return "", "", false
 	}
 
@@ -161,7 +162,7 @@ func resolveDefaultBranchForMerge(ctx core.Context, dir, remote string) (string,
 		return def, true
 	}
 	for _, candidate := range []string{"main", "master", "develop"} {
-		if _, ok, err := shared.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
+		if _, ok, err := gitref.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
 			return candidate, true
 		}
 	}
@@ -192,7 +193,7 @@ func gitMergeBase(ctx core.Context, dir, a, b string) (string, bool) {
 }
 
 func gitTreeHash(ctx core.Context, dir, rev string) (string, bool) {
-	sha, ok, err := shared.GitResolvedRef(ctx, dir, rev+"^{tree}")
+	sha, ok, err := gitref.GitResolvedRef(ctx, dir, rev+"^{tree}")
 	if err != nil || !ok {
 		return "", false
 	}
@@ -240,15 +241,15 @@ func gitRemoteRefContainingCommit(ctx core.Context, dir, sha string) (string, bo
 
 // reclaimAgentJobWorkClone removes a cleanly exited agent job's clone, only
 // inside the work root, so the runtime repo is never touched.
-func reclaimAgentJobWorkClone(job shared.EnvironmentJob) (reclaimed bool, reason string) {
-	if job.Kind != EnvironmentJobKindAgent || job.State != shared.EnvironmentJobStateExited {
+func reclaimAgentJobWorkClone(job jobstate.EnvironmentJob) (reclaimed bool, reason string) {
+	if job.Kind != EnvironmentJobKindAgent || job.State != jobstate.EnvironmentJobStateExited {
 		return false, ""
 	}
 	dir := strings.TrimSpace(job.Dir)
 	if dir == "" {
 		return false, ""
 	}
-	root, err := shared.WorkCloneRoot("")
+	root, err := gitref.WorkCloneRoot("")
 	if err != nil || !isUnderWorkRoot(root, dir) {
 		return false, ""
 	}

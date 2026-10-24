@@ -5,7 +5,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // effectiveRuntimeChartCoordinateForImage lets the staleness check see the
@@ -159,7 +158,7 @@ func deployRuntimeImageRegistry(target config.OpenResult, chartRegistry string) 
 // RuntimeImageIsStockDevops reports whether image names erun-devops in any
 // registry.
 func RuntimeImageIsStockDevops(image string) bool {
-	_, name, _, ok := shared.ParseDockerImageReference(image)
+	_, name, _, ok := ParseDockerImageReference(image)
 	return ok && name == config.DefaultRuntimeImageName
 }
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 func TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay(t *testing.T) {
@@ -39,7 +39,7 @@ func TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay(t 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := shared.NormalizeDockerBuildSecrets(tc.secrets)
+			got, err := dockerspec.NormalizeDockerBuildSecrets(tc.secrets)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("normalizeDockerBuildSecrets accepted %+v", tc.secrets)

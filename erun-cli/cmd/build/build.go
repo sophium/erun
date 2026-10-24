@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/helmrecovery"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -19,7 +21,9 @@ import (
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +36,7 @@ var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version
 
 var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
 
-func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
+func NewBuildCmd(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var jobs int
 	cmd := &cobra.Command{
@@ -66,12 +70,12 @@ func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectF
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			ctx.BuildJobs = jobs
 			return runBuildCommand(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart, cloudStore, cloudDeps)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addBuildCommandTargetFlags(cmd, &target)
 	// Only on build: push and release builds stay sequential.
 	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
@@ -79,16 +83,16 @@ func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectF
 	return cmd
 }
 
-func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildCommand(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
-	buildWithRetry := func(buildInput sharedpkg.DockerBuildSpec, stdout, stderr io.Writer) error {
+	buildWithRetry := func(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
 			ctx,
 			buildInput,
-			func(buildInput sharedpkg.DockerBuildSpec, stdout, stderr io.Writer) error {
+			func(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
 					return buildpkg.DockerImageBuilder(buildInput, stdout, stderr)
 				}
@@ -112,7 +116,7 @@ func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectR
 	return ctx.WriteResult(buildrun.NewBuildResult(execution))
 }
 
-func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target model.DockerCommandTarget, execution sharedpkg.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildAndDeploy(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget, execution dockerspec.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	if buildrun.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
@@ -130,7 +134,7 @@ func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjec
 	return execute.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps)
 }
 
-func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc) *cobra.Command {
+func NewPushCmd(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push buildpkg.DockerPushFunc) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -146,7 +150,7 @@ func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFi
 			if strings.TrimSpace(target.VersionOverride) == "" {
 				return errPushVersionRequired
 			}
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			pushInput, buildInput, err := buildrun.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
@@ -157,19 +161,19 @@ func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFi
 			})
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
 
-func pushBuildWithRetry(ctx core.Context, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner) buildpkg.DockerImageBuilderFunc {
-	return func(buildInput sharedpkg.DockerBuildSpec, stdout, stderr io.Writer) error {
+func pushBuildWithRetry(ctx core.Context, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) buildpkg.DockerImageBuilderFunc {
+	return func(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
 			ctx,
 			buildInput,
-			func(buildInput sharedpkg.DockerBuildSpec, stdout, stderr io.Writer) error {
+			func(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
 					return buildpkg.DockerImageBuilder(buildInput, stdout, stderr)
 				}
@@ -184,7 +188,7 @@ func pushBuildWithRetry(ctx core.Context, buildDockerImage buildpkg.DockerImageB
 }
 
 // NewRootPushCmd keeps --build orchestration here so push stays a pure primitive.
-func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
+func NewRootPushCmd(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -210,7 +214,7 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 			if force {
 				target.NoIncremental = true
 			}
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if target.Build {
 				if strings.TrimSpace(target.VersionOverride) != "" {
 					return errPushBuildVersionConflict
@@ -241,7 +245,7 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 			})
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache (also forces the --build step)")
@@ -249,7 +253,7 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 	return cmd
 }
 
-func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, target *model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runPushBuildStep(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target *model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
@@ -266,7 +270,7 @@ func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProject
 	return nil
 }
 
-func RunDockerPushWithRetry(ctx core.Context, pushInput sharedpkg.DockerPushSpec, push buildpkg.DockerPushFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner) error {
+func RunDockerPushWithRetry(ctx core.Context, pushInput dockerspec.DockerPushSpec, push buildpkg.DockerPushFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) error {
 	err := push(ctx, pushInput)
 	if err == nil {
 		return nil
@@ -301,7 +305,7 @@ func RunDockerPushWithRetry(ctx core.Context, pushInput sharedpkg.DockerPushSpec
 	return push(ctx, pushInput)
 }
 
-func runDockerBuildWithRetry(ctx core.Context, buildInput sharedpkg.DockerBuildSpec, build buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, stdout, stderr io.Writer) error {
+func runDockerBuildWithRetry(ctx core.Context, buildInput dockerspec.DockerBuildSpec, build buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, stdout, stderr io.Writer) error {
 	err := build(buildInput, stdout, stderr)
 	if err == nil {
 		return nil
@@ -357,7 +361,7 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *model.DockerCommandTa
 // handleNamespaceAuthError re-authenticates as the namespace owner, escalating to
 // `gh auth refresh`, which cannot complete headless (device code).
 func handleNamespaceAuthError(authErr model.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
-	if !sharedpkg.IsDockerCreatePackageDenied(authErr.Message) && !buildpkg.IsDockerScopeDenied(authErr.Message) {
+	if !dockerregistry.IsDockerCreatePackageDenied(authErr.Message) && !buildpkg.IsDockerScopeDenied(authErr.Message) {
 		return false, nil
 	}
 	finalErr := retryAfterNamespaceLogin(authErr, retry, stdout, stderr)
@@ -371,14 +375,14 @@ func handleNamespaceAuthError(authErr model.DockerRegistryAuthError, retry func(
 			finalErr = refreshErr
 		}
 	}
-	if sharedpkg.IsDockerCreatePackageDenied(authErr.Message) {
+	if dockerregistry.IsDockerCreatePackageDenied(authErr.Message) {
 		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 	}
 	return true, finalErr
 }
 
 func retryAfterNamespaceLogin(authErr model.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
-	ok, _ := sharedpkg.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
+	ok, _ := dockerregistry.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
 	if !ok {
 		return authErr
 	}
@@ -460,8 +464,8 @@ func isGHCR(registry string) bool {
 	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
 }
 
-func promptDockerLoginRetry(run shared.SelectRunner, registry string) (bool, error) {
-	if shared.IsTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
+func promptDockerLoginRetry(run promptpkg.SelectRunner, registry string) (bool, error) {
+	if helmrecovery.IsTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
 		return true, nil
 	}
 	label := fmt.Sprintf("Docker push requires login to %s", buildpkg.DockerRegistryDisplayName(registry))

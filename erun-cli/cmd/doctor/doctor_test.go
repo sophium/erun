@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -17,9 +17,9 @@ import (
 
 func forceStdinTerminal(t *testing.T, terminal bool) {
 	t.Helper()
-	previous := shared.StdinIsTerminal
-	shared.StdinIsTerminal = func() bool { return terminal }
-	t.Cleanup(func() { shared.StdinIsTerminal = previous })
+	previous := promptpkg.StdinIsTerminal
+	promptpkg.StdinIsTerminal = func() bool { return terminal }
+	t.Cleanup(func() { promptpkg.StdinIsTerminal = previous })
 }
 
 func doctorActionResult() config.OpenResult {

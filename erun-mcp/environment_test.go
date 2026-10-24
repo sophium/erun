@@ -7,13 +7,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/environment"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
@@ -42,8 +43,8 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
 	t.Setenv("ERUN_MCP_PORT", "17200")
 	t.Setenv("ERUN_SSHD_PORT", "17222")
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
@@ -73,8 +74,8 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 // Unobservable power state must read unknown, not stopped or idle.
 func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs: map[string]config.EnvConfig{

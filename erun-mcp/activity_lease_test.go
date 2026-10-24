@@ -10,7 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	activitypkg "github.com/sophium/erun/erun-mcp/tools/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func isolateLeaseCache(t *testing.T) {
@@ -22,8 +23,8 @@ func isolateLeaseCache(t *testing.T) {
 
 func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
@@ -50,8 +51,8 @@ func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 
 func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
@@ -74,8 +75,8 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 // The store sanitizes the id, so a renewal must normalize the raw id before comparing.
 func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
@@ -107,8 +108,8 @@ func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.
 // Normalization must apply to both sides, not disable the comparison.
 func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresent(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
@@ -131,8 +132,8 @@ func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresen
 // Scope is trimmed, not sanitized, so the renewal check must trim it too.
 func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},

@@ -22,7 +22,7 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // E2ESuiteResult is how one suite's run ended.
@@ -122,7 +122,7 @@ func resolveE2ERuns(ctx core.Context, params model.E2EParams, deps e2eDeps) (*E2
 	}
 	traceE2EVersion(ctx, version, versionOverride != "")
 	if len(secrets) > 0 {
-		ctx.Trace("e2e: secrets configured as " + shared.DescribeDockerBuildSecrets(secrets) + " (.erun/config.yaml e2e.secrets)")
+		ctx.Trace("e2e: secrets configured as " + dockerspec.DescribeDockerBuildSecrets(secrets) + " (.erun/config.yaml e2e.secrets)")
 	}
 
 	runs := make([]e2eRun, 0, len(params.Plan.Suites))
@@ -217,7 +217,7 @@ func e2eDockerBuildArgs(suite model.E2ESuite, version, baseURL string, exposed [
 		args = append(args, "--build-arg", e2eServiceURLBuildArg(service.Service)+"="+service.Scheme+"://"+service.Hostname)
 	}
 	args = build.AppendCgroupParentArg(args, cgroupParent)
-	args = append(args, shared.DockerSecretArgs(secrets)...)
+	args = append(args, dockerspec.DockerSecretArgs(secrets)...)
 	return append(args, "-f", suite.Dockerfile, ".")
 }
 
@@ -433,7 +433,7 @@ func lookupE2EHost(host string) ([]string, error) {
 // resolveE2ESecrets fails on a declared secret that cannot be supplied rather
 // than letting the suite silently skip what it checks.
 func resolveE2ESecrets(projectRoot string) ([]config.DockerBuildSecret, error) {
-	cfg, ok, err := shared.LoadProjectConfigForDockerSecrets(projectRoot)
+	cfg, ok, err := dockerspec.LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil || !ok {
 		return nil, err
 	}

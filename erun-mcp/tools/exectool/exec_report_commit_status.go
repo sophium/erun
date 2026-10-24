@@ -7,7 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // ExecReportCommitStatusInput reports a merge queue build as a GitHub commit status.
@@ -22,10 +24,10 @@ type ExecReportCommitStatusInput struct {
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-func ExecReportCommitStatusTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReportCommitStatusInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReportCommitStatusInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
+func ExecReportCommitStatusTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReportCommitStatusInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReportCommitStatusInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
 		var reported *model.ReportCommitStatusResult
-		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
+		output, err := runcmd.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
 			result, err := review.ReportCommitStatus(runCtx, model.ReportCommitStatusParams{
 				RemoteURL:   input.RemoteURL,
 				Commit:      input.Commit,

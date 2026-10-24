@@ -14,7 +14,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // writeModuleFixture references imageName through an interpolation, as the real module does.
@@ -107,7 +108,7 @@ func TestProbeAnonymousManifestPullAtStatusHandling(t *testing.T) {
 			stub := &anonymousManifestStub{ManifestStatus: tc.manifestStatus, TokenStatus: tc.tokenStatus}
 			server := stub.start(t)
 
-			pullable, err := shared.ProbeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
+			pullable, err := dockerregistry.ProbeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected an error")
@@ -126,7 +127,7 @@ func TestProbeAnonymousManifestPullAtStatusHandling(t *testing.T) {
 
 func TestProbeAnonymousManifestPullAtTokenRequestUnreachable(t *testing.T) {
 	unreachable := "http://127.0.0.1:1"
-	_, err := shared.ProbeAnonymousManifestPullAt(context.Background(), &http.Client{Timeout: time.Second}, "sophium/erun-example", "1.0.0", unreachable, unreachable)
+	_, err := dockerregistry.ProbeAnonymousManifestPullAt(context.Background(), &http.Client{Timeout: time.Second}, "sophium/erun-example", "1.0.0", unreachable, unreachable)
 	if err == nil {
 		t.Fatal("expected an error: the probe could not reach the registry at all")
 	}
@@ -141,7 +142,7 @@ func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 	stub := &anonymousManifestStub{ManifestStatus: http.StatusOK}
 	server := stub.start(t)
 
-	if _, err := shared.ProbeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL); err != nil {
+	if _, err := dockerregistry.ProbeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if stub.tokenRequestSawBasicAuth {
@@ -155,9 +156,9 @@ func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 	}
 }
 
-func fakeExecutionForImage(imageName, tag, version string) shared.BuildExecutionSpec {
-	return shared.BuildExecutionSpec{
-		DockerPushes: []shared.DockerPushSpec{
+func fakeExecutionForImage(imageName, tag, version string) dockerspec.BuildExecutionSpec {
+	return dockerspec.BuildExecutionSpec{
+		DockerPushes: []dockerspec.DockerPushSpec{
 			{Image: model.DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
 		},
 	}
@@ -240,9 +241,9 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNow
 	}
 }
 
-func realProbeAt(server *httptest.Server) shared.AnonymousPullProbeFunc {
+func realProbeAt(server *httptest.Server) dockerregistry.AnonymousPullProbeFunc {
 	return func(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error) {
-		return shared.ProbeAnonymousManifestPullAt(ctx, server.Client(), repoPath, tag, server.URL, server.URL)
+		return dockerregistry.ProbeAnonymousManifestPullAt(ctx, server.Client(), repoPath, tag, server.URL, server.URL)
 	}
 }
 
@@ -297,7 +298,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedPro
 
 	unreachable := "http://127.0.0.1:1"
 	probe := func(ctx context.Context, _ *http.Client, repoPath, tag string) (bool, error) {
-		return shared.ProbeAnonymousManifestPullAt(ctx, &http.Client{Timeout: time.Second}, repoPath, tag, unreachable, unreachable)
+		return dockerregistry.ProbeAnonymousManifestPullAt(ctx, &http.Client{Timeout: time.Second}, repoPath, tag, unreachable, unreachable)
 	}
 
 	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
@@ -322,7 +323,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndPr
 
 	unreachable := "http://127.0.0.1:1"
 	probe := func(ctx context.Context, _ *http.Client, repoPath, tag string) (bool, error) {
-		return shared.ProbeAnonymousManifestPullAt(ctx, &http.Client{Timeout: time.Second}, repoPath, tag, unreachable, unreachable)
+		return dockerregistry.ProbeAnonymousManifestPullAt(ctx, &http.Client{Timeout: time.Second}, repoPath, tag, unreachable, unreachable)
 	}
 
 	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
@@ -336,7 +337,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndPr
 func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenUnpublished(t *testing.T) {
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-orphaned-webhook")
-	execution := shared.BuildExecutionSpec{}
+	execution := dockerspec.BuildExecutionSpec{}
 	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) {
@@ -356,7 +357,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableNoOpWhenNothingReference
 		t.Fatal("must not probe when nothing is referenced")
 		return false, nil
 	}
-	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, shared.BuildExecutionSpec{}, probe); err != nil {
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, dockerspec.BuildExecutionSpec{}, probe); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

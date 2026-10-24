@@ -9,16 +9,18 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // A linux package component is never an image: a plain build runs its `test` stage to a cache-only
 // output, and only `erun build --release` exports and uploads its `dist` .deb files.
 
 // ResolveCurrentLinuxPackageContexts resolves the linux package components the current directory scopes a build to.
-func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target model.DockerCommandTarget) ([]shared.LinuxPackageContext, error) {
+func ResolveCurrentLinuxPackageContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, target model.DockerCommandTarget) ([]dockerspec.LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
-		resolveBuildContext = shared.ResolveDockerBuildContext
+		resolveBuildContext = dockerspec.ResolveDockerBuildContext
 	}
 
 	buildContext, err := resolveBuildContext()
@@ -26,15 +28,15 @@ func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc
 		return nil, err
 	}
 
-	if context, ok, err := shared.LinuxPackageContextAtDir(buildContext.Dir); err != nil {
+	if context, ok, err := dockerspec.LinuxPackageContextAtDir(buildContext.Dir); err != nil {
 		return nil, err
 	} else if ok {
-		return []shared.LinuxPackageContext{context}, nil
+		return []dockerspec.LinuxPackageContext{context}, nil
 	}
 
-	if contexts, err := shared.ResolveLinuxPackageContextsAtDir(buildContext.Dir); err == nil {
+	if contexts, err := ResolveLinuxPackageContextsAtDir(buildContext.Dir); err == nil {
 		return contexts, nil
-	} else if !errors.Is(err, shared.ErrLinuxPackageBuildNotFound) {
+	} else if !errors.Is(err, dockerspec.ErrLinuxPackageBuildNotFound) {
 		return nil, err
 	}
 
@@ -43,13 +45,13 @@ func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc
 		return nil, err
 	}
 	if ok {
-		return shared.ResolveLinuxPackageContextsAtDir(linuxDir)
+		return ResolveLinuxPackageContextsAtDir(linuxDir)
 	}
 
-	return nil, shared.ErrLinuxPackageBuildNotFound
+	return nil, dockerspec.ErrLinuxPackageBuildNotFound
 }
 
-func resolveCurrentDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
+func resolveCurrentDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil
@@ -64,7 +66,7 @@ func resolveCurrentDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, dir 
 		}
 	}
 
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return "", false, err
 	}
@@ -75,7 +77,7 @@ func resolveCurrentDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, dir 
 	return resolveProjectRootDevopsLinuxDir(findProjectRoot, projectRoot)
 }
 
-func resolveProjectRootDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func resolveProjectRootDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	if projectRoot == "" {
 		return "", false, nil
@@ -100,8 +102,8 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, 
 	}
 }
 
-func detectedProjectRootDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, projectRoot string) (string, bool, error) {
-	tenant, ok := shared.DetectedProjectTenant(findProjectRoot, projectRoot)
+func detectedProjectRootDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	tenant, ok := dockerbuild.DetectedProjectTenant(findProjectRoot, projectRoot)
 	if !ok {
 		return "", false, nil
 	}
@@ -137,12 +139,46 @@ func findDevopsLinuxDirs(projectRoot string) ([]string, error) {
 }
 
 func isLinuxPackageModuleDir(dir string) (bool, error) {
-	contexts, err := shared.ResolveLinuxPackageContextsAtDir(dir)
+	contexts, err := ResolveLinuxPackageContextsAtDir(dir)
 	if err != nil {
-		if errors.Is(err, shared.ErrLinuxPackageBuildNotFound) {
+		if errors.Is(err, dockerspec.ErrLinuxPackageBuildNotFound) {
 			return false, nil
 		}
 		return false, err
 	}
 	return len(contexts) > 0, nil
+}
+
+func ResolveLinuxPackageContextsAtDir(dir string) ([]dockerspec.LinuxPackageContext, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || filepath.Base(dir) != "linux" {
+		return nil, dockerspec.ErrLinuxPackageBuildNotFound
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, dockerspec.ErrLinuxPackageBuildNotFound
+		}
+		return nil, err
+	}
+
+	contexts := make([]dockerspec.LinuxPackageContext, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		context, ok, err := dockerspec.LinuxPackageContextAtDir(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		contexts = append(contexts, context)
+	}
+	if len(contexts) == 0 {
+		return nil, dockerspec.ErrLinuxPackageBuildNotFound
+	}
+	return contexts, nil
 }

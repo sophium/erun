@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
-func runDoctorInRuntime(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions) error {
+func runDoctorInRuntime(ctx core.Context, promptRunner promptpkg.PromptRunner, options doctorOptions) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func writeRemoteInitShortCircuit(ctx core.Context, inspection model.RemoteInitIn
 	return false, nil
 }
 
-func confirmRemoteInitFinish(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions) (bool, error) {
+func confirmRemoteInitFinish(ctx core.Context, promptRunner promptpkg.PromptRunner, options doctorOptions) (bool, error) {
 	if options.finishRemoteInit {
 		return true, nil
 	}
@@ -73,7 +73,7 @@ func confirmRemoteInitFinish(ctx core.Context, promptRunner shared.PromptRunner,
 		"Re-run with --finish-remote-init to run it without a prompt.")
 }
 
-func remoteInitPromptFunc(promptRunner shared.PromptRunner) doctor.RemoteInitFinishPrompt {
+func remoteInitPromptFunc(promptRunner promptpkg.PromptRunner) doctor.RemoteInitFinishPrompt {
 	return func(label string) (string, error) {
 		if promptRunner == nil {
 			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url and --codecommit-ssh-key-id when applicable")
@@ -93,7 +93,7 @@ func writeRemoteInitFinishReport(ctx core.Context, updated model.RemoteInitInspe
 	return doctor.WriteRemoteInitInspectionReport(ctx, updated)
 }
 
-func doctorRemoteInitPrompt(run shared.PromptRunner, label string) (string, error) {
+func doctorRemoteInitPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {

@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // apply-recommendation sizes only the runtime pod, so it combines freely with dind values.
@@ -220,10 +220,10 @@ func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.
 type RuntimeResizeDependencies struct {
 	Store                          deploy.DeployStore
 	SaveEnvConfig                  deploy.EnvConfigSaver
-	FindProjectRoot                shared.ProjectFinderFunc
-	ResolveDockerBuildContext      shared.BuildContextResolverFunc
+	FindProjectRoot                projectseam.ProjectFinderFunc
+	ResolveDockerBuildContext      projectseam.BuildContextResolverFunc
 	ResolveKubernetesDeployContext deploy.DeployContextResolverFunc
-	Now                            shared.NowFunc
+	Now                            projectseam.NowFunc
 	DeployHelmChart                deploy.HelmChartDeployerFunc
 	// LoadActivityLeases nil reads the local store, correct only inside the environment's pod.
 	LoadActivityLeases func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error)

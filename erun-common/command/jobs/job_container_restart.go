@@ -9,12 +9,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 // jobSupervisorContainerRestart reports this pod's own container restart.
 // ok=false means "could not check", never "did not restart".
-func jobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+func jobSupervisorContainerRestart(podName, containerName string, runner opentarget.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
 		return false, "", 0, time.Time{}, false
@@ -26,7 +27,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner shared.
 }
 
 // defaultJobSupervisorContainerRestart is the kubectl subprocess path.
-func defaultJobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+func defaultJobSupervisorContainerRestart(podName, containerName string, runner opentarget.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	if runner == nil {
 		return false, "", 0, time.Time{}, false
 	}
@@ -75,7 +76,7 @@ func libraryJobSupervisorContainerRestart(podName, containerName string) (restar
 }
 
 // jobLastKnownAliveAt is the earliest time a restart can be attributed to this job.
-func jobLastKnownAliveAt(job shared.EnvironmentJob) time.Time {
+func jobLastKnownAliveAt(job jobstate.EnvironmentJob) time.Time {
 	if !job.LastAliveAt.IsZero() {
 		return job.LastAliveAt
 	}

@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext model.DockerBuildContext) {
@@ -35,7 +36,7 @@ func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext 
 	return projectRoot, model.DockerBuildContext{Dir: contextDir, DockerfilePath: dockerfilePath}
 }
 
-func pushResolversForTest(projectRoot string, buildContext model.DockerBuildContext) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
+func pushResolversForTest(projectRoot string, buildContext model.DockerBuildContext) (projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return projectRoot, "", nil }
 	resolveBuildContext := func() (model.DockerBuildContext, error) { return buildContext, nil }
 	return findProjectRoot, resolveBuildContext
@@ -61,9 +62,9 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 	if len(builds) == 0 {
 		t.Fatal("ResolveDockerPushExecution resolved no builds to publish")
 	}
-	if got := builds[0].Platforms; !reflect.DeepEqual(got, shared.MultiPlatformDockerBuilds) {
+	if got := builds[0].Platforms; !reflect.DeepEqual(got, dockerspec.MultiPlatformDockerBuilds) {
 		t.Errorf("ResolveDockerPushExecution published platforms %v, want %v: a push is what puts a released version in the registry, so the project's amd64-only pin must not reach the published manifest",
-			got, shared.MultiPlatformDockerBuilds)
+			got, dockerspec.MultiPlatformDockerBuilds)
 	}
 
 	pushSpec, resolvedBuild, err := ResolveDockerPushSpec(core.Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
@@ -73,8 +74,8 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 	if resolvedBuild == nil {
 		t.Fatal("ResolveDockerPushSpec resolved no build")
 	}
-	if got := resolvedBuild.Platforms; !reflect.DeepEqual(got, shared.MultiPlatformDockerBuilds) {
-		t.Errorf("ResolveDockerPushSpec published platforms %v, want %v", got, shared.MultiPlatformDockerBuilds)
+	if got := resolvedBuild.Platforms; !reflect.DeepEqual(got, dockerspec.MultiPlatformDockerBuilds) {
+		t.Errorf("ResolveDockerPushSpec published platforms %v, want %v", got, dockerspec.MultiPlatformDockerBuilds)
 	}
 	if got := pushSpec.Image.Tag; got != "ghcr.io/sophium/widget:1.0.291" {
 		t.Errorf("pushed tag = %q, want %q", got, "ghcr.io/sophium/widget:1.0.291")

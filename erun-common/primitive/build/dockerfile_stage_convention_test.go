@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // The backend tests run only if the `test` stage runs them and a later stage consumes it.
@@ -21,7 +21,7 @@ func testStageInstructionLines(text string) []string {
 	inTestStage := false
 	for _, line := range strings.Split(text, "\n") {
 		if dockerfileFromRefPattern.MatchString(line) {
-			inTestStage = shared.DockerfileTestStagePattern.MatchString(line)
+			inTestStage = dockerspec.DockerfileTestStagePattern.MatchString(line)
 			continue
 		}
 		if inTestStage {
@@ -44,7 +44,7 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, componentTestCommand) {
 		t.Errorf("%s declares no `test` stage running %s — the component's tests, its database suites included, would never run before its image is built", venue, componentTestCommand)
 	}
-	if !shared.DockerfileHasConsumedTestStage(path) {
+	if !dockerspec.DockerfileHasConsumedTestStage(path) {
 		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and a later stage built or copying from it the image builds and publishes with its tests never run, and a fingerprint written after that build would let later builds reuse an untested result", venue)
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/envcall"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
@@ -30,14 +30,14 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 	t.Cleanup(restore)
 
 	port := closedLoopbackPort(t)
-	target := shared.McpEdgeTarget{
+	target := envcall.McpEdgeTarget{
 		Tenant:      "team",
 		Environment: "dev",
 		Port:        port,
 		Endpoint:    mcp.MCPLocalEndpoint(port),
 	}
 
-	_, err := shared.CallMCPToolWithReattach(context.Background(), testCommandContext(t, true), target, "whip", map[string]any{"preview": true}, false)
+	_, err := envcall.CallMCPToolWithReattach(context.Background(), testCommandContext(t, true), target, "whip", map[string]any{"preview": true}, false)
 	if !errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 		t.Fatalf("dry run against a closed port returned %v, want an unreachable endpoint", err)
 	}
@@ -45,7 +45,7 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 		t.Fatalf("--dry-run reattached %v, want no reattach at all", spawned)
 	}
 
-	_, _ = shared.CallMCPToolWithReattach(context.Background(), testCommandContext(t, false), target, "whip", map[string]any{}, false)
+	_, _ = envcall.CallMCPToolWithReattach(context.Background(), testCommandContext(t, false), target, "whip", map[string]any{}, false)
 	if len(spawned) != 1 || spawned[0] != "team/dev" {
 		t.Fatalf("a real run reattached %v, want exactly team/dev", spawned)
 	}
@@ -58,9 +58,9 @@ func testCommandContext(t *testing.T, dryRun bool) core.Context {
 }
 
 func swapReattachMCPChannel(replacement func(core.Context, string, string) error) func() {
-	original := shared.ReattachMCPChannel
-	shared.ReattachMCPChannel = replacement
-	return func() { shared.ReattachMCPChannel = original }
+	original := envcall.ReattachMCPChannel
+	envcall.ReattachMCPChannel = replacement
+	return func() { envcall.ReattachMCPChannel = original }
 }
 
 func closedLoopbackPort(t *testing.T) int {

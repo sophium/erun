@@ -53,15 +53,17 @@ linters:
       rules:
         tools:
           list-mode: lax
-          files: ["**/erun-mcp/tools/*/*.go", "!**/erun-mcp/tools/shared/*.go"]
+          files: ["**/erun-mcp/tools/*/*.go", "!**/erun-mcp/tools/shared/**"]
           allow:
-            - github.com/sophium/erun/erun-mcp/tools/shared$
+            - github.com/sophium/erun/erun-mcp/tools/shared/
           deny:
             - pkg: github.com/sophium/erun/erun-mcp
-              desc: an erun-mcp tool package may import tools/shared, never the server package or another tool group
+              desc: an erun-mcp tool package may import tools/shared/*, never the server package or another tool group
         shared:
           list-mode: lax
-          files: ["**/erun-mcp/tools/shared/*.go"]
+          files: ["**/erun-mcp/tools/shared/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-mcp/tools/shared/
           deny:
             - pkg: github.com/sophium/erun/erun-mcp
               desc: tools/shared sits below every tool group and imports none of them

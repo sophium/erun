@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // The notice is additive: a successful push reports success whether or not a review exists.
@@ -78,7 +78,7 @@ func execPushNoticePushDependencies(branch string) gitx.PushWorkingTreeBranchDep
 	}
 }
 
-func execPushNoticeFinder(projectRoot string) shared.ProjectFinderFunc {
+func execPushNoticeFinder(projectRoot string) projectseam.ProjectFinderFunc {
 	return func() (string, string, error) { return "tenant", projectRoot, nil }
 }
 

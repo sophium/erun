@@ -6,11 +6,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 type CancelEnvironmentJobResult struct {
-	Job shared.EnvironmentJob `json:"job"`
+	Job jobstate.EnvironmentJob `json:"job"`
 	// Signalled is false when the job had already finished.
 	Signalled bool   `json:"signalled"`
 	Signal    string `json:"signal,omitempty"`
@@ -19,7 +20,7 @@ type CancelEnvironmentJobResult struct {
 
 // resolveEnvironmentJobCancelTarget is the one place that ensures a job's own
 // supervisor is never signalled.
-func resolveEnvironmentJobCancelTarget(job shared.EnvironmentJob) (int, error) {
+func resolveEnvironmentJobCancelTarget(job jobstate.EnvironmentJob) (int, error) {
 	// A task job's PID is this process; there is no subprocess to signal.
 	if job.Kind == EnvironmentJobKindTask {
 		return 0, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
@@ -62,8 +63,8 @@ func CancelEnvironmentJob(ctx core.Context, params model.CancelEnvironmentJobPar
 	}
 	// Recorded before the signal: the target's finish check runs concurrently.
 	// Best-effort; failure costs only the provenance.
-	if dir, dirErr := shared.EnvironmentJobDir(params.Tenant, params.Environment); dirErr == nil {
-		recordEnvironmentJobCancelRequest(dir, job.ID, shared.CurrentEnvironmentJobID())
+	if dir, dirErr := jobexclusive.EnvironmentJobDir(params.Tenant, params.Environment); dirErr == nil {
+		recordEnvironmentJobCancelRequest(dir, job.ID, jobstate.CurrentEnvironmentJobID())
 	}
 	if err := core.SignalEnvironmentJobProcessGroup(target, signal); err != nil {
 		return CancelEnvironmentJobResult{}, err

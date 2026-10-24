@@ -40,7 +40,7 @@ new code goes into the layer it belongs to:
 erun-common/
   base/          model/ core/ config/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
-  primitive/     shared/ build/ push/ deploy/ open/ release/
+  primitive/     shared/<concern>/ build/ push/ deploy/ open/ release/
   orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
   command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
@@ -54,8 +54,8 @@ import only the erun packages its row names:
 | `base/core` | `base/model` |
 | `base/config` | `base/model`, `base/core` |
 | `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
-| `primitive/shared` | `base/*`, `infra/*` |
-| `primitive/*` | `base/*`, `infra/*`, `primitive/shared`; never another primitive |
+| `primitive/shared/*` | `base/*`, `infra/*`, other `primitive/shared/*` |
+| `primitive/*` | `base/*`, `infra/*`, `primitive/shared/*`; never another primitive |
 | `orchestration/build`, `/deploy`, `/clusterread`, `/diagnosis` | `base/*`, `infra/*`, `primitive/*` |
 | `orchestration/release` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build` |
 | `orchestration/execute` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build`, `/deploy`, `/release` |
@@ -83,9 +83,9 @@ import only the erun packages its row names:
   (`TestErunRegistry*`), `podruntime` → `doctor`
   (`TestRuntimeBootConfigCloudContextDefaults`).
 - erun-cli's commands follow the same rule one level up: `erun-cli/cmd/<command>`
-  per command, `erun-cli/cmd/shared` for what two or more of them use, and the
-  root `cmd` package registering them. erun-cli's `.golangci.yml` holds a
-  command to `cmd/shared` and `cmd/shared` to no command. Split with the same
+  per command, `erun-cli/cmd/shared/<concern>` for what two or more of them use,
+  and the root `cmd` package registering them. erun-cli's `.golangci.yml` holds a
+  command to `cmd/shared/*` and `cmd/shared/*` to no command. Split with the same
   tool, run from `erun-cli/cmd` (`maps/06-cli.map` names the command).
 - A test whose helper is this test binary re-executed registers that helper
   from an `init` in its own file (`reentryHelpers`, in each package's suite
@@ -102,7 +102,8 @@ import only the erun packages its row names:
   cannot be exported, so a helper a moved test needs is copied into that
   package's tests, and moved instead when its own package no longer uses it.
 - A primitive never calls another primitive: what two primitives share goes to
-  `primitive/shared`, and a composition of primitives goes in the
+  the `primitive/shared/<concern>` package for that concern, and a composition
+  of primitives goes in the
   `orchestration/*` package for that composition.
   Types and config code never call build, deploy or release.
 - `cmd/buildcost` measures what one edit costs every module's build, vet and

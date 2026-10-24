@@ -11,7 +11,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-mcp/tools/pin"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func writePinTestFile(t *testing.T, path, body string) {
@@ -25,8 +27,8 @@ func writePinTestFile(t *testing.T, path, body string) {
 }
 
 func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.100"},
@@ -50,8 +52,8 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	if err := lifecycle.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
@@ -68,8 +70,8 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 }
 
 func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{RepoPath: t.TempDir()},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{RepoPath: t.TempDir()},
 		Store:   listToolStore{},
 	}
 	_, _, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Version: "1.0.175"})
@@ -100,8 +102,8 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: frsRoot},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: frsRoot},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
@@ -127,8 +129,8 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 			},
 		},
 	}
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
 		Store:   store,
 		ResolveRuntimeRegistryVersions: func(context.Context) (model.RuntimeRegistryVersions, error) {
 			return model.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
@@ -153,7 +155,7 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	}
 }
 
-func assertPlanScopedToFrsOnly(t *testing.T, output shared.JobEnvelopeOutput, frsRoot string) {
+func assertPlanScopedToFrsOnly(t *testing.T, output jobenvelope.JobEnvelopeOutput, frsRoot string) {
 	t.Helper()
 	if output.Pin == nil {
 		t.Fatal("expected a resolved plan")

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/textfmt"
+	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -15,11 +16,11 @@ func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error
 	if _, err := fmt.Fprintln(ctx.Stdout, tenantHeaderLine(tenant)); err != nil {
 		return err
 	}
-	if err := shared.WriteIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
+	if err := textfmt.WriteIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
 		return err
 	}
 	if strings.TrimSpace(tenant.APIURL) != "" {
-		if err := shared.WriteIndentedValue(ctx, 4, "api url", tenant.APIURL); err != nil {
+		if err := textfmt.WriteIndentedValue(ctx, 4, "api url", tenant.APIURL); err != nil {
 			return err
 		}
 	}
@@ -64,9 +65,9 @@ func environmentHeaderLine(env lifecycle.ListEnvironmentResult) string {
 	if markers := statusMarkers(env.IsDefault, env.IsEffective); len(markers) > 0 {
 		envLine += " [" + strings.Join(markers, ", ") + "]"
 	}
-	envLine += " context=" + shared.QuotedValueOrNone(env.KubernetesContext)
+	envLine += " context=" + textfmt.QuotedValueOrNone(env.KubernetesContext)
 	if strings.TrimSpace(env.CloudProviderAlias) != "" {
-		envLine += " cloud=" + shared.QuotedValueOrNone(env.CloudProviderAlias)
+		envLine += " cloud=" + textfmt.QuotedValueOrNone(env.CloudProviderAlias)
 	}
 	return envLine
 }
@@ -74,23 +75,23 @@ func environmentHeaderLine(env lifecycle.ListEnvironmentResult) string {
 func environmentDetailLines(tenantName string, env lifecycle.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
-		indent + "type: " + shared.ValueOrNone(string(env.Type)),
-		indent + "repo: " + shared.ValueOrNone(env.RepoPath),
+		indent + "type: " + textfmt.ValueOrNone(string(env.Type)),
+		indent + "repo: " + textfmt.ValueOrNone(env.RepoPath),
 		indent + "ports: " + portRangeLabel(env.LocalPorts),
 		indent + "mcp-port: " + fmt.Sprintf("%d", env.LocalPorts.MCP),
 		indent + "api-port: " + fmt.Sprintf("%d", env.LocalPorts.API),
-		indent + "api-url: " + shared.ValueOrNone(env.APIURL),
+		indent + "api-url: " + textfmt.ValueOrNone(env.APIURL),
 		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
 		indent + "contribute-app-port: " + fmt.Sprintf("%d", env.LocalPorts.ContributeApp),
 		indent + "container-registries: " + containerRegistriesLabel(env.ContainerRegistries),
 		indent + "runtime-version: " + runtimeVersionLabel(tenantName, env),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
 	}
-	lines = append(lines, shared.RuntimeSizingLines(env.Sizing, indent)...)
+	lines = append(lines, usageview.RuntimeSizingLines(env.Sizing, indent)...)
 	lines = append(lines, []string{
-		indent + "managed-cloud: " + shared.EnabledDisabledLabel(env.ManagedCloud),
+		indent + "managed-cloud: " + textfmt.EnabledDisabledLabel(env.ManagedCloud),
 		indent + "hosted: " + hostedEnvironmentLabel(env.Hosted),
-		indent + "ai-tool: " + shared.ValueOrNone(env.AITool),
+		indent + "ai-tool: " + textfmt.ValueOrNone(env.AITool),
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
 	}...)
@@ -112,12 +113,12 @@ func environmentSSHDetailLines(tenantName, environmentName string, ssh model.Lis
 	return []string{
 		indent + "sshd: on",
 		indent + "ssh-host: " + sshHostAliasLabel(tenantName, environmentName, ssh.HostAlias),
-		indent + "ssh-user: " + shared.ValueOrNone(ssh.User),
+		indent + "ssh-user: " + textfmt.ValueOrNone(ssh.User),
 		indent + "ssh-local-port: " + fmt.Sprintf("%d", ssh.LocalPort),
-		indent + "ssh-workspace: " + shared.ValueOrNone(ssh.WorkspacePath),
-		indent + "ssh-public-key-path: " + shared.ValueOrNone(ssh.PublicKeyPath),
-		indent + "ssh-workspace-sync: " + shared.EnabledDisabledLabel(ssh.WorkspaceSyncEnabled),
-		indent + "ssh-workspace-sync-local-path: " + shared.ValueOrNone(ssh.WorkspaceSyncLocalPath),
+		indent + "ssh-workspace: " + textfmt.ValueOrNone(ssh.WorkspacePath),
+		indent + "ssh-public-key-path: " + textfmt.ValueOrNone(ssh.PublicKeyPath),
+		indent + "ssh-workspace-sync: " + textfmt.EnabledDisabledLabel(ssh.WorkspaceSyncEnabled),
+		indent + "ssh-workspace-sync-local-path: " + textfmt.ValueOrNone(ssh.WorkspaceSyncLocalPath),
 	}
 }
 
@@ -126,7 +127,7 @@ func environmentSSHDetailLines(tenantName, environmentName string, ssh model.Lis
 func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
-		return shared.ValueOrNone(alias)
+		return textfmt.ValueOrNone(alias)
 	}
 	configured, err := config.DefaultSSHConfigHasAlias(alias)
 	if err != nil || configured {
@@ -138,7 +139,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 // runtimeVersionLabel names the release line beside the version, since envs in one
 // tenant can ride different lines.
 func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult) string {
-	version := shared.ValueOrNone(env.RuntimeVersion)
+	version := textfmt.ValueOrNone(env.RuntimeVersion)
 	if env.RuntimeVersionLine == nil {
 		return version
 	}
@@ -159,7 +160,7 @@ func runtimePodLabel(pod model.RuntimePodResources) string {
 	if cpu == "" && memory == "" {
 		return "none"
 	}
-	return fmt.Sprintf("cpu=%s memory=%s", shared.ValueOrNone(cpu), shared.ValueOrNone(memory))
+	return fmt.Sprintf("cpu=%s memory=%s", textfmt.ValueOrNone(cpu), textfmt.ValueOrNone(memory))
 }
 
 func claudeLabel(c config.EnvironmentClaudeConfig) string {
@@ -190,7 +191,7 @@ func idleLabel(idle config.EnvironmentIdleConfig) string {
 		return "none"
 	}
 	return fmt.Sprintf("timeout=%s working-hours=%s timezone=%s idle-traffic-bytes=%d",
-		shared.ValueOrNone(timeout), shared.ValueOrNone(hours), shared.ValueOrNone(tz), idle.IdleTrafficBytes)
+		textfmt.ValueOrNone(timeout), textfmt.ValueOrNone(hours), textfmt.ValueOrNone(tz), idle.IdleTrafficBytes)
 }
 
 func optionalBoolLabel(b *bool) string {
@@ -224,11 +225,11 @@ func writeCloudProviders(ctx core.Context, providers []model.CloudProviderStatus
 	}
 	for _, provider := range providers {
 		line := "  - " + provider.Alias
-		line += " provider=" + shared.QuotedValueOrNone(provider.Provider)
-		line += " account=" + shared.QuotedValueOrNone(provider.AccountID)
-		line += " status=" + shared.QuotedValueOrNone(provider.Status)
+		line += " provider=" + textfmt.QuotedValueOrNone(provider.Provider)
+		line += " account=" + textfmt.QuotedValueOrNone(provider.AccountID)
+		line += " status=" + textfmt.QuotedValueOrNone(provider.Status)
 		if strings.TrimSpace(provider.Message) != "" {
-			line += " message=" + shared.QuotedValueOrNone(provider.Message)
+			line += " message=" + textfmt.QuotedValueOrNone(provider.Message)
 		}
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err

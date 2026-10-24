@@ -8,11 +8,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type ReviewListInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	TargetBranch   string `json:"targetBranch,omitempty" jsonschema:"filter by target branch"`
 	Repository     string `json:"repository,omitempty" jsonschema:"filter by repository, in any form git accepts; not defaulted from the checkout, since a listing is how you find work across every repository"`
 	SourceBranch   string `json:"sourceBranch,omitempty" jsonschema:"filter by source branch"`
@@ -29,26 +31,26 @@ type ReviewListResult struct {
 	Trace   []string               `json:"trace,omitempty"`
 }
 
-func ReviewListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
+func ReviewListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_list"
 		reviews, err := reviewpkg.RunReviewList(ctx, runtime.Store, input.Alias, model.ReviewListParams{
 			Repository:   input.Repository,
 			TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch, Status: input.Status,
 			AuthorUserID: input.AuthorUserID, ReviewerUserID: input.ReviewerUserID,
 			Mine: input.Mine, WaitingOnMe: input.WaitingOnMe,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewListResult{}, err
 		}
-		return nil, ReviewListResult{Preview: input.Preview, Reviews: reviews, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewListResult{Preview: input.Preview, Reviews: reviews, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewShowInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to fetch"`
 }
 
@@ -58,24 +60,24 @@ type ReviewShowResult struct {
 	Trace   []string           `json:"trace,omitempty"`
 }
 
-func ReviewShowTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewShowInput) (*mcp.CallToolResult, ReviewShowResult, error) {
+func ReviewShowTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewShowInput) (*mcp.CallToolResult, ReviewShowResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewShowInput) (*mcp.CallToolResult, ReviewShowResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" {
 			return nil, ReviewShowResult{}, fmt.Errorf("reviewId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_show"
-		detail, err := reviewpkg.RunReviewShow(ctx, runtime.Store, input.Alias, input.ReviewID, shared.CloudDependencies())
+		detail, err := reviewpkg.RunReviewShow(ctx, runtime.Store, input.Alias, input.ReviewID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewShowResult{}, err
 		}
-		return nil, ReviewShowResult{Preview: input.Preview, Detail: detail, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewShowResult{Preview: input.Preview, Detail: detail, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewCreateInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	Name         string `json:"name" jsonschema:"review name (unique per tenant and repository among reviews that can still land; the eventual squash-merge message)"`
 	Repository   string `json:"repository" jsonschema:"repository the branches belong to, in any form git accepts; defaults to this agent's own checkout origin"`
 	TargetBranch string `json:"targetBranch" jsonschema:"branch this review proposes merging into"`
@@ -89,29 +91,29 @@ type ReviewResult struct {
 	Trace   []string             `json:"trace,omitempty"`
 }
 
-func ReviewCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCreateInput) (*mcp.CallToolResult, ReviewResult, error) {
+func ReviewCreateTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCreateInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCreateInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.TargetBranch) == "" || strings.TrimSpace(input.SourceBranch) == "" {
 			return nil, ReviewResult{}, fmt.Errorf("name, targetBranch, and sourceBranch are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_create"
 		review, err := reviewpkg.RunReviewCreate(ctx, runtime.Store, input.Alias, model.PlatformCreateReviewParams{
 			Repository: input.Repository, Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
 			IssueRef: input.IssueRef,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
-		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 // ReviewCommentInput's anchor is optional, matching the CLI; the platform
 // decides whether an unanchored comment is valid.
 type ReviewCommentInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID        string `json:"reviewId" jsonschema:"review id to comment on"`
 	CommitID        string `json:"commitId,omitempty" jsonschema:"commit hash the comment is anchored to"`
 	FilePath        string `json:"filePath,omitempty" jsonschema:"file path the comment is anchored to"`
@@ -126,7 +128,7 @@ type ReviewCommentResult struct {
 	Trace   []string              `json:"trace,omitempty"`
 }
 
-func ReviewCommentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+func ReviewCommentTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 		var missing []string
 		if strings.TrimSpace(input.ReviewID) == "" {
@@ -143,42 +145,42 @@ func ReviewCommentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.
 			return nil, ReviewCommentResult{}, fmt.Errorf("%s%s required", strings.Join(missing, " and "), verb)
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_comment"
 		comment, err := reviewpkg.RunReviewComment(ctx, runtime.Store, input.Alias, model.ReviewCommentParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, FilePath: input.FilePath,
 			Line: input.Line, Body: input.Body, ParentCommentID: input.ParentCommentID,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewCommentResult{}, err
 		}
-		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewCloseInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to close"`
 }
 
-func ReviewCloseTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCloseInput) (*mcp.CallToolResult, ReviewResult, error) {
+func ReviewCloseTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCloseInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCloseInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" {
 			return nil, ReviewResult{}, fmt.Errorf("reviewId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_close"
-		review, err := reviewpkg.RunReviewClose(ctx, runtime.Store, input.Alias, input.ReviewID, shared.CloudDependencies())
+		review, err := reviewpkg.RunReviewClose(ctx, runtime.Store, input.Alias, input.ReviewID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
-		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewRecordBuildInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
 	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
 	Version       string `json:"version" jsonschema:"version the build minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one), required even for a failed build; a recorded build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required"`
@@ -194,7 +196,7 @@ type ReviewRecordBuildResult struct {
 
 // ReviewRecordBuildTool moves a review off OPEN to READY or FAILED, and to
 // MERGE if it heads the queue.
-func ReviewRecordBuildTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
+func ReviewRecordBuildTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommitID) == "" {
 			return nil, ReviewRecordBuildResult{}, fmt.Errorf("reviewId and commitId are required")
@@ -203,21 +205,21 @@ func ReviewRecordBuildTool(runtime shared.RuntimeConfig) func(context.Context, *
 			return nil, ReviewRecordBuildResult{}, fmt.Errorf("version is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_record-build"
 		build, err := reviewpkg.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, model.ReviewRecordBuildParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, Version: input.Version,
 			Successful: input.Successful, FailureDetail: input.FailureDetail,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewRecordBuildResult{}, err
 		}
-		return nil, ReviewRecordBuildResult{Preview: input.Preview, Build: build, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewRecordBuildResult{Preview: input.Preview, Build: build, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewReportMergedInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id to report merged"`
 	BuildID   string `json:"buildId,omitempty" jsonschema:"the successful recorded build of the merge commit that landed; omit for work that landed without the queue"`
 	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge, in any form git accepts; an SSH remote is read over its host's HTTPS without credentials"`
@@ -231,85 +233,85 @@ type ReviewReportMergedResult struct {
 
 // ReviewReportMergedTool reports a landed merge; the platform verifies it, and
 // MERGE_NOT_VERIFIED leaves the review at MERGE.
-func ReviewReportMergedTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
+func ReviewReportMergedTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.RemoteURL) == "" {
 			return nil, ReviewReportMergedResult{}, fmt.Errorf("reviewId and remoteUrl are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_report-merged"
-		review, err := reviewpkg.RunReviewReportMerged(ctx, runtime.Store, input.Alias, input.ReviewID, input.BuildID, input.RemoteURL, shared.CloudDependencies())
+		review, err := reviewpkg.RunReviewReportMerged(ctx, runtime.Store, input.Alias, input.ReviewID, input.BuildID, input.RemoteURL, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewReportMergedResult{}, err
 		}
-		return nil, ReviewReportMergedResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewReportMergedResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewRequeueInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to requeue; must currently be at MERGE"`
 }
 
 // ReviewRequeueTool moves a review from MERGE back to READY, freeing the
 // target branch's single MERGE slot.
-func ReviewRequeueTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
+func ReviewRequeueTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" {
 			return nil, ReviewResult{}, fmt.Errorf("reviewId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_requeue"
-		review, err := reviewpkg.RunReviewRequeue(ctx, runtime.Store, input.Alias, input.ReviewID, shared.CloudDependencies())
+		review, err := reviewpkg.RunReviewRequeue(ctx, runtime.Store, input.Alias, input.ReviewID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
-		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewCommentStatusInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id the comment belongs to"`
 	CommentID string `json:"commentId" jsonschema:"comment id to change status on; must be a thread's root comment, not a reply"`
 }
 
-func ReviewResolveTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+func ReviewResolveTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommentID) == "" {
 			return nil, ReviewCommentResult{}, fmt.Errorf("reviewId and commentId are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_resolve"
-		comment, err := reviewpkg.RunReviewResolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, shared.CloudDependencies())
+		comment, err := reviewpkg.RunReviewResolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewCommentResult{}, err
 		}
-		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func ReviewUnresolveTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+func ReviewUnresolveTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommentID) == "" {
 			return nil, ReviewCommentResult{}, fmt.Errorf("reviewId and commentId are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_unresolve"
-		comment, err := reviewpkg.RunReviewUnresolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, shared.CloudDependencies())
+		comment, err := reviewpkg.RunReviewUnresolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewCommentResult{}, err
 		}
-		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewReviewersListInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to list reviewers for"`
 }
 
@@ -319,24 +321,24 @@ type ReviewReviewersListResult struct {
 	Trace     []string                 `json:"trace,omitempty"`
 }
 
-func ReviewReviewersListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
+func ReviewReviewersListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" {
 			return nil, ReviewReviewersListResult{}, fmt.Errorf("reviewId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_reviewers_list"
-		reviewers, err := reviewpkg.RunReviewReviewersList(ctx, runtime.Store, input.Alias, input.ReviewID, shared.CloudDependencies())
+		reviewers, err := reviewpkg.RunReviewReviewersList(ctx, runtime.Store, input.Alias, input.ReviewID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewReviewersListResult{}, err
 		}
-		return nil, ReviewReviewersListResult{Preview: input.Preview, Reviewers: reviewers, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewReviewersListResult{Preview: input.Preview, Reviewers: reviewers, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewReviewerAddInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to assign a reviewer on"`
 	UserID   string `json:"userId" jsonschema:"user id to assign as a reviewer; must already be enrolled in the caller's own tenant"`
 }
@@ -347,24 +349,24 @@ type ReviewReviewerResult struct {
 	Trace    []string               `json:"trace,omitempty"`
 }
 
-func ReviewReviewerAddTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
+func ReviewReviewerAddTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.UserID) == "" {
 			return nil, ReviewReviewerResult{}, fmt.Errorf("reviewId and userId are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_reviewers_add"
-		reviewer, err := reviewpkg.RunReviewReviewerAdd(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, shared.CloudDependencies())
+		reviewer, err := reviewpkg.RunReviewReviewerAdd(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewReviewerResult{}, err
 		}
-		return nil, ReviewReviewerResult{Preview: input.Preview, Reviewer: reviewer, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewReviewerResult{Preview: input.Preview, Reviewer: reviewer, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewReviewerRemoveInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	ReviewID string `json:"reviewId" jsonschema:"review id to remove a reviewer from"`
 	UserID   string `json:"userId" jsonschema:"user id to remove as a reviewer"`
 }
@@ -374,90 +376,90 @@ type ReviewReviewerRemoveResult struct {
 	Trace   []string `json:"trace,omitempty"`
 }
 
-func ReviewReviewerRemoveTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerRemoveInput) (*mcp.CallToolResult, ReviewReviewerRemoveResult, error) {
+func ReviewReviewerRemoveTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerRemoveInput) (*mcp.CallToolResult, ReviewReviewerRemoveResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewerRemoveInput) (*mcp.CallToolResult, ReviewReviewerRemoveResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.UserID) == "" {
 			return nil, ReviewReviewerRemoveResult{}, fmt.Errorf("reviewId and userId are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_reviewers_remove"
-		if err := reviewpkg.RunReviewReviewerRemove(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, shared.CloudDependencies()); err != nil {
+		if err := reviewpkg.RunReviewReviewerRemove(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, clouddeps.CloudDependencies()); err != nil {
 			return nil, ReviewReviewerRemoveResult{}, err
 		}
-		return nil, ReviewReviewerRemoveResult{Preview: input.Preview, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewReviewerRemoveResult{Preview: input.Preview, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewMergeQueueListInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch to list the merge queue for"`
 	Repository   string `json:"repository" jsonschema:"repository whose queue to list, in any form git accepts; defaults to this agent's own checkout origin"`
 }
 
-func ReviewMergeQueueListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueListInput) (*mcp.CallToolResult, ReviewListResult, error) {
+func ReviewMergeQueueListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueListInput) (*mcp.CallToolResult, ReviewListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewMergeQueueListInput) (*mcp.CallToolResult, ReviewListResult, error) {
 		if strings.TrimSpace(input.TargetBranch) == "" {
 			return nil, ReviewListResult{}, fmt.Errorf("targetBranch is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_list"
 		reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewListResult{}, err
 		}
-		return nil, ReviewListResult{Preview: input.Preview, Reviews: reviews, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewListResult{Preview: input.Preview, Reviews: reviews, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewMergeQueueAdvanceInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch whose merge queue to advance"`
 	Repository   string `json:"repository" jsonschema:"repository whose queue to advance, in any form git accepts; defaults to this agent's own checkout origin"`
 }
 
-func ReviewMergeQueueAdvanceTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
+func ReviewMergeQueueAdvanceTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewMergeQueueAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.TargetBranch) == "" {
 			return nil, ReviewResult{}, fmt.Errorf("targetBranch is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_advance"
 		review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
-		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type ReviewMergeQueueOverrideAdvanceInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch whose merge queue to advance"`
 	Repository   string `json:"repository" jsonschema:"repository whose queue to advance, in any form git accepts; defaults to this agent's own checkout origin"`
 	Reason       string `json:"reason" jsonschema:"why the unresolved-thread gate is being bypassed; required, and recorded in the platform's audit trail"`
 }
 
-func ReviewMergeQueueOverrideAdvanceTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueOverrideAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
+func ReviewMergeQueueOverrideAdvanceTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueOverrideAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewMergeQueueOverrideAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.TargetBranch) == "" || strings.TrimSpace(input.Reason) == "" {
 			return nil, ReviewResult{}, fmt.Errorf("targetBranch and reason are required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_override-advance"
 		review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
-		}, input.Reason, shared.CloudDependencies())
+		}, input.Reason, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
-		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }

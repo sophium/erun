@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // TerraformStore is the config surface RunTerraform reads.
@@ -340,7 +341,7 @@ func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, 
 	stateFile := filepath.Join(workDir, "terraform.tfstate")
 	dataDir := filepath.Join(workDir, "data")
 	planFile := filepath.Join(workDir, terraformPlanFile)
-	lockReadonly := shared.FileExists(filepath.Join(dir, ".terraform.lock.hcl"))
+	lockReadonly := projectseam.FileExists(filepath.Join(dir, ".terraform.lock.hcl"))
 
 	steps := buildTerraformSteps(op, varFile, stateFile, planFile, lockReadonly, params.ExtraArgs)
 	result := model.TerraformResult{
@@ -359,7 +360,7 @@ func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, 
 		StateLocus:              terraformStateLocus(remoteWorktree),
 		KubernetesContext:       kubeContext,
 		LockReadonly:            lockReadonly,
-		LegacyStateInTree:       shared.FileExists(filepath.Join(dir, "terraform.tfstate")),
+		LegacyStateInTree:       projectseam.FileExists(filepath.Join(dir, "terraform.tfstate")),
 		Commands:                terraformStepCommands(steps),
 		RequiresConfirmation:    requiresTerraformConfirmation(op),
 	}
@@ -413,7 +414,7 @@ func resolveTerraformWorkDir(tenant, environment string) (string, error) {
 
 func detectTerraformVarFile(dir, environment string) string {
 	candidate := environment + ".tfvars"
-	if shared.FileExists(filepath.Join(dir, candidate)) {
+	if projectseam.FileExists(filepath.Join(dir, candidate)) {
 		return candidate
 	}
 	return ""
@@ -437,7 +438,7 @@ func resolveTerraformScope(store TerraformStore, params model.TerraformParams) (
 		}
 		tenant = strings.TrimSpace(config.DefaultTenant)
 		if tenant == "" {
-			return "", "", shared.ErrDefaultTenantNotConfigured
+			return "", "", opentarget.ErrDefaultTenantNotConfigured
 		}
 	}
 	if environment == "" {
@@ -447,7 +448,7 @@ func resolveTerraformScope(store TerraformStore, params model.TerraformParams) (
 		}
 		environment = strings.TrimSpace(tenantConfig.DefaultEnvironment)
 		if environment == "" {
-			return "", "", shared.ErrDefaultEnvironmentNotConfigured
+			return "", "", opentarget.ErrDefaultEnvironmentNotConfigured
 		}
 	}
 	return tenant, environment, nil

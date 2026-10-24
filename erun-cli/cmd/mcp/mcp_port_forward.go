@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/portfwd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func NewMCPForwarder() shared.MCPForwarder {
+func NewMCPForwarder() portfwd.MCPForwarder {
 	return func(ctx core.Context, result config.OpenResult) error {
 		_, err := ensureMCPPortForward(ctx, result)
 		return err
@@ -20,12 +20,12 @@ func NewMCPForwarder() shared.MCPForwarder {
 
 func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, error) {
 	localPort := config.MCPPortForResult(result)
-	statePath, err := shared.McpPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
+	statePath, err := portfwd.McpPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
 	}
-	state, _ := shared.LoadMCPPortForwardState(statePath)
-	expectedState := shared.McpPortForwardState{
+	state, _ := portfwd.LoadMCPPortForwardState(statePath)
+	expectedState := portfwd.McpPortForwardState{
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
@@ -35,21 +35,21 @@ func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, erro
 
 	if ctx.DryRun {
 		args := kubectlMCPPortForwardArgs(result, localPort)
-		if previewed, port := shared.PreviewAdoptOrConflict(ctx, "mcp", localPort, args, shared.CanReachLocalMCPEndpoint); previewed {
+		if previewed, port := portfwd.PreviewAdoptOrConflict(ctx, "mcp", localPort, args, portfwd.CanReachLocalMCPEndpoint); previewed {
 			return port, nil
 		}
-		shared.PreviewClearRecordedPortForward(ctx, "mcp", shared.StateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
-		shared.PreviewSweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
+		portfwd.PreviewClearRecordedPortForward(ctx, "mcp", portfwd.StateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
+		portfwd.PreviewSweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
 		ctx.TraceCommand("", "kubectl", args...)
 		return localPort, nil
 	}
 
-	if shared.ReusableRecordedPortForward(ctx, "mcp", shared.McpPortForwardLogPath(statePath), state, expectedState, localPort, shared.CanReachLocalMCPEndpoint) {
+	if portfwd.ReusableRecordedPortForward(ctx, "mcp", portfwd.McpPortForwardLogPath(statePath), state, expectedState, localPort, portfwd.CanReachLocalMCPEndpoint) {
 		return localPort, nil
 	}
 	args := kubectlMCPPortForwardArgs(result, localPort)
-	shared.SweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
-	if shared.CanConnectLocalPort(localPort) {
+	portfwd.SweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
+	if portfwd.CanConnectLocalPort(localPort) {
 		adopted, err := adoptForeignMCPPortForward(ctx, statePath, expectedState, args, localPort)
 		if err != nil {
 			return 0, err
@@ -66,44 +66,44 @@ func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, erro
 
 // adoptForeignMCPPortForward reuses an existing forward for this env, errors on a
 // foreign holder, and stops a dead erun forward so the caller starts a new one.
-func adoptForeignMCPPortForward(ctx core.Context, statePath string, expected shared.McpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
-	pid, argv, ok := shared.FindLocalPortHolder(localPort)
+func adoptForeignMCPPortForward(ctx core.Context, statePath string, expected portfwd.McpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
+	pid, argv, ok := portfwd.FindLocalPortHolder(localPort)
 	if !ok {
 		return false, fmt.Errorf("local MCP port %d is already in use", localPort)
 	}
-	if !shared.ArgvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
-		return false, fmt.Errorf("local MCP port %d is already in use by %s", localPort, shared.FormatHolderForError(pid, argv))
+	if !portfwd.ArgvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+		return false, fmt.Errorf("local MCP port %d is already in use by %s", localPort, portfwd.FormatHolderForError(pid, argv))
 	}
-	if !shared.CanReachLocalMCPEndpoint(localPort) {
-		if shared.ReplaceStalePortForwardHolder(ctx, "mcp", pid, localPort) {
+	if !portfwd.CanReachLocalMCPEndpoint(localPort) {
+		if portfwd.ReplaceStalePortForwardHolder(ctx, "mcp", pid, localPort) {
 			return false, nil
 		}
-		return false, fmt.Errorf("local MCP port %d is held by a stale kubectl port-forward that could not be stopped: %s", localPort, shared.FormatHolderForError(pid, argv))
+		return false, fmt.Errorf("local MCP port %d is held by a stale kubectl port-forward that could not be stopped: %s", localPort, portfwd.FormatHolderForError(pid, argv))
 	}
 	adopted := expected
 	adopted.ProcessID = pid
-	adopted.LogPath = shared.McpPortForwardLogPath(statePath)
-	shared.RotatePortForwardLogIfOversized(ctx, "mcp", adopted.LogPath)
-	if err := shared.SaveMCPPortForwardState(statePath, adopted); err != nil {
+	adopted.LogPath = portfwd.McpPortForwardLogPath(statePath)
+	portfwd.RotatePortForwardLogIfOversized(ctx, "mcp", adopted.LogPath)
+	if err := portfwd.SaveMCPPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt MCP port-forward (PID %d): %w", pid, err)
 	}
 	ctx.Trace(fmt.Sprintf("mcp: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", localPort, pid))
 	return true, nil
 }
 
-func startMCPPortForward(ctx core.Context, statePath string, expectedState shared.McpPortForwardState, args []string, localPort int) (int, error) {
-	logPath := shared.McpPortForwardLogPath(statePath)
+func startMCPPortForward(ctx core.Context, statePath string, expectedState portfwd.McpPortForwardState, args []string, localPort int) (int, error) {
+	logPath := portfwd.McpPortForwardLogPath(statePath)
 	expectedState.LogPath = logPath
-	process, err := shared.StartPortForwardWithBindRetry(ctx, "mcp", localPort, func() (*os.Process, error) {
-		logStart := shared.PortForwardLogSize(logPath)
-		p, err := shared.LaunchPortForwardProcessRetrying(func() (*os.Process, error) {
+	process, err := portfwd.StartPortForwardWithBindRetry(ctx, "mcp", localPort, func() (*os.Process, error) {
+		logStart := portfwd.PortForwardLogSize(logPath)
+		p, err := portfwd.LaunchPortForwardProcessRetrying(func() (*os.Process, error) {
 			return launchMCPPortForwardProcess(logPath, args)
 		})
 		if err != nil {
 			return nil, err
 		}
 		expectedState.ProcessID = p.Pid
-		if err := shared.SaveMCPPortForwardState(statePath, expectedState); err != nil {
+		if err := portfwd.SaveMCPPortForwardState(statePath, expectedState); err != nil {
 			return p, err
 		}
 		if err := waitForMCPPortForward(localPort, logPath, logStart); err != nil {
@@ -112,14 +112,14 @@ func startMCPPortForward(ctx core.Context, statePath string, expectedState share
 		return p, nil
 	})
 	if err != nil {
-		shared.ReleaseUnreachablePortForward(ctx, "mcp", process, localPort, err)
+		portfwd.ReleaseUnreachablePortForward(ctx, "mcp", process, localPort, err)
 		return 0, err
 	}
 	return localPort, nil
 }
 
 func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, error) {
-	logFile, err := shared.OpenPortForwardLog(logPath)
+	logFile, err := portfwd.OpenPortForwardLog(logPath)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, er
 	cmd := core.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	shared.DetachBackgroundProcess(cmd)
+	portfwd.DetachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -139,19 +139,19 @@ func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, er
 
 // logStart is where this attempt's output begins in logPath; the caller takes it before launching.
 func waitForMCPPortForward(localPort int, logPath string, logStart int64) error {
-	deadline := time.Now().Add(shared.McpPortForwardStartupTimeout)
+	deadline := time.Now().Add(portfwd.McpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
-		if shared.CanReachLocalMCPEndpoint(localPort) {
+		if portfwd.CanReachLocalMCPEndpoint(localPort) {
 			return nil
 		}
 		// kubectl exits on a failed listen; only this attempt's log output counts.
-		if shared.PortForwardLogReportsListenConflict(logPath, logStart) {
-			return shared.ListenConflictError(localPort, logPath)
+		if portfwd.PortForwardLogReportsListenConflict(logPath, logStart) {
+			return portfwd.ListenConflictError(localPort, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if detail := shared.McpPortForwardTimeoutDetail(logPath); detail != "" {
+	if detail := portfwd.McpPortForwardTimeoutDetail(logPath); detail != "" {
 		return fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d: %s; see %s", localPort, detail, logPath)
 	}
 	return fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d; see %s", localPort, logPath)

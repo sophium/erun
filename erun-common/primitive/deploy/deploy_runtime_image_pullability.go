@@ -9,11 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
 
 // A var so tests avoid reaching live ghcr.io.
-var deployRuntimeImagePullProbe shared.AnonymousPullProbeFunc = shared.ProbeAnonymousManifestPull
+var deployRuntimeImagePullProbe dockerregistry.AnonymousPullProbeFunc = dockerregistry.ProbeAnonymousManifestPull
 
 // autoImagePullSecretName is distinct from operator-named secrets so it never
 // repurposes one.
@@ -25,7 +25,7 @@ func autoImagePullSecretName(tenant string) string {
 // mutation: Recreate tears the old pod down first, so an unpullable image takes
 // the env down. A resolved credential is always attached; otherwise a real run
 // probes anonymous pullability and refuses unless it is confirmed pullable.
-func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe shared.AnonymousPullProbeFunc) error {
+func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe dockerregistry.AnonymousPullProbeFunc) error {
 	image := strings.TrimSpace(deployInput.ImageOverrides[config.DevopsComponentName])
 	if image == "" {
 		return nil
@@ -34,7 +34,7 @@ func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec,
 	if !registry.IsGHCRRegistry(host) {
 		return nil
 	}
-	_, repoName, tag, ok := shared.ParseDockerImageReference(image)
+	_, repoName, tag, ok := ParseDockerImageReference(image)
 	if !ok {
 		return nil
 	}

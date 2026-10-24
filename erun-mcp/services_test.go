@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/services"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // servicesKubectlStub answers only the two expected reads; any other call fails.
@@ -33,11 +34,11 @@ func servicesKubectlStub(t *testing.T, servicesJSON, ingressesJSON string) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-func servicesTestRuntime(t *testing.T, tenant, environment string) shared.RuntimeConfig {
+func servicesTestRuntime(t *testing.T, tenant, environment string) runtimecfg.RuntimeConfig {
 	t.Helper()
 	repoPath := t.TempDir()
-	return shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
+	return runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
 		Store: listToolStore{
 			tenantConfigs: map[string]model.TenantConfig{tenant: {Name: tenant}},
 			envConfigs: map[string]config.EnvConfig{

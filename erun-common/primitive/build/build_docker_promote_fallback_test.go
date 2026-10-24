@@ -11,7 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // newFakeDockerOnPath fakes docker on PATH; `docker push` of a tag fails with
@@ -20,7 +21,7 @@ func newFakeDockerOnPath(t *testing.T, pushFailureMessage string) {
 	t.Helper()
 	binDir := t.TempDir()
 	stateDir := t.TempDir()
-	failuresPerTag := shared.DockerPushUnknownBlobRetries + 1
+	failuresPerTag := dockerregistry.DockerPushUnknownBlobRetries + 1
 	script := "#!/bin/bash\n" +
 		"case \"$1\" in\n" +
 		"  push)\n" +
@@ -131,8 +132,8 @@ func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testin
 	}
 }
 
-func testPromoteBuildInput() shared.DockerBuildSpec {
-	return shared.DockerBuildSpec{
+func testPromoteBuildInput() dockerspec.DockerBuildSpec {
+	return dockerspec.DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
 		Image: model.DockerImageReference{

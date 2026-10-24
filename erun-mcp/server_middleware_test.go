@@ -12,7 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestCorsMiddlewareAnswersPreflightWithoutReachingTheWrappedHandler(t *testing.T) {
@@ -101,11 +103,11 @@ func TestCorsMiddlewareAddsNothingForNonBrowserCallers(t *testing.T) {
 // A preflight carries no Authorization, so CORS must sit outside auth; the real
 // POST still needs the token.
 func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
-	t.Setenv(sharedpkg.EnvMCPTrustedIssuer, "file:///some/key.pub")
-	t.Setenv(sharedpkg.EnvTenant, "acme")
+	t.Setenv(edgeauth.EnvMCPTrustedIssuer, "file:///some/key.pub")
+	t.Setenv(edgeauth.EnvTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, sharedpkg.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, runtimecfg.RuntimeConfig{}, nil))
 	defer httpServer.Close()
 
 	preflight, err := http.NewRequest(http.MethodOptions, httpServer.URL+cfg.Path, nil)
@@ -142,7 +144,7 @@ func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -176,7 +178,7 @@ func TestActivityHTTPMiddlewareRecordsWithoutIdleProbe(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -206,7 +208,7 @@ func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

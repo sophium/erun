@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // RunPushCommand brackets standalone pushes only with the markers the desktop
@@ -35,9 +36,9 @@ func RunPushCommand(ctx core.Context, op func(core.Context) error) (err error) {
 	return op(ctx)
 }
 
-func RunDockerPush(ctx core.Context, pushInput shared.DockerPushSpec, push shared.DockerImagePusherFunc) error {
+func RunDockerPush(ctx core.Context, pushInput dockerspec.DockerPushSpec, push dockerspec.DockerImagePusherFunc) error {
 	if push == nil {
-		push = shared.DockerImagePusher
+		push = dockerregistry.DockerImagePusher
 	}
 	pushInput.Verbosity = ctx.Verbosity
 	command := pushInput.Command()
@@ -51,7 +52,7 @@ func RunDockerPush(ctx core.Context, pushInput shared.DockerPushSpec, push share
 // PreflightRegistryPushAccess refuses an impossible publish before the build,
 // which would otherwise end at an interactive login a job cannot answer. The
 // per-artifact check catches org policy denying create_package despite scope.
-func PreflightRegistryPushAccess(ctx core.Context, execution shared.DockerPushExecutionSpec) error {
+func PreflightRegistryPushAccess(ctx core.Context, execution dockerspec.DockerPushExecutionSpec) error {
 	if ctx.DryRun {
 		return nil
 	}
@@ -177,7 +178,7 @@ func PackageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec)
 
 // ComponentChartPublishVersion skips version-pinned bases; empty lets each chart
 // use its own image version.
-func ComponentChartPublishVersion(builds []shared.DockerBuildSpec) string {
+func ComponentChartPublishVersion(builds []dockerspec.DockerBuildSpec) string {
 	for _, buildInput := range builds {
 		if buildInput.Image.VersionFromBuildDir {
 			continue

@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
 // syncConfigTestEnv returns a managed-cloud runtime pod's injected env with overrides applied.
@@ -31,7 +31,7 @@ func syncConfigTestEnv(overrides map[string]string) func(string) string {
 }
 
 func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
-	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
+	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
 	if !ok {
 		t.Fatalf("ResolveInjectedRuntimeConfig ok = false, want true")
 	}
@@ -44,7 +44,7 @@ func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 }
 
 func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
-	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
+	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
 	if !ok {
 		t.Fatalf("ResolveInjectedRuntimeConfig ok = false, want true")
 	}

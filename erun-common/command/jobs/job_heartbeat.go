@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // startEnvironmentJobAliveBeat stamps the alive fields on their own fast cadence;
 // the lease ticker backs off far too slowly to answer liveness within 5s.
 func startEnvironmentJobAliveBeat(recorder *jobRecorder) func() {
 	beatOnce := func() {
-		recorder.update(func(job *shared.EnvironmentJob) {
+		recorder.update(func(job *jobstate.EnvironmentJob) {
 			job.LastAliveAt = time.Now()
 			job.AliveSeq++
 		})
@@ -57,7 +57,7 @@ type jobHeartbeat struct {
 	exclusive bool
 
 	mu        sync.Mutex
-	progress  shared.AgentJobProgress
+	progress  jobstate.AgentJobProgress
 	leaseName string
 	renewedAt time.Time
 }
@@ -112,7 +112,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 		progress := h.agent.snapshot()
 		if progress != h.progress {
 			h.progress = progress
-			h.recorder.update(func(job *shared.EnvironmentJob) {
+			h.recorder.update(func(job *jobstate.EnvironmentJob) {
 				folded := progress
 				job.Progress = &folded
 			})
@@ -140,7 +140,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 
 // renewExclusiveClaim also records the supervisor's pid on a claim taken before
 // it existed. A lost renewal is ignored rather than killing the job's work.
-func (h *jobHeartbeat) renewExclusiveClaim(job shared.EnvironmentJob, name string) {
+func (h *jobHeartbeat) renewExclusiveClaim(job jobstate.EnvironmentJob, name string) {
 	if !h.exclusive {
 		return
 	}

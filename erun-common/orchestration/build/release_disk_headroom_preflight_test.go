@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
@@ -15,7 +15,7 @@ func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
 		free  = diskHeadroomBelow
 		floor = diskHeadroomTestFloor
 	)
-	dockerCanStillFree := shared.DiskHeadroomShortfall{
+	dockerCanStillFree := diskheadroom.DiskHeadroomShortfall{
 		Free: free, Floor: floor, Path: dockerRootPath,
 		DockerReclaimExhausted: false,
 	}
@@ -23,7 +23,7 @@ func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
 		t.Fatalf("a shortfall docker can still reach must name the docker remedy, got %q", got)
 	}
 
-	dockerHasNothingToFree := shared.DiskHeadroomShortfall{
+	dockerHasNothingToFree := diskheadroom.DiskHeadroomShortfall{
 		Free: free, Floor: floor, Path: dockerRootPath,
 		SharedPaths:            []string{environmentWorkCloneDir},
 		DockerReclaimExhausted: true,
@@ -39,7 +39,7 @@ func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
 	}
 
 	// Reclaimable images can be reported while the bytes sit in the build cache.
-	buildCacheStillHoldsIt := shared.DiskHeadroomShortfall{
+	buildCacheStillHoldsIt := diskheadroom.DiskHeadroomShortfall{
 		Free: free, Floor: floor, Path: dockerRootPath,
 		DockerReclaimExhausted:     false,
 		BuildCacheStillReclaimable: 43 << 30,
@@ -55,19 +55,19 @@ func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
 	}
 }
 
-func diskHeadroomShortLimits() shared.DiskHeadroomTimeouts {
+func diskHeadroomShortLimits() diskheadroom.DiskHeadroomTimeouts {
 	const short = 500 * time.Millisecond
-	return shared.DiskHeadroomTimeouts{Read: short, Probe: short, Prune: short}
+	return diskheadroom.DiskHeadroomTimeouts{Read: short, Probe: short, Prune: short}
 }
 
 // headroomTestBound is far above the short limits so a loaded machine is not read as a hang.
 const headroomTestBound = 30 * time.Second
 
-func awaitHeadroomPreflight(t *testing.T, ctx core.Context, policy shared.DiskHeadroomPolicy) error {
+func awaitHeadroomPreflight(t *testing.T, ctx core.Context, policy diskheadroom.DiskHeadroomPolicy) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() {
-		done <- shared.EnsureDiskHeadroomWith(ctx, policy, shared.DockerRootDiskBytes, shared.DockerReclaimableBytes, shared.DockerBuildCacheReclaimable, shared.RunDiskHeadroomPrune)
+		done <- diskheadroom.EnsureDiskHeadroomWith(ctx, policy, diskheadroom.DockerRootDiskBytes, diskheadroom.DockerReclaimableBytes, diskheadroom.DockerBuildCacheReclaimable, diskheadroom.RunDiskHeadroomPrune)
 	}()
 	select {
 	case err := <-done:
@@ -82,7 +82,7 @@ func TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering(t *testing.T) {
 	// `exec` so the stub is the sleeping process: the bound kills only the direct child.
 	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, "exec sleep 3600"))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, "exec sleep 3600"))
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}

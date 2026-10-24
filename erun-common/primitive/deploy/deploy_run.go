@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func runDeploySpecsPlan(ctx core.Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
@@ -68,7 +68,7 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (configpkg.ProjectK
 
 // resolvePublishedDeployPlan falls back to the cwd project when the configured
 // repo path (the pod's own) is absent on this machine, tracing each branch.
-func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
+func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
 	configuredPath := strings.TrimSpace(resolvedTarget.RepoPath)
 	plan, err := loadProjectK8sPlanForRepo(configuredPath, resolvedTarget.Environment)
 	if err != nil {
@@ -99,7 +99,7 @@ func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot shared.Project
 	return fallbackPlan, nil
 }
 
-func resolveDeployPlanFallbackPath(findProjectRoot shared.ProjectFinderFunc, configuredPath string) string {
+func resolveDeployPlanFallbackPath(findProjectRoot projectseam.ProjectFinderFunc, configuredPath string) string {
 	_, fallbackPath, err := findProjectRoot()
 	fallbackPath = strings.TrimSpace(fallbackPath)
 	if err != nil || fallbackPath == "" || filepath.Clean(fallbackPath) == filepath.Clean(configuredPath) {

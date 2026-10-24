@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 // ExposeStore resolves the target environment for RunExposeService.
@@ -418,7 +418,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 		}
 		// Without platform.env the DNS write uses the current context, which is
 		// right for the single-cluster deploy Job this override serves.
-		return zone, config.NormalizeNamespaceName(namespace), shared.TenantResourcePrefix(platTenant) + "-powerdns", "", nil
+		return zone, config.NormalizeNamespaceName(namespace), opentarget.TenantResourcePrefix(platTenant) + "-powerdns", "", nil
 	}
 
 	platform := deploy.ResolveProjectPlatform(params.ProjectRoot)
@@ -433,14 +433,14 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 		return "", "", "", "", fmt.Errorf("platform.env is required in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
 	}
 	platTenant, _, _ := splitTenantEnv(platform.Env)
-	return platform.ServicesZone, config.NormalizeNamespaceName(platform.Env), shared.TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
+	return platform.ServicesZone, config.NormalizeNamespaceName(platform.Env), opentarget.TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
 }
 
 func resolveExposeBackendService(backendService, tenant, service string) string {
 	if backendService = strings.TrimSpace(backendService); backendService != "" {
 		return backendService
 	}
-	return fmt.Sprintf("%s-%s", shared.TenantResourcePrefix(tenant), service)
+	return fmt.Sprintf("%s-%s", opentarget.TenantResourcePrefix(tenant), service)
 }
 
 // resolveExposeTLSPlan disables TLS for --no-tls or when no DNS-01 broker can

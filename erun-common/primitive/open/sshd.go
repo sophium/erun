@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 const DefaultSSHUser = "erun"
@@ -75,7 +75,7 @@ func ValidateSSHDTarget(result config.OpenResult) error {
 		return fmt.Errorf("sshd requires a remote environment initialized with --remote")
 	}
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) == "" {
-		return fmt.Errorf("%w: %s/%s", shared.ErrKubernetesContextNotConfigured, result.Tenant, result.Environment)
+		return fmt.Errorf("%w: %s/%s", opentarget.ErrKubernetesContextNotConfigured, result.Tenant, result.Environment)
 	}
 	return nil
 }

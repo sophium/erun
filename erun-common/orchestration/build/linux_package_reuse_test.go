@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // Keep tests off the operator's package-test record and any real docker daemon
@@ -77,7 +77,7 @@ func reusablePackageProject(t *testing.T) (string, model.LinuxPackageSpec) {
 		writeComponentTreeFile(t, root, rel, content)
 	}
 	dir := filepath.Join(root, "team-devops", "linux", "app")
-	packages := shared.NewLinuxPackageSpecs(root, []shared.LinuxPackageContext{{Dir: dir, DockerfilePath: filepath.Join(dir, "Dockerfile")}})
+	packages := dockerspec.NewLinuxPackageSpecs(root, []dockerspec.LinuxPackageContext{{Dir: dir, DockerfilePath: filepath.Join(dir, "Dockerfile")}})
 	return root, packages[0]
 }
 

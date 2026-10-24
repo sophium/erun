@@ -3,16 +3,17 @@ package e2e
 import (
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewE2ECmd(resolveOpen envscope.OpenResolver, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var tenant, environment, component, baseURL, version string
 	cmd := &cobra.Command{
 		Use:   "e2e",
@@ -53,10 +54,10 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot sharedpkg.Projec
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runE2ECommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), findProjectRoot, component, baseURL, version)
+			return runE2ECommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), findProjectRoot, component, baseURL, version)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&component, "component", "", "Run only the named suite (a directory under e2e/); default runs every suite")
@@ -65,7 +66,7 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot sharedpkg.Projec
 	return cmd
 }
 
-func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, findProjectRoot sharedpkg.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, findProjectRoot projectseam.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
@@ -98,7 +99,7 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params mod
 }
 
 // resolveE2ETarget resolves no environment when --base-url and --version name the target.
-func resolveE2ETarget(resolveOpen shared.OpenResolver, params model.OpenParams, targetNamed bool, baseURL, version string) (model.E2ETarget, error) {
+func resolveE2ETarget(resolveOpen envscope.OpenResolver, params model.OpenParams, targetNamed bool, baseURL, version string) (model.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
 		return model.E2ETarget{}, nil
 	}

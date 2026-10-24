@@ -53,15 +53,17 @@ linters:
       rules:
         commands:
           list-mode: lax
-          files: ["**/erun-cli/cmd/*/*.go", "!**/erun-cli/cmd/shared/*.go"]
+          files: ["**/erun-cli/cmd/*/*.go", "!**/erun-cli/cmd/shared/**"]
           allow:
-            - github.com/sophium/erun/cmd/shared$
+            - github.com/sophium/erun/cmd/shared
           deny:
             - pkg: github.com/sophium/erun/cmd
-              desc: an erun-cli command package may import cmd/shared, never the root command or another command
+              desc: an erun-cli command package may import cmd/shared and cmd/shared/*, never the root command or another command
         shared:
           list-mode: lax
-          files: ["**/erun-cli/cmd/shared/*.go"]
+          files: ["**/erun-cli/cmd/shared/**/*.go"]
+          allow:
+            - github.com/sophium/erun/cmd/shared
           deny:
             - pkg: github.com/sophium/erun/cmd
               desc: cmd/shared sits below every command and imports none of them

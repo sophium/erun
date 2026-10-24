@@ -13,7 +13,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 func DockerfileCopySources(dockerfilePath, contextDir string) ([]string, error) {
@@ -104,7 +106,7 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 
 // computeBuildFingerprint derives a build's content identity from its inputs only, never
 // the pod it runs in, so a pod roll does not force a cold rebuild.
-func computeBuildFingerprint(buildInput shared.DockerBuildSpec) (string, error) {
+func computeBuildFingerprint(buildInput dockerspec.DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)
 	if contextDir == "" {
 		return "", errors.New("empty context dir")
@@ -169,12 +171,12 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 
 // hashBuildVersionInto folds ERUN_VERSION into builds that consume it, so a version bump
 // does not promote an image reporting the old version.
-func hashBuildVersionInto(w io.Writer, buildInput shared.DockerBuildSpec) error {
+func hashBuildVersionInto(w io.Writer, buildInput dockerspec.DockerBuildSpec) error {
 	if !dockerfileConsumesVersion(buildInput.DockerfilePath) {
 		return nil
 	}
 	// Unsuffixed, so both per-arch fingerprints move together.
-	version := shared.DockerBuildArgVersion(buildInput)
+	version := dockerspec.DockerBuildArgVersion(buildInput)
 	if version == "" {
 		return nil
 	}
@@ -186,7 +188,7 @@ func hashBuildVersionInto(w io.Writer, buildInput shared.DockerBuildSpec) error 
 }
 
 // hashComponentChartInto folds the component's chart in, so a chart-only edit is not dropped by promotion.
-func hashComponentChartInto(w io.Writer, buildInput shared.DockerBuildSpec) error {
+func hashComponentChartInto(w io.Writer, buildInput dockerspec.DockerBuildSpec) error {
 	// A version-pinned base's chart is bumped every release; folding it in would churn its fingerprint.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
@@ -218,7 +220,7 @@ func hashComponentChartInto(w io.Writer, buildInput shared.DockerBuildSpec) erro
 }
 
 // componentChartDirForBuild returns the component's chart dir, or "" when it has none.
-func componentChartDirForBuild(buildInput shared.DockerBuildSpec) string {
+func componentChartDirForBuild(buildInput dockerspec.DockerBuildSpec) string {
 	dockerfilePath := strings.TrimSpace(buildInput.DockerfilePath)
 	if dockerfilePath == "" {
 		return ""
@@ -241,13 +243,13 @@ func componentChartDirForBuild(buildInput shared.DockerBuildSpec) string {
 // the one that ships; it never fails the build.
 func componentChartDirCandidate(projectRoot, dockerDir string) string {
 	component := filepath.Base(dockerDir)
-	if k8sDir, ok, err := shared.ResolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
+	if k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
 		return filepath.Join(k8sDir, component)
 	}
 	return filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", component)
 }
 
-func CollectFingerprintFiles(contextDir string, sources []string, ignored *shared.IgnoreSet) ([]string, error) {
+func CollectFingerprintFiles(contextDir string, sources []string, ignored *IgnoreSet) ([]string, error) {
 	files := make([]string, 0, 64)
 	seen := make(map[string]struct{}, 64)
 	add := func(p string) {
@@ -280,7 +282,7 @@ func CollectFingerprintFiles(contextDir string, sources []string, ignored *share
 	return files, nil
 }
 
-func collectFingerprintFile(contextDir, full string, ignored *shared.IgnoreSet, add func(string)) error {
+func collectFingerprintFile(contextDir, full string, ignored *IgnoreSet, add func(string)) error {
 	rel, err := filepath.Rel(contextDir, full)
 	if err != nil {
 		return err
@@ -292,7 +294,7 @@ func collectFingerprintFile(contextDir, full string, ignored *shared.IgnoreSet, 
 	return nil
 }
 
-func collectFingerprintDir(contextDir, full string, ignored *shared.IgnoreSet, add func(string)) error {
+func collectFingerprintDir(contextDir, full string, ignored *IgnoreSet, add func(string)) error {
 	return filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -327,16 +329,16 @@ func hashFileInto(w io.Writer, path string) error {
 }
 
 // LoadContextIgnoreSet appends patterns in load order so later negations override.
-func LoadContextIgnoreSet(contextDir string, sources []string) (*shared.IgnoreSet, error) {
-	combined := &shared.IgnoreSet{}
+func LoadContextIgnoreSet(contextDir string, sources []string) (*IgnoreSet, error) {
+	combined := &IgnoreSet{}
 	for _, name := range []string{".dockerignore", ".gitignore"} {
-		set, err := shared.LoadIgnoreFile(filepath.Join(contextDir, name), "")
+		set, err := LoadIgnoreFile(filepath.Join(contextDir, name), "")
 		if err != nil {
 			return nil, err
 		}
 		combined.Patterns = append(combined.Patterns, set.Patterns...)
 	}
-	if err := shared.LoadNestedGitignores(contextDir, sources, combined); err != nil {
+	if err := LoadNestedGitignores(contextDir, sources, combined); err != nil {
 		return nil, err
 	}
 	return combined, nil
@@ -346,10 +348,10 @@ func LoadContextIgnoreSet(contextDir string, sources []string) (*shared.IgnoreSe
 type LocalDockerImageInspector func(tag string) (bool, error)
 
 // ApplyIncrementalToBuildExecution applies incremental promotion to an execution's docker builds.
-func ApplyIncrementalToBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, noIncremental bool) (shared.BuildExecutionSpec, error) {
+func ApplyIncrementalToBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, noIncremental bool) (dockerspec.BuildExecutionSpec, error) {
 	updated, err := ApplyIncrementalToDockerBuilds(ctx, execution.DockerBuilds, noIncremental)
 	if err != nil {
-		return shared.BuildExecutionSpec{}, err
+		return dockerspec.BuildExecutionSpec{}, err
 	}
 	execution.DockerBuilds = updated
 	return execution, nil
@@ -357,7 +359,7 @@ func ApplyIncrementalToBuildExecution(ctx core.Context, execution shared.BuildEx
 
 // ApplyIncrementalToDockerBuilds is the single incremental-promotion entry point for every
 // command. In dry-run, configured fingerprint tags are treated as present.
-func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []shared.DockerBuildSpec, noIncremental bool) ([]shared.DockerBuildSpec, error) {
+func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []dockerspec.DockerBuildSpec, noIncremental bool) ([]dockerspec.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}
@@ -374,7 +376,7 @@ func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []shared.DockerBuil
 			if _, ok := materialized[tag]; ok {
 				return true, nil
 			}
-			return shared.DockerImageExists(tag)
+			return dockerregistry.DockerImageExists(tag)
 		}
 	}
 	return applyIncrementalPromotion(builds, inspect)
@@ -382,14 +384,14 @@ func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []shared.DockerBuil
 
 // applyIncrementalPromotion promotes builds whose fp-tagged image exists locally; a rebuilt
 // local base forces its dependents to rebuild.
-func applyIncrementalPromotion(builds []shared.DockerBuildSpec, inspect LocalDockerImageInspector) ([]shared.DockerBuildSpec, error) {
+func applyIncrementalPromotion(builds []dockerspec.DockerBuildSpec, inspect LocalDockerImageInspector) ([]dockerspec.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}
 	if inspect == nil {
-		inspect = shared.DockerImageExists
+		inspect = dockerregistry.DockerImageExists
 	}
-	out := make([]shared.DockerBuildSpec, len(builds))
+	out := make([]dockerspec.DockerBuildSpec, len(builds))
 	copy(out, builds)
 	rebuildSet := make(map[string]struct{}, len(out))
 	for i := range out {
@@ -419,13 +421,13 @@ func applyIncrementalPromotion(builds []shared.DockerBuildSpec, inspect LocalDoc
 	return out, nil
 }
 
-func inspectFingerprintTags(build shared.DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
+func inspectFingerprintTags(build dockerspec.DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
 	if build.Fingerprint == "" {
 		return nil, nil
 	}
 	var missing []string
 	for _, platform := range build.Platforms {
-		ok, err := inspect(shared.FingerprintTag(build.Image, build.Fingerprint, platform))
+		ok, err := inspect(dockerspec.FingerprintTag(build.Image, build.Fingerprint, platform))
 		if err != nil {
 			return nil, err
 		}
@@ -436,7 +438,7 @@ func inspectFingerprintTags(build shared.DockerBuildSpec, inspect LocalDockerIma
 	return missing, nil
 }
 
-func cascadeRebuildsThroughLocalDeps(builds []shared.DockerBuildSpec, rebuildSet map[string]struct{}) {
+func cascadeRebuildsThroughLocalDeps(builds []dockerspec.DockerBuildSpec, rebuildSet map[string]struct{}) {
 	if len(rebuildSet) == 0 {
 		return
 	}

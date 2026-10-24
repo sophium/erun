@@ -14,7 +14,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"golang.org/x/term"
 )
 
@@ -66,10 +66,10 @@ func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T
 		t.Fatalf("make the pty raw: %v", err)
 	}
 
-	previousStdin, previousInput := os.Stdin, shared.PlainPromptInput
+	previousStdin, previousInput := os.Stdin, prompt.PlainPromptInput
 	os.Stdin = slave
-	shared.PlainPromptInput = sync.OnceValue(func() *bufio.Reader { return bufio.NewReader(slave) })
-	t.Cleanup(func() { os.Stdin, shared.PlainPromptInput = previousStdin, previousInput })
+	prompt.PlainPromptInput = sync.OnceValue(func() *bufio.Reader { return bufio.NewReader(slave) })
+	t.Cleanup(func() { os.Stdin, prompt.PlainPromptInput = previousStdin, previousInput })
 
 	var captured bytes.Buffer
 	drained := make(chan struct{})
@@ -81,7 +81,7 @@ func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T
 	if _, err := io.WriteString(master, "y\n"); err != nil {
 		t.Fatalf("type the answer: %v", err)
 	}
-	ok, err := shared.ConfirmPromptTo(shared.RunPrompt, "add team-dev to ~/.bashrc", nopWriteCloser{slave})
+	ok, err := prompt.ConfirmPromptTo(prompt.RunPrompt, "add team-dev to ~/.bashrc", nopWriteCloser{slave})
 	if err != nil {
 		t.Fatalf("confirmPromptTo: %v", err)
 	}

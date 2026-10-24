@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // The supervisor publishes its running record before spawning the work, so a
@@ -31,11 +32,11 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	supervisorCmd := startCancelTestStandInSupervisor(t)
 	supervisor := supervisorCmd.Process
 
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	record := shared.EnvironmentJob{
+	record := jobstate.EnvironmentJob{
 		ID:          id,
 		Name:        id,
 		State:       EnvironmentJobStateRunning,

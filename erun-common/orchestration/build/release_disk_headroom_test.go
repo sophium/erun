@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 type diskHeadroomRead struct {
@@ -19,13 +19,13 @@ type diskHeadroomRead struct {
 	ok          bool
 }
 
-func (r diskHeadroomRead) measurement() shared.DiskHeadroomMeasurement {
-	return shared.DiskHeadroomMeasurement{Free: r.free, Total: r.total, Path: r.path, SharedPaths: r.sharedPaths}
+func (r diskHeadroomRead) measurement() diskheadroom.DiskHeadroomMeasurement {
+	return diskheadroom.DiskHeadroomMeasurement{Free: r.free, Total: r.total, Path: r.path, SharedPaths: r.sharedPaths}
 }
 
 type diskHeadroomCase struct {
 	name          string
-	policy        shared.DiskHeadroomPolicy
+	policy        diskheadroom.DiskHeadroomPolicy
 	dryRun        bool
 	reads         []diskHeadroomRead
 	reclaimable   uint64
@@ -56,19 +56,19 @@ func diskHeadroomCases() []diskHeadroomCase {
 	return []diskHeadroomCase{
 		{
 			name:   "free space above floor: no prune",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads:  []diskHeadroomRead{{free: diskHeadroomAbove, ok: true}},
 		},
 		{
 			name:        "free space below floor: prune runs, re-check above floor passes",
-			policy:      shared.ReleaseDiskHeadroomPolicy,
+			policy:      diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			reclaimable: 1 << 40, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
 			name:   "release still below floor after pruning refuses",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
@@ -92,7 +92,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 		},
 		{
 			name:        "a failed prune is non-fatal but the disk can still refuse afterward",
-			policy:      shared.ReleaseDiskHeadroomPolicy,
+			policy:      diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
 			pruneErr:    errors.New("boom"),
 			reclaimable: 1 << 40, reclaimableOK: true,
@@ -102,7 +102,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 		{
 			// docker system df understates reclaimable cache; a nonzero figure is only a lower bound.
 			name:        "reclaimable understated but non-zero: prunes instead of refusing on the stale figure",
-			policy:      shared.ReleaseDiskHeadroomPolicy,
+			policy:      diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			reclaimable: 1 << 20, reclaimableOK: true,
 			wantPrune: true,
@@ -111,7 +111,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			// Build layers count as Images while their images exist, so 0B here does not mean
 			// the cache is empty.
 			name:   "a zero reclaimable figure no longer declines the prune",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
@@ -131,13 +131,13 @@ func diskHeadroomCases() []diskHeadroomCase {
 		},
 		{
 			name:      "an unknown reclaimable figure still prunes",
-			policy:    shared.ReleaseDiskHeadroomPolicy,
+			policy:    diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			wantPrune: true,
 		},
 		{
 			name:   "dry run: neither reads free space nor prunes",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			dryRun: true,
 			// Never consumed: dry run returns before the first read.
 			reads: []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
@@ -151,7 +151,7 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 		// remedy must not be named.
 		{
 			name:   "a shortage docker cannot free drops the docker remedy and names what holds the space",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{
 					free:        diskHeadroomBelow,
@@ -183,7 +183,7 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 		},
 		{
 			name:   "a shortage docker's stores can still reach keeps the docker remedy",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
@@ -200,7 +200,7 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 		},
 		{
 			name:   "a shortfall the build cache still holds names the cache, not image removal",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
@@ -221,7 +221,7 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 		},
 		{
 			name:   "the message names the path the read was taken at",
-			policy: shared.ReleaseDiskHeadroomPolicy,
+			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
 				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
@@ -247,7 +247,7 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 
 func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 	t.Helper()
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	wantReads := 0
 	if !tc.dryRun {
@@ -255,7 +255,7 @@ func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 	}
 
 	readCalls := 0
-	readFree := func(shared.DiskHeadroomTimeouts) (shared.DiskHeadroomMeasurement, error) {
+	readFree := func(diskheadroom.DiskHeadroomTimeouts) (diskheadroom.DiskHeadroomMeasurement, error) {
 		read := tc.reads[readCalls]
 		readCalls++
 		if !read.ok {
@@ -283,7 +283,7 @@ func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 		return tc.pruneErr
 	}
 
-	err := shared.EnsureDiskHeadroomWith(core.Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, readCacheReclaimable, prune)
+	err := diskheadroom.EnsureDiskHeadroomWith(core.Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, readCacheReclaimable, prune)
 	assertDiskHeadroomMessage(t, tc, err)
 
 	if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {

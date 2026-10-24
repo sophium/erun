@@ -7,7 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // ExecClosePRInput closes branch's PR after review_report-merged; GitHub never
@@ -22,10 +24,10 @@ type ExecClosePRInput struct {
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-func ExecClosePRTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecClosePRInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecClosePRInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
+func ExecClosePRTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecClosePRInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecClosePRInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
 		var closed *model.ClosePullRequestResult
-		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
+		output, err := runcmd.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
 			result, err := review.ClosePullRequest(runCtx, model.ClosePullRequestParams{
 				RemoteURL:     input.RemoteURL,
 				Branch:        input.Branch,

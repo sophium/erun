@@ -7,7 +7,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type EnvironmentInput struct {
@@ -19,14 +20,14 @@ type EnvironmentInput struct {
 // EnvironmentTool aggregates summary, lifecycle state, idle status, cloud
 // context and deploy diagnosis. Cloud power state cannot be refreshed in-pod,
 // so managed-cloud environments report "unknown".
-func EnvironmentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
+func EnvironmentTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, lifecycle.EnvironmentReadModel{}, err
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, 0, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, 0, nil, &traceOutput, &traceOutput)
 		model, err := lifecycle.ResolveEnvironmentReadModel(ctx, runtime.Store, tenant, environment, time.Now())
 		if err != nil {
 			return nil, lifecycle.EnvironmentReadModel{}, err

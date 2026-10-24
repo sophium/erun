@@ -10,8 +10,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobresult"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // JobAttachInput registers work the caller started another way.
@@ -26,14 +28,14 @@ type JobAttachInput struct {
 	Preview         bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the attach without recording it"`
 }
 
-func JobAttachTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAttachInput) (*mcp.CallToolResult, sharedpkg.JobResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAttachInput) (*mcp.CallToolResult, sharedpkg.JobResult, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func JobAttachTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAttachInput) (*mcp.CallToolResult, jobresult.JobResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAttachInput) (*mcp.CallToolResult, jobresult.JobResult, error) {
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, sharedpkg.JobResult{}, err
+			return nil, jobresult.JobResult{}, err
 		}
 		trace := new(bytes.Buffer)
-		ctx := sharedpkg.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
+		ctx := toolio.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
 		job, err := jobspkg.AttachEnvironmentJob(ctx, model.AttachEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
@@ -44,13 +46,13 @@ func JobAttachTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 			LeaseTTL:    time.Duration(input.LeaseTTLSeconds) * time.Second,
 		})
 		if err != nil {
-			return nil, sharedpkg.JobResult{}, err
+			return nil, jobresult.JobResult{}, err
 		}
-		return nil, sharedpkg.JobResult{
+		return nil, jobresult.JobResult{
 			Tenant:      tenant,
 			Environment: environment,
 			Job:         job,
-			Trace:       sharedpkg.NormalizeTraceLines(trace.String()),
+			Trace:       toolio.NormalizeTraceLines(trace.String()),
 			Executed:    !input.Preview,
 		}, nil
 	}
@@ -61,7 +63,7 @@ func JobAttachTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 const jobCommandPreviewChars = 240
 
 // previewJobForStatus returns a truncated copy, never mutating job.
-func previewJobForStatus(job shared.EnvironmentJob) shared.EnvironmentJob {
+func previewJobForStatus(job jobstate.EnvironmentJob) jobstate.EnvironmentJob {
 	if preview, truncated := previewCommand(job.Command); truncated {
 		job.Command = preview
 	}
@@ -87,19 +89,19 @@ type JobStatusInput struct {
 // JobStatusResult never reports an unrecorded outcome; a vanished supervisor
 // reads as unknown. Jobs is empty when id selects one job.
 type JobStatusResult struct {
-	Tenant      string                  `json:"tenant"`
-	Environment string                  `json:"environment"`
-	Job         *shared.EnvironmentJob  `json:"job,omitempty"`
-	Jobs        []shared.EnvironmentJob `json:"jobs"`
+	Tenant      string                    `json:"tenant"`
+	Environment string                    `json:"environment"`
+	Job         *jobstate.EnvironmentJob  `json:"job,omitempty"`
+	Jobs        []jobstate.EnvironmentJob `json:"jobs"`
 }
 
-func JobStatusTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
+func JobStatusTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobStatusResult{}, err
 		}
-		result := JobStatusResult{Tenant: tenant, Environment: environment, Jobs: []shared.EnvironmentJob{}}
+		result := JobStatusResult{Tenant: tenant, Environment: environment, Jobs: []jobstate.EnvironmentJob{}}
 		now := time.Now()
 		if strings.TrimSpace(input.ID) != "" {
 			job, err := jobspkg.LoadEnvironmentJob(tenant, environment, input.ID, now)
@@ -129,9 +131,9 @@ type JobAwaitInput struct {
 	TimeoutSeconds int64  `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning still-running; defaults to 30 and may not exceed 600 (a larger value is refused, not capped silently), so no call is ever held open for the work's lifetime. For a job that can run longer than 600s, call this tool again each time it reports timedOut=true rather than requesting one longer wait"`
 }
 
-func JobAwaitTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, jobspkg.AwaitEnvironmentJobResult, error) {
+func JobAwaitTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, jobspkg.AwaitEnvironmentJobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAwaitInput) (*mcp.CallToolResult, jobspkg.AwaitEnvironmentJobResult, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, jobspkg.AwaitEnvironmentJobResult{}, err
 		}
@@ -158,9 +160,9 @@ type JobOutputInput struct {
 	MaxBytes    int64  `json:"maxBytes,omitempty" jsonschema:"most bytes to return in this read; defaults to 65536"`
 }
 
-func JobOutputTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobOutputInput) (*mcp.CallToolResult, jobspkg.EnvironmentJobOutput, error) {
+func JobOutputTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobOutputInput) (*mcp.CallToolResult, jobspkg.EnvironmentJobOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobOutputInput) (*mcp.CallToolResult, jobspkg.EnvironmentJobOutput, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, jobspkg.EnvironmentJobOutput{}, err
 		}
@@ -195,14 +197,14 @@ type JobCancelResult struct {
 	Trace       []string                           `json:"trace,omitempty"`
 }
 
-func JobCancelTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
+func JobCancelTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobCancelResult{}, err
 		}
 		trace := new(bytes.Buffer)
-		ctx := sharedpkg.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
+		ctx := toolio.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
 		cancel, err := jobspkg.CancelEnvironmentJob(ctx, model.CancelEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
@@ -216,7 +218,7 @@ func JobCancelTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 			Tenant:      tenant,
 			Environment: environment,
 			Cancel:      cancel,
-			Trace:       sharedpkg.NormalizeTraceLines(trace.String()),
+			Trace:       toolio.NormalizeTraceLines(trace.String()),
 		}, nil
 	}
 }

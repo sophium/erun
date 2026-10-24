@@ -7,7 +7,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // Drives a real MCP session so the SDK's schema validation runs, which a direct handler
@@ -16,7 +17,7 @@ func TestExecAgentIsCallableWithOnlyAgentAndPrompt(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	// Preview never execs the supervisor, so a placeholder name suffices.
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{

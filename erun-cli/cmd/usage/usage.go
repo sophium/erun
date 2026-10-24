@@ -3,7 +3,9 @@ package usage
 import (
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
@@ -11,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewUsageCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func NewUsageCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	var intervalSeconds float64
 	cmd := &cobra.Command{
@@ -71,17 +73,17 @@ func NewUsageCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUsageCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), intervalSeconds)
+			return runUsageCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), intervalSeconds)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().Float64Var(&intervalSeconds, "interval", 1, "CPU sample window in seconds, clamped to 0.1-30: usage is read, the window elapses, then it is read again so utilisation is a rate rather than a cumulative counter")
 	return cmd
 }
 
-func runUsageCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, intervalSeconds float64) error {
+func runUsageCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, intervalSeconds float64) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -100,5 +102,5 @@ func runUsageCommand(ctx core.Context, resolveOpen shared.OpenResolver, params m
 	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(report)
 	}
-	return shared.WriteUsageResult(ctx, report)
+	return usageview.WriteUsageResult(ctx, report)
 }

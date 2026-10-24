@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -15,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewActivityCmd(store config.OpenStore, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewActivityCmd(store config.OpenStore, resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "activity",
 		Short:         "Record and inspect environment activity",
@@ -85,13 +87,13 @@ func newActivityStatusCmd(store config.OpenStore) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			commandCtx := shared.CommandContext(cmd)
-			if shared.CommandWantsJSON(commandCtx, jsonOutput) {
+			commandCtx := clicmd.CommandContext(cmd)
+			if clicmd.CommandWantsJSON(commandCtx, jsonOutput) {
 				encoder := json.NewEncoder(commandCtx.Stdout)
 				encoder.SetIndent("", "  ")
 				return encoder.Encode(status)
 			}
-			return writeActivityStatus(shared.CommandContext(cmd), status)
+			return writeActivityStatus(clicmd.CommandContext(cmd), status)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -135,8 +137,8 @@ func runActivityStopReady(cmd *cobra.Command, store config.OpenStore, tenant, en
 	if err != nil {
 		return err
 	}
-	if shared.CommandWantsJSON(shared.CommandContext(cmd), jsonOutput) {
-		if err := emitStopReadyJSON(shared.CommandContext(cmd).Stdout, status, result); err != nil {
+	if clicmd.CommandWantsJSON(clicmd.CommandContext(cmd), jsonOutput) {
+		if err := emitStopReadyJSON(clicmd.CommandContext(cmd).Stdout, status, result); err != nil {
 			return err
 		}
 	}
@@ -243,7 +245,7 @@ func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, clou
 		return err
 	}
 	source = normalizeStopHistorySource(source)
-	pending, havePending, err := loadPendingForRecord(shared.CommandContext(cmd).Stdin, stateStdin, tenant, environment)
+	pending, havePending, err := loadPendingForRecord(clicmd.CommandContext(cmd).Stdin, stateStdin, tenant, environment)
 	if err != nil {
 		return err
 	}
@@ -348,11 +350,11 @@ func resolveActivityStatus(store config.OpenStore, tenant, environment string) (
 }
 
 func writeActivityStatus(ctx core.Context, status model.EnvironmentIdleStatus) error {
-	if err := shared.WriteLabeledValue(ctx, "stop eligible", shared.EnabledDisabledLabel(status.StopEligible)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "stop eligible", textfmt.EnabledDisabledLabel(status.StopEligible)); err != nil {
 		return err
 	}
 	if strings.TrimSpace(status.StopBlockedReason) != "" {
-		if err := shared.WriteLabeledValue(ctx, "stop blocked", status.StopBlockedReason); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, "stop blocked", status.StopBlockedReason); err != nil {
 			return err
 		}
 	}
@@ -364,7 +366,7 @@ func writeActivityStatus(ctx core.Context, status model.EnvironmentIdleStatus) e
 		if strings.TrimSpace(marker.Reason) != "" {
 			value += " (" + marker.Reason + ")"
 		}
-		if err := shared.WriteLabeledValue(ctx, marker.Name, value); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, marker.Name, value); err != nil {
 			return err
 		}
 	}

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 const (
@@ -18,7 +20,7 @@ const (
 // linuxPackageCheckTarget is `test` when declared, otherwise `build`, so untested packages still compile.
 func linuxPackageCheckTarget(pkg model.LinuxPackageSpec) (string, error) {
 	for _, stage := range []string{linuxPackageTestStage, linuxPackageBuildStage} {
-		if shared.DockerfileDeclaresStage(pkg.DockerfilePath, stage) {
+		if DockerfileDeclaresStage(pkg.DockerfilePath, stage) {
 			return stage, nil
 		}
 	}
@@ -40,7 +42,7 @@ func linuxPackageCheckArgs(pkg model.LinuxPackageSpec, target, cgroupParent stri
 }
 
 func linuxPackageDistArgs(pkg model.LinuxPackageSpec, version, platform, dest, cgroupParent string) []string {
-	args := []string{"build", "--progress=plain", "--platform", platform, "--target", shared.LinuxPackageDistStage, "--build-arg", "ERUN_VERSION=" + version, "--output", "type=local,dest=" + dest}
+	args := []string{"build", "--progress=plain", "--platform", platform, "--target", LinuxPackageDistStage, "--build-arg", "ERUN_VERSION=" + version, "--output", "type=local,dest=" + dest}
 	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
 
@@ -138,8 +140,8 @@ func ExportReleaseLinuxPackages(ctx core.Context, spec model.ReleaseSpec) error 
 				return err
 			}
 		}
-		for _, platform := range shared.MultiPlatformDockerBuilds {
-			args := linuxPackageDistArgs(pkg, spec.Version, platform, shared.LinuxPackageExportDir(spec.LinuxPackageDir, pkg, platform), cgroupParent)
+		for _, platform := range dockerspec.MultiPlatformDockerBuilds {
+			args := linuxPackageDistArgs(pkg, spec.Version, platform, dockerspec.LinuxPackageExportDir(spec.LinuxPackageDir, pkg, platform), cgroupParent)
 			ctx.TraceCommand(pkg.ContextDir, "docker", args...)
 			if ctx.DryRun {
 				continue
@@ -154,4 +156,35 @@ func ExportReleaseLinuxPackages(ctx core.Context, spec model.ReleaseSpec) error 
 		}
 	}
 	return nil
+}
+
+const (
+	LinuxPackageDistStage = "dist"
+)
+
+func DockerfileDeclaresStage(dockerfilePath, stage string) bool {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return false
+	}
+	pattern := regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+` + regexp.QuoteMeta(stage) + `(?:\s|$)`)
+	return pattern.Match(data)
+}
+
+func checkLinuxPackagesReleasable(packages []model.LinuxPackageSpec) error {
+	for _, pkg := range packages {
+		if !DockerfileDeclaresStage(pkg.DockerfilePath, LinuxPackageDistStage) {
+			return fmt.Errorf("linux package %s declares no `dist` stage, so a release has no .deb files to publish: %s", pkg.Name, pkg.DockerfilePath)
+		}
+	}
+	return nil
+}
+
+// releaseLinuxPackageDir is outside the worktree, which a release keeps clean.
+func releaseLinuxPackageDir(projectRoot, version string) string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheDir) == "" {
+		cacheDir = os.TempDir()
+	}
+	return filepath.Join(cacheDir, "erun", "release", filepath.Base(filepath.Clean(projectRoot)), version, "linux")
 }

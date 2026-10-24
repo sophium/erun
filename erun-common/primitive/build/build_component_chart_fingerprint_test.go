@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // A pinned base's chart tracks the release version, so hashing it would rebuild a stable image every release.
@@ -30,8 +30,8 @@ func TestBuildFingerprintExcludesChartForVersionPinnedBase(t *testing.T) {
 		}
 	}
 
-	newSpec := func(pinned bool) shared.DockerBuildSpec {
-		return shared.DockerBuildSpec{
+	newSpec := func(pinned bool) dockerspec.DockerBuildSpec {
+		return dockerspec.DockerBuildSpec{
 			ContextDir:     dockerDir,
 			DockerfilePath: dockerfile,
 			Image:          model.DockerImageReference{ImageName: "comp", VersionFromBuildDir: pinned},

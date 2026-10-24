@@ -6,7 +6,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 type AISessionsInput struct {
@@ -24,9 +24,9 @@ type AISessionsResult struct {
 
 // AiSessionsTool reads AI-session status from each session's last reported
 // turn-boundary event, never from PTY output.
-func AiSessionsTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, AISessionsInput) (*mcp.CallToolResult, AISessionsResult, error) {
+func AiSessionsTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, AISessionsInput) (*mcp.CallToolResult, AISessionsResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input AISessionsInput) (*mcp.CallToolResult, AISessionsResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}

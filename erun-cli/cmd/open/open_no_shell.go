@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -21,7 +22,7 @@ const (
 	openNoShellDialectPowerShell openNoShellDialect = "powershell"
 )
 
-func emitLocalShellSetupForOpenResult(ctx core.Context, result config.OpenResult, promptRunner shared.PromptRunner, stdout, stderr io.Writer) error {
+func emitLocalShellSetupForOpenResult(ctx core.Context, result config.OpenResult, promptRunner prompt.PromptRunner, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -41,7 +42,7 @@ func emitLocalShellSetupForOpenResult(ctx core.Context, result config.OpenResult
 }
 
 func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
-	return shared.WriterIsTerminal(stdout)
+	return prompt.WriterIsTerminal(stdout)
 }
 
 // nopWriteCloser keeps promptui from closing the underlying stream.
@@ -54,7 +55,7 @@ func (w nopWriteCloser) UnwrapWriter() io.Writer { return w.Writer }
 
 func promptStderr() io.WriteCloser { return nopWriteCloser{os.Stderr} }
 
-func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, promptRunner shared.PromptRunner, shellPath string, stderr io.Writer) error {
+func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, promptRunner prompt.PromptRunner, shellPath string, stderr io.Writer) error {
 	dialect := openNoShellDialectForShell(shellPath)
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
@@ -67,7 +68,7 @@ func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, 
 	}
 
 	// stderr: promptui repaints from a goroutine and would interleave with the stdout setup script.
-	ok, err := shared.ConfirmPromptTo(promptRunner, fmt.Sprintf("add %s to %s", aliasName, startupFile), promptStderr())
+	ok, err := prompt.ConfirmPromptTo(promptRunner, fmt.Sprintf("add %s to %s", aliasName, startupFile), promptStderr())
 	if err != nil {
 		return err
 	}
@@ -199,7 +200,7 @@ func appendOpenNoShellAlias(path, aliasCommand string) error {
 }
 
 func openNoShellDialectForShell(shellPath string) openNoShellDialect {
-	return detectOpenNoShellDialect(shared.CurrentHostOS(), shellPath)
+	return detectOpenNoShellDialect(desktop.CurrentHostOS(), shellPath)
 }
 
 func detectOpenNoShellDialect(hostOS model.HostOS, shellPath string) openNoShellDialect {

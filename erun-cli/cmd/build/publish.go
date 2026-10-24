@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc) *cobra.Command {
+func NewPublishCmd(store deploy.DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:   "publish [TENANT] [ENVIRONMENT]",
@@ -31,8 +33,8 @@ func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFi
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
-			publishTarget, err := shared.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
+			publishTarget, err := opentarget.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -45,7 +47,7 @@ func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFi
 			return release.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish (produced by `erun build`/`erun push`)")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Publish for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Publish for a specific environment; requires --tenant")

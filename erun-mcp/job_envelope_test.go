@@ -12,22 +12,24 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // The server process has no ERUN_JOB_ID, so the caller's job id must be threaded onto
 // the record or its parent's child scan never finds it.
 func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "build", sharedpkg.JobEnvelopeInput{
+	job := startEnvelopeJob(t, runtime, "build", jobenvelope.JobEnvelopeInput{
 		Wait:           boolPtr(false),
 		StartedByJobID: "gate-parent",
-	}, func(bool, io.Writer) (sharedpkg.CommandOutput, error) {
-		return sharedpkg.CommandOutput{Executed: true}, nil
+	}, func(bool, io.Writer) (toolio.CommandOutput, error) {
+		return toolio.CommandOutput{Executed: true}, nil
 	})
 
 	if job.StartedByJobID != "gate-parent" {
@@ -41,10 +43,10 @@ func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 // A caller outside any job is genuinely parentless.
 func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "deploy", sharedpkg.JobEnvelopeInput{Wait: boolPtr(false)}, func(bool, io.Writer) (sharedpkg.CommandOutput, error) {
-		return sharedpkg.CommandOutput{Executed: true}, nil
+	job := startEnvelopeJob(t, runtime, "deploy", jobenvelope.JobEnvelopeInput{Wait: boolPtr(false)}, func(bool, io.Writer) (toolio.CommandOutput, error) {
+		return toolio.CommandOutput{Executed: true}, nil
 	})
 
 	if job.StartedByJobID != "" {
@@ -55,14 +57,14 @@ func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 // Handoff keeps a deliberate fire-and-forget from becoming a waited-on child.
 func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "release", sharedpkg.JobEnvelopeInput{
+	job := startEnvelopeJob(t, runtime, "release", jobenvelope.JobEnvelopeInput{
 		Wait:           boolPtr(false),
 		StartedByJobID: "gate-parent",
 		Handoff:        true,
-	}, func(bool, io.Writer) (sharedpkg.CommandOutput, error) {
-		return sharedpkg.CommandOutput{Executed: true}, nil
+	}, func(bool, io.Writer) (toolio.CommandOutput, error) {
+		return toolio.CommandOutput{Executed: true}, nil
 	})
 
 	if !job.Handoff {
@@ -73,11 +75,11 @@ func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 // The work's trace and output reach the job's log as produced.
 func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "doctor", sharedpkg.JobEnvelopeInput{Wait: boolPtr(false)}, func(_ bool, log io.Writer) (sharedpkg.CommandOutput, error) {
+	job := startEnvelopeJob(t, runtime, "doctor", jobenvelope.JobEnvelopeInput{Wait: boolPtr(false)}, func(_ bool, log io.Writer) (toolio.CommandOutput, error) {
 		_, _ = io.WriteString(log, "docker build failed: no space left on device\n")
-		return sharedpkg.CommandOutput{Executed: true}, errors.New("exit status 1")
+		return toolio.CommandOutput{Executed: true}, errors.New("exit status 1")
 	})
 
 	if job.Succeeded {
@@ -98,7 +100,7 @@ func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 func TestJobEnvelopeSwitchesArePublishedAsTopLevelProperties(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	t.Setenv("ERUN_CODEX_BIN", "true")
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	tools, err := session.ListTools(context.Background(), nil)
@@ -145,9 +147,9 @@ func publishedInputProperties(t *testing.T, name string, inputSchema any) map[st
 }
 
 // startEnvelopeJob is bounded so unsettled work fails rather than hangs.
-func startEnvelopeJob(t *testing.T, runtime sharedpkg.RuntimeConfig, name string, input sharedpkg.JobEnvelopeInput, execute func(bool, io.Writer) (sharedpkg.CommandOutput, error)) shared.EnvironmentJob {
+func startEnvelopeJob(t *testing.T, runtime runtimecfg.RuntimeConfig, name string, input jobenvelope.JobEnvelopeInput, execute func(bool, io.Writer) (toolio.CommandOutput, error)) jobstate.EnvironmentJob {
 	t.Helper()
-	envelope, err := sharedpkg.RunJobEnvelope(runtime, name, input, false, execute)
+	envelope, err := jobenvelope.RunJobEnvelope(runtime, name, input, false, execute)
 	if err != nil {
 		t.Fatalf("runJobEnvelope: %v", err)
 	}
@@ -173,7 +175,7 @@ func startEnvelopeJob(t *testing.T, runtime sharedpkg.RuntimeConfig, name string
 // Preview resolves the supervisor invocation, where startedByJobId must appear.
 func TestExecRawBackgroundThreadsTheCallersJobIDToTheSupervisor(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
-	runtime := normalizeRuntimeConfig(sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}})
 
 	for _, tc := range []struct {
 		name  string

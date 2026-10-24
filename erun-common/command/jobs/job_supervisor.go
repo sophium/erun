@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // The supervisor is the only writer of a job record: it waits on the work, so
@@ -28,17 +29,17 @@ func environmentJobLogPath(dir, id string) string {
 type jobRecorder struct {
 	dir string
 	mu  sync.Mutex
-	job shared.EnvironmentJob
+	job jobstate.EnvironmentJob
 }
 
-func (r *jobRecorder) update(mutate func(*shared.EnvironmentJob)) {
+func (r *jobRecorder) update(mutate func(*jobstate.EnvironmentJob)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	mutate(&r.job)
 	_ = writeEnvironmentJob(r.dir, r.job)
 }
 
-func (r *jobRecorder) snapshot() shared.EnvironmentJob {
+func (r *jobRecorder) snapshot() jobstate.EnvironmentJob {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.job
@@ -78,7 +79,7 @@ func registerEnvironmentJob(params model.EnvironmentJobSupervisorParams) (*jobRe
 	if err != nil {
 		return nil, err
 	}
-	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := jobexclusive.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func registerEnvironmentJob(params model.EnvironmentJobSupervisorParams) (*jobRe
 		return nil, err
 	}
 	now := time.Now()
-	job := shared.EnvironmentJob{
+	job := jobstate.EnvironmentJob{
 		ID:        id,
 		Name:      name,
 		State:     EnvironmentJobStateRunning,
@@ -103,7 +104,7 @@ func registerEnvironmentJob(params model.EnvironmentJobSupervisorParams) (*jobRe
 		LeaseID:          environmentJobLeaseID(id),
 		Hostname:         build.CurrentJobHostname(),
 		// The explicit override wins; otherwise ERUN_JOB_ID inherited from a parent job.
-		StartedByJobID: core.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(shared.EnvironmentJobIDEnvVar))),
+		StartedByJobID: core.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(jobstate.EnvironmentJobIDEnvVar))),
 		Handoff:        params.Handoff,
 		Exclusive:      params.Exclusive,
 	}
@@ -155,8 +156,8 @@ func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, pan
 		reason = fmt.Sprintf("job supervisor panicked before it could record an outcome: %v", panicked)
 	}
 	code := 1
-	recorder.update(func(job *shared.EnvironmentJob) {
-		job.State = shared.EnvironmentJobStateExited
+	recorder.update(func(job *jobstate.EnvironmentJob) {
+		job.State = jobstate.EnvironmentJobStateExited
 		job.EndedAt = time.Now()
 		job.ExitCode = &code
 		job.Reason = reason
@@ -186,7 +187,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params model.E
 	defer stopAlive()
 
 	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, agent: agent, onTruncate: func() {
-		recorder.update(func(job *shared.EnvironmentJob) { job.OutputTruncated = true })
+		recorder.update(func(job *jobstate.EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
 	// The deadline is set once so the reinvocation budget covers the whole chain.
@@ -197,7 +198,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params model.E
 		cmd.Dir = params.Dir
 		// ERUN_JOB_ID lets nested job starts record this job as their parent; it is
 		// stable across reinvoked turns.
-		cmd.Env = append(append(os.Environ(), sortedEnvironmentJobEnvPairs(params.Env)...), shared.EnvironmentJobIDEnvVar+"="+job.ID)
+		cmd.Env = append(append(os.Environ(), sortedEnvironmentJobEnvPairs(params.Env)...), jobstate.EnvironmentJobIDEnvVar+"="+job.ID)
 		cmd.Stdin = nil
 		cmd.Stdout = writer
 		cmd.Stderr = writer
@@ -211,7 +212,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params model.E
 			waitErr = startErr
 		} else {
 			childPID = cmd.Process.Pid
-			recorder.update(func(job *shared.EnvironmentJob) { job.ChildPID = childPID })
+			recorder.update(func(job *jobstate.EnvironmentJob) { job.ChildPID = childPID })
 			// Reap only while the job's command is the sole os/exec child, so the reaper
 			// cannot steal cmd.Wait's exit status.
 			stopReaper := core.StartEnvironmentJobChildReaper(childPID)

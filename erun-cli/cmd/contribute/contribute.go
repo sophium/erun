@@ -1,7 +1,7 @@
 package contribute
 
 import (
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
@@ -25,10 +25,10 @@ func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			return review.RunContributeClone(ctx, "", runGit)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

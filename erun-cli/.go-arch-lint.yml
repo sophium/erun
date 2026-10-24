@@ -83,6 +83,32 @@ components:
     in: "cmd/services"
   cmd-shared:
     in: "cmd/shared"
+  cmd-shared-clicmd:
+    in: "cmd/shared/clicmd"
+  cmd-shared-cloudcli:
+    in: "cmd/shared/cloudcli"
+  cmd-shared-deploynotice:
+    in: "cmd/shared/deploynotice"
+  cmd-shared-desktop:
+    in: "cmd/shared/desktop"
+  cmd-shared-envcall:
+    in: "cmd/shared/envcall"
+  cmd-shared-envscope:
+    in: "cmd/shared/envscope"
+  cmd-shared-helmrecovery:
+    in: "cmd/shared/helmrecovery"
+  cmd-shared-opentarget:
+    in: "cmd/shared/opentarget"
+  cmd-shared-portfwd:
+    in: "cmd/shared/portfwd"
+  cmd-shared-prompt:
+    in: "cmd/shared/prompt"
+  cmd-shared-sshdlink:
+    in: "cmd/shared/sshdlink"
+  cmd-shared-textfmt:
+    in: "cmd/shared/textfmt"
+  cmd-shared-usageview:
+    in: "cmd/shared/usageview"
   cmd-sshd:
     in: "cmd/sshd"
   cmd-stop:
@@ -110,6 +136,7 @@ deps:
     canUse:
       - github-com-manifoldco-promptui
       - github-com-spf13-cobra
+      - github-com-spf13-pflag
   cmd-activity:
     anyProjectDeps: true
     canUse:
@@ -242,11 +269,40 @@ deps:
       - github-com-spf13-cobra
   cmd-shared:
     anyProjectDeps: true
+  cmd-shared-clicmd:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-shared-cloudcli:
+    anyProjectDeps: true
     canUse:
       - github-com-manifoldco-promptui
-      - github-com-spf13-cobra
-      - github-com-spf13-pflag
+  cmd-shared-deploynotice:
+    anyProjectDeps: true
+  cmd-shared-desktop:
+    anyProjectDeps: true
+  cmd-shared-envcall:
+    anyProjectDeps: true
+  cmd-shared-envscope:
+    anyProjectDeps: true
+  cmd-shared-helmrecovery:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+  cmd-shared-opentarget:
+    anyProjectDeps: true
+  cmd-shared-portfwd:
+    anyProjectDeps: true
+  cmd-shared-prompt:
+    canUse:
+      - github-com-manifoldco-promptui
       - golang-org-x-term
+  cmd-shared-sshdlink:
+    anyProjectDeps: true
+  cmd-shared-textfmt:
+    anyProjectDeps: true
+  cmd-shared-usageview:
+    anyProjectDeps: true
   cmd-sshd:
     anyProjectDeps: true
     canUse:

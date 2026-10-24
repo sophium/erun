@@ -3,7 +3,7 @@ package review
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
@@ -12,7 +12,7 @@ import (
 )
 
 func newReviewMergeQueueCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"queue",
 		"Inspect and advance a target branch's merge queue",
 		newReviewMergeQueueListCmd(store, alias, deps),
@@ -37,7 +37,7 @@ func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps
 		Example: "  erun review queue list --target-branch main\n" +
 			"  erun review queue list --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -56,7 +56,7 @@ func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps
 	}
 	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to list (defaults to the current checkout's origin)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch to list the merge queue for")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -79,7 +79,7 @@ func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, d
 		Example: "  erun review queue advance --target-branch main\n" +
 			"  erun review queue advance --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -98,7 +98,7 @@ func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, d
 	}
 	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -119,7 +119,7 @@ func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *s
 		SilenceUsage: true,
 		Example:      "  erun review queue override-advance --target-branch main --reason \"hotfix, reviewers unavailable\"",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, params, reason, deps)
 			if err != nil {
 				return err
@@ -139,6 +139,6 @@ func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *s
 	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
 	cmd.Flags().StringVar(&reason, "reason", "", "Why the unresolved-thread gate is being bypassed (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

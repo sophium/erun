@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // An image is dispatched as soon as its own FROM bases finish. Trace lines are emitted
@@ -37,7 +37,7 @@ func resolveBuildJobs(ctx core.Context, images int) int {
 
 // buildBaseTags lists the sibling images this Dockerfile FROMs, in Dockerfile order.
 // A self-reference is ignored; it would strand the image forever.
-func buildBaseTags(build shared.DockerBuildSpec, buildsByTag map[string]shared.DockerBuildSpec) []string {
+func buildBaseTags(build dockerspec.DockerBuildSpec, buildsByTag map[string]dockerspec.DockerBuildSpec) []string {
 	tag := strings.TrimSpace(build.Image.Tag)
 	dependencies := dockerfileLocalBaseImageTags(build.DockerfilePath, buildsByTag)
 	bases := make([]string, 0, len(dependencies))
@@ -51,7 +51,7 @@ func buildBaseTags(build shared.DockerBuildSpec, buildsByTag map[string]shared.D
 }
 
 // buildDependencies maps each tag to its sibling bases and reports FROM cycles instead of deadlocking.
-func buildDependencies(builds []shared.DockerBuildSpec) (map[string][]string, error) {
+func buildDependencies(builds []dockerspec.DockerBuildSpec) (map[string][]string, error) {
 	buildsByTag := dockerBuildsByTag(builds)
 	dependencies := make(map[string][]string, len(builds))
 	for _, build := range builds {
@@ -69,7 +69,7 @@ const (
 	buildVisited
 )
 
-func checkBuildDependenciesAreAcyclic(builds []shared.DockerBuildSpec, dependencies map[string][]string) error {
+func checkBuildDependenciesAreAcyclic(builds []dockerspec.DockerBuildSpec, dependencies map[string][]string) error {
 	state := make(map[string]int, len(dependencies))
 	path := make([]string, 0, len(dependencies))
 
@@ -115,7 +115,7 @@ func buildCycleStart(path []string, tag string) int {
 
 // traceBuildDependencyPlan records the FROM edges, not a schedule; worker count is host-derived
 // and deliberately omitted. Nothing to order prints nothing.
-func traceBuildDependencyPlan(ctx core.Context, builds []shared.DockerBuildSpec, dependencies map[string][]string) {
+func traceBuildDependencyPlan(ctx core.Context, builds []dockerspec.DockerBuildSpec, dependencies map[string][]string) {
 	waiting := make([]string, 0, len(builds))
 	for _, build := range builds {
 		tag := strings.TrimSpace(build.Image.Tag)
@@ -131,7 +131,7 @@ func traceBuildDependencyPlan(ctx core.Context, builds []shared.DockerBuildSpec,
 
 // runBuildDependencies runs each image once its bases finish, holding at most `jobs` worker
 // slots. Output is published in build order; the heartbeat bypasses that buffering.
-func runBuildDependencies(ctx core.Context, builds []shared.DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) error {
+func runBuildDependencies(ctx core.Context, builds []dockerspec.DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) error {
 	if jobs <= 1 || len(builds) <= 1 {
 		for _, buildInput := range builds {
 			if err := executeDockerBuild(ctx, buildInput, build, ctx.Stdout, ctx.Stderr); err != nil {
@@ -153,7 +153,7 @@ func runBuildDependencies(ctx core.Context, builds []shared.DockerBuildSpec, dep
 
 type buildDispatch struct {
 	ctx         core.Context
-	builds      []shared.DockerBuildSpec
+	builds      []dockerspec.DockerBuildSpec
 	build       DockerImageBuilderFunc
 	baseIndexes [][]int
 	output      *buildOutputOrder
@@ -166,7 +166,7 @@ type buildDispatch struct {
 	running  sync.WaitGroup
 }
 
-func newBuildDispatch(ctx core.Context, builds []shared.DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) *buildDispatch {
+func newBuildDispatch(ctx core.Context, builds []dockerspec.DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) *buildDispatch {
 	dispatch := &buildDispatch{
 		ctx:         ctx,
 		builds:      builds,
@@ -185,7 +185,7 @@ func newBuildDispatch(ctx core.Context, builds []shared.DockerBuildSpec, depende
 }
 
 // A base not built in this run (pulled from a registry) has no index and holds nothing back.
-func buildBaseIndexes(builds []shared.DockerBuildSpec, dependencies map[string][]string) [][]int {
+func buildBaseIndexes(builds []dockerspec.DockerBuildSpec, dependencies map[string][]string) [][]int {
 	indexByTag := make(map[string]int, len(builds))
 	for i, buildInput := range builds {
 		indexByTag[strings.TrimSpace(buildInput.Image.Tag)] = i

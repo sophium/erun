@@ -9,7 +9,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // toolsExcludedFromRequiredInputAudit mutate real state with no preview mode,
@@ -33,7 +34,7 @@ var camelCaseBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 func TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	t.Setenv("ERUN_CODEX_BIN", "true")
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	tools, err := session.ListTools(context.Background(), nil)

@@ -16,7 +16,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	versionpkg "github.com/sophium/erun/erun-mcp/tools/version"
 )
 
@@ -172,9 +173,9 @@ var wantRegisteredTools = []string{
 
 // connectTestMCPSession clears ambient auth anchors, which inside a runtime pod
 // would reject the unauthenticated test client.
-func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime sharedpkg.RuntimeConfig) *mcp.ClientSession {
+func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime runtimecfg.RuntimeConfig) *mcp.ClientSession {
 	t.Helper()
-	for _, key := range []string{sharedpkg.EnvMCPTrustedIssuers, sharedpkg.EnvMCPTrustedIssuer, sharedpkg.EnvMCPAudience, sharedpkg.EnvTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	cfg := HTTPConfig{Path: "/mcp"}
@@ -198,7 +199,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
-	}, sharedpkg.RuntimeConfig{})
+	}, runtimecfg.RuntimeConfig{})
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -226,7 +227,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 // job_start is a registered stub, so the call must fail as a tool error naming
 // its replacements, not as "unknown tool".
 func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
-	session := connectTestMCPSession(t, model.BuildInfo{}, sharedpkg.RuntimeConfig{})
+	session := connectTestMCPSession(t, model.BuildInfo{}, runtimecfg.RuntimeConfig{})
 
 	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "job_start",
@@ -293,7 +294,7 @@ func (b *lockedBuffer) String() string {
 // The refusal is a JSON-RPC error on HTTP 200, so the assertion is on the
 // SDK's log line, not the response.
 func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
-	for _, key := range []string{sharedpkg.EnvMCPTrustedIssuers, sharedpkg.EnvMCPTrustedIssuer, sharedpkg.EnvMCPAudience, sharedpkg.EnvTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 
@@ -303,7 +304,7 @@ func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	t.Cleanup(func() { mcpServerLogger = previous })
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, sharedpkg.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, runtimecfg.RuntimeConfig{}, nil))
 	t.Cleanup(httpServer.Close)
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`

@@ -10,7 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/terraform"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type TerraformInput struct {
@@ -22,16 +25,16 @@ type TerraformInput struct {
 	ExtraArgs   []string `json:"extraArgs,omitempty" jsonschema:"extra args passed through to terraform plan"`
 	Preview     bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the terraform commands without executing them"`
 	Verbosity   int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func TerraformTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func TerraformTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, shared.JobEnvelopeOutput{}, err
+			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
-		projectRoot := shared.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
+		projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
 		terraformStore, ok := any(runtime.Store).(terraform.TerraformStore)
 		if !ok {
@@ -48,7 +51,7 @@ func TerraformTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 			return nil
 		}
 
-		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			_, err := terraform.RunTerraform(runCtx, model.TerraformParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -58,7 +61,7 @@ func TerraformTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 			}, terraformStore, confirm, nil)
 			return err
 		})
-		envelope, err := shared.RunJobEnvelope(runtime, "terraform", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "terraform", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

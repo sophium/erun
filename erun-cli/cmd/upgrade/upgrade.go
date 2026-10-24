@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/deploynotice"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
@@ -12,11 +14,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
+func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
 	var versionOverride string
 	var tenant string
 	var environment string
@@ -66,10 +68,10 @@ func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfi
 			holder := model.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
 			deployer = lifecycle.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
-			return runUpgrade(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, target, deployer)
+			return runUpgrade(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, target, deployer)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Deploy this exact version to every opted-in environment, skipping channel resolution")
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Restrict the upgrade to a specific tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Restrict the upgrade to a specific environment; requires --tenant")
@@ -152,7 +154,7 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
+func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
 	return func(ctx core.Context, item model.UpgradePlanItem) error {
 		deployTarget := model.DeployTarget{
 			Tenant:          item.Tenant,
@@ -170,7 +172,7 @@ func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.Env
 		if err := deploypkg.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, deploypkg.ResolveDeployedHelmReleaseVersion); err != nil {
 			return err
 		}
-		shared.NoticeStaleRuntimePortForwards(ctx, specs)
+		deploynotice.NoticeStaleRuntimePortForwards(ctx, specs)
 		return nil
 	}
 }

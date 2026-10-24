@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 const (
@@ -15,7 +15,7 @@ const (
 // TestOrchestratorSessionEnvVarsAreDocumented checks it against env-vars.md.
 func OrchestratorSessionEnvVars() []string {
 	return []string{
-		shared.OrchestratorIDEnvVar,
+		jobstate.OrchestratorIDEnvVar,
 		DesktopSessionEnvVar,
 		core.RuntimeOutputsDirEnvVar,
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 // ociChartReferenceRegistry is PublishedDevopsChartOCIRepo's inverse, or "" for a non-OCI reference.
@@ -230,7 +230,7 @@ func traceRuntimeRegistryMemo(ctx core.Context, target config.OpenResult, search
 // into subcharts.
 func publishedUmbrellaSubchartKey(tenant, chartName string) string {
 	chartName = strings.TrimSpace(chartName)
-	base, ok := strings.CutPrefix(chartName, shared.TenantResourcePrefix(tenant)+"-")
+	base, ok := strings.CutPrefix(chartName, opentarget.TenantResourcePrefix(tenant)+"-")
 	if !ok {
 		return ""
 	}

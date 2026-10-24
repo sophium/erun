@@ -5,7 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
@@ -13,11 +14,11 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/release"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) *cobra.Command {
+func NewReleaseCmd(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -26,10 +27,10 @@ func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Projec
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReleaseCommand(shared.CommandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, buildDockerImage, loginToDockerRegistry, selectRunner, push)
+			return runReleaseCommand(clicmd.CommandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, buildDockerImage, loginToDockerRegistry, selectRunner, push)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&force, "force", false, "Delete and recreate conflicting release tags before tagging")
 	cmd.Example = "  erun release --dry-run\n  erun -v release --dry-run"
 	cmd.Long = "Cut a release from the current branch.\n\n" +
@@ -42,7 +43,7 @@ func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Projec
 	return cmd
 }
 
-func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) error {
+func runReleaseCommand(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, model.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // wireTimeOmitzeroRoots are the JSON roots machine consumers read.
@@ -18,7 +18,7 @@ var wireTimeOmitzeroRoots = []any{
 	model.EnvironmentActivityLease{},
 	model.EnvironmentStopPending{},
 	model.EnvironmentStopHistoryEntry{},
-	shared.EnvironmentJob{},
+	jobstate.EnvironmentJob{},
 	model.AISessionStatus{},
 	RuntimeUsageHistory{},
 	model.HostCredentialsRefresh{},

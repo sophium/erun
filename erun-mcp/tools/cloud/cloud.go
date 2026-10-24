@@ -9,7 +9,9 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type CloudListInput struct {
@@ -85,9 +87,9 @@ type CloudSetResult struct {
 	Trace       []string            `json:"trace,omitempty"`
 }
 
-func CloudListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
+func CloudListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
-		statuses, err := cloud.ListCloudProviderStatuses(runtime.Store, shared.CloudDependencies())
+		statuses, err := cloud.ListCloudProviderStatuses(runtime.Store, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudListResult{}, err
 		}
@@ -95,10 +97,10 @@ func CloudListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 	}
 }
 
-func CloudInitAWSTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
+func CloudInitAWSTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		params := model.InitAWSCloudProviderParams{
 			SSOStartURL:   input.SSOStartURL,
 			SSORegion:     input.SSORegion,
@@ -127,14 +129,14 @@ func CloudInitAWSTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 			return nil, CloudActionResult{}, err
 		}
 		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
-		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func CloudInitCloudflareTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
+func CloudInitCloudflareTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		params := model.InitCloudflareCloudProviderParams{
 			AccountID: input.AccountID,
 			TokenName: input.TokenName,
@@ -148,19 +150,19 @@ func CloudInitCloudflareTool(runtime shared.RuntimeConfig) func(context.Context,
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := cloud.InitCloudflareCloudProvider(ctx, runtime.Store, params, shared.CloudDependencies())
+		provider, err := cloud.InitCloudflareCloudProvider(ctx, runtime.Store, params, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := cloud.CloudProviderTokenStatus(provider, shared.CloudDependencies())
-		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		status := cloud.CloudProviderTokenStatus(provider, clouddeps.CloudDependencies())
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func CloudInitERunTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
+func CloudInitERunTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		params := model.InitERunCloudProviderParams{APIURL: input.APIURL}
 		if input.Preview {
 			plan := []string{
@@ -175,37 +177,37 @@ func CloudInitERunTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.
 			return nil, CloudActionResult{}, err
 		}
 		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
-		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func CloudLoginTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
+func CloudLoginTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		alias := strings.TrimSpace(input.Alias)
 		if alias == "" {
 			return nil, CloudActionResult{}, fmt.Errorf("cloud provider alias is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, model.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, shared.CloudDependencies())
+		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, model.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func CloudOIDCTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
+func CloudOIDCTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		alias := strings.TrimSpace(input.Alias)
 		if alias == "" {
 			return nil, CloudActionResult{}, fmt.Errorf("cloud provider alias is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		if input.Preview {
 			return nil, CloudActionResult{
 				Preview: true,
@@ -226,18 +228,18 @@ func CloudOIDCTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
-func CloudSetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
+func CloudSetTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
-		tenant, environment, err := shared.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
+		tenant, environment, err := runtimecfg.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
 		if err != nil {
 			return nil, CloudSetResult{}, err
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, model.SetEnvironmentCloudAliasParams{
 			Tenant:      tenant,
 			Environment: environment,
@@ -251,7 +253,7 @@ func CloudSetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 			Tenant:      tenant,
 			Environment: environment,
 			EnvConfig:   config,
-			Trace:       shared.NormalizeTraceLines(traceOutput.String()),
+			Trace:       toolio.NormalizeTraceLines(traceOutput.String()),
 		}, nil
 	}
 }

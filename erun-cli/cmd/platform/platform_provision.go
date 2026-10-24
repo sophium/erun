@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -28,7 +28,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 		Example: "  erun platform provision --env-name prod --env-type runtime --kubernetes-context prod-cluster\n" +
 			"  erun platform provision --env-name prod --env-type runtime --context-name prod --context-alias aws-main --context-region eu-west-2",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			result, err := platform.RunPlatformProvision(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -71,7 +71,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 		}
 		return originalRunE(cmd, args)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

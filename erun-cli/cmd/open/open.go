@@ -6,7 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/opentarget"
+	"github.com/sophium/erun/cmd/shared/portfwd"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -41,11 +45,11 @@ func resolveOpenTarget(
 	if vscode && intellij {
 		return config.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
 	}
-	params, err := shared.ResolveOpenParams(ctx.Command, args, target)
+	params, err := opentarget.ResolveOpenParams(ctx.Command, args, target)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shared.ShouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, opentarget.ShouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
@@ -62,7 +66,7 @@ func resolveOpenTarget(
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -97,7 +101,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
@@ -128,7 +132,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 		},
 	}
 
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Open a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Open a specific environment")
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
@@ -166,12 +170,12 @@ type OpenOptions struct {
 }
 
 func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
-	_, result, err := shared.ResolveOpenArgs(ctx.Command, args, resolveOpen)
+	_, result, err := opentarget.ResolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
-	if initErr := shared.RunInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
+	if initErr := opentarget.RunInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
 		return config.OpenResult{}, true, initErr
 	}
 
@@ -184,14 +188,14 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams,
 		return result, false, err
 	}
 
-	if initErr := shared.RunInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
+	if initErr := opentarget.RunInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
 		return config.OpenResult{}, true, initErr
 	}
 
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -218,16 +222,16 @@ type resolvedOpenRunner struct {
 	ctx                       core.Context
 	result                    config.OpenResult
 	options                   OpenOptions
-	promptRunner              shared.PromptRunner
+	promptRunner              prompt.PromptRunner
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
 	checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc
 	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error)
 	deployHelmChart           deploy.HelmChartDeployerFunc
 	resolveDeployedVersion    deploy.HelmReleaseVersionResolverFunc
-	activateMCP               shared.MCPForwarder
-	activateAPI               shared.APIForwarder
-	activateSSHD              shared.SSHDActivator
+	activateMCP               portfwd.MCPForwarder
+	activateAPI               portfwd.APIForwarder
+	activateSSHD              sshdlink.SSHDActivator
 	launchVSCode              VSCodeLauncher
 	launchIntelliJ            IntelliJLauncher
 }
@@ -284,7 +288,7 @@ func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (do
 		}
 		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
 		return true, r.emitNoShellSetup()
-	case !shared.StdinIsTerminal():
+	case !prompt.StdinIsTerminal():
 		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
 		return true, r.emitNoShellSetup()
 	default:
@@ -343,7 +347,7 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 	if !r.result.EnvConfig.HasAWSCloudAlias() {
 		return
 	}
-	refresh, err := shared.RefreshEnvironmentHostCredentials(r.ctx, r.result)
+	refresh, err := RefreshEnvironmentHostCredentials(r.ctx, r.result)
 	if err != nil {
 		r.ctx.Trace("open: host AWS credential refresh failed; the environment keeps whatever credentials it already had: " + strings.TrimSpace(err.Error()))
 		return
@@ -358,7 +362,7 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 // returned error matters only when the forwards are the deliverable (no shell).
 func (r *resolvedOpenRunner) activateForwarders() error {
 	// Reclaim orphaned records before the forward store is read and appended to.
-	shared.ReclaimOrphanedPortForwardRecords(r.ctx)
+	ReclaimOrphanedPortForwardRecords(r.ctx)
 	var failures []string
 	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
 		if err := r.activateSSHD(r.ctx, r.result); err != nil {

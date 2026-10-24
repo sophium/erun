@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/doctor"
 	"github.com/sophium/erun/erun-mcp/tools/expose"
 	"github.com/sophium/erun/erun-mcp/tools/observe"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 	"github.com/sophium/erun/erun-mcp/tools/terraform"
 	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
@@ -22,8 +23,8 @@ func TestCrossEnvironmentToolsRefuseAForeignEnvironment(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	ctx := context.Background()
@@ -57,8 +58,8 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	ctx := context.Background()
@@ -91,8 +92,8 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 
 // Explicit ServicesZone/PlatformNamespace avoid needing a project on disk.
 func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeRuntime, KubernetesContext: "test-context"},
@@ -151,8 +152,8 @@ func TestTerraformAcceptsItsOwnScope(t *testing.T) {
 		t.Fatalf("mkdir terraform root: %v", err)
 	}
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: projectRoot},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: projectRoot},
 		Store: terraformTestStore{listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent},

@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewListCmd(store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewListCmd(store lifecycle.ListStore, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var versionDriftTenant string
 	var gateEnvironment string
 	var controlPlanes bool
@@ -29,7 +30,7 @@ func NewListCmd(store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFind
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(shared.CommandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, erunAlias, controlPlanes, failOnDrift)
+			return runListCommand(clicmd.CommandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, erunAlias, controlPlanes, failOnDrift)
 		},
 	}
 	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
@@ -37,7 +38,7 @@ func NewListCmd(store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFind
 	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
 	cmd.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0")
 	cmd.Flags().StringVar(&erunAlias, "erun-alias", "", "With --control-planes, narrow the check to this one configured erun-hosted alias instead of every configured one (defaults to checking all)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift\n  erun list --control-planes --erun-alias erun+api.acme.services.erunpaas.com@erun"
 	return cmd
 }
@@ -62,7 +63,7 @@ func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) err
 	return nil
 }
 
-func runListCommand(ctx core.Context, store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx core.Context, store lifecycle.ListStore, findProjectRoot projectseam.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
@@ -161,30 +162,30 @@ func writeListConfigurationSection(ctx core.Context, configDirectory string) err
 	if _, err := fmt.Fprintln(ctx.Stdout, "Configuration:"); err != nil {
 		return err
 	}
-	return shared.WriteLabeledValue(ctx, "directory", shared.ValueOrNone(configDirectory))
+	return textfmt.WriteLabeledValue(ctx, "directory", textfmt.ValueOrNone(configDirectory))
 }
 
 func writeListDefaultsSection(ctx core.Context, defaults model.ListDefaultsResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Defaults:"); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "tenant", shared.ValueOrNone(defaults.Tenant)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "tenant", textfmt.ValueOrNone(defaults.Tenant)); err != nil {
 		return err
 	}
-	return shared.WriteLabeledValue(ctx, "environment", shared.ValueOrNone(defaults.Environment))
+	return textfmt.WriteLabeledValue(ctx, "environment", textfmt.ValueOrNone(defaults.Environment))
 }
 
 func writeListCurrentDirectorySection(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Current Directory:"); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "path", shared.ValueOrNone(current.Path)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "path", textfmt.ValueOrNone(current.Path)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "repo", shared.ValueOrNone(current.Repo)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "repo", textfmt.ValueOrNone(current.Repo)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "configured tenant", configuredCurrentTenantOrNone(current.ConfiguredTenant)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "configured tenant", configuredCurrentTenantOrNone(current.ConfiguredTenant)); err != nil {
 		return err
 	}
 	return writeEffectiveOpen(ctx, current)

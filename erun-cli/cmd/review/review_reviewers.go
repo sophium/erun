@@ -3,7 +3,7 @@ package review
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -13,7 +13,7 @@ import (
 )
 
 func newReviewReviewersCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"reviewers",
 		"Assign and remove reviewers on a review",
 		newReviewReviewersListCmd(store, alias, deps),
@@ -35,7 +35,7 @@ func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps 
 		SilenceUsage: true,
 		Example:      "  erun review reviewers list 018f...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			reviewers, err := reviewpkg.RunReviewReviewersList(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -59,7 +59,7 @@ func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps 
 			return ctx.WriteResult(reviewers)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -77,7 +77,7 @@ func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps c
 		SilenceUsage: true,
 		Example:      "  erun review reviewers add 018f... --user-id 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			reviewer, err := reviewpkg.RunReviewReviewerAdd(ctx, store, *alias, args[0], userID, deps)
 			if err != nil {
 				return err
@@ -95,7 +95,7 @@ func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps c
 		},
 	}
 	cmd.Flags().StringVar(&userID, "user-id", "", "User id to assign as a reviewer (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -108,7 +108,7 @@ func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, dep
 		SilenceUsage: true,
 		Example:      "  erun review reviewers remove 018f... --user-id 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			err := reviewpkg.RunReviewReviewerRemove(ctx, store, *alias, args[0], userID, deps)
 			if err != nil {
 				return err
@@ -126,6 +126,6 @@ func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, dep
 		},
 	}
 	cmd.Flags().StringVar(&userID, "user-id", "", "User id to remove as a reviewer (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

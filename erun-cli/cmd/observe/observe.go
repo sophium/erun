@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
@@ -12,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewObserveCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func NewObserveCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	var secretChecks []string
 	cmd := &cobra.Command{
@@ -47,10 +48,10 @@ func NewObserveCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runObserveCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), checks)
+			return runObserveCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment), checks)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringArrayVar(&secretChecks, "secret", nil, "Check a Secret for a key's presence, as name=key (repeatable); the value is never read")
@@ -71,7 +72,7 @@ func parseObserveSecretChecks(raw []string) ([]model.ObserveSecretCheck, error) 
 	return checks, nil
 }
 
-func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, checks []model.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, checks []model.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err

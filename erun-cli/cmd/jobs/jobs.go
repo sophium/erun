@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -16,7 +16,7 @@ import (
 // NewJobsCmd builds `erun jobs`, the platform-backed view of the tenant's whole queue.
 func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
-	cmd := shared.NewCommandGroup(
+	cmd := clicmd.NewCommandGroup(
 		"jobs",
 		"See what agents and orchestrators are working on, and what recently finished",
 		newJobsListCmd(store, &alias, deps),
@@ -41,7 +41,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		SilenceUsage: true,
 		Example:      "  erun jobs list --status RUNNING\n  erun jobs list --issue sophium/erun#2109",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			jobs, err := jobspkg.RunJobList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -63,7 +63,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Filter by the issue the work belongs to, e.g. owner/repo#2109")
 	cmd.Flags().StringVar(&params.Scope, "scope", "", "Filter by the scope a job claims")
 	cmd.Flags().StringVar(&params.ActorID, "actor", "", "Filter by the actor holding the job")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -75,7 +75,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			job, err := jobspkg.RunJobShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -92,7 +92,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 			return ctx.WriteResult(job)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -117,7 +117,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 			"  erun jobs start --type triage --status PLANNED --issue sophium/erun#2109 --scope sophium/erun#2109 \\\n" +
 			"    --summary \"planning the jobs claim fix\" --actor erun/ideas",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			job, err := jobspkg.RunJobClaim(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -143,7 +143,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "The issue this work belongs to, e.g. owner/repo#2109")
 	cmd.Flags().StringVar(&params.Scope, "scope", "", "What this job claims, so a second actor is told who holds it")
 	cmd.Flags().StringVar(&params.LocalJobID, "local-job-id", "", "The in-pod job id this mirrors, when there is one")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -162,7 +162,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			"  erun jobs finish job_01H... --status RUNNING   # the planned work has begun\n" +
 			"  erun jobs finish job_01H... --summary \"waiting on the merge-queue build\"",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			params.JobID = args[0]
 			job, err := jobspkg.RunJobUpdate(ctx, store, *alias, params, deps)
 			if err != nil {
@@ -183,7 +183,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	cmd.Flags().StringVar(&params.Status, "status", "", "Move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it")
 	cmd.Flags().StringVar(&params.Summary, "summary", "", "Refresh what the job is doing, in prose")
 	cmd.Flags().StringVar(&params.LocalJobID, "local-job-id", "", "Record the in-pod job id this mirrors")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

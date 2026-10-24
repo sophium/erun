@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // considerEnvironmentJobReinvocation returns the resumed invocation when this
@@ -24,18 +24,18 @@ func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbea
 	if err != nil {
 		return nil, false
 	}
-	recorder.update(func(job *shared.EnvironmentJob) { job.ReinvocationCount++ })
+	recorder.update(func(job *jobstate.EnvironmentJob) { job.ReinvocationCount++ })
 	return resumeCommand, true
 }
 
 // decideEnvironmentJobReinvocation holds the whole bound: an agent job, a
 // started job that is unfinished or failed (not a plain nonzero exit), a
 // captured session id, and both the count and wall-clock caps unspent.
-func decideEnvironmentJobReinvocation(job shared.EnvironmentJob, jobState, startedJobFailed, reason string, deadline time.Time) (string, bool) {
+func decideEnvironmentJobReinvocation(job jobstate.EnvironmentJob, jobState, startedJobFailed, reason string, deadline time.Time) (string, bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", false
 	}
-	if jobState != shared.EnvironmentJobStateGateIncomplete && startedJobFailed == "" {
+	if jobState != jobstate.EnvironmentJobStateGateIncomplete && startedJobFailed == "" {
 		return "", false
 	}
 	if job.Progress == nil || strings.TrimSpace(job.Progress.SessionID) == "" {
@@ -61,7 +61,7 @@ func environmentJobReinvocationOutcome(reason, startedJobFailed string) string {
 
 // buildEnvironmentJobReinvocationPrompt restates the original task when it is
 // recoverable, so the resumed turn's final message still answers it.
-func buildEnvironmentJobReinvocationPrompt(job shared.EnvironmentJob, outcome string) string {
+func buildEnvironmentJobReinvocationPrompt(job jobstate.EnvironmentJob, outcome string) string {
 	maxReinvocations := resolveEnvironmentJobMaxReinvocations()
 	attempt := job.ReinvocationCount + 1
 	task := AgentJobCommandPrompt(job.AgentTool, job.Command)

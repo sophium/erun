@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,7 +58,7 @@ func ResolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDepen
 		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(
 			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
 	}
-	provider, err := shared.ResolveERunPlatformAlias(store, alias)
+	provider, err := cloudconfig.ResolveERunPlatformAlias(store, alias)
 	if err != nil {
 		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
 	}

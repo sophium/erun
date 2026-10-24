@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
 
 // newCountingFakeDockerOnPath fails the first failuresPerTag pushes of each tag.
@@ -72,19 +72,19 @@ func TestTheUnknownBlobRetryIsBoundedAndStillFails(t *testing.T) {
 	attempted := newCountingFakeDockerOnPath(t, "unknown blob", 99)
 
 	var stdout, stderr bytes.Buffer
-	err := shared.PushDockerImageWithRetries(concurrentPushTestTag, 0, &stdout, &stderr, noWait)
+	err := dockerregistry.PushDockerImageWithRetries(concurrentPushTestTag, 0, &stdout, &stderr, noWait)
 	if err == nil {
 		t.Fatal("expected a blob rejection that never clears to fail")
 	}
-	if !shared.IsDockerUnknownBlobError(err.Error()) {
+	if !dockerregistry.IsDockerUnknownBlobError(err.Error()) {
 		t.Errorf("expected the original blob failure to surface, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), concurrentPushTestTag) {
 		t.Errorf("expected the error to name the pushed image, got: %v", err)
 	}
-	want := shared.DockerPushUnknownBlobRetries + 1
+	want := dockerregistry.DockerPushUnknownBlobRetries + 1
 	if got := countDockerPushAttempts(t, attempted, concurrentPushTestTag); got != want {
-		t.Errorf("expected exactly %d attempts (1 initial + %d retries), got %d", want, shared.DockerPushUnknownBlobRetries, got)
+		t.Errorf("expected exactly %d attempts (1 initial + %d retries), got %d", want, dockerregistry.DockerPushUnknownBlobRetries, got)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestANonBlobPushFailureIsNotRetried(t *testing.T) {
 	attempted := newCountingFakeDockerOnPath(t, "internal server error", 99)
 
 	var stdout, stderr bytes.Buffer
-	err := shared.PushDockerImageWithRetries(concurrentPushTestTag, 0, &stdout, &stderr, noWait)
+	err := dockerregistry.PushDockerImageWithRetries(concurrentPushTestTag, 0, &stdout, &stderr, noWait)
 	if err == nil {
 		t.Fatal("expected the push to fail")
 	}

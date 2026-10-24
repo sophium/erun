@@ -5,7 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
@@ -14,7 +16,7 @@ import (
 )
 
 // NewServicesCmd builds `erun services`, listing the names `erun expose` accepts.
-func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func NewServicesCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
 		Use:   "services",
@@ -37,16 +39,16 @@ func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServicesCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+			return runServicesCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	return cmd
 }
 
-func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
+func runServicesCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -79,7 +81,7 @@ func writeServicesResult(ctx core.Context, result model.EnvironmentServiceList) 
 	}
 	for _, service := range result.Services {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s (%s): ports %s\n",
-			service.Name, shared.ValueOrNone(service.Type), formatServicePorts(service.Ports)); err != nil {
+			service.Name, textfmt.ValueOrNone(service.Type), formatServicePorts(service.Ports)); err != nil {
 			return err
 		}
 		if service.Exposure == nil {
@@ -103,5 +105,5 @@ func formatServicePorts(ports []model.ObservedServicePort) string {
 		}
 		rendered = append(rendered, strconv.Itoa(port.Port))
 	}
-	return shared.FormatStringList(rendered)
+	return textfmt.FormatStringList(rendered)
 }

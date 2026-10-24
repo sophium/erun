@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -23,7 +23,7 @@ func checkoutBinDir(root string) string { return filepath.Join(root, "erun-ui", 
 // appCopyPath is the .app bundle on macOS, the binary elsewhere.
 func appCopyPath(dir string, hostOS model.HostOS, executableName string) string {
 	if hostOS == model.HostOSDarwin {
-		return filepath.Join(dir, shared.DesktopAppBundleName)
+		return filepath.Join(dir, desktop.DesktopAppBundleName)
 	}
 	return filepath.Join(dir, executableName)
 }
@@ -98,7 +98,7 @@ func TestResolveAppExecutableNearLaunchesTheFreshRebuildOverTheStaleCopy(t *test
 			staleCopy := stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			freshCopy := stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, freshAppBuiltAt)
 
-			chosen, trace := shared.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
+			chosen, trace := desktop.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
 
 			if chosen != freshCopy {
 				t.Errorf("resolved %q, want the fresh rebuild %q (the stale copy beside the CLI was %q)", chosen, freshCopy, staleCopy)
@@ -225,7 +225,7 @@ func TestResolveAppExecutableNearChoosesAmongCopies(t *testing.T) {
 					tc.stage(t, root, hostOS, executableName)
 
 					want := expectedAppCopyPath(root, hostOS, executableName, tc.want)
-					chosen, trace := shared.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
+					chosen, trace := desktop.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
 					if chosen != want {
 						t.Fatalf("resolved %q, want %q", chosen, want)
 					}

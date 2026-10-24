@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 const jobSupervisorSetupFailureHelperEnv = "ERUN_COMMON_TEST_JOB_SUPERVISOR_SETUP_FAILURE_HELPER"
@@ -67,11 +67,11 @@ func TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if job.State == shared.EnvironmentJobStateUnknown {
+	if job.State == jobstate.EnvironmentJobStateUnknown {
 		t.Fatalf("the supervisor ended without recording an outcome: %s", job.Reason)
 	}
-	if job.State != shared.EnvironmentJobStateExited {
-		t.Fatalf("state = %q, want %q", job.State, shared.EnvironmentJobStateExited)
+	if job.State != jobstate.EnvironmentJobStateExited {
+		t.Fatalf("state = %q, want %q", job.State, jobstate.EnvironmentJobStateExited)
 	}
 	if job.ExitCode == nil || *job.ExitCode == 0 {
 		t.Fatalf("exit code = %v, want a recorded nonzero failure", job.ExitCode)
@@ -86,9 +86,9 @@ func TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone(t *test
 	dir := t.TempDir()
 	const id = "settled"
 	code := 7
-	recorder := &jobRecorder{dir: dir, job: shared.EnvironmentJob{
+	recorder := &jobRecorder{dir: dir, job: jobstate.EnvironmentJob{
 		ID:       id,
-		State:    shared.EnvironmentJobStateExited,
+		State:    jobstate.EnvironmentJobStateExited,
 		ExitCode: &code,
 		Reason:   "the outcome finishEnvironmentJob already recorded",
 	}}
@@ -98,7 +98,7 @@ func TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone(t *test
 
 	recordEnvironmentJobSupervisorFailure(recorder, fmt.Errorf("too late"), nil)
 
-	job, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+	job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		t.Fatalf("readEnvironmentJob: %v", err)
 	}
@@ -106,10 +106,10 @@ func TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone(t *test
 		t.Fatalf("settled outcome was overwritten: %+v", job)
 	}
 
-	panicked := &jobRecorder{dir: dir, job: shared.EnvironmentJob{ID: "crashed", State: EnvironmentJobStateRunning}}
+	panicked := &jobRecorder{dir: dir, job: jobstate.EnvironmentJob{ID: "crashed", State: EnvironmentJobStateRunning}}
 	recordEnvironmentJobSupervisorFailure(panicked, nil, "nil map write")
 	crashed := panicked.snapshot()
-	if crashed.State != shared.EnvironmentJobStateExited || crashed.ExitCode == nil || *crashed.ExitCode == 0 {
+	if crashed.State != jobstate.EnvironmentJobStateExited || crashed.ExitCode == nil || *crashed.ExitCode == 0 {
 		t.Fatalf("panicked supervisor's record = %+v, want a recorded failure", crashed)
 	}
 	if !strings.Contains(crashed.Reason, "nil map write") {

@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 )
 
 // GateMergeWorkingTreeDependencies lets tests replace the git plumbing.
@@ -27,7 +28,7 @@ type GateMergeWorkingTreeDependencies struct {
 
 func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependencies) GateMergeWorkingTreeDependencies {
 	if deps.WorkingTreeClean == nil {
-		deps.WorkingTreeClean = shared.GitWorktreeClean
+		deps.WorkingTreeClean = gitref.GitWorktreeClean
 	}
 	if deps.ResolveRef == nil {
 		deps.ResolveRef = gitResolveRef
@@ -66,7 +67,7 @@ func GateMergeWorkingTree(ctx core.Context, root string, params model.GateMergeW
 
 	// Gate-merges rewrite the environment's one shared worktree, so concurrent runs land the
 	// wrong tree; refuse before fetching, in --dry-run too.
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
 		return model.GateMergeWorkingTreeResult{}, err
 	}
 

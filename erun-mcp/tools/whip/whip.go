@@ -7,7 +7,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/registrar"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // WhipInput mirrors `erun whip`; tenant/environment must name this server's own environment.
@@ -19,9 +20,9 @@ type WhipInput struct {
 
 // whipTool nudges this environment's AI session now. It ignores staleness but
 // respects the consecutive-nudge cap.
-func whipTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, model.WhipResult, error) {
+func whipTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, model.WhipResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input WhipInput) (*mcp.CallToolResult, model.WhipResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, model.WhipResult{}, err
 		}
@@ -36,8 +37,8 @@ func whipTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolR
 	}
 }
 
-func RegisterWhipTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
-	shared.AddTool(reg, &mcp.Tool{
+func RegisterWhipTools(reg registrar.ToolRegistrar, runtime runtimecfg.RuntimeConfig) {
+	registrar.AddTool(reg, &mcp.Tool{
 		Name: "whip",
 		Description: "Push this environment's own AI session with the pacing nudge, on demand. Reports what it decided " +
 			"(pushed, skipped because the session isn't alive, or skipped because it already hit the consecutive-nudge cap) " +

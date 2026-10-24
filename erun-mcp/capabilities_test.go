@@ -14,22 +14,25 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/registrar"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // connectWithCapabilities bypasses auth middleware: it tests the surface, not token parsing.
 func connectWithCapabilities(t *testing.T, capabilities ...string) *mcp.ClientSession {
 	t.Helper()
-	return connectWithRuntime(t, shared.RuntimeConfig{}, capabilities...)
+	return connectWithRuntime(t, runtimecfg.RuntimeConfig{}, capabilities...)
 }
 
 // connectWithRuntime is connectWithCapabilities with a real runtime for handlers that read it.
-func connectWithRuntime(t *testing.T, runtime shared.RuntimeConfig, capabilities ...string) *mcp.ClientSession {
+func connectWithRuntime(t *testing.T, runtime runtimecfg.RuntimeConfig, capabilities ...string) *mcp.ClientSession {
 	t.Helper()
-	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
-	identity := shared.AuthIdentity{
+	identity := callerid.AuthIdentity{
 		Tenant:       "acme",
 		User:         "operator@acme",
 		Capabilities: mcptools.NewMCPCapabilitySet(capabilities),
@@ -138,7 +141,7 @@ func TestOperateCapabilityCannotSeeExecutionOrEnvironmentLifecycleDecisions(t *t
 }
 
 func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
-	identity := shared.AuthIdentity{
+	identity := callerid.AuthIdentity{
 		Tenant:       "acme",
 		Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityOperate)}),
 	}
@@ -148,7 +151,7 @@ func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
 		return nil, struct{}{}, nil
 	}
 
-	guarded := shared.GuardTool(identity, "deploy", nil, handler)
+	guarded := registrar.GuardTool(identity, "deploy", nil, handler)
 	if _, _, err := guarded(context.Background(), nil, struct{}{}); err != nil {
 		t.Fatalf("an operate capability must reach deploy's handler: %v", err)
 	}
@@ -195,7 +198,7 @@ func TestReadCapabilityCanReachTheEnvironmentReadModelTools(t *testing.T) {
 
 // No trust anchor means the loopback-only edge, which must keep the admin surface.
 func TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface(t *testing.T) {
-	identity := shared.AuthIdentityFrom(context.Background())
+	identity := callerid.AuthIdentityFrom(context.Background())
 	if !identity.Capabilities.AllowsTool("raw") {
 		t.Fatalf("an unauthenticated edge keeps its existing surface, got %+v", identity.Capabilities)
 	}
@@ -203,7 +206,7 @@ func TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface(t *testing.T) {
 
 // Defence in depth for handlers reached without registration.
 func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
-	identity := shared.AuthIdentity{
+	identity := callerid.AuthIdentity{
 		Tenant:       "acme",
 		Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)}),
 	}
@@ -213,7 +216,7 @@ func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 		return nil, struct{}{}, nil
 	}
 
-	guarded := shared.GuardTool(identity, "raw", nil, handler)
+	guarded := registrar.GuardTool(identity, "raw", nil, handler)
 	if _, _, err := guarded(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("the guard must refuse a tool outside the caller's capabilities")
 	}
@@ -240,7 +243,7 @@ func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, nil
 	}
-	guarded := shared.GuardTool(shared.AuthIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
+	guarded := registrar.GuardTool(callerid.AuthIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
 
 	const callers = 200
 	var wg sync.WaitGroup
@@ -249,7 +252,7 @@ func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func(i int) {
 			defer wg.Done()
-			ctx := shared.WithAuthIdentity(context.Background(), shared.AuthIdentity{
+			ctx := callerid.WithAuthIdentity(context.Background(), callerid.AuthIdentity{
 				Tenant:       "acme",
 				User:         fmt.Sprintf("user-%d", i),
 				Capabilities: capabilities,
@@ -290,9 +293,9 @@ func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T)
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, nil
 	}
-	guarded := shared.GuardTool(shared.AuthIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
+	guarded := registrar.GuardTool(callerid.AuthIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
 
-	liveCtx := shared.WithAuthIdentity(context.Background(), shared.AuthIdentity{Tenant: "acme", User: "live-caller", Capabilities: capabilities})
+	liveCtx := callerid.WithAuthIdentity(context.Background(), callerid.AuthIdentity{Tenant: "acme", User: "live-caller", Capabilities: capabilities})
 	if _, _, err := guarded(liveCtx, nil, struct{}{}); err != nil {
 		t.Fatalf("live caller: unexpected refusal: %v", err)
 	}
@@ -325,12 +328,12 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // mcpauth.SignMCPToken call.
 func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere(t *testing.T) {
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityOperate))
-	t.Setenv(shared.EnvMCPTrustedIssuer, issuer)
-	t.Setenv(shared.EnvMCPAudience, "erun-mcp")
-	t.Setenv(shared.EnvTenant, "acme")
+	t.Setenv(edgeauth.EnvMCPTrustedIssuer, issuer)
+	t.Setenv(edgeauth.EnvMCPAudience, "erun-mcp")
+	t.Setenv(edgeauth.EnvTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, shared.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, runtimecfg.RuntimeConfig{}, nil))
 	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "operate-edge-test", Version: "v0.0.1"}, nil)

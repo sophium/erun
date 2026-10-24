@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{
@@ -50,7 +53,7 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
 			result, err := lifecycle.RunRuntimeResize(ctx, lifecycle.RuntimeResizeDependencies{
 				Store:                          store,
 				SaveEnvConfig:                  saveEnvConfig,
@@ -82,7 +85,7 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 			return writeResizeResult(ctx, result)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&cpu, "cpu", "", "Explicit CPU limit for the runtime pod (Kubernetes quantity, e.g. 6); omit to leave CPU unchanged unless --apply-recommendation")
@@ -98,14 +101,14 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 // resizeActivityLeaseLoader reads leases from the target environment's own store,
 // via its MCP edge when off-environment. It runs even under --dry-run, since
 // dry-run must still answer "would this be refused".
-func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver) func(string, string, time.Time) ([]model.EnvironmentActivityLease, error) {
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver) func(string, string, time.Time) ([]model.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false
 	return func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error) {
-		if shared.EnvironmentTargetsItself() {
+		if envcall.EnvironmentTargetsItself() {
 			return activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 		}
-		leases, _, err := shared.ListLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
+		leases, _, err := envcall.ListLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
 		return leases, err
 	}
 }

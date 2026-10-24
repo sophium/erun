@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
 
 // heavyDualStreamScript writes over 64KB to both streams, so a draining bug hangs.
@@ -59,7 +59,7 @@ func TestRunDockerPushOnceDrainsHeavyOutputConcurrently(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	err := runWithHangGuard(t, 20*time.Second, func() error {
-		return shared.RunDockerPushOnce("tag", core.VerbosityDebug, &stdout, &stderr)
+		return dockerregistry.RunDockerPushOnce("tag", core.VerbosityDebug, &stdout, &stderr)
 	})
 	if err != nil {
 		t.Fatalf("runDockerPushOnce: %v", err)

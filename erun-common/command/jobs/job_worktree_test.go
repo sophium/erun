@@ -10,7 +10,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 func runGitForTest(t *testing.T, dir string, args ...string) {
@@ -101,11 +102,11 @@ func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpoi
 	const siblingID = "i2083"
 	const id = "land2083"
 
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	sibling := shared.EnvironmentJob{
+	sibling := jobstate.EnvironmentJob{
 		ID:        siblingID,
 		Name:      siblingID,
 		State:     EnvironmentJobStateRunning,

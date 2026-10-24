@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
+	"github.com/sophium/erun/erun-common/primitive/shared/releaseflow"
 )
 
 // A release refused for disk headroom must leave the repository exactly as it
@@ -33,9 +34,9 @@ func refuseReleaseDiskHeadroom(t *testing.T, root string) {
 	t.Setenv("ERUN_DOCKER_BIN", releaseDiskResidueStubDocker(t, root))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 	// Leave the cache volume unset so the floor is what refuses.
-	t.Setenv(shared.DockerVolumeBytesEnv, "")
+	t.Setenv(diskheadroom.DockerVolumeBytesEnv, "")
 }
 
 func gitTagsForTest(t *testing.T, dir string) string {
@@ -60,11 +61,11 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 		Version:     "1.0.301",
 		Mode:        model.ReleaseModeStable,
 		Stages: []model.ReleaseStage{
-			shared.NewReleaseStage(repo, nil, "1.0.301", model.ReleaseModeStable),
+			releaseflow.NewReleaseStage(repo, nil, "1.0.301", model.ReleaseModeStable),
 		},
 	}
 
-	if err := shared.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, nil); err != nil {
+	if err := releaseflow.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, nil); err != nil {
 		t.Fatalf("a release with no publisher marks source control only and must not be refused for disk, got %v", err)
 	}
 	if tags := gitTagsForTest(t, repo); !strings.Contains(tags, "v1.0.301") {
@@ -72,11 +73,11 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	}
 	runGitForTest(t, repo, "tag", "-d", "v1.0.301")
 
-	publisher := shared.ReleasePublisher{
+	publisher := releaseflow.ReleasePublisher{
 		Publish: func(core.Context) error { t.Fatal("the publish ran despite the refusal"); return nil },
 		Verify:  func(core.Context) error { return nil },
 	}
-	if err := shared.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher); err == nil {
+	if err := releaseflow.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher); err == nil {
 		t.Fatal("expected the disk-headroom preflight to refuse a build-and-publish release")
 	}
 	if tags := gitTagsForTest(t, repo); tags != "" {

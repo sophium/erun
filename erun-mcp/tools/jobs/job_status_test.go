@@ -10,15 +10,16 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // An agent job's command embeds its whole prompt, so status/await must bound
 // it and never echo it twice.
 
 // writeJobFixture writes an exited job, which skips supervisor liveness checks.
-func writeJobFixture(t *testing.T, tenant, environment string, job shared.EnvironmentJob) {
+func writeJobFixture(t *testing.T, tenant, environment string, job jobstate.EnvironmentJob) {
 	t.Helper()
 	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
@@ -37,13 +38,13 @@ func writeJobFixture(t *testing.T, tenant, environment string, job shared.Enviro
 	}
 }
 
-func finishedJobFixture(id string, command []string) shared.EnvironmentJob {
+func finishedJobFixture(id string, command []string) jobstate.EnvironmentJob {
 	zero := 0
 	now := time.Now()
-	return shared.EnvironmentJob{
+	return jobstate.EnvironmentJob{
 		ID:        id,
 		Name:      id,
-		State:     shared.EnvironmentJobStateExited,
+		State:     jobstate.EnvironmentJobStateExited,
 		Command:   command,
 		ExitCode:  &zero,
 		StartedAt: now.Add(-time.Minute),
@@ -53,7 +54,7 @@ func finishedJobFixture(id string, command []string) shared.EnvironmentJob {
 
 func TestJobStatusCollapsesALongCommandByDefault(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	prompt := strings.Repeat("investigate and fix the failing lane ", 200)
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("sweep", []string{"claude", "-p", prompt}))
@@ -76,7 +77,7 @@ func TestJobStatusCollapsesALongCommandByDefault(t *testing.T) {
 
 func TestJobStatusLeavesAShortCommandUntouched(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("suite", []string{"./gradlew", "test"}))
 
@@ -95,7 +96,7 @@ func TestJobStatusLeavesAShortCommandUntouched(t *testing.T) {
 
 func TestJobStatusByIDDoesNotDuplicateTheJob(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("suite", []string{"./gradlew", "test"}))
 
@@ -113,7 +114,7 @@ func TestJobStatusByIDDoesNotDuplicateTheJob(t *testing.T) {
 
 func TestJobStatusListsCollapseEveryJobsCommand(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	prompt := strings.Repeat("build the release image and push it ", 200)
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("sweep-a", []string{"claude", "-p", prompt}))
@@ -136,7 +137,7 @@ func TestJobStatusListsCollapseEveryJobsCommand(t *testing.T) {
 
 func TestJobAwaitCollapsesALongCommand(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	prompt := strings.Repeat("investigate and fix the failing lane ", 200)
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("sweep", []string{"claude", "-p", prompt}))

@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 func TestProjectDockerPlatformsDefaultCoversUnlistedEnvironments(t *testing.T) {
@@ -47,7 +48,7 @@ environments:
 
 func resolveDockerBuildPlatformsForTest(t *testing.T, projectRoot, environment string, override ...string) []string {
 	t.Helper()
-	platforms, err := shared.ResolveDockerBuildPlatforms(core.Context{}, projectRoot, environment, override)
+	platforms, err := dockerbuild.ResolveDockerBuildPlatforms(core.Context{}, projectRoot, environment, override)
 	if err != nil {
 		t.Fatalf("resolveDockerBuildPlatforms(%q, %q) failed: %v", projectRoot, environment, err)
 	}
@@ -92,7 +93,7 @@ func TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments(t *tes
 	if got := cfg.DockerPlatformsForEnvironment("local"); len(got) != 0 {
 		t.Errorf(`DockerPlatformsForEnvironment("local") = %v, want empty: "local" is a generic name that can belong to a non-amd64 machine, so this shared config must not pin it`, got)
 	}
-	if got, want := resolveDockerBuildPlatformsForTest(t, repoRoot, "local"), shared.MultiPlatformDockerBuilds; !reflect.DeepEqual(got, want) {
+	if got, want := resolveDockerBuildPlatformsForTest(t, repoRoot, "local"), dockerspec.MultiPlatformDockerBuilds; !reflect.DeepEqual(got, want) {
 		t.Errorf(`resolved platforms for "local" = %v, want %v: the project-wide amd64 pin must not reach the generic default environment`, got, want)
 	}
 }

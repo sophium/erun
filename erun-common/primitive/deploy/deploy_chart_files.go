@@ -10,7 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"gopkg.in/yaml.v3"
 )
 
@@ -151,24 +151,24 @@ func componentChartsK8sDir(projectRoot string) (string, bool, error) {
 	if projectRoot == "" {
 		return "", false, nil
 	}
-	if dir, ok, err := shared.ConfiguredK8sDir(projectRoot); err != nil || ok {
+	if dir, ok, err := dockerbuild.ConfiguredK8sDir(projectRoot); err != nil || ok {
 		return dir, ok, err
 	}
-	dockerDir, declared, err := shared.ConfiguredDockerDir(projectRoot)
+	dockerDir, declared, err := dockerbuild.ConfiguredDockerDir(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
 	if declared {
 		return declaredDevopsModuleK8sDir(dockerDir)
 	}
-	return shared.ResolveProjectRootDevopsK8sDir(configpkg.FindProjectRoot, projectRoot)
+	return dockerbuild.ResolveProjectRootDevopsK8sDir(configpkg.FindProjectRoot, projectRoot)
 }
 
 // declaredDevopsModuleK8sDir resolves charts inside the paths.docker-declared module only;
 // a migrating tenant must not publish the legacy module it is leaving.
 func declaredDevopsModuleK8sDir(dockerDir string) (string, bool, error) {
 	k8sDir := filepath.Join(filepath.Dir(dockerDir), "k8s")
-	isModule, err := shared.IsKubernetesDeployModuleDir(k8sDir)
+	isModule, err := dockerbuild.IsKubernetesDeployModuleDir(k8sDir)
 	if err != nil || !isModule {
 		return "", false, err
 	}

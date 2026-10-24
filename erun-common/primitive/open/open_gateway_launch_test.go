@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 type openGatewayStore struct {
@@ -86,7 +86,7 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 }
 
 func TestOpenWithoutAReadableRootConfigLaunchesWithoutAGateway(t *testing.T) {
-	if got := shared.ResolveOpenGateway(openTenantResolutionStore{}); got != nil {
+	if got := opentarget.ResolveOpenGateway(openTenantResolutionStore{}); got != nil {
 		t.Fatalf("an unreadable root config should resolve no gateway, got %+v", got)
 	}
 }

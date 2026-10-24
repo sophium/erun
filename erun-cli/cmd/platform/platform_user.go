@@ -3,7 +3,7 @@ package platform
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -13,7 +13,7 @@ import (
 )
 
 func newPlatformUserCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"user",
 		"Manage users on the erun platform",
 		newPlatformUserEnrollCmd(store, alias, deps),
@@ -39,7 +39,7 @@ func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, dep
 		SilenceUsage: true,
 		Example:      "  erun platform user grant-role --user-id 019a7fa5-c2c0-7c55-bc70-714873a71f60 --role-id 019a7fa5-c2c0-7c55-bc70-714873a71f70",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if err := platform.RunPlatformGrantUserRole(ctx, store, *alias, params, deps); err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, dep
 	cmd.Flags().StringVar(&params.RoleID, "role-id", "", "Role id to grant")
 	_ = cmd.MarkFlagRequired("user-id")
 	_ = cmd.MarkFlagRequired("role-id")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -80,7 +80,7 @@ func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps c
 		SilenceUsage: true,
 		Example:      "  erun platform user enroll --username jane --issuer https://acme.example.com --subject jane@acme.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			user, err := platform.RunPlatformCreateUser(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -106,7 +106,7 @@ func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps c
 	cmd.Flags().StringVar(&params.Subject, "subject", "", "OIDC subject of the external identity to link")
 	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Target tenant id (operations-tenant callers only; defaults to the caller's own tenant)")
 	cmd.Flags().StringArrayVar(&params.RoleIDs, "role-id", nil, "Role id to grant, repeatable (defaults to the platform's own default role for this enrollment)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -119,7 +119,7 @@ func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps clo
 		SilenceUsage: true,
 		Example:      "  erun platform user list\n  erun platform user list --tenant-id 018f...  # operations-tenant callers only",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			users, err := platform.RunPlatformListUsers(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -137,7 +137,7 @@ func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps clo
 		},
 	}
 	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Target tenant id (operations-tenant callers only; defaults to the caller's own tenant)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

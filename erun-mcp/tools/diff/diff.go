@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type DiffInput struct {
@@ -19,9 +20,9 @@ type DiffInput struct {
 	Target         string `json:"target,omitempty" jsonschema:"which repository to diff: 'env' (default) for the environment's runtime repo, or 'erun' for the contribute-mode clone at $HOME/git/erun"`
 }
 
-func DiffTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DiffInput) (*mcp.CallToolResult, model.DiffResult, error) {
+func DiffTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DiffInput) (*mcp.CallToolResult, model.DiffResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input DiffInput) (*mcp.CallToolResult, model.DiffResult, error) {
-		envRoot, err := shared.RuntimeRepoPath(runtime.Context)
+		envRoot, err := toolio.RuntimeRepoPath(runtime.Context)
 		if err != nil {
 			return nil, model.DiffResult{}, err
 		}
@@ -33,7 +34,7 @@ func DiffTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolR
 			return nil, model.DiffResult{}, fmt.Errorf("diff target %q resolved to an empty working directory", input.Target)
 		}
 		traceOutput := new(strings.Builder)
-		ctx := shared.RuntimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
+		ctx := toolio.RuntimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.TraceCommand(workDir, "git", "diff", "--no-color", "--no-ext-diff")
 		result, err := lifecycle.ResolveGitDiffWithOptions(workDir, model.DiffOptions{
 			Scope:          input.Scope,

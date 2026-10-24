@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
 // Platform identity resolves like `erun platform` does, never from an
@@ -114,7 +114,7 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig model.TenantConfig, al
 }
 
 func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (model.CloudProviderConfig, *tenantPlatformResolution, error) {
-	provider, err := shared.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
+	provider, err := cloudconfig.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
 	if err != nil {
 		resolution, resolveErr := a.tenantPlatformResolutionForResolveError(err)
 		return model.CloudProviderConfig{}, &resolution, resolveErr

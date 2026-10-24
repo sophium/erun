@@ -12,11 +12,12 @@ import (
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/release"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/releaseflow"
 )
 
 // RunBuildExecution runs a plain `erun build`; outcome reporting is best-effort and store may be nil.
-func RunBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
+func RunBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := buildpkg.TraceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -24,7 +25,7 @@ func RunBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, ru
 }
 
 // RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart.
-func RunBuildExecutionAndDeploy(ctx core.Context, execution shared.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
+func RunBuildExecutionAndDeploy(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := buildpkg.TraceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -33,7 +34,7 @@ func RunBuildExecutionAndDeploy(ctx core.Context, execution shared.BuildExecutio
 
 // reportBuildExecutionOutcome reports a build best-effort. Standalone `erun release`
 // skips it: a release records itself through the release queue.
-func reportBuildExecutionOutcome(ctx core.Context, execution shared.BuildExecutionSpec, store config.CloudReadStore, deps cloud.CloudDependencies, err error) {
+func reportBuildExecutionOutcome(ctx core.Context, execution dockerspec.BuildExecutionSpec, store config.CloudReadStore, deps cloud.CloudDependencies, err error) {
 	if store == nil {
 		return
 	}
@@ -53,7 +54,7 @@ func reportBuildExecutionOutcome(ctx core.Context, execution shared.BuildExecuti
 }
 
 // buildExecutionProjectRootAndEnvironment reads both off the first image; empty for a script build.
-func buildExecutionProjectRootAndEnvironment(execution shared.BuildExecutionSpec) (string, string) {
+func buildExecutionProjectRootAndEnvironment(execution dockerspec.BuildExecutionSpec) (string, string) {
 	for _, build := range execution.DockerBuilds {
 		if build.Image.ProjectRoot != "" || build.Image.Environment != "" {
 			return build.Image.ProjectRoot, build.Image.Environment
@@ -63,25 +64,25 @@ func buildExecutionProjectRootAndEnvironment(execution shared.BuildExecutionSpec
 }
 
 // RunReleaseExecution runs a standalone `erun release` under the `==> Releasing` umbrella.
-func RunReleaseExecution(ctx core.Context, execution shared.BuildExecutionSpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) (err error) {
+func RunReleaseExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) (err error) {
 	ctx, finish := release.TraceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
 // runBuildExecution refuses a plan with no work: exiting zero would report untested as green.
-func runBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc) error {
+func runBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc) error {
 	if !buildrun.BuildExecutionPlansWork(execution) {
 		return buildpkg.NewEmptyBuildPlanError("the resolved plan has nothing to build or test")
 	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }
 
-func runResolvedBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc) error {
+func runResolvedBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deploy deploypkg.HelmChartDeployerFunc) error {
 	if execution.Release != nil {
 		// The release wraps build+push so images and charts exist before the tag is pushed.
 		publisher := releaserun.NewReleasePublisher(execution, deploySpecs, runScript, build, push)
-		if err := shared.RunReleaseSpec(ctx, *execution.Release, runGit, nil, &publisher); err != nil {
+		if err := releaseflow.RunReleaseSpec(ctx, *execution.Release, runGit, nil, &publisher); err != nil {
 			return err
 		}
 	} else {
@@ -108,14 +109,14 @@ func runResolvedBuildExecution(ctx core.Context, execution shared.BuildExecution
 }
 
 // BuildExecutionReleaseSpec returns the release a build execution carries.
-func BuildExecutionReleaseSpec(execution shared.BuildExecutionSpec) (model.ReleaseSpec, bool) {
+func BuildExecutionReleaseSpec(execution dockerspec.BuildExecutionSpec) (model.ReleaseSpec, bool) {
 	if execution.Release == nil {
 		return model.ReleaseSpec{}, false
 	}
 	return *execution.Release, true
 }
 
-func releaseExecutionVersion(execution shared.BuildExecutionSpec) string {
+func releaseExecutionVersion(execution dockerspec.BuildExecutionSpec) string {
 	if execution.Release == nil {
 		return ""
 	}

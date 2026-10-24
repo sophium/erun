@@ -12,16 +12,18 @@ import (
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/push"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func DockerPushExecutionSpecFromSpecs(builds []shared.DockerBuildSpec, pushes []shared.DockerPushSpec) shared.DockerPushExecutionSpec {
-	return shared.DockerPushExecutionSpec{Builds: builds, Pushes: pushes}
+func DockerPushExecutionSpecFromSpecs(builds []dockerspec.DockerBuildSpec, pushes []dockerspec.DockerPushSpec) dockerspec.DockerPushExecutionSpec {
+	return dockerspec.DockerPushExecutionSpec{Builds: builds, Pushes: pushes}
 }
 
 // resolveComponentChartSpecs resolves a publish spec for every chart under k8s/,
 // whether or not a same-named image exists.
-func resolveComponentChartSpecs(builds []shared.DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
+func resolveComponentChartSpecs(builds []dockerspec.DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
 	version := push.ComponentChartPublishVersion(builds)
 	registry, projectRoot := componentChartRegistryAndRoot(builds)
 	if version == "" || registry == "" || projectRoot == "" {
@@ -43,7 +45,7 @@ func resolveComponentChartSpecs(builds []shared.DockerBuildSpec) ([]helm.HelmCha
 	return specs, nil
 }
 
-func componentChartRegistryAndRoot(builds []shared.DockerBuildSpec) (registry, projectRoot string) {
+func componentChartRegistryAndRoot(builds []dockerspec.DockerBuildSpec) (registry, projectRoot string) {
 	for _, build := range builds {
 		if registry == "" {
 			registry = strings.TrimSpace(build.Image.Registry)
@@ -58,26 +60,26 @@ func componentChartRegistryAndRoot(builds []shared.DockerBuildSpec) (registry, p
 // publishDockerTarget pins a push to every supported platform: the
 // docker.platforms pin narrows local builds only, never what is published.
 func publishDockerTarget(target model.DockerCommandTarget) model.DockerCommandTarget {
-	target.Platforms = slices.Clone(shared.MultiPlatformDockerBuilds)
+	target.Platforms = slices.Clone(dockerspec.MultiPlatformDockerBuilds)
 	return target
 }
 
-func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) (shared.DockerPushExecutionSpec, error) {
-	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+func ResolveDockerPushExecution(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushExecutionSpec, error) {
+	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
 	buildContexts, err := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
 	if err != nil {
-		return shared.DockerPushExecutionSpec{}, err
+		return dockerspec.DockerPushExecutionSpec{}, err
 	}
 
-	builds := make([]shared.DockerBuildSpec, 0, len(buildContexts))
-	pushes := make([]shared.DockerPushSpec, 0, len(buildContexts))
+	builds := make([]dockerspec.DockerBuildSpec, 0, len(buildContexts))
+	pushes := make([]dockerspec.DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		// A multi-arch image has no arch-less tag to `docker push`, so the build publishes it.
 		build, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
-			return shared.DockerPushExecutionSpec{}, err
+			return dockerspec.DockerPushExecutionSpec{}, err
 		}
 		build.Push = true
 		builds = append(builds, build)
@@ -86,37 +88,37 @@ func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, find
 
 	builds, err = buildpkg.ApplyIncrementalToDockerBuilds(ctx, builds, target.NoIncremental)
 	if err != nil {
-		return shared.DockerPushExecutionSpec{}, err
+		return dockerspec.DockerPushExecutionSpec{}, err
 	}
 
 	charts, err := resolveComponentChartSpecs(builds)
 	if err != nil {
-		return shared.DockerPushExecutionSpec{}, err
+		return dockerspec.DockerPushExecutionSpec{}, err
 	}
 
-	return shared.DockerPushExecutionSpec{Builds: builds, Pushes: pushes, ComponentCharts: charts}, nil
+	return dockerspec.DockerPushExecutionSpec{Builds: builds, Pushes: pushes, ComponentCharts: charts}, nil
 }
 
-func ResolveDockerPushSpec(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) (shared.DockerPushSpec, *shared.DockerBuildSpec, error) {
-	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+func ResolveDockerPushSpec(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushSpec, *dockerspec.DockerBuildSpec, error) {
+	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
 	buildContext, err := resolveBuildContext()
 	if err != nil {
-		return shared.DockerPushSpec{}, nil, err
+		return dockerspec.DockerPushSpec{}, nil, err
 	}
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
-		return shared.DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
+		return dockerspec.DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
 
 	resolvedBuild, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
-		return shared.DockerPushSpec{}, nil, err
+		return dockerspec.DockerPushSpec{}, nil, err
 	}
 	resolvedBuild.Push = true
-	incremental, err := buildpkg.ApplyIncrementalToDockerBuilds(ctx, []shared.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+	incremental, err := buildpkg.ApplyIncrementalToDockerBuilds(ctx, []dockerspec.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
 	if err != nil {
-		return shared.DockerPushSpec{}, nil, err
+		return dockerspec.DockerPushSpec{}, nil, err
 	}
 	resolvedBuild = incremental[0]
 

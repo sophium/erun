@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // buildDaemonEndpointAddr is where a test stage's `RUN --network=host` reaches a daemon.
@@ -40,7 +40,7 @@ var runBuildDaemonCommand = func(args ...string) (string, error) {
 
 // ensureBuildDaemonEndpoint forwards the build's daemon to buildDaemonEndpointAddr on the
 // daemon host's loopback when nothing provides it, for the build's duration.
-func ensureBuildDaemonEndpoint(ctx core.Context, builds []shared.DockerBuildSpec) (func(), error) {
+func ensureBuildDaemonEndpoint(ctx core.Context, builds []dockerspec.DockerBuildSpec) (func(), error) {
 	noop := func() {}
 	if !anyBuildDeclaresTestStage(builds) {
 		return noop, nil
@@ -125,9 +125,9 @@ func buildDaemonForwarderArgs(ownerPID string) []string {
 	}
 }
 
-func anyBuildDeclaresTestStage(builds []shared.DockerBuildSpec) bool {
+func anyBuildDeclaresTestStage(builds []dockerspec.DockerBuildSpec) bool {
 	for _, build := range builds {
-		if shared.DockerfileDeclaresTestStage(build.DockerfilePath) {
+		if dockerspec.DockerfileDeclaresTestStage(build.DockerfilePath) {
 			return true
 		}
 	}

@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/podruntime"
@@ -96,7 +98,7 @@ func resolveAISessionHookTarget(cmd *cobra.Command, tenant, environment string) 
 	if tenant != "" && environment != "" {
 		return tenant, environment, nil
 	}
-	missing := shared.MissingTenantOrEnvironmentFlags(tenant, environment)
+	missing := envcall.MissingTenantOrEnvironmentFlags(tenant, environment)
 	hint := "ERUN_TENANT and ERUN_ENVIRONMENT are both set, which a runtime pod already does"
 	if len(missing) == 1 {
 		hint = "ERUN_" + strings.ToUpper(missing[0]) + " is set, which a runtime pod already does"
@@ -218,14 +220,14 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 }
 
 func WriteAISessionStatuses(cmd *cobra.Command, statuses []model.AISessionStatus, jsonOutput bool) error {
-	ctx := shared.CommandContext(cmd)
-	if shared.CommandWantsJSON(ctx, jsonOutput) {
+	ctx := clicmd.CommandContext(cmd)
+	if clicmd.CommandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(statuses)
 	}
 	if len(statuses) == 0 {
-		return shared.WriteLabeledValue(ctx, "ai sessions", "none recorded")
+		return textfmt.WriteLabeledValue(ctx, "ai sessions", "none recorded")
 	}
 	for _, status := range statuses {
 		value := string(status.State)
@@ -235,7 +237,7 @@ func WriteAISessionStatuses(cmd *cobra.Command, statuses []model.AISessionStatus
 		if strings.TrimSpace(status.Reason) != "" {
 			value += fmt.Sprintf(" (%s)", status.Reason)
 		}
-		if err := shared.WriteLabeledValue(ctx, status.SessionID, value); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, status.SessionID, value); err != nil {
 			return err
 		}
 	}

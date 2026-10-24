@@ -9,11 +9,13 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +53,7 @@ func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveR
 		Use:   "version",
 		Short: "Print build information",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			info, err := resolveBuildInfo()
 			if err != nil {
 				return err
@@ -72,7 +74,7 @@ func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveR
 			return writeVersionLines(ctx, info, versions)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&noRegistry, "no-registry", false, "Skip remote registry version lookup")
 	cmd.Example = "  erun version\n  erun -v version\n  erun version --dry-run"
 	cmd.Long = fmt.Sprintf("%s\n\nThe `erun` line is always erun's own build version, so it is comparable with the `latest stable:` line. A project VERSION resolved from the current directory is reported separately on its own `project` line.\n\nVerbosity levels:\n  -v    print trace logs for command flow and side effects\n\nDry-run:\n  --dry-run runs the same resolution flow but skips mutating operations", cmd.Short)
@@ -146,7 +148,7 @@ func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx co
 	return versions
 }
 
-func ResolveVersionCommandBuildInfo(findProjectRoot sharedpkg.ProjectFinderFunc) (VersionCommandInfo, error) {
+func ResolveVersionCommandBuildInfo(findProjectRoot projectseam.ProjectFinderFunc) (VersionCommandInfo, error) {
 	info := VersionCommandInfo{Build: shared.CurrentBuildInfo()}
 
 	buildDir, err := os.Getwd()
@@ -162,9 +164,9 @@ func ResolveVersionCommandBuildInfo(findProjectRoot sharedpkg.ProjectFinderFunc)
 		projectRoot = ""
 	}
 
-	version, _, versionFilePath, err := sharedpkg.ResolveDockerBuildVersion(buildDir, projectRoot, "")
+	version, _, versionFilePath, err := buildversion.ResolveDockerBuildVersion(buildDir, projectRoot, "")
 	if err != nil {
-		if errors.Is(err, shared.ErrVersionFileNotFound) {
+		if errors.Is(err, ErrVersionFileNotFound) {
 			return info, nil
 		}
 		return info, err

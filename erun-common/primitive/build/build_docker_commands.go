@@ -17,17 +17,19 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func DockerImageBuilder(buildInput shared.DockerBuildSpec, stdout, stderr io.Writer) error {
+func DockerImageBuilder(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 	if buildInput.Promote {
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
 }
 
-func runMultiPlatformBuild(buildInput shared.DockerBuildSpec, stdout, stderr io.Writer) error {
+func runMultiPlatformBuild(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 	if err := verifyDockerBuildPlatforms(buildInput.Platforms); err != nil {
 		return err
 	}
@@ -36,7 +38,7 @@ func runMultiPlatformBuild(buildInput shared.DockerBuildSpec, stdout, stderr io.
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
 		cgroupBefore := core.CaptureBuildCgroupSnapshot()
-		platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+		platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		output, err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 		elapsed := time.Since(started)
@@ -56,9 +58,9 @@ func runMultiPlatformBuild(buildInput shared.DockerBuildSpec, stdout, stderr io.
 
 // buildPlatformImageFromSource builds, tags and pushes one platform, returning the
 // captured build output for step timing.
-func buildPlatformImageFromSource(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
-	platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
-	args := shared.DockerBuildArgs(buildInput, platform)
+func buildPlatformImageFromSource(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
+	platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+	args := dockerspec.DockerBuildArgs(buildInput, platform)
 	output, err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
 	if err == nil {
 		err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
@@ -72,11 +74,11 @@ func buildPlatformImageFromSource(buildInput shared.DockerBuildSpec, platform st
 	return output, err
 }
 
-func promoteDockerImage(buildInput shared.DockerBuildSpec, stdout, stderr io.Writer) error {
+func promoteDockerImage(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
-		platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+		platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		output, err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
@@ -95,9 +97,9 @@ func promoteDockerImage(buildInput shared.DockerBuildSpec, stdout, stderr io.Wri
 
 // promotePlatformImage re-tags and pushes one platform's cached fingerprint image,
 // falling back to a real build when settlePromoteFailure deems the cache untrustworthy.
-func promotePlatformImage(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
-	fpTag := shared.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
-	platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+func promotePlatformImage(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
+	fpTag := dockerspec.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+	platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 	err := runDockerTag(fpTag, platformTag, stdout, stderr)
 	if err == nil {
 		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
@@ -119,19 +121,19 @@ func promotePlatformImage(buildInput shared.DockerBuildSpec, platform string, st
 
 // promoteSourceMissing reports only an affirmative "no image"; a failed inspect is not evidence.
 func promoteSourceMissing(fpTag string) bool {
-	present, err := shared.DockerImageExists(fpTag)
+	present, err := dockerregistry.DockerImageExists(fpTag)
 	return err == nil && !present
 }
 
 // settlePromoteFailure rebuilds from source when the cached image vanished, the registry
 // reports "unknown blob", or the image is not single-platform; other failures are returned.
-func settlePromoteFailure(buildInput shared.DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
+func settlePromoteFailure(buildInput dockerspec.DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
 	switch {
 	case promoteErr == nil:
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
 	case promoteSourceMissing(fpTag):
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); that cached image is no longer in the local image store, so rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, promoteErr, platform)
-	case shared.IsDockerUnknownBlobError(promoteErr.Error()):
+	case dockerregistry.IsDockerUnknownBlobError(promoteErr.Error()):
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, promoteErr)
 	default:
 		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
@@ -179,11 +181,11 @@ func isImageIndexMediaType(mediaType string) bool {
 
 // pushPlatformImage publishes each platform as soon as it builds: the containerd store
 // may collect tag-only content before a later push pass runs.
-func pushPlatformImage(buildInput shared.DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
+func pushPlatformImage(buildInput dockerspec.DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
 	if !buildInput.Push {
 		return nil
 	}
-	return shared.DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
+	return dockerregistry.DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
 }
 
 // assembleMultiPlatformManifest publishes the arch-less tag. The cached local manifest
@@ -191,21 +193,21 @@ func pushPlatformImage(buildInput shared.DockerBuildSpec, platformTag string, st
 func assembleMultiPlatformManifest(tag string, perPlatformTags []string, insecure bool, verbosity int, stdout, stderr io.Writer) error {
 	// `docker manifest rm` is local-only, so it needs no --insecure.
 	_ = runDockerSimpleCommandWithVerbosity([]string{"manifest", "rm", tag}, verbosity, io.Discard, io.Discard)
-	createArgs := append(shared.DockerManifestArgs("create", insecure), tag)
+	createArgs := append(dockerspec.DockerManifestArgs("create", insecure), tag)
 	createArgs = append(createArgs, perPlatformTags...)
 	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
 	}
-	pushArgs := append(shared.DockerManifestArgs("push", insecure), tag)
+	pushArgs := append(dockerspec.DockerManifestArgs("push", insecure), tag)
 	return runDockerSimpleCommandWithVerbosity(pushArgs, verbosity, stdout, stderr)
 }
 
-func tagFingerprintAfterBuild(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+func tagFingerprintAfterBuild(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	if buildInput.Fingerprint == "" {
 		return nil
 	}
-	sourceTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
-	target := shared.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+	sourceTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+	target := dockerspec.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	if sourceTag == target {
 		return nil
 	}
@@ -214,13 +216,13 @@ func tagFingerprintAfterBuild(buildInput shared.DockerBuildSpec, platform string
 
 // tagStableBaseVersionAfterBuild tags a snapshot base locally per arch so wrapper builds
 // can resolve it; no-op for release builds.
-func tagStableBaseVersionAfterBuild(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
-	target := shared.StableBaseVersionTag(buildInput.Image)
+func tagStableBaseVersionAfterBuild(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	target := dockerspec.StableBaseVersionTag(buildInput.Image)
 	if target == "" {
 		return nil
 	}
-	sourceTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
-	if archTarget := shared.PlatformSuffixedTag(target, platform); archTarget != sourceTag {
+	sourceTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
+	if archTarget := dockerspec.PlatformSuffixedTag(target, platform); archTarget != sourceTag {
 		if err := runDockerTag(sourceTag, archTarget, stdout, stderr); err != nil {
 			return err
 		}
@@ -253,7 +255,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 	if verbosity < core.VerbosityDebug && stderr != nil {
 		_, _ = io.WriteString(stderr, message)
 	}
-	if push && shared.IsDockerPushAuthorizationError(message) {
+	if push && dockerregistry.IsDockerPushAuthorizationError(message) {
 		return message, model.DockerRegistryAuthError{
 			Tag:      authContextTag,
 			Registry: registrypkg.DockerRegistryFromImageTag(authContextTag),
@@ -406,7 +408,7 @@ func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps clo
 
 // hostedRegistryDockerLogin passes the token over stdin, never argv.
 func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDependencies, stdout, stderr io.Writer) error {
-	provider, err := shared.ResolveERunPlatformAlias(store, "")
+	provider, err := cloudconfig.ResolveERunPlatformAlias(store, "")
 	if err != nil {
 		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
 	}
@@ -425,16 +427,16 @@ func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDepe
 }
 
 func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
-	if !shared.GHCLIAvailable() {
+	if !dockerregistry.GHCLIAvailable() {
 		return false, nil
 	}
 
-	user, ok := shared.CaptureGHValue("api", "user", "--jq", ".login")
+	user, ok := dockerregistry.CaptureGHValue("api", "user", "--jq", ".login")
 	if !ok {
 		return false, nil
 	}
 
-	token, ok := shared.CaptureGHValue("auth", "token")
+	token, ok := dockerregistry.CaptureGHValue("auth", "token")
 	if !ok {
 		return false, nil
 	}
@@ -459,7 +461,7 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	if namespace == "" {
 		return false, nil
 	}
-	if !shared.GHCLIAvailable() {
+	if !dockerregistry.GHCLIAvailable() {
 		return false, nil
 	}
 
@@ -486,7 +488,7 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 		return false, err
 	}
 
-	return shared.TryGHCRNamespaceLogin(tag, stdout, stderr)
+	return dockerregistry.TryGHCRNamespaceLogin(tag, stdout, stderr)
 }
 
 // interactiveGHAuthAllowed is false in a runtime pod (PTY but no browser) and for a
@@ -525,7 +527,7 @@ func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	return errors.New(sb.String())
 }
 
-func RunScriptSpec(ctx core.Context, script shared.ScriptSpec, run BuildScriptRunnerFunc) error {
+func RunScriptSpec(ctx core.Context, script dockerspec.ScriptSpec, run BuildScriptRunnerFunc) error {
 	if run == nil {
 		run = BuildScriptRunner
 	}
@@ -545,7 +547,7 @@ func BuildScriptEnv(version string) []string {
 	return []string{"ERUN_BUILD_VERSION=" + version}
 }
 
-func scriptTraceCommand(script shared.ScriptSpec) (string, []string) {
+func scriptTraceCommand(script dockerspec.ScriptSpec) (string, []string) {
 	if len(script.Env) == 0 {
 		return script.Path, nil
 	}

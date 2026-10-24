@@ -11,7 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // resolveInstallExistingVersionDeploySpec installs the image already published at
@@ -80,7 +83,7 @@ func verifyExistingDeployImage(ctx core.Context, ref, version, registry string, 
 		tag = strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + ref
 	}
 
-	ctx.TraceCommand("", "docker", append(shared.DockerManifestArgs("inspect", insecure), tag)...)
+	ctx.TraceCommand("", "docker", append(dockerspec.DockerManifestArgs("inspect", insecure), tag)...)
 	if ctx.DryRun {
 		return nil
 	}
@@ -90,11 +93,11 @@ func verifyExistingDeployImage(ctx core.Context, ref, version, registry string, 
 // A non-definitive registry error is tolerated; the rollout surfaces a real pull
 // failure.
 func confirmDeployImagePresent(ctx core.Context, tag, version string, insecure bool) error {
-	remote, remoteErr := shared.DockerManifestExists(tag, insecure)
+	remote, remoteErr := dockerregistry.DockerManifestExists(tag, insecure)
 	if remote {
 		return nil
 	}
-	if local, _ := shared.DockerImageExists(tag); local {
+	if local, _ := dockerregistry.DockerImageExists(tag); local {
 		return nil
 	}
 	if remoteErr != nil {
@@ -153,7 +156,7 @@ func helmOIDCAllowedIssuersSetArgs(issuers string) []string {
 
 // resolveDeploySpecForCurrentDockerBuild references the image the build phase
 // already pushed; it never builds.
-func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, build shared.DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, build dockerspec.DockerBuildSpec) (DeploySpec, error) {
 	deployInput, err := newHelmDeploySpec(target, deployContext, "")
 	if err != nil {
 		return DeploySpec{}, err
@@ -180,21 +183,21 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.
 	}, nil
 }
 
-func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, projectRoot, environment, versionOverride string) (*shared.DockerBuildSpec, error) {
-	store, _, resolveDockerBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
+func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, projectRoot, environment, versionOverride string) (*dockerspec.DockerBuildSpec, error) {
+	store, _, resolveDockerBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	buildContext, ok, err := currentDockerComponentBuildContext(resolveDockerBuildContext)
 	if err != nil || !ok {
 		return nil, err
 	}
 
-	build, err := shared.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, nil, "")
+	build, err := dockerbuild.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, nil, "")
 	if err != nil {
 		return nil, err
 	}
 	return &build, nil
 }
 
-func currentDockerComponentBuildContext(resolveDockerBuildContext shared.BuildContextResolverFunc) (model.DockerBuildContext, bool, error) {
+func currentDockerComponentBuildContext(resolveDockerBuildContext projectseam.BuildContextResolverFunc) (model.DockerBuildContext, bool, error) {
 	if resolveDockerBuildContext == nil {
 		return model.DockerBuildContext{}, false, nil
 	}
@@ -215,7 +218,7 @@ func deployContextOwnsRuntimeChart(deployContext model.KubernetesDeployContext, 
 	return slices.Contains(runtimeComponentNames(tenant), name)
 }
 
-func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, build shared.DockerBuildSpec) bool {
+func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, build dockerspec.DockerBuildSpec) bool {
 	chartPath := filepath.Clean(strings.TrimSpace(deployContext.ChartPath))
 	dockerfilePath := filepath.Clean(strings.TrimSpace(build.DockerfilePath))
 	if chartPath == "" || dockerfilePath == "" {
@@ -238,7 +241,7 @@ func applyDeployKubernetesContext(store DeployStore, target configpkg.OpenResult
 	return target
 }
 
-func ResolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target configpkg.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+func ResolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target configpkg.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	if err := refuseHostEnvironmentOperation("deploy", target); err != nil {
 		return DeploySpec{}, err
 	}

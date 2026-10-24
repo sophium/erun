@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // isolateJobsCache needs xdg.Reload because xdg resolves XDG_CACHE_HOME at init.
@@ -48,9 +48,9 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]shared.EnvironmentJob, error) {
+		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]jobstate.EnvironmentJob, error) {
 			gotEndpoint = endpoint
-			return []shared.EnvironmentJob{
+			return []jobstate.EnvironmentJob{
 				{ID: "finish-1350", Name: "Finish #1350 desktop jobs surface", State: jobspkg.EnvironmentJobStateRunning},
 			}, nil
 		},
@@ -123,7 +123,7 @@ func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 }
 
 func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
-	running := environmentJobToUI(shared.EnvironmentJob{
+	running := environmentJobToUI(jobstate.EnvironmentJob{
 		ID: "j1", Name: "build", State: "running", Kind: "command",
 		StartedAt: time.Unix(1700000000, 0),
 	})
@@ -141,7 +141,7 @@ func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
 	}
 
 	code := 0
-	exited := environmentJobToUI(shared.EnvironmentJob{
+	exited := environmentJobToUI(jobstate.EnvironmentJob{
 		ID: "j2", State: "exited", ExitCode: &code,
 		StartedAt: time.Unix(1700000000, 0), EndedAt: time.Unix(1700000042, 0),
 	})

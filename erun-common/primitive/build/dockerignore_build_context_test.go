@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func repoRootForDockerignoreTest(t *testing.T) string {
@@ -22,7 +20,7 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
 	// An empty base anchors the root .dockerignore the same way real docker does.
-	set := shared.ParseIgnoreData(data, "")
+	set := ParseIgnoreData(data, "")
 
 	excludedDirs := []string{
 		"erun-docs/node_modules",
@@ -58,7 +56,7 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 	if err != nil {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
-	set := shared.ParseIgnoreData(data, "")
+	set := ParseIgnoreData(data, "")
 
 	excludedDirs := []string{
 		"erun-ui/build/bin",
@@ -114,7 +112,7 @@ func TestRootDockerignoreExcludesDesktopMacOSBuildOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
-	set := shared.ParseIgnoreData(data, "")
+	set := ParseIgnoreData(data, "")
 	for _, dir := range []string{"erun-ui/ERun.app", "erun-ui/darwin"} {
 		if !set.Matches(dir, true) {
 			t.Errorf("root .dockerignore must exclude %q from the build context", dir)

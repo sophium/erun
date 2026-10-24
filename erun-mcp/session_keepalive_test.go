@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // sessionTestTimeout is short; waits below are on observable conditions, never durations.
@@ -20,14 +21,14 @@ const sessionTestTimeout = 2 * time.Second
 // sessionTestEdge runs the production handler and middleware chain.
 func sessionTestEdge(t *testing.T) *httptest.Server {
 	t.Helper()
-	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	previousTimeout := mcpSessionTimeout
 	mcpSessionTimeout = sessionTestTimeout
 	t.Cleanup(func() { mcpSessionTimeout = previousTimeout })
 
-	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, shared.RuntimeConfig{}, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtimecfg.RuntimeConfig{}, nil))
 	t.Cleanup(server.Close)
 	return server
 }

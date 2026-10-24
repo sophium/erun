@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/releaseclaim"
 )
 
 func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testing.T) {
@@ -23,7 +23,7 @@ func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shared.ReleaseClaimHolderDescription(tc.holder, tc.environment); got != tc.want {
+			if got := releaseclaim.ReleaseClaimHolderDescription(tc.holder, tc.environment); got != tc.want {
 				t.Errorf("releaseClaimHolderDescription(%+v, %q) = %q, want %q", tc.holder, tc.environment, got, tc.want)
 			}
 		})
@@ -33,12 +33,12 @@ func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testin
 // The claim ref is the only thing an operator can act on by hand.
 func TestReleaseRepoClaimRefusalNamesTheDeliberateRemedy(t *testing.T) {
 	start := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
-	err := (&shared.ReleaseRepoClaimConflictError{
+	err := (&releaseclaim.ReleaseRepoClaimConflictError{
 		Version:     "1.0.289",
 		Holder:      model.EnvironmentActivityLeaseHolder{Tenant: "erun"},
 		Environment: "build",
 		StartedAt:   start,
-		ExpiresAt:   start.Add(shared.ReleaseVersionClaimTTL),
+		ExpiresAt:   start.Add(releaseclaim.ReleaseVersionClaimTTL),
 		Now:         start.Add(time.Minute),
 	}).Error()
 

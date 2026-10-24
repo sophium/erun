@@ -190,23 +190,24 @@ linters:
               desc: a command package may import base/*, infra/*, primitive/* and orchestration/*, never another command package
         primitive-shared:
           list-mode: lax
-          files: ["**/erun-common/primitive/shared/*.go"]
+          files: ["**/erun-common/primitive/shared/**/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: primitive/shared sits below every primitive and may import base/* and infra/* only
+              desc: primitive/shared/* sits below every primitive and may import base/*, infra/* and other primitive/shared/* only
         primitives:
           list-mode: lax
-          files: ["**/erun-common/primitive/*/*.go", "!**/erun-common/primitive/shared/*.go"]
+          files: ["**/erun-common/primitive/*/*.go", "!**/erun-common/primitive/shared/**"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
-            - github.com/sophium/erun/erun-common/primitive/shared$
+            - github.com/sophium/erun/erun-common/primitive/shared/
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: a primitive may import base/*, infra/* and primitive/shared, never another primitive; composing primitives is orchestration's job
+              desc: a primitive may import base/*, infra/* and primitive/shared/*, never another primitive; composing primitives is orchestration's job
         orchestration:
           list-mode: lax
           files: ["**/erun-common/orchestration/build/*.go", "**/erun-common/orchestration/clusterread/*.go", "**/erun-common/orchestration/deploy/*.go", "**/erun-common/orchestration/diagnosis/*.go"]

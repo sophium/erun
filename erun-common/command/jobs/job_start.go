@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 const jobSupervisorReportTimeout = 10 * time.Second
@@ -21,24 +22,24 @@ const jobSupervisorStartupReadLimit = 4 << 10
 const jobSupervisorStartupQuoteLimit = 240
 
 // StartEnvironmentJob detaches the work and returns the handle to it.
-func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (shared.EnvironmentJob, error) {
+func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (jobstate.EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	if err := ensureAgentJobToolAvailable(ctx, params.Agent); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
-	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := jobexclusive.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	if err := reserveEnvironmentJobID(ctx, dir, params.ID); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	// Resolve exclusivity before spawning so a lost environment is refused synchronously.
 	if params.Exclusive, err = resolveEnvironmentJobExclusivity(ctx, dir, params, time.Now()); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 
 	logPath := environmentJobLogPath(dir, params.ID)
@@ -57,13 +58,13 @@ func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (sh
 
 // spawnEnvironmentJobSupervisor returns once the supervisor has registered the
 // job; every failure releases any exclusivity claim this start took.
-func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams, args []string) (shared.EnvironmentJob, error) {
+func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams, args []string) (jobstate.EnvironmentJob, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	if params.Exclusive {
 		if _, err := takeEnvironmentJobExclusivityClaim(params, time.Now()); err != nil {
-			return shared.EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
+			return jobstate.EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
 		}
 	}
 	cmd := core.Command(params.SupervisorPath, args...)
@@ -82,7 +83,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 	closeEnvironmentJobStartupCapture(startup)
 	if startErr != nil {
 		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, 0)
-		return shared.EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", startErr)
+		return jobstate.EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", startErr)
 	}
 	// Reap the supervisor so a long-lived caller does not collect zombies.
 	go func() { _ = cmd.Wait() }()
@@ -90,7 +91,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 	job, err := awaitEnvironmentJobRecord(dir, params.ID, cmd.Process.Pid)
 	if err != nil {
 		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, cmd.Process.Pid)
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	return job, nil
 }
@@ -159,35 +160,35 @@ func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 }
 
 // readReservedEnvironmentJob treats an unreadable record as none.
-func readReservedEnvironmentJob(dir, id string) (shared.EnvironmentJob, bool) {
-	job, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+func readReservedEnvironmentJob(dir, id string) (jobstate.EnvironmentJob, bool) {
+	job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 	return job, err == nil
 }
 
 // awaitEnvironmentJobRecord waits until the record names the work's pid (or is
 // terminal); otherwise cancel could only signal the supervisor itself.
-func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (shared.EnvironmentJob, error) {
+func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (jobstate.EnvironmentJob, error) {
 	deadline := time.Now().Add(jobSupervisorReportTimeout)
 	for {
-		job, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+		job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 		if err == nil && (job.ChildPID > 0 || job.Finished()) {
 			return job, nil
 		}
 		if !time.Now().Before(deadline) {
 			if err == nil {
-				return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
+				return jobstate.EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
 			}
-			return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
+			return jobstate.EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
 		if !activity.ProcessAlive(supervisorPID) {
-			return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
+			return jobstate.EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) shared.EnvironmentJob {
-	return shared.EnvironmentJob{
+func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) jobstate.EnvironmentJob {
+	return jobstate.EnvironmentJob{
 		ID:               params.ID,
 		Name:             params.Name,
 		State:            EnvironmentJobStateRunning,

@@ -6,16 +6,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
-func newJobAwaitCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobAwaitCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -69,15 +71,15 @@ func newJobAwaitCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to wait for")
 	cmd.Flags().DurationVar(&timeout, "timeout", jobspkg.DefaultEnvironmentJobAwaitTimeout, fmt.Sprintf("How long to wait before reporting the job as still running (capped at %s; call await again to keep waiting past it)", jobspkg.MaxEnvironmentJobAwaitTimeout))
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.AwaitEnvironmentJobParams) error {
+func runJobAwait(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params model.AwaitEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	result, resolved, err := awaitJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -96,8 +98,8 @@ func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params mod
 	return jobAwaitExit(result)
 }
 
-func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AwaitEnvironmentJobParams) (jobspkg.AwaitEnvironmentJobResult, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.AwaitEnvironmentJobParams) (jobspkg.AwaitEnvironmentJobResult, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return awaitJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
@@ -123,13 +125,13 @@ func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 	switch {
 	case result.TimedOut:
 		return internal.WithExitCode(fmt.Errorf("job %q is still running after %ds", result.Job.ID, result.TimeoutSeconds), jobAwaitTimeoutExitCode)
-	case result.Job.State == sharedpkg.EnvironmentJobStateUnknown:
+	case result.Job.State == jobstate.EnvironmentJobStateUnknown:
 		return internal.WithExitCode(fmt.Errorf("job %q has no recorded outcome: %s", result.Job.ID, result.Job.Reason), jobAwaitUnknownExitCode)
 	case result.Job.Succeeded:
 		return nil
-	case result.Job.State == sharedpkg.EnvironmentJobStateAbandoned:
+	case result.Job.State == jobstate.EnvironmentJobStateAbandoned:
 		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
-	case result.Job.State == sharedpkg.EnvironmentJobStateGateIncomplete:
+	case result.Job.State == jobstate.EnvironmentJobStateGateIncomplete:
 		return fmt.Errorf("job %q ended while work it started was still running: %s", result.Job.ID, result.Job.Reason)
 	case result.Job.WorktreeDirty:
 		return fmt.Errorf("job %q ended with an uncommitted working tree: %s", result.Job.ID, jobWorktreeSummary(result.Job))
@@ -141,7 +143,7 @@ func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 }
 
 // jobFailedExitError carries the signal, else the recorded reason.
-func jobFailedExitError(job sharedpkg.EnvironmentJob) error {
+func jobFailedExitError(job jobstate.EnvironmentJob) error {
 	switch {
 	case strings.TrimSpace(job.Signal) != "":
 		return fmt.Errorf("job %q exited %d (signal %s)", job.ID, jobExitCodeOrUnset(job), job.Signal)

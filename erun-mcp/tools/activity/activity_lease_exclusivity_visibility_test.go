@@ -8,8 +8,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // A claim taken over MCP must be the same claim the in-pod CLI's gate-merge
@@ -25,7 +26,7 @@ func inPodGuardIdentity(t *testing.T, tenant, environment string) {
 func TestExclusiveClaimTakenOverMCPRefusesTheInPodGateMergeGuard(t *testing.T) {
 	isolateLeaseCache(t)
 	inPodGuardIdentity(t, "erun", "code1")
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "erun", Environment: "code1"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "code1"}}
 
 	// No explicit scope, so the claim lands at the exclusive default.
 	_, taken, err := ActivityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
@@ -44,11 +45,11 @@ func TestExclusiveClaimTakenOverMCPRefusesTheInPodGateMergeGuard(t *testing.T) {
 
 func expectInPodGuardRefusal(t *testing.T, holderID, orchestrator string) {
 	t.Helper()
-	err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "")
+	err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "")
 	if err == nil {
 		t.Fatal("a claim taken over MCP must refuse the in-pod gate-merge guard, got no error")
 	}
-	var conflict *shared.EnvironmentExclusivityConflictError
+	var conflict *jobexclusive.EnvironmentExclusivityConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("expected a refusal naming the holder, got %v", err)
 	}
@@ -59,17 +60,17 @@ func expectInPodGuardRefusal(t *testing.T, holderID, orchestrator string) {
 
 func expectInPodGuardExemption(t *testing.T, underLeaseID string) {
 	t.Helper()
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", underLeaseID); err != nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", underLeaseID); err != nil {
 		t.Fatalf("the claim's own holder must not be refused, got %v", err)
 	}
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "another-drive"); err == nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "another-drive"); err == nil {
 		t.Fatal("--under-lease must exempt only the caller's own claim")
 	}
 }
 
 func TestExclusiveClaimTakenByTheInPodCLIIsReadBackOverMCPAsExclusive(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "erun", Environment: "code1"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "code1"}}
 
 	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "code1", Name: "in-pod drive", ID: "in-pod-drive",

@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	"github.com/sophium/erun/cmd/shared/deploynotice"
+	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
@@ -51,9 +54,9 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
 			ctx.PlatformAlias = strings.TrimSpace(erunAlias)
-			deployTarget, err := shared.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
+			deployTarget, err := opentarget.ResolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -78,7 +81,7 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 			return nil
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
 	cmd.Flags().StringVar(&target.RuntimeChartOverride, "runtime-chart", "", "Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:1.0.178). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart")
@@ -96,7 +99,7 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
+func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
 	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -109,11 +112,11 @@ func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.
 	if err := deploy.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion); err != nil {
 		return err
 	}
-	shared.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
+	deploynotice.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
 	return nil
 }
 
-func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
@@ -122,7 +125,7 @@ func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSav
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
+			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
 			deploySpec, err := deploy.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
@@ -133,7 +136,7 @@ func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSav
 			return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, []deploy.DeploySpec{deploySpec}, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	return cmd
 }

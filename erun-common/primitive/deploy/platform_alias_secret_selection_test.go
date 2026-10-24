@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
 func secondPlatformAliasProvider() model.CloudProviderConfig {
@@ -82,7 +82,7 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 		testPlatformAliasProvider(), secondPlatformAliasProvider(),
 	}}}
 
-	_, err := shared.ResolveERunPlatformAlias(several, "")
+	_, err := cloudconfig.ResolveERunPlatformAlias(several, "")
 	if err == nil {
 		t.Fatal("several configured aliases with none selected must not resolve")
 	}
@@ -90,7 +90,7 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 		t.Fatalf("several configured aliases must report the ambiguity, got: %v", err)
 	}
 
-	_, err = shared.ResolveERunPlatformAlias(staticCloudStore{}, "")
+	_, err = cloudconfig.ResolveERunPlatformAlias(staticCloudStore{}, "")
 	if err == nil {
 		t.Fatal("a host with no erun alias must not resolve")
 	}

@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/terraform"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
@@ -62,7 +63,7 @@ func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot sharedpkg.P
 	return cmd
 }
 
-func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
+func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot projectseam.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
 	var tenantFlag, environmentFlag, confirmEnvironment string
 	cmd := &cobra.Command{
 		Use:          use,
@@ -72,10 +73,10 @@ func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot sh
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTerraformCommand(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, findProjectRoot, op, args, tenantFlag, environmentFlag, confirmEnvironment)
+			return runTerraformCommand(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, findProjectRoot, op, args, tenantFlag, environmentFlag, confirmEnvironment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenantFlag, "tenant", "", "Target a specific tenant (defaults to the current scope)")
 	cmd.Flags().StringVar(&environmentFlag, "environment", "", "Target a specific environment (defaults to the tenant's default)")
 	if op == model.TerraformApply || op == model.TerraformDestroy {
@@ -84,7 +85,7 @@ func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot sh
 	return cmd
 }
 
-func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findProjectRoot projectseam.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}

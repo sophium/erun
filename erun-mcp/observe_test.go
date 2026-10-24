@@ -9,7 +9,8 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func observeOutputSchema(t *testing.T, session *mcp.ClientSession) *jsonschema.Schema {
@@ -55,8 +56,8 @@ func TestObserveToolRequiresTheDriftProperty(t *testing.T) {
 
 // A preview reads nothing, so drift is null, but the key must still be present.
 func TestObserveToolReturnsTheDriftKey(t *testing.T) {
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	session := connectWithRuntime(t, runtime, string(mcptools.MCPCapabilityRead))

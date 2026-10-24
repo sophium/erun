@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
 
@@ -23,8 +24,8 @@ func TestUsageToolCarriesTheStandingSizingRecommendation(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 	seedUsageHistoryForTest(t, "tenant-a", "dev")
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 
@@ -49,8 +50,8 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 
@@ -83,8 +84,8 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 	seedUsageHistoryForTest(t, "tenant-a", "dev")
 
-	runtime := shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})
@@ -145,8 +146,8 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runtime := shared.RuntimeConfig{
-				Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+			runtime := runtimecfg.RuntimeConfig{
+				Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 				Store:   usageTestStoreOfType("tenant-a", "dev", tc.envType, t.TempDir()),
 			}
 			_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})

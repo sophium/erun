@@ -11,7 +11,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // Only an exact `AS e2e` counts: erun builds `--target e2e`, so `e2e-deps` must not match.
@@ -20,9 +22,9 @@ var dockerfileE2EStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+e2e
 const e2eMigrationRemedy = "move each suite to <tenant>-devops/e2e/<component>/Dockerfile, whose `AS e2e` stage installs the suite's dependencies and runs it (for example `npx playwright test`) against the ERUN_E2E_BASE_URL build arg"
 
 // ResolveE2EPlan discovers the suites to run; an empty component runs them all.
-func ResolveE2EPlan(findProjectRoot shared.ProjectFinderFunc, component string) (model.E2EPlan, error) {
+func ResolveE2EPlan(findProjectRoot projectseam.ProjectFinderFunc, component string) (model.E2EPlan, error) {
 	component = strings.TrimSpace(component)
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 	if err != nil {
 		return model.E2EPlan{}, err
 	}
@@ -31,7 +33,7 @@ func ResolveE2EPlan(findProjectRoot shared.ProjectFinderFunc, component string) 
 	}
 	projectRoot = filepath.Clean(projectRoot)
 
-	cfg, _, err := shared.LoadProjectConfigForDockerSecrets(projectRoot)
+	cfg, _, err := dockerspec.LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
 		return model.E2EPlan{}, err
 	}

@@ -121,8 +121,32 @@ components:
     in: "primitive/push"
   primitive-release:
     in: "primitive/release"
-  primitive-shared:
-    in: "primitive/shared"
+  primitive-shared-buildversion:
+    in: "primitive/shared/buildversion"
+  primitive-shared-cloudconfig:
+    in: "primitive/shared/cloudconfig"
+  primitive-shared-diskheadroom:
+    in: "primitive/shared/diskheadroom"
+  primitive-shared-dockerbuild:
+    in: "primitive/shared/dockerbuild"
+  primitive-shared-dockerregistry:
+    in: "primitive/shared/dockerregistry"
+  primitive-shared-dockerspec:
+    in: "primitive/shared/dockerspec"
+  primitive-shared-gitref:
+    in: "primitive/shared/gitref"
+  primitive-shared-jobexclusive:
+    in: "primitive/shared/jobexclusive"
+  primitive-shared-jobstate:
+    in: "primitive/shared/jobstate"
+  primitive-shared-opentarget:
+    in: "primitive/shared/opentarget"
+  primitive-shared-projectseam:
+    in: "primitive/shared/projectseam"
+  primitive-shared-releaseclaim:
+    in: "primitive/shared/releaseclaim"
+  primitive-shared-releaseflow:
+    in: "primitive/shared/releaseflow"
 
 deps:
   base-config:
@@ -159,7 +183,8 @@ deps:
       - orchestration-diagnosis
       - primitive-build
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-cloudconfig
+      - primitive-shared-diskheadroom
   command-e2e:
     mayDependOn:
       - base-config
@@ -168,7 +193,9 @@ deps:
       - orchestration-clusterread
       - primitive-build
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+      - primitive-shared-projectseam
   command-expose:
     mayDependOn:
       - base-config
@@ -181,7 +208,7 @@ deps:
       - infra-platformclient
       - orchestration-clusterread
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-opentarget
   command-inputs:
     mayDependOn:
       - base-config
@@ -201,7 +228,13 @@ deps:
       - infra-platformclient
       - primitive-build
       - primitive-open
-      - primitive-shared
+      - primitive-shared-diskheadroom
+      - primitive-shared-gitref
+      - primitive-shared-jobexclusive
+      - primitive-shared-jobstate
+      - primitive-shared-opentarget
+      - primitive-shared-releaseclaim
+      - primitive-shared-releaseflow
     canUse:
       - github-com-adrg-xdg
   command-lifecycle:
@@ -218,7 +251,9 @@ deps:
       - orchestration-diagnosis
       - primitive-deploy
       - primitive-open
-      - primitive-shared
+      - primitive-shared-gitref
+      - primitive-shared-opentarget
+      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
   command-mergequeue:
@@ -226,7 +261,8 @@ deps:
       - base-core
       - base-model
       - infra-gitx
-      - primitive-shared
+      - primitive-shared-gitref
+      - primitive-shared-jobexclusive
   command-observe:
     mayDependOn:
       - base-config
@@ -243,7 +279,8 @@ deps:
       - infra-activity
       - infra-kube
       - primitive-open
-      - primitive-shared
+      - primitive-shared-cloudconfig
+      - primitive-shared-jobstate
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -270,7 +307,7 @@ deps:
       - orchestration-diagnosis
       - primitive-build
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-cloudconfig
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -299,7 +336,7 @@ deps:
       - infra-remoteinit
       - primitive-deploy
       - primitive-open
-      - primitive-shared
+      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -311,7 +348,8 @@ deps:
       - infra-kube
       - orchestration-clusterread
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-opentarget
+      - primitive-shared-projectseam
   command-workspace:
     mayDependOn:
       - base-config
@@ -320,7 +358,7 @@ deps:
       - infra-codesign
       - infra-mcp
       - primitive-open
-      - primitive-shared
+      - primitive-shared-projectseam
   infra-activity:
     mayDependOn:
       - base-config
@@ -405,7 +443,10 @@ deps:
       - primitive-build
       - primitive-deploy
       - primitive-push
-      - primitive-shared
+      - primitive-shared-diskheadroom
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+      - primitive-shared-projectseam
   orchestration-clusterread:
     mayDependOn:
       - base-config
@@ -418,7 +459,7 @@ deps:
       - base-model
       - primitive-build
       - primitive-deploy
-      - primitive-shared
+      - primitive-shared-projectseam
   orchestration-diagnosis:
     mayDependOn:
       - base-config
@@ -440,7 +481,8 @@ deps:
       - primitive-build
       - primitive-deploy
       - primitive-release
-      - primitive-shared
+      - primitive-shared-dockerspec
+      - primitive-shared-releaseflow
   orchestration-release:
     mayDependOn:
       - base-core
@@ -450,19 +492,33 @@ deps:
       - primitive-build
       - primitive-deploy
       - primitive-push
-      - primitive-shared
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+      - primitive-shared-projectseam
+      - primitive-shared-releaseflow
   primitive-build:
     mayDependOn:
       - base-config
       - base-core
       - base-model
       - infra-cloud
+      - infra-gitx
       - infra-helm
       - infra-kube
       - infra-platformclient
       - infra-registry
-      - primitive-shared
+      - primitive-shared-buildversion
+      - primitive-shared-cloudconfig
+      - primitive-shared-diskheadroom
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+      - primitive-shared-gitref
+      - primitive-shared-opentarget
+      - primitive-shared-projectseam
+      - primitive-shared-releaseflow
     canUse:
+      - gopkg-in-yaml-v3
       - k8s-io-api
   primitive-deploy:
     mayDependOn:
@@ -475,7 +531,13 @@ deps:
       - infra-kube
       - infra-mcpauth
       - infra-registry
-      - primitive-shared
+      - primitive-shared-cloudconfig
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+      - primitive-shared-jobstate
+      - primitive-shared-opentarget
+      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -488,7 +550,7 @@ deps:
       - infra-activity
       - infra-cloud
       - infra-kube
-      - primitive-shared
+      - primitive-shared-opentarget
     canUse:
       - gopkg-in-yaml-v3
   primitive-push:
@@ -496,25 +558,86 @@ deps:
       - base-core
       - infra-helm
       - infra-registry
-      - primitive-shared
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
   primitive-release:
     mayDependOn:
       - base-core
       - base-model
       - infra-gitx
-      - primitive-shared
+      - primitive-shared-releaseclaim
+      - primitive-shared-releaseflow
     canUse:
       - github-com-adrg-xdg
-  primitive-shared:
+  primitive-shared-buildversion:
+    mayDependOn:
+      - base-config
+  primitive-shared-cloudconfig:
     mayDependOn:
       - base-config
       - base-core
       - base-model
-      - infra-activity
       - infra-cloud
-      - infra-gitx
-      - infra-helm
+  primitive-shared-diskheadroom:
+    mayDependOn:
+      - base-core
+      - primitive-shared-gitref
+  primitive-shared-dockerbuild:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
       - infra-kube
       - infra-registry
-    canUse:
-      - gopkg-in-yaml-v3
+      - primitive-shared-buildversion
+      - primitive-shared-cloudconfig
+      - primitive-shared-dockerspec
+      - primitive-shared-projectseam
+  primitive-shared-dockerregistry:
+    mayDependOn:
+      - base-core
+      - base-model
+      - infra-registry
+      - primitive-shared-dockerspec
+  primitive-shared-dockerspec:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-helm
+  primitive-shared-gitref:
+    mayDependOn:
+      - base-core
+  primitive-shared-jobexclusive:
+    mayDependOn:
+      - base-core
+      - base-model
+      - infra-activity
+      - primitive-shared-jobstate
+  primitive-shared-opentarget:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - primitive-shared-projectseam
+  primitive-shared-projectseam:
+    mayDependOn:
+      - base-config
+      - base-model
+  primitive-shared-releaseclaim:
+    mayDependOn:
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-gitx
+      - primitive-shared-jobstate
+  primitive-shared-releaseflow:
+    mayDependOn:
+      - base-core
+      - base-model
+      - infra-gitx
+      - infra-helm
+      - primitive-shared-diskheadroom
+      - primitive-shared-dockerspec
+      - primitive-shared-gitref
+      - primitive-shared-releaseclaim

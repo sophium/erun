@@ -8,15 +8,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"github.com/sophium/erun/erun-mcp/tools/platform"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // MCP callers have no --erun-alias flag, so the remedy must name the `alias` input.
 func mcpAliasMessageFor(t *testing.T, providers ...model.CloudProviderConfig) string {
 	t.Helper()
-	runtime := sharedpkg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
+	runtime := runtimecfg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
 	_, _, err := platform.PlatformEnvListTool(runtime)(context.Background(), nil, platform.PlatformEnvListInput{})
 	if err == nil {
 		t.Fatal("expected the unresolvable-alias error, got none")
@@ -77,7 +77,7 @@ func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &listToolStore{toolConfig: config.ERunConfig{CloudProviders: tc.providers}}
-			_, err := shared.ResolveERunPlatformAlias(store, "")
+			_, err := cloudconfig.ResolveERunPlatformAlias(store, "")
 			if err == nil {
 				t.Fatal("expected the unresolvable-alias error, got none")
 			}

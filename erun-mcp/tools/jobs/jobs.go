@@ -8,7 +8,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // PlatformJobResult is a platform job, unlike the in-pod JobResult.
@@ -26,7 +28,7 @@ type PlatformJobListResult struct {
 }
 
 type JobsListInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	Status        string `json:"status,omitempty" jsonschema:"filter by status: PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"`
 	EnvironmentID string `json:"environmentId,omitempty" jsonschema:"filter by the platform's environment id"`
 	IssueRef      string `json:"issueRef,omitempty" jsonschema:"filter by the issue the work belongs to, in owner/repo#number form"`
@@ -34,10 +36,10 @@ type JobsListInput struct {
 	ActorID       string `json:"actorId,omitempty" jsonschema:"filter by the actor holding the job"`
 }
 
-func JobsListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsListInput) (*mcp.CallToolResult, PlatformJobListResult, error) {
+func JobsListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsListInput) (*mcp.CallToolResult, PlatformJobListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobsListInput) (*mcp.CallToolResult, PlatformJobListResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_list"
 		jobs, err := jobspkg.RunJobList(ctx, runtime.Store, input.Alias, model.JobListParams{
 			Status:        input.Status,
@@ -45,37 +47,37 @@ func JobsListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 			IssueRef:      input.IssueRef,
 			Scope:         input.Scope,
 			ActorID:       input.ActorID,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, PlatformJobListResult{}, err
 		}
-		return nil, PlatformJobListResult{Preview: input.Preview, Jobs: jobs, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlatformJobListResult{Preview: input.Preview, Jobs: jobs, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type JobsShowInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	JobID string `json:"jobId" jsonschema:"job id to show"`
 }
 
-func JobsShowTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsShowInput) (*mcp.CallToolResult, PlatformJobResult, error) {
+func JobsShowTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsShowInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobsShowInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 		if strings.TrimSpace(input.JobID) == "" {
 			return nil, PlatformJobResult{}, fmt.Errorf("jobId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_show"
-		job, err := jobspkg.RunJobShow(ctx, runtime.Store, input.Alias, input.JobID, shared.CloudDependencies())
+		job, err := jobspkg.RunJobShow(ctx, runtime.Store, input.Alias, input.JobID, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, PlatformJobResult{}, err
 		}
-		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type JobsStartInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	JobType     string `json:"jobType" jsonschema:"type of work: fix, review, gate, release, deploy, investigate, plan, triage, or maintenance"`
 	Summary     string `json:"summary" jsonschema:"what the work is, in prose — never the command that performs it"`
 	ActorID     string `json:"actorId" jsonschema:"who is doing the work: the orchestrator id or agent identity"`
@@ -88,14 +90,14 @@ type JobsStartInput struct {
 	Status string `json:"status,omitempty" jsonschema:"PLANNED records work that has not started, RUNNING (the default) records work already underway"`
 }
 
-func JobsStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsStartInput) (*mcp.CallToolResult, PlatformJobResult, error) {
+func JobsStartTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsStartInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobsStartInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 		actorKind := input.ActorKind
 		if strings.TrimSpace(actorKind) == "" {
 			actorKind = "agent"
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_start"
 		job, err := jobspkg.RunJobClaim(ctx, runtime.Store, input.Alias, model.JobClaimParams{
 			Environment: input.Environment,
@@ -107,39 +109,39 @@ func JobsStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 			Scope:       input.Scope,
 			LocalJobID:  input.LocalJobID,
 			Status:      input.Status,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, PlatformJobResult{}, err
 		}
-		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 
 type JobsFinishInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	JobID      string `json:"jobId" jsonschema:"job id to update"`
 	Status     string `json:"status,omitempty" jsonschema:"move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it"`
 	Summary    string `json:"summary,omitempty" jsonschema:"refresh what the job is doing, in prose"`
 	LocalJobID string `json:"localJobId,omitempty" jsonschema:"record the in-pod job id this mirrors"`
 }
 
-func JobsFinishTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsFinishInput) (*mcp.CallToolResult, PlatformJobResult, error) {
+func JobsFinishTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsFinishInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobsFinishInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 		if strings.TrimSpace(input.JobID) == "" {
 			return nil, PlatformJobResult{}, fmt.Errorf("jobId is required")
 		}
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_finish"
 		job, err := jobspkg.RunJobUpdate(ctx, runtime.Store, input.Alias, model.JobUpdateParams{
 			JobID:      input.JobID,
 			Status:     input.Status,
 			Summary:    input.Summary,
 			LocalJobID: input.LocalJobID,
-		}, shared.CloudDependencies())
+		}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, PlatformJobResult{}, err
 		}
-		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlatformJobResult{Preview: input.Preview, Job: job, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }

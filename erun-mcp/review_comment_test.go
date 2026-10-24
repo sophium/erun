@@ -10,7 +10,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 const reviewCommentTestAlias = "erun-test"
@@ -18,7 +19,7 @@ const reviewCommentTestAlias = "erun-test"
 // stubReviewCommentStore embeds the interface so any call beyond alias
 // resolution panics instead of passing.
 type stubReviewCommentStore struct {
-	shared.RuntimeStore
+	runtimecfg.RuntimeStore
 	config configpkg.ERunConfig
 }
 
@@ -26,9 +27,9 @@ func (s stubReviewCommentStore) LoadERunConfig() (configpkg.ERunConfig, string, 
 	return s.config, "/tmp/.erun/config.yaml", nil
 }
 
-func reviewCommentTestRuntime() shared.RuntimeConfig {
-	return shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
+func reviewCommentTestRuntime() runtimecfg.RuntimeConfig {
+	return runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: stubReviewCommentStore{config: configpkg.ERunConfig{
 			CloudProviders: []model.CloudProviderConfig{{
 				Alias:    reviewCommentTestAlias,

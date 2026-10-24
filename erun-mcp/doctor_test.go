@@ -9,7 +9,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-mcp/tools/doctor"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // kubectl fails the test if invoked: an unreachable API server must skip pod sections.
@@ -33,8 +34,8 @@ func TestDoctorToolSkipsPodDependentSectionsWhenClusterUnreachable(t *testing.T)
 	}
 	t.Setenv("ERUN_KUBECTL_BIN", kubectlPath)
 
-	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{
-		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store:   usageTestStore("acme", "dev"),
 	})
 

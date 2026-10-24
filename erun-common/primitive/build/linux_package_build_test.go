@@ -12,7 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 const (
@@ -83,7 +83,7 @@ func TestLinuxPackageDiscoveryFindsDockerfilesUnderLinux(t *testing.T) {
 			findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, tc.cwd)
 			contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot))
 			if tc.want == nil {
-				if !errors.Is(err, shared.ErrLinuxPackageBuildNotFound) {
+				if !errors.Is(err, dockerspec.ErrLinuxPackageBuildNotFound) {
 					t.Fatalf("expected no packages, got %+v, %v", contexts, err)
 				}
 				return
@@ -91,7 +91,7 @@ func TestLinuxPackageDiscoveryFindsDockerfilesUnderLinux(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := linuxPackageNames(shared.NewLinuxPackageSpecs(projectRoot, contexts))
+			got := linuxPackageNames(dockerspec.NewLinuxPackageSpecs(projectRoot, contexts))
 			slices.Sort(got)
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("packages = %v, want %v", got, tc.want)
@@ -143,7 +143,7 @@ func readLines(t *testing.T, path string) []string {
 
 func TestLinuxPackageCheckFailureReportsNoOutcome(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
-	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
+	packages := dockerspec.NewLinuxPackageSpecs(projectRoot, []dockerspec.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
 	fakeDockerRecorder(t, "1")
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
@@ -156,7 +156,7 @@ func TestLinuxPackageCheckFailureReportsNoOutcome(t *testing.T) {
 func linuxPackageReleaseSpec(t *testing.T, version string) model.ReleaseSpec {
 	t.Helper()
 	projectRoot, uiDir, cliDir := linuxPackageProject(t)
-	packages, err := shared.DiscoverReleaseLinuxPackages(projectRoot, filepath.Join(projectRoot, "team-devops"))
+	packages, err := DiscoverReleaseLinuxPackages(projectRoot, filepath.Join(projectRoot, "team-devops"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,14 +200,14 @@ func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
 
 func assertGitHubReleaseCreated(t *testing.T, ctx core.Context, spec model.ReleaseSpec, ghLog string) {
 	t.Helper()
-	if err := shared.UploadReleaseLinuxPackages(ctx, spec); err != nil {
+	if err := dockerspec.UploadReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	gh := readLines(t, ghLog)
 	if len(gh) != 2 || gh[0] != "release view v1.4.2-rc.1" {
 		t.Fatalf("expected a view then a create, got:\n%s", strings.Join(gh, "\n"))
 	}
-	files, err := shared.ReleaseLinuxPackageFiles(spec)
+	files, err := dockerspec.ReleaseLinuxPackageFiles(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestReleaseUploadsToAnExistingGitHubRelease(t *testing.T) {
 	if err := ExportReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.UploadReleaseLinuxPackages(ctx, spec); err != nil {
+	if err := dockerspec.UploadReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	gh := readLines(t, ghLog)
@@ -241,7 +241,7 @@ func TestReleaseUploadRefusesAnExportWithoutPackages(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2")
 	ghLog := fakeGitHubCLI(t, "0")
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
-	err := shared.UploadReleaseLinuxPackages(ctx, spec)
+	err := dockerspec.UploadReleaseLinuxPackages(ctx, spec)
 	if err == nil || !strings.Contains(err.Error(), "exported no .deb file") || !strings.Contains(err.Error(), "do not delete the tag") {
 		t.Fatalf("expected a missing-package failure, got %v", err)
 	}
@@ -259,7 +259,7 @@ func TestReleaseLinuxPackagesDryRunTracesWithoutRunning(t *testing.T) {
 	if err := ExportReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.UploadReleaseLinuxPackages(ctx, spec); err != nil {
+	if err := dockerspec.UploadReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	if calls := append(readLines(t, dockerLog), readLines(t, ghLog)...); len(calls) != 0 {
@@ -288,7 +288,7 @@ func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 		t.Fatal("an injected runtime pod should have a CPU cap cgroup parent")
 	}
 	projectRoot, uiDir, _ := linuxPackageProject(t)
-	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
+	packages := dockerspec.NewLinuxPackageSpecs(projectRoot, []dockerspec.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
 	dockerLog := fakeDockerRecorder(t, "0")
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
@@ -313,7 +313,7 @@ func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 // The stub holds the build until the test has looked at the heartbeat.
 func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
-	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
+	packages := dockerspec.NewLinuxPackageSpecs(projectRoot, []dockerspec.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
 	gate := t.TempDir()
 	stub := writeExecutableScript(t, "touch '"+gate+"/started'\nwhile [ ! -e '"+gate+"/release' ]; do sleep 0.01; done\nexit 0")
 	t.Setenv("ERUN_DOCKER_BIN", stub)

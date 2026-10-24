@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 const (
@@ -145,7 +145,7 @@ func TestPromoteRebuildsACacheEntryThatIsAWholeMultiPlatformIndex(t *testing.T) 
 		!strings.Contains(stderr.String(), perArchTag) {
 		t.Fatalf("expected the rebuild to be reported against the tag it repairs, got: %s", stderr.String())
 	}
-	repaired := indexOfExactCall(recorded, "tag "+perArchTag+" "+shared.FingerprintTag(testPromoteBuildInput().Image, "abc123", "linux/amd64"))
+	repaired := indexOfExactCall(recorded, "tag "+perArchTag+" "+dockerspec.FingerprintTag(testPromoteBuildInput().Image, "abc123", "linux/amd64"))
 	if repaired < 0 {
 		t.Fatalf("the rebuilt image was not re-tagged as the fingerprint entry, got %v", recorded)
 	}

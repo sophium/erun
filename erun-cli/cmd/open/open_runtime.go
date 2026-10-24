@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/helmrecovery"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -98,7 +99,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution deploy.DeploySpec) error {
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution deploy.DeploySpec) deploy.HelmChartDeployerFunc {
-	return shared.WrapHelmDeployWithReleaseRecovery(
+	return helmrecovery.WrapHelmDeployWithReleaseRecovery(
 		r.promptRunner,
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
 		deploy.ClearHelmReleasePendingOperation,

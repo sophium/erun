@@ -3,7 +3,8 @@ package platform
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -13,7 +14,7 @@ import (
 )
 
 func newPlatformContextCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"context",
 		"Manage the erun platform's own cloud contexts (managed clusters)",
 		newPlatformContextCreateCmd(store, alias, deps),
@@ -36,7 +37,7 @@ func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, dep
 		SilenceUsage: true,
 		Example:      "  erun platform context create --name prod --alias aws-main --region eu-west-2 --preview\n  erun platform context create --name prod --alias aws-main --region eu-west-2",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			result, err := platform.RunPlatformCreateContext(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -60,7 +61,7 @@ func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, dep
 	cmd.Flags().StringVar(&params.DiskType, "disk-type", "", "Root disk type")
 	cmd.Flags().IntVar(&params.DiskSizeGB, "disk-size-gb", 0, "Root disk size in GB")
 	cmd.Flags().BoolVar(&params.Preview, "preview", false, "Resolve and return the bootstrap plan without creating anything")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -84,7 +85,7 @@ func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps 
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			contexts, err := platform.RunPlatformListContexts(ctx, store, *alias, deps)
 			if err != nil {
 				return err
@@ -101,7 +102,7 @@ func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps 
 			return ctx.WriteResult(contexts)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -111,7 +112,7 @@ func writePlatformContextList(ctx core.Context, contexts []model.PlatformContext
 		return err
 	}
 	for _, cloudContext := range contexts {
-		if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, shared.QuotedValueOrNone(cloudContext.Region)); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, textfmt.QuotedValueOrNone(cloudContext.Region)); err != nil {
 			return err
 		}
 	}
@@ -125,7 +126,7 @@ func newPlatformContextGetCmd(store config.CloudReadStore, alias *string, deps c
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			cloudContext, err := platform.RunPlatformGetContext(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -135,13 +136,13 @@ func newPlatformContextGetCmd(store config.CloudReadStore, alias *string, deps c
 				return err
 			}
 			if ctx.Output != model.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, shared.QuotedValueOrNone(cloudContext.Region)); err != nil {
+				if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, textfmt.QuotedValueOrNone(cloudContext.Region)); err != nil {
 					return err
 				}
 			}
 			return ctx.WriteResult(cloudContext)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

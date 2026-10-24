@@ -8,7 +8,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func isolateLeaseCache(t *testing.T) {
@@ -20,7 +21,7 @@ func isolateLeaseCache(t *testing.T) {
 
 func TestActivityLeaseToolsRoundTripAgainstTheServerContext(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
 	// A real pid: a made-up one is reclaimed as an orphan on the next read.
 	holder := os.Getpid()
@@ -51,7 +52,7 @@ func TestActivityLeaseToolsRoundTripAgainstTheServerContext(t *testing.T) {
 
 func TestExclusiveLeaseToolRefusesASecondHolderAndNamesIt(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "ux"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "ux"}}
 
 	_, first, err := ActivityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
 		Name: "job-fix-1201", ID: "job-fix-1201", Exclusive: true, Orchestrator: "petios",
@@ -77,7 +78,7 @@ func TestExclusiveLeaseToolRefusesASecondHolderAndNamesIt(t *testing.T) {
 
 func TestExclusiveLeaseToolAllowsDifferentScopesInOnePod(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "pod"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "erun", Environment: "pod"}}
 
 	if _, _, err := ActivityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
 		Name: "clone-a", ID: "clone-a", Exclusive: true, Scope: "/git/clone-a",
@@ -93,10 +94,10 @@ func TestExclusiveLeaseToolAllowsDifferentScopesInOnePod(t *testing.T) {
 
 func TestActivityLeaseToolsRejectIncompleteInput(t *testing.T) {
 	isolateLeaseCache(t)
-	if _, _, err := ActivityLeaseTakeTool(shared.RuntimeConfig{})(context.Background(), nil, ActivityLeaseTakeInput{Name: "x"}); err == nil {
+	if _, _, err := ActivityLeaseTakeTool(runtimecfg.RuntimeConfig{})(context.Background(), nil, ActivityLeaseTakeInput{Name: "x"}); err == nil {
 		t.Error("expected an error without a resolvable tenant and environment")
 	}
-	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	if _, _, err := ActivityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{}); err == nil {
 		t.Error("expected an error when the lease has no name")
 	}

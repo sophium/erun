@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/sshdlink"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -13,7 +15,7 @@ import (
 
 // runWorkspaceSyncDoctor diagnoses and optionally repairs a remote-agent env's host-side
 // SSH provisioning, without the helm redeploy `erun sshd init` would run.
-func runWorkspaceSyncDoctor(ctx core.Context, promptRunner shared.PromptRunner, configStore config.ConfigStore, result config.OpenResult, options doctorOptions) error {
+func runWorkspaceSyncDoctor(ctx core.Context, promptRunner prompt.PromptRunner, configStore config.ConfigStore, result config.OpenResult, options doctorOptions) error {
 	if !doctorWorkspaceSyncApplicable(result) {
 		if options.repairWorkspaceSync {
 			_, err := fmt.Fprintf(ctx.Stdout, "Workspace sync is not enabled for %s/%s; nothing to repair.\n", result.Tenant, result.Environment)
@@ -64,7 +66,7 @@ func anyDoctorActionRequested(flags ...bool) bool {
 // diagnoseAndReportWorkspaceSync returns whether SSH reaches the pod; dry-run only traces.
 func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) (bool, error) {
 	info := open.SSHConnectionInfoForResult(result)
-	mirror := shared.ValueOrNone(strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath))
+	mirror := textfmt.ValueOrNone(strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath))
 	if _, err := fmt.Fprintf(ctx.Stdout, "== Workspace sync (host mirror) ==\n  host alias: %s\n  mirror: %s\n", info.HostAlias, mirror); err != nil {
 		return false, err
 	}
@@ -73,7 +75,7 @@ func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) 
 		ctx.TraceCommand("", "ssh", workspaceSyncReachArgs(info.HostAlias)...)
 		return false, nil
 	}
-	if keyPath, _, err := shared.ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath); err != nil {
+	if keyPath, _, err := sshdlink.ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath); err != nil {
 		if _, e := fmt.Fprintf(ctx.Stdout, "  ssh key: not found (%s)\n", err.Error()); e != nil {
 			return false, e
 		}
@@ -90,7 +92,7 @@ func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) 
 }
 
 // shouldRepairWorkspaceSync: the flag wins; otherwise offer only interactively on a problem.
-func shouldRepairWorkspaceSync(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions, healthy bool) (bool, error) {
+func shouldRepairWorkspaceSync(ctx core.Context, promptRunner prompt.PromptRunner, result config.OpenResult, options doctorOptions, healthy bool) (bool, error) {
 	if options.repairWorkspaceSync {
 		return true, nil
 	}
@@ -110,10 +112,10 @@ func repairWorkspaceSyncProvisioning(ctx core.Context, configStore config.Config
 	if err := writeWorkspaceSyncLocalSSHConfig(ctx, result); err != nil {
 		return err
 	}
-	if _, err := shared.SyncRemoteSSHDKey(ctx, result, kube.RunRemoteCommand); err != nil {
+	if _, err := sshdlink.SyncRemoteSSHDKey(ctx, result, kube.RunRemoteCommand); err != nil {
 		return err
 	}
-	if _, err := shared.EnsureSSHDPortForward(ctx, result); err != nil {
+	if _, err := sshdlink.EnsureSSHDPortForward(ctx, result); err != nil {
 		// A port-forward that never serves SSH usually means no SSHD has been deployed yet.
 		return reportWorkspaceSyncSSHDMissing(ctx, result, err)
 	}
@@ -129,7 +131,7 @@ func reportWorkspaceSyncSSHDMissing(ctx core.Context, result config.OpenResult, 
 
 // persistWorkspaceSyncKeyPath records the resolved key when the env config has none.
 func persistWorkspaceSyncKeyPath(ctx core.Context, configStore config.ConfigStore, result *config.OpenResult) error {
-	publicKeyPath, _, err := shared.ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
+	publicKeyPath, _, err := sshdlink.ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
 		if !ctx.DryRun {
 			return fmt.Errorf("resolve SSH public key: %w", err)
@@ -160,7 +162,7 @@ func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult
 		ctx.Trace(fmt.Sprintf("workspace-sync: write ssh config host %s for %s/%s", info.HostAlias, result.Tenant, result.Environment))
 		return nil
 	}
-	localConfig, err := shared.WriteLocalSSHConfig(result)
+	localConfig, err := sshdlink.WriteLocalSSHConfig(result)
 	if err != nil {
 		return err
 	}

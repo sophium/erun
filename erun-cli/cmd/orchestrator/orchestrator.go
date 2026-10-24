@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
@@ -50,7 +50,7 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetGatewayCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorGatewayParams{
+			return runOrchestratorSetGatewayCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorGatewayParams{
 				OrchestratorID: args[0],
 				UseGateway:     useGateway,
 			})
@@ -60,7 +60,7 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 	if err := cmd.MarkFlagRequired("gateway"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -102,7 +102,7 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetModelCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorModelParams{
+			return runOrchestratorSetModelCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorModelParams{
 				OrchestratorID: args[0],
 				Model:          parsedModel,
 			})
@@ -112,7 +112,7 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	if err := cmd.MarkFlagRequired("model"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -148,7 +148,7 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetEffortCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorEffortParams{
+			return runOrchestratorSetEffortCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorEffortParams{
 				OrchestratorID: args[0],
 				Effort:         parsedEffort,
 			})
@@ -158,7 +158,7 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 	if err := cmd.MarkFlagRequired("effort"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -205,7 +205,7 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetAliasCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorAliasParams{
+			return runOrchestratorSetAliasCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorAliasParams{
 				OrchestratorID: args[0],
 				Alias:          parsedAlias,
 			})
@@ -215,7 +215,7 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	if err := cmd.MarkFlagRequired("alias"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -260,7 +260,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetRoleCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorEnvRoleParams{
+			return runOrchestratorSetRoleCommand(clicmd.CommandContext(cmd), store, modelpkg.SetOrchestratorEnvRoleParams{
 				OrchestratorID: args[0],
 				Tenant:         args[1],
 				Environment:    args[2],
@@ -273,7 +273,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

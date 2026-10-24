@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -40,7 +41,7 @@ func NewInitCmd(runInit func(core.Context, open.BootstrapInitParams) error) *cob
 			if err != nil {
 				return err
 			}
-			return runInit(shared.CommandContext(cmd), runParams)
+			return runInit(clicmd.CommandContext(cmd), runParams)
 		},
 	}
 
@@ -72,7 +73,7 @@ func NewInitCmd(runInit func(core.Context, open.BootstrapInitParams) error) *cob
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
 	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Save this as the env's default deploy component selection — what a later erun deploy rolls out with no --components flag of its own. Pass an empty string to clear a saved selection and return the env to its repo k8s.deployments plan")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -169,7 +170,7 @@ func validateInitRunParams(params open.BootstrapInitParams) error {
 	return nil
 }
 
-func ContainerRegistryPrompt(run shared.PromptRunner, label string) (string, error) {
+func ContainerRegistryPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label:   label,
 		Default: config.DefaultContainerRegistry,
@@ -193,7 +194,7 @@ func ContainerRegistryPrompt(run shared.PromptRunner, label string) (string, err
 	return result, nil
 }
 
-func RemoteRepositoryURLPrompt(run shared.PromptRunner, label string) (string, error) {
+func RemoteRepositoryURLPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -211,7 +212,7 @@ func RemoteRepositoryURLPrompt(run shared.PromptRunner, label string) (string, e
 	return strings.TrimSpace(result), nil
 }
 
-func CodeCommitSSHKeyIDPrompt(run shared.PromptRunner, label string) (string, error) {
+func CodeCommitSSHKeyIDPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -229,7 +230,7 @@ func CodeCommitSSHKeyIDPrompt(run shared.PromptRunner, label string) (string, er
 	return strings.TrimSpace(result), nil
 }
 
-func KubernetesContextPrompt(run shared.PromptRunner, selectRun shared.SelectRunner, list shared.KubernetesContextsLister, label string) (string, error) {
+func KubernetesContextPrompt(run promptpkg.PromptRunner, selectRun promptpkg.SelectRunner, list promptpkg.KubernetesContextsLister, label string) (string, error) {
 	contexts := listedKubernetesContexts(list)
 	if len(contexts) > 0 && selectRun != nil {
 		selected, manual, err := selectKubernetesContextPrompt(selectRun, label, contexts)
@@ -244,7 +245,7 @@ func KubernetesContextPrompt(run shared.PromptRunner, selectRun shared.SelectRun
 	return manualKubernetesContextPrompt(run, label)
 }
 
-func listedKubernetesContexts(list shared.KubernetesContextsLister) []string {
+func listedKubernetesContexts(list promptpkg.KubernetesContextsLister) []string {
 	if list == nil {
 		return nil
 	}
@@ -255,7 +256,7 @@ func listedKubernetesContexts(list shared.KubernetesContextsLister) []string {
 	return normalizeKubernetesContexts(contexts)
 }
 
-func manualKubernetesContextPrompt(run shared.PromptRunner, label string) (string, error) {
+func manualKubernetesContextPrompt(run promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
@@ -284,7 +285,7 @@ func manualKubernetesContextPrompt(run shared.PromptRunner, label string) (strin
 	return result, nil
 }
 
-func selectKubernetesContextPrompt(run shared.SelectRunner, label string, contexts []string) (string, bool, error) {
+func selectKubernetesContextPrompt(run promptpkg.SelectRunner, label string, contexts []string) (string, bool, error) {
 	items := append(append([]string{}, contexts...), enterKubernetesContextManuallyOption)
 
 	prompt := promptui.Select{
@@ -364,16 +365,16 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 
 // tenantPromptHasAnswer peeks so piped answers still work; only an exhausted stdin is unanswerable.
 var tenantPromptHasAnswer = func() bool {
-	_, err := shared.PlainPromptInput().Peek(1)
+	_, err := promptpkg.PlainPromptInput().Peek(1)
 	return err == nil
 }
 
 // TenantSelectionUnavailable reports whether stdin cannot answer a tenant prompt.
 func TenantSelectionUnavailable() bool {
-	return !shared.StdinIsTerminal() && !tenantPromptHasAnswer()
+	return !promptpkg.StdinIsTerminal() && !tenantPromptHasAnswer()
 }
 
-func SelectTenantPrompt(run shared.SelectRunner, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
+func SelectTenantPrompt(run promptpkg.SelectRunner, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)

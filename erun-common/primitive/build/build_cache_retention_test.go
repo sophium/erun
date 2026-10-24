@@ -4,14 +4,14 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 // buildCacheTestVolume is the chart's default docker volume: 50 GiB.
 const buildCacheTestVolume uint64 = 50 << 30
 
-func buildCacheTestBounds() shared.BuildCacheBounds {
-	return shared.ResolveBuildCacheBounds(buildCacheTestVolume)
+func buildCacheTestBounds() diskheadroom.BuildCacheBounds {
+	return diskheadroom.ResolveBuildCacheBounds(buildCacheTestVolume)
 }
 
 func TestResolveBuildCacheBounds(t *testing.T) {
@@ -33,7 +33,7 @@ func TestResolveBuildCacheBounds(t *testing.T) {
 	})
 
 	t.Run("scales with the volume rather than being a fixed size", func(t *testing.T) {
-		double := shared.ResolveBuildCacheBounds(buildCacheTestVolume * 4)
+		double := diskheadroom.ResolveBuildCacheBounds(buildCacheTestVolume * 4)
 		if double.Ceiling != bounds.Ceiling*4 {
 			t.Fatalf("ceiling = %d, want %d", double.Ceiling, bounds.Ceiling*4)
 		}
@@ -42,8 +42,8 @@ func TestResolveBuildCacheBounds(t *testing.T) {
 
 func TestDockerVolumeBytes(t *testing.T) {
 	t.Run("reads the declared volume size", func(t *testing.T) {
-		t.Setenv(shared.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
-		got, err := shared.DockerVolumeBytes()
+		t.Setenv(diskheadroom.DockerVolumeBytesEnv, strconv.FormatUint(buildCacheTestVolume, 10))
+		got, err := diskheadroom.DockerVolumeBytes()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -53,16 +53,16 @@ func TestDockerVolumeBytes(t *testing.T) {
 	})
 
 	t.Run("an absent declaration is an error, not a zero-byte volume", func(t *testing.T) {
-		t.Setenv(shared.DockerVolumeBytesEnv, "")
-		if _, err := shared.DockerVolumeBytes(); err == nil {
+		t.Setenv(diskheadroom.DockerVolumeBytesEnv, "")
+		if _, err := diskheadroom.DockerVolumeBytes(); err == nil {
 			t.Fatal("expected an unset volume size to be reported as unknown")
 		}
 	})
 
 	t.Run("a malformed declaration is not a size to reclaim against", func(t *testing.T) {
 		for _, raw := range []string{"not-a-number", "0", "-1", "50Gi"} {
-			t.Setenv(shared.DockerVolumeBytesEnv, raw)
-			if _, err := shared.DockerVolumeBytes(); err == nil {
+			t.Setenv(diskheadroom.DockerVolumeBytesEnv, raw)
+			if _, err := diskheadroom.DockerVolumeBytes(); err == nil {
 				t.Fatalf("expected %q to be rejected", raw)
 			}
 		}

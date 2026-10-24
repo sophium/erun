@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // The refusal names the missing input, not every accepted field.
 func TestReviewCommentToolRefusesACallMissingReviewIDOrBody(t *testing.T) {
-	handler := ReviewCommentTool(shared.RuntimeConfig{})
+	handler := ReviewCommentTool(runtimecfg.RuntimeConfig{})
 	cases := []struct {
 		name  string
 		input ReviewCommentInput

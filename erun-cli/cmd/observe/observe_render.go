@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func writeObserveResult(ctx core.Context, result model.ObserveResult) error {
-	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", shared.ValueOrNone(result.Namespace)); err != nil {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", textfmt.ValueOrNone(result.Namespace)); err != nil {
 		return err
 	}
 	if err := writeObservePods(ctx, result.Pods); err != nil {
@@ -58,7 +58,7 @@ func writeObservePods(ctx core.Context, pods []model.ObservedPod) error {
 			return err
 		}
 		for _, container := range pod.Containers {
-			if _, err := fmt.Fprintf(ctx.Stdout, "    %s: image %s, limits %s\n", container.Name, shared.ValueOrNone(container.Image), formatResourceMap(container.ResourceLimits)); err != nil {
+			if _, err := fmt.Fprintf(ctx.Stdout, "    %s: image %s, limits %s\n", container.Name, textfmt.ValueOrNone(container.Image), formatResourceMap(container.ResourceLimits)); err != nil {
 				return err
 			}
 		}
@@ -110,7 +110,7 @@ func writeObserveServices(ctx core.Context, services []model.ObservedService) er
 			ports = append(ports, strconv.Itoa(port.Port))
 		}
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s (%s): ports %s\n",
-			service.Name, shared.ValueOrNone(service.Type), shared.FormatStringList(ports)); err != nil {
+			service.Name, textfmt.ValueOrNone(service.Type), textfmt.FormatStringList(ports)); err != nil {
 			return err
 		}
 	}
@@ -122,7 +122,7 @@ func writeObserveIngresses(ctx core.Context, ingresses []model.ObservedIngress) 
 		return err
 	}
 	for _, ingress := range ingresses {
-		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: hosts %s\n", ingress.Name, shared.FormatStringList(ingress.Hosts)); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: hosts %s\n", ingress.Name, textfmt.FormatStringList(ingress.Hosts)); err != nil {
 			return err
 		}
 		for _, backend := range ingress.Backends {
@@ -131,7 +131,7 @@ func writeObserveIngresses(ctx core.Context, ingresses []model.ObservedIngress) 
 			}
 		}
 		for _, tls := range ingress.TLS {
-			if _, err := fmt.Fprintf(ctx.Stdout, "    tls %s -> secret %s\n", shared.FormatStringList(tls.Hosts), shared.ValueOrNone(tls.SecretName)); err != nil {
+			if _, err := fmt.Fprintf(ctx.Stdout, "    tls %s -> secret %s\n", textfmt.FormatStringList(tls.Hosts), textfmt.ValueOrNone(tls.SecretName)); err != nil {
 				return err
 			}
 		}
@@ -154,7 +154,7 @@ func writeObserveCertificates(ctx core.Context, certificates []model.ObservedCer
 				status += " (" + cert.Message + ")"
 			}
 		}
-		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: %s, secret %s, dnsNames %s\n", cert.Name, status, shared.ValueOrNone(cert.SecretName), shared.FormatStringList(cert.DNSNames)); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: %s, secret %s, dnsNames %s\n", cert.Name, status, textfmt.ValueOrNone(cert.SecretName), textfmt.FormatStringList(cert.DNSNames)); err != nil {
 			return err
 		}
 		if err := writeObserveCertificateOrders(ctx, cert.Orders); err != nil {
@@ -166,12 +166,12 @@ func writeObserveCertificates(ctx core.Context, certificates []model.ObservedCer
 
 func writeObserveCertificateOrders(ctx core.Context, orders []model.ObservedCertificateOrder) error {
 	for _, order := range orders {
-		if _, err := fmt.Fprintf(ctx.Stdout, "    order %s: state %s, reason %s\n", order.Name, shared.ValueOrNone(order.State), shared.ValueOrNone(order.Reason)); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "    order %s: state %s, reason %s\n", order.Name, textfmt.ValueOrNone(order.State), textfmt.ValueOrNone(order.Reason)); err != nil {
 			return err
 		}
 		for _, challenge := range order.Challenges {
 			if _, err := fmt.Fprintf(ctx.Stdout, "      challenge %s: type %s, dnsName %s, state %s, reason %s\n",
-				challenge.Name, shared.ValueOrNone(challenge.Type), shared.ValueOrNone(challenge.DNSName), shared.ValueOrNone(challenge.State), shared.ValueOrNone(challenge.Reason)); err != nil {
+				challenge.Name, textfmt.ValueOrNone(challenge.Type), textfmt.ValueOrNone(challenge.DNSName), textfmt.ValueOrNone(challenge.State), textfmt.ValueOrNone(challenge.Reason)); err != nil {
 				return err
 			}
 		}
@@ -227,7 +227,7 @@ func writeObserveHelmReleaseNotFound(ctx core.Context, release *model.ObservedHe
 
 func writeObserveHelmReleaseDetails(ctx core.Context, release *model.ObservedHelmRelease) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
-		release.Name, release.Revision, shared.ValueOrNone(release.Status), shared.ValueOrNone(release.Chart), shared.ValueOrNone(release.ChartVersion), shared.ValueOrNone(release.AppVersion)); err != nil {
+		release.Name, release.Revision, textfmt.ValueOrNone(release.Status), textfmt.ValueOrNone(release.Chart), textfmt.ValueOrNone(release.ChartVersion), textfmt.ValueOrNone(release.AppVersion)); err != nil {
 		return err
 	}
 	if len(release.ImageOverrides) > 0 {

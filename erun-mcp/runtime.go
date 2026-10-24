@@ -7,16 +7,16 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
-func normalizeRuntimeConfig(cfg sharedpkg.RuntimeConfig) sharedpkg.RuntimeConfig {
+func normalizeRuntimeConfig(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
 	cfg = normalizeRuntimeConfigBuildDefaults(cfg)
 	return normalizeRuntimeConfigRemoteDefaults(cfg)
 }
 
-func normalizeRuntimeConfigBuildDefaults(cfg sharedpkg.RuntimeConfig) sharedpkg.RuntimeConfig {
+func normalizeRuntimeConfigBuildDefaults(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
 	if cfg.Store == nil {
 		cfg.Store = config.ConfigStore{}
 	}
@@ -27,7 +27,7 @@ func normalizeRuntimeConfigBuildDefaults(cfg sharedpkg.RuntimeConfig) sharedpkg.
 		cfg.BuildDockerImage = build.DockerImageBuilder
 	}
 	if cfg.PushDockerImage == nil {
-		cfg.PushDockerImage = shared.DockerImagePusher
+		cfg.PushDockerImage = dockerregistry.DockerImagePusher
 	}
 	if cfg.DeployHelmChart == nil {
 		cfg.DeployHelmChart = deploy.DeployHelmChart
@@ -35,7 +35,7 @@ func normalizeRuntimeConfigBuildDefaults(cfg sharedpkg.RuntimeConfig) sharedpkg.
 	return cfg
 }
 
-func normalizeRuntimeConfigRemoteDefaults(cfg sharedpkg.RuntimeConfig) sharedpkg.RuntimeConfig {
+func normalizeRuntimeConfigRemoteDefaults(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
 	namespaceEnsurer := cfg.EnsureKubernetesNamespace
 	if namespaceEnsurer == nil {
 		namespaceEnsurer = kube.EnsureKubernetesNamespace

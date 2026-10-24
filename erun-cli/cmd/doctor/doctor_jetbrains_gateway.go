@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/desktop"
+	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -18,7 +19,7 @@ type jetBrainsGatewayDoctorRepair struct {
 	idePath     string
 }
 
-func runSelectedJetBrainsGatewayRepair(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
+func runSelectedJetBrainsGatewayRepair(ctx core.Context, promptRunner prompt.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
 	repair, ok, err := jetBrainsGatewayDoctorRepairForResult(result)
 	if err != nil {
 		return false, err
@@ -41,7 +42,7 @@ func runSelectedJetBrainsGatewayRepair(ctx core.Context, promptRunner shared.Pro
 	return runJetBrainsGatewayRepair(ctx, repair)
 }
 
-func shouldRepairJetBrainsGateway(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
+func shouldRepairJetBrainsGateway(ctx core.Context, promptRunner prompt.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
 	if options.repairJetBrainsGateway {
 		return true, nil
 	}
@@ -78,7 +79,7 @@ func runJetBrainsGatewayRepair(ctx core.Context, repair jetBrainsGatewayDoctorRe
 // intelliJOptionsDir resolves this host's IntelliJ options directory; a host
 // without one has no Gateway metadata to repair.
 func intelliJOptionsDir() (string, bool) {
-	optionsDir, err := shared.ResolveIntelliJOptionsDir(shared.CurrentHostOS())
+	optionsDir, err := desktop.ResolveIntelliJOptionsDir(desktop.CurrentHostOS())
 	return optionsDir, err == nil
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 )
 
 // The default exclusive scope is "worktree", which gate-merge rewrites, so it must refuse.
@@ -37,11 +37,11 @@ func TestGateMergeGuardRefusesADefaultScopedExclusiveClaim(t *testing.T) {
 	inPodGuardEnv(t, "erun", "code1")
 	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", "")
 
-	err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "")
+	err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "")
 	if err == nil {
 		t.Fatal("an exclusive claim at the default scope must refuse gate-merge, got no error")
 	}
-	var conflict *shared.EnvironmentExclusivityConflictError
+	var conflict *jobexclusive.EnvironmentExclusivityConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("expected a structured refusal naming the holder, got %v", err)
 	}
@@ -60,10 +60,10 @@ func TestGateMergeGuardExemptsOnlyTheCallersOwnDefaultScopedClaim(t *testing.T) 
 	inPodGuardEnv(t, "erun", "code1")
 	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", "")
 
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue"); err != nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue"); err != nil {
 		t.Fatalf("the claim's own holder must not be refused, got %v", err)
 	}
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "some-other-drive"); err == nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "some-other-drive"); err == nil {
 		t.Fatal("--under-lease must exempt only the caller's own claim, not any claim")
 	}
 }
@@ -73,7 +73,7 @@ func TestGateMergeGuardIgnoresAClaimOnAnUnrelatedNamedScope(t *testing.T) {
 	inPodGuardEnv(t, "erun", "pod")
 	seedExclusiveClaim(t, "erun", "pod", "clone-b", "clone b build", "/git/clone-b")
 
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", ""); err != nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", ""); err != nil {
 		t.Fatalf("a claim on another clone's scope must not refuse this worktree, got %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func TestGateMergeGuardRefusesADifferentHoldersEnvironmentClaimUnderTheCallersOw
 	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", activity.DefaultEnvironmentActivityLeaseScope)
 	seedExclusiveClaim(t, "erun", "code1", "other-gate", "another gate", activity.EnvironmentActivityLeaseScopeEnvironment)
 
-	err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue")
+	err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue")
 	if err == nil {
 		t.Fatal("another holder's environment-wide claim must still refuse this caller")
 	}
@@ -99,7 +99,7 @@ func TestGateMergeGuardIsANoOpOutsideAnEnvironment(t *testing.T) {
 	t.Setenv("ERUN_ENVIRONMENT", "")
 	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", "")
 
-	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", ""); err != nil {
+	if err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", ""); err != nil {
 		t.Fatalf("expected an off-pod no-op, got %v", err)
 	}
 }

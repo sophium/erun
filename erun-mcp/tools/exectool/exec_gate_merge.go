@@ -7,7 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // ExecGateMergeSource is one branch to squash, in landing order.
@@ -27,10 +29,10 @@ type ExecGateMergeInput struct {
 	Verbosity    int                   `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-func ExecGateMergeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecGateMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
+func ExecGateMergeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecGateMergeInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateMergeInput) (*mcp.CallToolResult, toolio.CommandOutput, error) {
 		var merged *model.GateMergeWorkingTreeResult
-		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
+		output, err := runcmd.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
 			sources := make([]model.GateMergeSource, len(input.Sources))
 			for i, source := range input.Sources {
 				sources[i] = model.GateMergeSource{Branch: source.Branch, Message: source.Message}

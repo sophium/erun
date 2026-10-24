@@ -9,8 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
@@ -32,20 +35,20 @@ type DeployInput struct {
 	MaxCPU     string `json:"max_cpu,omitempty" jsonschema:"Kubernetes CPU quantity (e.g. 4) capping the environment's namespace via a ResourceQuota+LimitRange; requires max_memory and max_storage too. Omit all three to use the env's saved namespace quota, if any"`
 	MaxMemory  string `json:"max_memory,omitempty" jsonschema:"Kubernetes memory quantity (e.g. 8Gi) capping the environment's namespace; requires max_cpu and max_storage too"`
 	MaxStorage string `json:"max_storage,omitempty" jsonschema:"Kubernetes storage quantity (e.g. 80Gi) capping the environment's namespace; requires max_cpu and max_memory too"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func DeployTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input DeployInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
+func DeployTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DeployInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
 		if strings.TrimSpace(input.Version) == "" {
-			return nil, sharedpkg.JobEnvelopeOutput{}, errMissingDeployVersion
+			return nil, jobenvelope.JobEnvelopeOutput{}, errMissingDeployVersion
 		}
-		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			findProjectRoot := func() (string, string, error) {
-				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
+				return toolio.RuntimeFindProjectRoot(runtime.Context, workDir)
 			}
 			resolveBuildContext := func() (model.DockerBuildContext, error) {
-				return shared.DockerBuildContextAtDir(workDir)
+				return dockerspec.DockerBuildContextAtDir(workDir)
 			}
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return deploy.KubernetesDeployContextAtDir(workDir), nil
@@ -91,7 +94,7 @@ func DeployTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 			}
 			return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 		})
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

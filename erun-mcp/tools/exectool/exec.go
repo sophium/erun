@@ -12,7 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // RawInput is exec_raw's input; agent runs use exec_agent.
@@ -37,11 +39,11 @@ type RawInput struct {
 	Wait            *bool  `json:"wait,omitempty" jsonschema:"when true (the default), run in the foreground and return once the command exits, with its captured stdout/stderr inline -- today's behaviour. Set false to detach the command as a background job instead and get back {jobId, state: running} immediately: erun gives it its own session, captures merged stdout/stderr to the job's log, and records the exit status by waiting on the process, so nothing has to be wrapped in setsid/nohup/a redirect. Poll exec_job_status/exec_job_await/exec_job_output for the outcome. This is the replacement for the removed job_start tool's command mode; reach for exec_agent instead when the work is an AI tool rather than a plain command"`
 }
 
-func RawTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, RawInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input RawInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		wait := shared.WaitRequested(input.Wait)
+func RawTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, RawInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input RawInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		wait := jobenvelope.WaitRequested(input.Wait)
 		if wait && len(input.Env) > 0 {
-			return nil, shared.JobEnvelopeOutput{}, fmt.Errorf("env only applies to a backgrounded command: set wait to false, or drop env and set the process's environment before calling exec_raw")
+			return nil, jobenvelope.JobEnvelopeOutput{}, fmt.Errorf("env only applies to a backgrounded command: set wait to false, or drop env and set the process's environment before calling exec_raw")
 		}
 		if !wait {
 			output, err := execRawBackground(runtime, input)
@@ -52,48 +54,48 @@ func RawTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 	}
 }
 
-func execRawForeground(runtime shared.RuntimeConfig, input RawInput) (shared.JobEnvelopeOutput, error) {
-	if _, _, err := shared.ScopedTenantEnv(input.Tenant, input.Environment, runtime); err != nil {
-		return shared.JobEnvelopeOutput{}, err
+func execRawForeground(runtime runtimecfg.RuntimeConfig, input RawInput) (jobenvelope.JobEnvelopeOutput, error) {
+	if _, _, err := runtimecfg.ScopedTenantEnv(input.Tenant, input.Environment, runtime); err != nil {
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
 	traceOutput := new(bytes.Buffer)
-	ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, strings.NewReader(input.Stdin), traceOutput, traceOutput)
+	ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, strings.NewReader(input.Stdin), traceOutput, traceOutput)
 
 	workDir, err := execRawResolveDir(runtime, input.Dir)
 	if err != nil {
-		return shared.JobEnvelopeOutput{}, err
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
 
-	output, err := shared.RunCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx core.Context) error {
+	output, err := toolio.RunCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx core.Context) error {
 		return core.RunRawCommand(runCtx, model.RawCommandSpec{
 			Dir:  workDir,
 			Args: input.Command,
 		}, nil)
 	})
-	return shared.JobEnvelopeOutput{CommandOutput: output, Wait: true}, err
+	return jobenvelope.JobEnvelopeOutput{CommandOutput: output, Wait: true}, err
 }
 
 // execRawBackground detaches the subprocess as a job.
-func execRawBackground(runtime shared.RuntimeConfig, input RawInput) (shared.JobEnvelopeOutput, error) {
-	tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func execRawBackground(runtime runtimecfg.RuntimeConfig, input RawInput) (jobenvelope.JobEnvelopeOutput, error) {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
-		return shared.JobEnvelopeOutput{}, err
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
 	dir, err := execRawResolveDir(runtime, input.Dir)
 	if err != nil {
-		return shared.JobEnvelopeOutput{}, err
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
 	supervisor, err := jobs.ResolveErunExecutable()
 	if err != nil {
-		return shared.JobEnvelopeOutput{}, err
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
 
 	trace := new(bytes.Buffer)
-	ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, trace, trace)
+	ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, trace, trace)
 	job, err := jobs.StartEnvironmentJob(ctx, jobs.StartEnvironmentJobParams{
 		Tenant:         tenant,
 		Environment:    environment,
-		Name:           shared.FirstNonEmpty(strings.TrimSpace(input.Name), "exec_raw"),
+		Name:           toolio.FirstNonEmpty(strings.TrimSpace(input.Name), "exec_raw"),
 		ID:             strings.TrimSpace(input.ID),
 		Command:        input.Command,
 		Dir:            dir,
@@ -106,12 +108,12 @@ func execRawBackground(runtime shared.RuntimeConfig, input RawInput) (shared.Job
 		SupervisorPath: supervisor,
 	})
 	if err != nil {
-		return shared.JobEnvelopeOutput{}, err
+		return jobenvelope.JobEnvelopeOutput{}, err
 	}
-	return shared.JobEnvelopeOutput{
-		CommandOutput: shared.CommandOutput{
+	return jobenvelope.JobEnvelopeOutput{
+		CommandOutput: toolio.CommandOutput{
 			Executed: !input.Preview,
-			Trace:    shared.NormalizeTraceLines(trace.String()),
+			Trace:    toolio.NormalizeTraceLines(trace.String()),
 		},
 		JobID: job.ID,
 		State: job.State,
@@ -119,8 +121,8 @@ func execRawBackground(runtime shared.RuntimeConfig, input RawInput) (shared.Job
 	}, nil
 }
 
-func execRawResolveDir(runtime shared.RuntimeConfig, dir string) (string, error) {
-	repoPath, err := shared.RuntimeRepoPath(runtime.Context)
+func execRawResolveDir(runtime runtimecfg.RuntimeConfig, dir string) (string, error) {
+	repoPath, err := toolio.RuntimeRepoPath(runtime.Context)
 	if err != nil {
 		return "", err
 	}

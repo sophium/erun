@@ -8,7 +8,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func FindComponentDockerBuildContext(projectRoot, componentName string) (model.DockerBuildContext, bool, error) {
@@ -66,7 +65,7 @@ func componentDockerBuildContextsUnderRoot(searchRoot, componentName string) ([]
 
 // componentDockerBuildContextCandidate reports whether path is the named component's Dockerfile.
 // It shares the fingerprint walk's ignore matcher so ignored copies never make a component ambiguous.
-func componentDockerBuildContextCandidate(searchRoot string, ignored *shared.IgnoreSet, path string, d os.DirEntry, componentName string, err error) (model.DockerBuildContext, bool, error) {
+func componentDockerBuildContextCandidate(searchRoot string, ignored *IgnoreSet, path string, d os.DirEntry, componentName string, err error) (model.DockerBuildContext, bool, error) {
 	if err != nil {
 		return model.DockerBuildContext{}, false, err
 	}

@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // The registry credential preflight covers a component chart push, not just
@@ -18,7 +18,7 @@ func TestPreflightRegistryPushAccessRefusesChartPushWithNoCredentialConfigured(t
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 
-	execution := shared.DockerPushExecutionSpec{
+	execution := dockerspec.DockerPushExecutionSpec{
 		ComponentCharts: []helm.HelmChartPublishSpec{{
 			OCIRepo:   "oci://ghcr.io/sophium/charts",
 			ChartName: "erun-backend-postgres",

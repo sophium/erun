@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
 // ConfigSyncInspection is the result of comparing in-pod config with the injected env.
@@ -19,7 +19,7 @@ type ConfigSyncInspection struct {
 	Tenant      string
 	Environment string
 	HasInjected bool
-	Injected    shared.InjectedRuntimeConfig
+	Injected    cloudconfig.InjectedRuntimeConfig
 	Drift       []model.ConfigDriftField
 }
 
@@ -40,7 +40,7 @@ func ResolveRuntimeConfigHome(homeDir string) string {
 // The raw decode catches a legacy `remote:` key the struct decode migrates away;
 // repopath is excluded because the injected projection has no LocalRepoPath.
 func InspectRuntimeConfigSync(configHome string, env func(string) string) (ConfigSyncInspection, error) {
-	injected, ok := shared.ResolveInjectedRuntimeConfig(env)
+	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(env)
 	inspection := ConfigSyncInspection{
 		ConfigHome:  configHome,
 		Tenant:      injected.Tenant,
@@ -116,7 +116,7 @@ func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []
 	return drift
 }
 
-func rootConfigDrift(injected shared.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []model.ConfigDriftField {
+func rootConfigDrift(injected cloudconfig.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []model.ConfigDriftField {
 	var drift []model.ConfigDriftField
 	for _, provider := range injected.Providers {
 		existing, found := configpkg.FindCloudProvider(onDisk.CloudProviders, provider.Alias)
@@ -191,13 +191,13 @@ func RunRuntimeConfigSync(ctx core.Context, inspection ConfigSyncInspection) err
 	if !ctx.DryRun {
 		_ = configpkg.WriteEnvConfigBackupIfDue(envPath, configpkg.TimeNow)
 	}
-	if err := writeRuntimeYAML(ctx, envPath, shared.OverlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
+	if err := writeRuntimeYAML(ctx, envPath, cloudconfig.OverlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
 		return err
 	}
 	return reconcileRuntimeRootConfig(ctx, inspection.ConfigHome, injected)
 }
 
-func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected shared.InjectedRuntimeConfig) error {
+func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
 	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
 		return nil
 	}

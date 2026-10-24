@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // agentAuthFailureSignatures mark an AI tool's own auth failure, which means the
@@ -58,7 +58,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 
 	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr, adoptedBaseline)
 	// Reinvocations are spent; say so instead of a first-run reason.
-	if count := recorder.snapshot().ReinvocationCount; count > 0 && (jobState == shared.EnvironmentJobStateGateIncomplete || startedJobFailed != "") {
+	if count := recorder.snapshot().ReinvocationCount; count > 0 && (jobState == jobstate.EnvironmentJobStateGateIncomplete || startedJobFailed != "") {
 		note := fmt.Sprintf("already resumed %d time(s) without a clean outcome; the reinvocation bound is exhausted", count)
 		if reason == "" {
 			reason = note
@@ -69,7 +69,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot(), recorder.dir)
 	// Taken before reclaim so EndedAt does not include reclaim's own time.
 	endedAt := time.Now()
-	settle := func(job *shared.EnvironmentJob) {
+	settle := func(job *jobstate.EnvironmentJob) {
 		job.State = jobState
 		job.EndedAt = endedAt
 		job.OutputBytes = writer.written()
@@ -91,7 +91,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	settle(&settled)
 	reclaimed, cloneReason := reclaimAgentJobWorkClone(settled)
 
-	recorder.update(func(job *shared.EnvironmentJob) {
+	recorder.update(func(job *jobstate.EnvironmentJob) {
 		settle(job)
 		job.CloneReclaimed = reclaimed
 		job.CloneKeptReason = cloneReason
@@ -115,15 +115,15 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		reason = "failed to start: " + waitErr.Error()
 	}
 	self := recorder.snapshot()
-	jobState = shared.EnvironmentJobStateExited
+	jobState = jobstate.EnvironmentJobStateExited
 	if state != nil && (core.EnvironmentJobProcessGroupSurvivors(childPID) ||
 		core.EnvironmentJobSessionSurvivors(childPID) ||
 		core.EnvironmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
-		jobState = shared.EnvironmentJobStateAbandoned
+		jobState = jobstate.EnvironmentJobStateAbandoned
 		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
-		jobState = shared.EnvironmentJobStateGateIncomplete
+		jobState = jobstate.EnvironmentJobStateGateIncomplete
 		reason = environmentJobGateIncompleteReason(running)
 		return code, signal, reason, jobState, startedJobFailed
 	}
@@ -157,7 +157,7 @@ func environmentJobLeftoverExclusions(dir, parentID string, adoptedBaseline map[
 
 // awaitEnvironmentJobRunningChildren polls until no non-handoff child runs or
 // waitCap elapses, returning those still running.
-func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Duration) []shared.EnvironmentJob {
+func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Duration) []jobstate.EnvironmentJob {
 	poll := resolveEnvironmentJobGateIncompletePoll()
 	deadline := time.Now().Add(waitCap)
 	for {
@@ -176,7 +176,7 @@ func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Durat
 	}
 }
 
-func environmentJobGateIncompleteReason(running []shared.EnvironmentJob) string {
+func environmentJobGateIncompleteReason(running []jobstate.EnvironmentJob) string {
 	ids := make([]string, 0, len(running))
 	for _, job := range running {
 		ids = append(ids, job.ID)
@@ -188,7 +188,7 @@ func environmentJobGateIncompleteReason(running []shared.EnvironmentJob) string 
 	return fmt.Sprintf("this job ended while the %s it started (%s) had not reached a verdict; await it directly for the real outcome instead of treating this job's own exit as the answer", noun, strings.Join(ids, ", "))
 }
 
-func environmentJobFailedChildReason(failed []shared.EnvironmentJob) string {
+func environmentJobFailedChildReason(failed []jobstate.EnvironmentJob) string {
 	ids := make([]string, 0, len(failed))
 	for _, job := range failed {
 		ids = append(ids, job.ID)

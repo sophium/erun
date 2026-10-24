@@ -6,37 +6,39 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveDockerImageReference(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, buildDir string, target model.DockerCommandTarget) (model.DockerImageReference, error) {
-	store, findProjectRoot, _, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+func ResolveDockerImageReference(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, buildDir string, target model.DockerCommandTarget) (model.DockerImageReference, error) {
+	store, findProjectRoot, _, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
 		return model.DockerImageReference{}, err
 	}
 
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return model.DockerImageReference{}, err
 	}
 
-	environment, err := shared.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
+	environment, err := dockerbuild.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
 	if err != nil {
 		return model.DockerImageReference{}, err
 	}
 
-	return shared.ResolveDockerImageReferenceForProject(ctx, now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride), target.Component)
+	return dockerbuild.ResolveDockerImageReferenceForProject(ctx, now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride), target.Component)
 }
 
 // ResolveDockerBuildForComponent resolves a single image by its build context directory name.
 // It is not a components: selection, so version/context resolution stays project-global.
-func ResolveDockerBuildForComponent(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*shared.DockerBuildSpec, error) {
-	store, _, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+func ResolveDockerBuildForComponent(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*dockerspec.DockerBuildSpec, error) {
+	store, _, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
-		build, err := shared.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
+		build, err := dockerbuild.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
 		if err != nil {
 			return nil, err
 		}
@@ -48,14 +50,14 @@ func ResolveDockerBuildForComponent(ctx core.Context, store shared.DockerStore, 
 		return nil, err
 	}
 
-	build, err := shared.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
+	build, err := dockerbuild.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
 	if err != nil {
 		return nil, err
 	}
 	return &build, nil
 }
 
-func currentComponentDockerBuildContext(resolveBuildContext shared.BuildContextResolverFunc, componentName string) (model.DockerBuildContext, bool) {
+func currentComponentDockerBuildContext(resolveBuildContext projectseam.BuildContextResolverFunc, componentName string) (model.DockerBuildContext, bool) {
 	if resolveBuildContext == nil {
 		return model.DockerBuildContext{}, false
 	}
@@ -70,20 +72,20 @@ func currentComponentDockerBuildContext(resolveBuildContext shared.BuildContextR
 	return buildContext, strings.TrimSpace(buildContext.DockerfilePath) != ""
 }
 
-func ResolveDockerBuildSpec(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, buildContext model.DockerBuildContext, target model.DockerCommandTarget) (shared.DockerBuildSpec, error) {
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+func ResolveDockerBuildSpec(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, buildContext model.DockerBuildContext, target model.DockerCommandTarget) (dockerspec.DockerBuildSpec, error) {
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
-		return shared.DockerBuildSpec{}, err
+		return dockerspec.DockerBuildSpec{}, err
 	}
 
-	environment, err := shared.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
+	environment, err := dockerbuild.ResolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
 	if err != nil {
-		return shared.DockerBuildSpec{}, err
+		return dockerspec.DockerBuildSpec{}, err
 	}
 
-	return shared.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
+	return dockerbuild.NewDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
 }
 
-func NewDockerPushSpec(dir string, image model.DockerImageReference) shared.DockerPushSpec {
-	return shared.DockerPushSpec{Dir: dir, Image: image}
+func NewDockerPushSpec(dir string, image model.DockerImageReference) dockerspec.DockerPushSpec {
+	return dockerspec.DockerPushSpec{Dir: dir, Image: image}
 }

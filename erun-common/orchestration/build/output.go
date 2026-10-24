@@ -5,11 +5,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // NewBuildResult extracts the structured result from a resolved build execution.
-func NewBuildResult(execution shared.BuildExecutionSpec) model.BuildResult {
+func NewBuildResult(execution dockerspec.BuildExecutionSpec) model.BuildResult {
 	result := model.BuildResult{}
 	if execution.Release != nil {
 		result.Version = strings.TrimSpace(execution.Release.Version)

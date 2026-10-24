@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
@@ -41,11 +41,11 @@ func NewRuntimeInitCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRuntimeInitCommand(shared.CommandContext(cmd), args)
+			return runRuntimeInitCommand(clicmd.CommandContext(cmd), args)
 		},
 	}
 	cmd.Flags().SetInterspersed(false)
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -93,11 +93,11 @@ func NewTrimCacheCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrimCacheCommand(shared.CommandContext(cmd), args, maxBytes, cmd.Flags().Changed("max-bytes"))
+			return runTrimCacheCommand(clicmd.CommandContext(cmd), args, maxBytes, cmd.Flags().Changed("max-bytes"))
 		},
 	}
 	cmd.Flags().Int64Var(&maxBytes, "max-bytes", 0, "Cap in bytes (default: ERUN_GO_BUILD_CACHE_MAX_BYTES, else 16 GiB)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -142,12 +142,12 @@ func NewInstallSkillsCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInstallSkillsCommand(shared.CommandContext(cmd), skillsDir, agentsDir)
+			return runInstallSkillsCommand(clicmd.CommandContext(cmd), skillsDir, agentsDir)
 		},
 	}
 	cmd.Flags().StringVar(&skillsDir, "skills-dir", core.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
 	cmd.Flags().StringVar(&agentsDir, "agents-dir", podruntime.RuntimeBakedAgentsDir, "Directory holding one <name>.md per agent")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

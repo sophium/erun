@@ -9,7 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type UnexposeInput struct {
@@ -22,23 +26,23 @@ type UnexposeInput struct {
 	ServicesZone       string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
 	PlatformNamespace  string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
 	ErunAlias          string `json:"erunAlias,omitempty" jsonschema:"erun platform cloud alias to route the DNS delete through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias)"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func UnexposeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input UnexposeInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func UnexposeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input UnexposeInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, shared.JobEnvelopeOutput{}, err
+			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
-		projectRoot := shared.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
+		projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
 		exposeStore, ok := any(runtime.Store).(expose.ExposeStore)
 		if !ok {
 			exposeStore = config.ConfigStore{}
 		}
 
-		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			runCtx.MCPTool = "unexpose"
 			_, err := expose.RunUnexposeService(runCtx, model.UnexposeParams{
 				Tenant:             tenant,
@@ -48,10 +52,10 @@ func UnexposeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 				ServicesZone:       strings.TrimSpace(input.ServicesZone),
 				PlatformNamespace:  strings.TrimSpace(input.PlatformNamespace),
 				ErunAlias:          strings.TrimSpace(input.ErunAlias),
-			}, exposeStore, runtime.Store, shared.CloudDependencies(), nil)
+			}, exposeStore, runtime.Store, clouddeps.CloudDependencies(), nil)
 			return err
 		})
-		envelope, err := shared.RunJobEnvelope(runtime, "unexpose", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "unexpose", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // build -> test -> dist -> runtime: the image is produced only after tests pass.
@@ -39,14 +39,14 @@ func writeTestDockerfile(t *testing.T, dir, content string) string {
 
 func TestDockerfileHasConsumedTestStageDetectsTheComponentShape(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), consumedTestStageDockerfileContent)
-	if !shared.DockerfileHasConsumedTestStage(path) {
+	if !dockerspec.DockerfileHasConsumedTestStage(path) {
 		t.Fatal("expected a Dockerfile whose dist stage is built FROM test to be detected as consuming its test stage")
 	}
 }
 
 func TestDockerfileHasConsumedTestStageIgnoresOrdinaryDockerfiles(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
-	if shared.DockerfileHasConsumedTestStage(path) {
+	if dockerspec.DockerfileHasConsumedTestStage(path) {
 		t.Fatal("expected an ordinary Dockerfile with no test stage not to be detected as consuming one")
 	}
 }
@@ -55,24 +55,24 @@ func TestDockerfileHasConsumedTestStageIgnoresOrdinaryDockerfiles(t *testing.T) 
 func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20 AS test-toolchain\nRUN apk add curl\n\n"+
 		"FROM golang:1.26.0 AS builder\nCOPY --from=test-toolchain /usr/bin/curl /usr/bin/curl\n")
-	if shared.DockerfileHasConsumedTestStage(path) {
+	if dockerspec.DockerfileHasConsumedTestStage(path) {
 		t.Error("a `test-toolchain` stage and a `COPY --from=test-toolchain` were read as a consumed test stage")
 	}
-	if shared.DockerfileDeclaresTestStage(path) {
+	if dockerspec.DockerfileDeclaresTestStage(path) {
 		t.Error("a `test-toolchain` stage was read as declaring a test stage, which would grant this build the host-network entitlement")
 	}
 }
 
 func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) {
 	declared := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN make check\n\nFROM scratch\nCOPY . /app\n")
-	if shared.DockerfileHasConsumedTestStage(declared) {
+	if dockerspec.DockerfileHasConsumedTestStage(declared) {
 		t.Fatal("a test stage with no FROM test or COPY --from=test dependent was read as consumed")
 	}
-	if !shared.DockerfileDeclaresTestStage(declared) {
+	if !dockerspec.DockerfileDeclaresTestStage(declared) {
 		t.Fatal("expected a Dockerfile declaring AS test to be detected as declaring a test stage even when no later stage consumes it")
 	}
 	ordinary := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
-	if shared.DockerfileDeclaresTestStage(ordinary) {
+	if dockerspec.DockerfileDeclaresTestStage(ordinary) {
 		t.Fatal("expected an ordinary Dockerfile with no test stage not to be detected as declaring one")
 	}
 }
@@ -97,7 +97,7 @@ func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the erun-devops Dockerfile is not readable at %s: %v", path, err)
 	}
-	if !shared.DockerfileHasConsumedTestStage(path) {
+	if !dockerspec.DockerfileHasConsumedTestStage(path) {
 		t.Fatalf("%s no longer declares a stage `AS test` that a later stage consumes (`FROM test` or `COPY --from=test`), so its image would build and publish with its tests never run", path)
 	}
 }

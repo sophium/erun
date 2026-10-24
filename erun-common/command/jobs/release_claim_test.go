@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/releaseclaim"
 )
 
 // Drives the production entry point against a SIGTERM-cancelled release's
@@ -22,11 +22,11 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 	cancelled := model.EnvironmentActivityLeaseHolder{Tenant: tenant}
 	start := time.Now()
 
-	cancelledSHA, err := shared.TakeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
+	cancelledSHA, err := releaseclaim.TakeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
 	if err != nil {
 		t.Fatalf("cancelled release's repository claim: %v", err)
 	}
-	if _, err := shared.TakeReleaseVersionClaim(tenant, environment, version, cancelled, exitedProcessPIDForTest(t), start); err != nil {
+	if _, err := releaseclaim.TakeReleaseVersionClaim(tenant, environment, version, cancelled, exitedProcessPIDForTest(t), start); err != nil {
 		t.Fatalf("cancelled release's local claim: %v", err)
 	}
 
@@ -36,13 +36,13 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 	}
 
 	spec := model.ReleaseSpec{ProjectRoot: repo, Version: version}
-	release, err := shared.ClaimReleaseVersion(ctx, spec, runtimePodEnvForTest(tenant, environment))
+	release, err := releaseclaim.ClaimReleaseVersion(ctx, spec, runtimePodEnvForTest(tenant, environment))
 	if err != nil {
 		t.Fatalf("the next attempt in this environment must reclaim a cancelled holder's claim, got: %v", err)
 	}
 	defer release()
 
-	sha, exists, err := shared.GitLsRemoteRef(ctx, repo, shared.ReleaseRepoClaimRemote, shared.ReleaseRepoClaimRef(version))
+	sha, exists, err := releaseclaim.GitLsRemoteRef(ctx, repo, releaseclaim.ReleaseRepoClaimRemote, releaseclaim.ReleaseRepoClaimRef(version))
 	if err != nil || !exists {
 		t.Fatalf("expected the reclaiming attempt to hold the version's claim, exists=%v err=%v", exists, err)
 	}
@@ -64,9 +64,9 @@ func runtimePodEnvForTest(tenant, environment string) func(string) string {
 	}
 }
 
-func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) shared.ReleaseRepoClaimRecord {
+func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) releaseclaim.ReleaseRepoClaimRecord {
 	t.Helper()
-	record, err := shared.ReadReleaseRepoClaimBlob(ctx, repo, sha)
+	record, err := releaseclaim.ReadReleaseRepoClaimBlob(ctx, repo, sha)
 	if err != nil {
 		t.Fatalf("reading back claim %s: %v", sha, err)
 	}

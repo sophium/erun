@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -17,7 +17,7 @@ import (
 // NewReviewCmd builds `erun review`, the client for the platform's collaboration API.
 func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
-	cmd := shared.NewCommandGroup(
+	cmd := clicmd.NewCommandGroup(
 		"review",
 		"Review code changes on the erun platform",
 		newReviewListCmd(store, &alias, deps),
@@ -57,7 +57,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			"  erun review list --target-branch main\n" +
 			"  erun review list --repository git@github.com:org/repo.git --status READY",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			reviews, err := reviewpkg.RunReviewList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -82,7 +82,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	cmd.Flags().StringVar(&params.ReviewerUserID, "reviewer-user-id", "", "Filter by reviewer user id")
 	cmd.Flags().BoolVar(&params.Mine, "mine", false, "Show only reviews you authored")
 	cmd.Flags().BoolVar(&params.WaitingOnMe, "waiting-on-me", false, "Show only reviews you are a reviewer on")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -132,7 +132,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			detail, err := reviewpkg.RunReviewShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -149,7 +149,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			return ctx.WriteResult(detail)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -204,7 +204,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 			"  erun review create --name \"Add widget\" --issue sophium/erun#2212 --source-branch feature/add-widget --target-branch main\n" +
 			"  erun review create --name \"Add widget\" --repository https://github.com/org/repo.git --source-branch feature/add-widget --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewCreate(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -226,7 +226,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch this review proposes merging into")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch this review proposes merging (must already be pushed)")
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Issue this work belongs to (owner/repo#number, or a bare number joined to the recorded repository)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -248,7 +248,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			body, err := io.ReadAll(ctx.Stdin)
 			if err != nil {
 				return fmt.Errorf("read comment body from stdin: %w", err)
@@ -280,7 +280,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 	cmd.Flags().StringVar(&filePath, "file", "", "File path the comment is anchored to")
 	cmd.Flags().IntVar(&line, "line", 0, "Line number the comment is anchored to")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "Comment id to reply to, making this a reply in that thread")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -296,7 +296,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 		SilenceUsage: true,
 		Example:      "  erun review resolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			comment, err := reviewpkg.RunReviewResolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
@@ -313,7 +313,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 			return ctx.WriteResult(comment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -329,7 +329,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		Example:      "  erun review unresolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			comment, err := reviewpkg.RunReviewUnresolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
@@ -346,7 +346,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(comment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -357,7 +357,7 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewClose(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -374,6 +374,6 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 			return ctx.WriteResult(review)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

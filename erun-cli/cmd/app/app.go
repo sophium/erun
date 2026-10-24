@@ -11,10 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/desktop"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +33,7 @@ func NewAppCmd(launchApp AppLauncher) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			// Resolve once so the reported path is the executable that actually starts.
 			executable, chosen := resolveAppExecutable()
 			if chosen != "" {
@@ -55,8 +56,8 @@ func NewAppCmd(launchApp AppLauncher) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&headless, "headless", false, "Run the desktop backend without a Wails window and serve the frontend over HTTP")
 	cmd.Flags().IntVar(&port, "port", 0, "HTTP listen port for --headless mode (defaults to the desktop binary's default)")
-	shared.AddDryRunFlag(cmd)
-	shared.AddCommands(cmd, newAppRestartCmd())
+	clicmd.AddDryRunFlag(cmd)
+	clicmd.AddCommands(cmd, newAppRestartCmd())
 	return cmd
 }
 
@@ -82,12 +83,12 @@ func newAppRestartCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAppRestartCommand(shared.CommandContext(cmd), orchestratorID)
+			return runAppRestartCommand(clicmd.CommandContext(cmd), orchestratorID)
 		},
 	}
 	cmd.Flags().StringVar(&orchestratorID, "orchestrator", "", "Orchestrator id that owns the terminal pane after the restart (defaults to $ERUN_ORCHESTRATOR_ID; a bare restart with neither set gives it to the most recently opened one)")
-	shared.AddDryRunFlag(cmd)
-	shared.AddOutputFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
+	clicmd.AddOutputFlag(cmd)
 	return cmd
 }
 
@@ -95,7 +96,7 @@ func newAppRestartCmd() *cobra.Command {
 func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
-		id = strings.TrimSpace(os.Getenv(sharedpkg.OrchestratorIDEnvVar))
+		id = strings.TrimSpace(os.Getenv(jobstate.OrchestratorIDEnvVar))
 	}
 	ctx.Trace(fmt.Sprintf("app restart: orchestrator=%q", id))
 	markerPath := core.DefaultDesktopControlMarkerPath()
@@ -201,7 +202,7 @@ func resolveAppExecutable() (string, string) {
 
 	executable, err := os.Executable()
 	if err == nil {
-		if resolved, chosen := shared.ResolveAppExecutableNear(executable, executableName, hostOS); resolved != "" {
+		if resolved, chosen := desktop.ResolveAppExecutableNear(executable, executableName, hostOS); resolved != "" {
 			return resolved, chosen
 		}
 	}

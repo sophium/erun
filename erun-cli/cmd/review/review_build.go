@@ -3,7 +3,7 @@ package review
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -50,7 +50,7 @@ func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cl
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			build, err := reviewpkg.RunReviewRecordBuild(ctx, store, *alias, model.ReviewRecordBuildParams{
 				ReviewID:      args[0],
 				CommitID:      commitID,
@@ -77,7 +77,7 @@ func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cl
 	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --output json, or --dry-run --output json when it failed) (required)")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -116,7 +116,7 @@ func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps c
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewReportMerged(ctx, store, *alias, args[0], buildID, remoteURL, deps)
 			if err != nil {
 				return err
@@ -135,7 +135,7 @@ func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps c
 	}
 	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful recorded build of the merge commit that landed (omit for work that landed without the queue)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge; any form git accepts, an SSH remote being read over its host's HTTPS without credentials")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -154,7 +154,7 @@ func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.
 		SilenceUsage: true,
 		Example:      "  erun review requeue 018f...",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			review, err := reviewpkg.RunReviewRequeue(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -171,7 +171,7 @@ func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.
 			return ctx.WriteResult(review)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

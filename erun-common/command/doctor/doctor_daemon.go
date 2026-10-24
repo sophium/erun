@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 // ResolveDoctorDockerDaemon picks the daemon from the environment's type.
@@ -371,7 +371,7 @@ func parseDoctorDockerStore(text string) (DoctorDockerStore, bool) {
 		if strings.EqualFold(name, "local volumes") {
 			continue
 		}
-		reclaimable, ok := shared.ParseDockerSize(fields[len(fields)-1])
+		reclaimable, ok := diskheadroom.ParseDockerSize(fields[len(fields)-1])
 		if !ok {
 			continue
 		}

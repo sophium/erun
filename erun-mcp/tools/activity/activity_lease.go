@@ -9,7 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 // A detached job makes no requests, so without a lease its environment reads as idle.
@@ -39,13 +40,13 @@ type ActivityLeaseResult struct {
 	Released *bool `json:"released,omitempty"`
 }
 
-func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+func ActivityLeaseTakeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, input ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
-		identity := shared.AuthIdentityFrom(ctx)
+		identity := callerid.AuthIdentityFrom(ctx)
 		id := strings.TrimSpace(input.ID)
 		if id == "" {
 			id = strings.TrimSpace(input.Name)
@@ -116,9 +117,9 @@ type ActivityLeaseReleaseInput struct {
 	Scope     string `json:"scope,omitempty" jsonschema:"the scope the exclusive claim was taken on; defaults to 'worktree'. Only meaningful with exclusive=true"`
 }
 
-func ActivityLeaseReleaseTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseReleaseInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+func ActivityLeaseReleaseTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseReleaseInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseReleaseInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
@@ -160,9 +161,9 @@ type ActivityLeaseListInput struct {
 	Environment string `json:"environment,omitempty" jsonschema:"environment to read; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
-func ActivityLeaseListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+func ActivityLeaseListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}

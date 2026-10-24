@@ -9,7 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
@@ -20,7 +23,7 @@ import (
 
 // The manual, host-side fan-out of the desktop's automatic pacing nudge.
 
-func NewWhipCmd(store lifecycle.ListStore, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewWhipCmd(store lifecycle.ListStore, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -54,17 +57,17 @@ func NewWhipCmd(store lifecycle.ListStore, resolveOpen shared.OpenResolver) *cob
 			if len(args) > 1 {
 				environment = args[1]
 			}
-			return runWhipCommand(cmd.Context(), shared.CommandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
+			return runWhipCommand(cmd.Context(), clicmd.CommandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
 		},
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Whip only this tenant's environment (requires --environment)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Whip only this environment (requires --tenant)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycle.ListStore, resolveOpen shared.OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycle.ListStore, resolveOpen envscope.OpenResolver, tenant, environment string, jsonOutput bool) error {
 	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
@@ -75,7 +78,7 @@ func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycl
 	// Text rows stream as decided since a slow reattach can stall the sweep; JSON is written once at the end.
 	emit := func(result model.WhipResult) error {
 		report.Results = append(report.Results, result)
-		if shared.CommandWantsJSON(commandCtx, jsonOutput) {
+		if clicmd.CommandWantsJSON(commandCtx, jsonOutput) {
 			return nil
 		}
 		return writeWhipResult(commandCtx, result, commandCtx.DryRun)
@@ -104,7 +107,7 @@ func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycl
 
 // WriteWhipReport keeps --output json and --json from diverging.
 func WriteWhipReport(commandCtx core.Context, report model.WhipReport, jsonOutput bool) error {
-	if shared.CommandWantsJSON(commandCtx, jsonOutput) {
+	if clicmd.CommandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
@@ -154,7 +157,7 @@ func resolveWhipEnvironmentTargets(store lifecycle.ListStore, tenant, environmen
 
 // whipOneEnvironment calls the env's "whip" tool, preview-guarded under --dry-run.
 // An unreachable edge resolves to "not alive".
-func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment string) model.WhipResult {
+func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, tenant, environment string) model.WhipResult {
 	id := tenant + "/" + environment
 	notAlive := model.WhipResult{
 		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
@@ -162,14 +165,14 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 		Reason:    model.WhipReasonNotAlive,
 	}
 
-	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, shared.ScopedOpenParams(commandCtx.Command, tenant, environment))
+	target, err := envcall.ResolveMCPEdgeTarget(commandCtx, resolveOpen, envscope.ScopedOpenParams(commandCtx.Command, tenant, environment))
 	if err != nil {
 		notAlive.Error = err.Error()
 		return notAlive
 	}
 	// Restate the scope so a stale edge surfaces as a named mismatch.
 	arguments := map[string]any{"preview": commandCtx.DryRun, "tenant": target.Tenant, "environment": target.Environment}
-	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, "whip", shared.CompactMCPArguments(arguments))
+	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, "whip", envcall.CompactMCPArguments(arguments))
 
 	// An error means the call failed; a dead session comes back as a successful WhipReasonNotAlive.
 	failed := func(detail string) model.WhipResult {
@@ -191,10 +194,10 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 		}
 	}
 
-	result, err := shared.CallMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
+	result, err := envcall.CallMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
 	if err != nil {
 		if errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
-			return channelDown(shared.McpEdgeError(target, err).Error())
+			return channelDown(envcall.McpEdgeError(target, err).Error())
 		}
 		return failed(err.Error())
 	}
@@ -209,7 +212,7 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 }
 
 func writeWhipResult(ctx core.Context, result model.WhipResult, dryRun bool) error {
-	return shared.WriteLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
+	return textfmt.WriteLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
 }
 
 func whipResultLabel(result model.WhipResult) string {

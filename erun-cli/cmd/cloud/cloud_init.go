@@ -7,15 +7,17 @@ import (
 	"time"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
+	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func newCloudInitCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+func newCloudInitCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"init",
 		"Initialize cloud provider configuration",
 		newCloudInitAWSCmd(store, promptRunner, deps),
@@ -24,7 +26,7 @@ func newCloudInitCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, s
 	)
 }
 
-func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params model.InitAWSCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "aws",
@@ -36,7 +38,7 @@ func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner shared.PromptRunner
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return shared.RunCloudInitAWSCommand(shared.CommandContext(cmd), store, promptRunner, params, deps)
+			return cloudcli.RunCloudInitAWSCommand(clicmd.CommandContext(cmd), store, promptRunner, params, deps)
 		},
 	}
 	cmd.Flags().StringVar(&params.SSOStartURL, "sso-start-url", "", "AWS IAM Identity Center start URL")
@@ -45,11 +47,11 @@ func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner shared.PromptRunner
 	cmd.Flags().StringVar(&params.RoleName, "role-name", "", "AWS permission set (IAM Identity Center) to assume for SSO login")
 	cmd.Flags().StringVar(&params.Region, "region", "", "Default AWS region for the generated configuration")
 	cmd.Flags().StringVar(&params.OIDCIssuerURL, "oidc-issuer-url", "", "OIDC issuer URL trusted by deployed ERun APIs")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params model.InitCloudflareCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "cloudflare",
@@ -67,17 +69,17 @@ func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner shared.Promp
 		SilenceUsage: true,
 		Example:      "  erun cloud init cloudflare\n  erun cloud init cloudflare --account-id <account> --token-name <label> --api-token <token>",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudInitCloudflareCommand(shared.CommandContext(cmd), store, promptRunner, selectRunner, params, deps)
+			return runCloudInitCloudflareCommand(clicmd.CommandContext(cmd), store, promptRunner, selectRunner, params, deps)
 		},
 	}
 	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to (auto-resolved in guided setup)")
 	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token (defaults in guided setup)")
 	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare API token value (Zone + DNS edit, plus any other scopes you'll use such as Cloudflare Pages)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
+func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
 	switch {
 	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
 		var err error
@@ -100,7 +102,7 @@ func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, pro
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: Cloudflare cloud provider initialization planned.")
 		return err
 	}
-	return shared.WriteCloudProviderSaved(ctx, provider)
+	return cloudcli.WriteCloudProviderSaved(ctx, provider)
 }
 
 func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *cobra.Command {
@@ -118,14 +120,14 @@ func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *
 		SilenceUsage: true,
 		Example:      "  erun cloud init erun --api-url " + cloud.HostedPlatformAPIURL,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudInitERunCommand(shared.CommandContext(cmd), store, params, deps)
+			return runCloudInitERunCommand(clicmd.CommandContext(cmd), store, params, deps)
 		},
 	}
 	cmd.Flags().StringVar(&params.APIURL, "api-url", "", "Base URL of the hosted erun platform's API")
 	if err := cmd.MarkFlagRequired("api-url"); err != nil {
 		panic(err)
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -138,7 +140,7 @@ func runCloudInitERunCommand(ctx core.Context, store cloud.CloudStore, params mo
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun cloud provider initialization planned.")
 		return err
 	}
-	return shared.WriteCloudProviderSaved(ctx, provider)
+	return cloudcli.WriteCloudProviderSaved(ctx, provider)
 }
 
 func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps cloud.CloudDependencies) (string, error) {
@@ -157,7 +159,7 @@ func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps
 	}
 }
 
-func runCloudflareInitWizard(ctx core.Context, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) (model.InitCloudflareCloudProviderParams, error) {
+func runCloudflareInitWizard(ctx core.Context, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) (model.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
 	_, _ = fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
 	_, _ = fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")
@@ -189,7 +191,7 @@ func runCloudflareInitWizard(ctx core.Context, promptRunner shared.PromptRunner,
 	params.AccountID = accountID
 
 	if strings.TrimSpace(params.TokenName) == "" {
-		label, err := shared.RequiredCloudPrompt(promptRunner, "Token label", defaultCloudflareTokenLabel())
+		label, err := cloudcli.RequiredCloudPrompt(promptRunner, "Token label", defaultCloudflareTokenLabel())
 		if err != nil {
 			return params, err
 		}
@@ -198,7 +200,7 @@ func runCloudflareInitWizard(ctx core.Context, promptRunner shared.PromptRunner,
 	return params, nil
 }
 
-func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) (string, error) {
+func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner promptpkg.PromptRunner, deps cloud.CloudDependencies) (string, error) {
 	for {
 		token, err := requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
 		if err != nil {
@@ -214,11 +216,11 @@ func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner shared.Prom
 	}
 }
 
-func resolveCloudflareAccountInteractive(ctx core.Context, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, token string, deps cloud.CloudDependencies) (string, error) {
+func resolveCloudflareAccountInteractive(ctx core.Context, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, token string, deps cloud.CloudDependencies) (string, error) {
 	accounts, err := cloud.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil || len(accounts) == 0 {
 		_, _ = fmt.Fprintln(ctx.Stdout, "  Could not auto-resolve the account from the token; enter it manually.")
-		return shared.RequiredCloudPrompt(promptRunner, "Cloudflare account ID", "")
+		return cloudcli.RequiredCloudPrompt(promptRunner, "Cloudflare account ID", "")
 	}
 	if len(accounts) == 1 {
 		_, _ = fmt.Fprintf(ctx.Stdout, "  Using account %q (%s)\n", accounts[0].Name, accounts[0].ID)
@@ -244,7 +246,7 @@ func defaultCloudflareTokenLabel() string {
 	return "erun-" + host + "-" + time.Now().UTC().Format("20060102")
 }
 
-func requiredCloudSecretPrompt(promptRunner shared.PromptRunner, label string) (string, error) {
+func requiredCloudSecretPrompt(promptRunner promptpkg.PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Mask:  '*',

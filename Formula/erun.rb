@@ -23,7 +23,7 @@ class Erun < Formula
       system "go", "build",
              *std_go_args(
                output:  bin/"emcp",
-               ldflags: "-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=#{version}",
+               ldflags: "-s -w -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=#{version}",
              ),
              "./cmd/emcp"
     end

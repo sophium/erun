@@ -10,7 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 type DeleteInput struct {
@@ -19,21 +21,21 @@ type DeleteInput struct {
 	Confirmation string `json:"confirmation,omitempty" jsonschema:"must exactly match tenant-environment when preview is false"`
 	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity    int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func DeleteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input DeleteInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		tenant, environment, err := shared.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
+func DeleteTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DeleteInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		tenant, environment, err := runtimecfg.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
 		if err != nil {
-			return nil, shared.JobEnvelopeOutput{}, err
+			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
 		expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
-			return nil, shared.JobEnvelopeOutput{}, shared.ErrMissingLocalTarget(tenant == "", environment == "")
+			return nil, jobenvelope.JobEnvelopeOutput{}, runtimecfg.ErrMissingLocalTarget(tenant == "", environment == "")
 		}
 		if !input.Preview && strings.TrimSpace(input.Confirmation) != expected {
-			return nil, shared.JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
+			return nil, jobenvelope.JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
 		}
 
 		deleteStore, ok := any(runtime.Store).(lifecycle.DeleteStore)
@@ -41,7 +43,7 @@ func DeleteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToo
 			deleteStore = config.ConfigStore{}
 		}
 
-		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			result, err := lifecycle.RunDeleteEnvironment(runCtx, model.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -54,7 +56,7 @@ func DeleteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToo
 			}
 			return nil
 		})
-		envelope, err := shared.RunJobEnvelope(runtime, "delete", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "delete", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

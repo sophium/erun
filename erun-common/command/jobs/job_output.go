@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // EnvironmentJobOutput is one page of a job's merged stdout and stderr.
 type EnvironmentJobOutput struct {
-	Job        shared.EnvironmentJob `json:"job"`
-	Offset     int64                 `json:"offset"`
-	NextOffset int64                 `json:"nextOffset"`
-	Output     string                `json:"output"`
-	HasMore    bool                  `json:"hasMore"`
+	Job        jobstate.EnvironmentJob `json:"job"`
+	Offset     int64                   `json:"offset"`
+	NextOffset int64                   `json:"nextOffset"`
+	Output     string                  `json:"output"`
+	HasMore    bool                    `json:"hasMore"`
 	// Complete means the job finished and this page reached the end of its output.
 	Complete bool `json:"complete"`
 }

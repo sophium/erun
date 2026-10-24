@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // CgroupParent derives from the pod hostname and is placement, not image identity, so a
@@ -26,8 +26,8 @@ func TestBuildFingerprintSurvivesAPodRoll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	spec := func(cgroupParent string) shared.DockerBuildSpec {
-		return shared.DockerBuildSpec{
+	spec := func(cgroupParent string) dockerspec.DockerBuildSpec {
+		return dockerspec.DockerBuildSpec{
 			ContextDir:     root,
 			DockerfilePath: dockerfile,
 			Image: model.DockerImageReference{
@@ -40,13 +40,13 @@ func TestBuildFingerprintSurvivesAPodRoll(t *testing.T) {
 			CgroupParent: cgroupParent,
 		}
 	}
-	cacheKey := func(build shared.DockerBuildSpec) string {
+	cacheKey := func(build dockerspec.DockerBuildSpec) string {
 		t.Helper()
 		digest, err := computeBuildFingerprint(build)
 		if err != nil {
 			t.Fatalf("computeBuildFingerprint: %v", err)
 		}
-		return shared.FingerprintTag(build.Image, digest, build.Platforms[0])
+		return dockerspec.FingerprintTag(build.Image, digest, build.Platforms[0])
 	}
 
 	beforeRoll := cacheKey(spec("/docker/erun-build-cpu-cap-erun-devops-86cc5c7658-kmtdv"))

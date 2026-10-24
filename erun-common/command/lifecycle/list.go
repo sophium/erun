@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type ListResult struct {
@@ -59,7 +60,7 @@ type ListTenantResult struct {
 	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
-func ResolveListResult(store ListStore, findProjectRoot shared.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
+func ResolveListResult(store ListStore, findProjectRoot projectseam.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
 	if store == nil {
 		return ListResult{}, fmt.Errorf("store is required")
 	}
@@ -204,7 +205,7 @@ func configuredTenantForRepo(repoName string, tenants []model.TenantConfig) stri
 	return ""
 }
 
-func detectCurrentRepo(findProjectRoot shared.ProjectFinderFunc) (string, string, error) {
+func detectCurrentRepo(findProjectRoot projectseam.ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -266,7 +267,7 @@ func loadListOrchestrators(store ListStore) ([]model.ListOrchestratorResult, err
 func loadListDefaultEnvironment(store ListStore, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
-		return "", shared.ErrDefaultEnvironmentNotConfigured
+		return "", opentarget.ErrDefaultEnvironmentNotConfigured
 	}
 	config, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {

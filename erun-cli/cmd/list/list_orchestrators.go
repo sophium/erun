@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
@@ -118,9 +118,9 @@ func writeOrchestratorEnvEntry(ctx core.Context, env modelpkg.ListOrchestratorEn
 func writeEffectiveOpen(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
 	if current.Effective == nil {
 		if strings.TrimSpace(current.EffectiveError) != "" {
-			return shared.WriteLabeledValue(ctx, "effective target", "unavailable ("+current.EffectiveError+")")
+			return textfmt.WriteLabeledValue(ctx, "effective target", "unavailable ("+current.EffectiveError+")")
 		}
-		return shared.WriteLabeledValue(ctx, "effective target", "none")
+		return textfmt.WriteLabeledValue(ctx, "effective target", "none")
 	}
 	if err := writeEffectiveOpenBase(ctx, *current.Effective); err != nil {
 		return err
@@ -130,7 +130,7 @@ func writeEffectiveOpen(ctx core.Context, current lifecycle.ListCurrentDirectory
 			return err
 		}
 	}
-	return shared.WriteLabeledValue(ctx, "repo path", current.Effective.RepoPath)
+	return textfmt.WriteLabeledValue(ctx, "repo path", current.Effective.RepoPath)
 }
 
 func writeEffectiveOpenBase(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
@@ -144,14 +144,14 @@ func writeEffectiveOpenBase(ctx core.Context, effective lifecycle.ListEffectiveT
 }
 
 func writeEffectiveTargetIdentity(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
-	if err := shared.WriteLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "kubernetes context", effective.KubernetesContext); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "kubernetes context", effective.KubernetesContext); err != nil {
 		return err
 	}
 	if strings.TrimSpace(effective.CloudProviderAlias) != "" {
-		if err := shared.WriteLabeledValue(ctx, "cloud provider", effective.CloudProviderAlias); err != nil {
+		if err := textfmt.WriteLabeledValue(ctx, "cloud provider", effective.CloudProviderAlias); err != nil {
 			return err
 		}
 	}
@@ -159,38 +159,38 @@ func writeEffectiveTargetIdentity(ctx core.Context, effective lifecycle.ListEffe
 }
 
 func writeEffectiveTargetType(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
-	return shared.WriteLabeledValue(ctx, "type", shared.ValueOrNone(string(effective.Type)))
+	return textfmt.WriteLabeledValue(ctx, "type", textfmt.ValueOrNone(string(effective.Type)))
 }
 
 func writeEffectiveTargetPorts(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
-	if err := shared.WriteLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", effective.LocalPorts.MCP)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", effective.LocalPorts.MCP)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "assigned api local port", fmt.Sprintf("%d (when API is running or forwarded)", effective.LocalPorts.API)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "assigned api local port", fmt.Sprintf("%d (when API is running or forwarded)", effective.LocalPorts.API)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "api url", effective.APIURL); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "api url", effective.APIURL); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH)); err != nil {
 		return err
 	}
-	return shared.WriteLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
+	return textfmt.WriteLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
 func writeEffectiveOpenSSH(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	ssh := effective.SSH
-	if err := shared.WriteLabeledValue(ctx, "sshd", "on"); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "sshd", "on"); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "ssh host", sshHostAliasLabel(effective.Tenant, effective.Environment, ssh.HostAlias)); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "ssh host", sshHostAliasLabel(effective.Tenant, effective.Environment, ssh.HostAlias)); err != nil {
 		return err
 	}
-	if err := shared.WriteLabeledValue(ctx, "ssh user", ssh.User); err != nil {
+	if err := textfmt.WriteLabeledValue(ctx, "ssh user", ssh.User); err != nil {
 		return err
 	}
-	return shared.WriteLabeledValue(ctx, "ssh workspace", ssh.WorkspacePath)
+	return textfmt.WriteLabeledValue(ctx, "ssh workspace", ssh.WorkspacePath)
 }

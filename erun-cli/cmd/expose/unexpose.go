@@ -4,17 +4,18 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var skipIfUnconfigured bool
 	var servicesZone string
 	var platformNamespace string
@@ -35,10 +36,10 @@ func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, 
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUnexposeCommand(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, args[0], args[1], skipIfUnconfigured, servicesZone, platformNamespace, erunAlias)
+			return runUnexposeCommand(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, cloudStore, deps, findProjectRoot, args[0], args[1], skipIfUnconfigured, servicesZone, platformNamespace, erunAlias)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&skipIfUnconfigured, "skip-if-unconfigured", false, "Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing unexpose after another command)")
 	cmd.Flags().StringVar(&servicesZone, "services-zone", "", "Override the platform services zone tenant hostnames live under, so unexpose needs no project checkout (requires --platform-namespace too)")
 	cmd.Flags().StringVar(&platformNamespace, "platform-namespace", "", "Override the namespace running the platform's PowerDNS singleton, so unexpose needs no project checkout (requires --services-zone too)")
@@ -46,7 +47,7 @@ func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, 
 	return cmd
 }
 
-func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
+func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// The zone/namespace overrides let a caller with no checkout (the hosted delete Job) run unexpose.

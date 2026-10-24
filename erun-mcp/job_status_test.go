@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // An agent job's command embeds the whole prompt, so status/await must truncate it and
 // never duplicate it.
 
 // writeJobFixture writes an exited job, which skips liveness reconciliation.
-func writeJobFixture(t *testing.T, tenant, environment string, job shared.EnvironmentJob) {
+func writeJobFixture(t *testing.T, tenant, environment string, job jobstate.EnvironmentJob) {
 	t.Helper()
 	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
@@ -34,13 +34,13 @@ func writeJobFixture(t *testing.T, tenant, environment string, job shared.Enviro
 	}
 }
 
-func finishedJobFixture(id string, command []string) shared.EnvironmentJob {
+func finishedJobFixture(id string, command []string) jobstate.EnvironmentJob {
 	zero := 0
 	now := time.Now()
-	return shared.EnvironmentJob{
+	return jobstate.EnvironmentJob{
 		ID:        id,
 		Name:      id,
-		State:     shared.EnvironmentJobStateExited,
+		State:     jobstate.EnvironmentJobStateExited,
 		Command:   command,
 		ExitCode:  &zero,
 		StartedAt: now.Add(-time.Minute),

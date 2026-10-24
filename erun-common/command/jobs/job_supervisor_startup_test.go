@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 const (
@@ -60,7 +61,7 @@ func startAgainstADyingSupervisor(t *testing.T, id, mode string) (string, error)
 	t.Setenv(jobAliveSupervisorHelperEnvNameEnv, testSupervisorStartupEnvironment)
 	t.Setenv(jobAliveSupervisorHelperIDEnv, id)
 
-	dir, err := shared.EnvironmentJobDir(testSupervisorStartupTenant, testSupervisorStartupEnvironment)
+	dir, err := jobexclusive.EnvironmentJobDir(testSupervisorStartupTenant, testSupervisorStartupEnvironment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestEnvironmentJobStartNamesWhyASupervisorDiedBeforeRegistering(t *testing.
 	if !strings.Contains(err.Error(), "max output bytes must not be negative") {
 		t.Fatalf("error = %q, want it to name the setup failure that ended the supervisor", err)
 	}
-	if _, readErr := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json")); readErr == nil {
+	if _, readErr := jobstate.ReadEnvironmentJob(filepath.Join(dir, id+".json")); readErr == nil {
 		t.Fatal("this supervisor registered a record; the case is meant to cover the path that never got that far")
 	}
 }

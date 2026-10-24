@@ -7,12 +7,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // materializeConfiguredFingerprints pulls the fp-tagged images configured fingerprints
 // name so a fresh checkout can promote them; failures fall through to a rebuild.
-func materializeConfiguredFingerprints(ctx core.Context, builds []shared.DockerBuildSpec) (map[string]struct{}, error) {
+func materializeConfiguredFingerprints(ctx core.Context, builds []dockerspec.DockerBuildSpec) (map[string]struct{}, error) {
 	materialized := make(map[string]struct{})
 	configuredByEnv := make(map[string]map[string]string)
 
@@ -62,10 +63,10 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	return configured, nil
 }
 
-func materializeBuildFingerprints(ctx core.Context, build shared.DockerBuildSpec, hash string, materialized map[string]struct{}) {
+func materializeBuildFingerprints(ctx core.Context, build dockerspec.DockerBuildSpec, hash string, materialized map[string]struct{}) {
 	for _, platform := range build.Platforms {
-		fpTag := shared.FingerprintTag(build.Image, hash, platform)
-		if exists, err := shared.DockerImageExists(fpTag); err == nil && exists {
+		fpTag := dockerspec.FingerprintTag(build.Image, hash, platform)
+		if exists, err := dockerregistry.DockerImageExists(fpTag); err == nil && exists {
 			materialized[fpTag] = struct{}{}
 			continue
 		}
@@ -78,9 +79,9 @@ func materializeBuildFingerprints(ctx core.Context, build shared.DockerBuildSpec
 }
 
 func pullAndTagConfiguredFingerprint(ctx core.Context, sourceTag, fpTag, platform string, insecure bool) error {
-	ctx.TraceCommand("", "docker", append(shared.DockerManifestArgs("inspect", insecure), sourceTag)...)
+	ctx.TraceCommand("", "docker", append(dockerspec.DockerManifestArgs("inspect", insecure), sourceTag)...)
 	if !ctx.DryRun {
-		exists, err := shared.DockerManifestExists(sourceTag, insecure)
+		exists, err := dockerregistry.DockerManifestExists(sourceTag, insecure)
 		if err != nil {
 			return err
 		}

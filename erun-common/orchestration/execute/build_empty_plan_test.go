@@ -9,12 +9,12 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // A build that plans no work must not exit zero: callers read the exit code as a verdict.
 func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
-	err := RunBuildExecution(core.Context{DryRun: true}, shared.BuildExecutionSpec{}, nil, nil, nil, nil, cloud.CloudDependencies{})
+	err := RunBuildExecution(core.Context{DryRun: true}, dockerspec.BuildExecutionSpec{}, nil, nil, nil, nil, cloud.CloudDependencies{})
 	if err == nil {
 		t.Fatal("expected a build that plans no work to fail instead of reporting success")
 	}
@@ -24,13 +24,13 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 }
 
 func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
-	if buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{}) {
+	if buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{}) {
 		t.Error("an execution with no release, script, image, or chart plans no work")
 	}
-	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{Script: &shared.ScriptSpec{Path: "./build.sh"}}) {
+	if !buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{Script: &dockerspec.ScriptSpec{Path: "./build.sh"}}) {
 		t.Error("a project build script is work")
 	}
-	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{LinuxPackages: []model.LinuxPackageSpec{{Name: "erun-ui"}}}) {
+	if !buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{LinuxPackages: []model.LinuxPackageSpec{{Name: "erun-ui"}}}) {
 		t.Error("a linux package is work")
 	}
 }

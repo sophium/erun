@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 const (
@@ -69,7 +69,7 @@ func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, uiDir)
 
-	if contexts, err := build.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot)); !errors.Is(err, shared.ErrDockerBuildContextNotFound) {
+	if contexts, err := build.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot)); !errors.Is(err, dockerspec.ErrDockerBuildContextNotFound) {
 		t.Fatalf("a package directory resolved image contexts %+v, %v", contexts, err)
 	}
 	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))

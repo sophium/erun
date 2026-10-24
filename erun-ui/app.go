@@ -14,7 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -56,7 +57,7 @@ type projectConfigStore interface {
 
 type erunUIDeps struct {
 	store                  erunUIStore
-	findProjectRoot        shared.ProjectFinderFunc
+	findProjectRoot        projectseam.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
 	resolveImageRegistry   func(context.Context, string, string) (model.RuntimeRegistryVersions, error)
@@ -91,7 +92,7 @@ type erunUIDeps struct {
 	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (model.CommitWorkingTreeResult, error)
 	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (model.PushWorkingTreeBranchResult, error)
 	loadIdleStatus            func(context.Context, string, string) (model.EnvironmentIdleStatus, error)
-	loadEnvironmentJobs       func(context.Context, string, string) ([]shared.EnvironmentJob, error)
+	loadEnvironmentJobs       func(context.Context, string, string) ([]jobstate.EnvironmentJob, error)
 	readEnvironmentJobOutput  func(context.Context, string, string, model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
 	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
 	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)

@@ -7,7 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // guardRuntimeImageLineSwitch refuses, before any cluster mutation, a deploy that
@@ -86,7 +85,7 @@ func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) e
 	if strings.TrimSpace(chartName) != config.DevopsComponentName || !RuntimeImageIsStockDevops(image) {
 		return nil
 	}
-	_, _, tag, ok := shared.ParseDockerImageReference(strings.TrimSpace(image))
+	_, _, tag, ok := ParseDockerImageReference(strings.TrimSpace(image))
 	if !ok {
 		return nil
 	}

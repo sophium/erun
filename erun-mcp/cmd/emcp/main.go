@@ -13,14 +13,15 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/buildinfo"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, shared.CurrentBuildInfo(), erunmcp.RunHTTP))
+	os.Exit(run(os.Args[1:], os.Stderr, buildinfo.CurrentBuildInfo(), erunmcp.RunHTTP))
 }
 
-type serverRunner func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, shared.RuntimeConfig) error
+type serverRunner func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error
 
 func run(args []string, stderr io.Writer, info model.BuildInfo, runServer serverRunner) int {
 	flags := flag.NewFlagSet("emcp", flag.ContinueOnError)
@@ -28,7 +29,7 @@ func run(args []string, stderr io.Writer, info model.BuildInfo, runServer server
 
 	cfg := erunmcp.HTTPConfig{}
 	metricsCfg := erunmcp.MetricsConfig{}
-	runtime := shared.RuntimeConfig{}
+	runtime := runtimecfg.RuntimeConfig{}
 	flags.StringVar(&cfg.Host, "host", erunmcp.DefaultHost, "Host interface to bind the MCP HTTP server to")
 	flags.IntVar(&cfg.Port, "port", erunmcp.DefaultPort, "Port to bind the MCP HTTP server to")
 	flags.StringVar(&cfg.Path, "path", erunmcp.DefaultPath, "HTTP path to serve the MCP endpoint from")

@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type VersionInput struct {
@@ -25,9 +25,9 @@ func VersionTool(info model.BuildInfo) func(context.Context, *mcp.CallToolReques
 	return func(_ context.Context, _ *mcp.CallToolRequest, input VersionInput) (*mcp.CallToolResult, VersionOutput, error) {
 		output := BuildVersionOutput(info)
 		traceOutput := new(bytes.Buffer)
-		ctx := shared.RuntimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
+		ctx := toolio.RuntimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.TraceCommand("", "erun", "version")
-		output.Trace = shared.NormalizeTraceLines(traceOutput.String())
+		output.Trace = toolio.NormalizeTraceLines(traceOutput.String())
 		return nil, output, nil
 	}
 }

@@ -11,7 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // A task job runs Go work in this process, so MCP tools keep their typed
@@ -56,28 +57,28 @@ func (p TaskEnvironmentJobParams) normalize() (TaskEnvironmentJobParams, error) 
 }
 
 // StartTaskEnvironmentJob runs work in a goroutine and returns once the record is durable.
-func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (shared.EnvironmentJob, error) {
+func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (jobstate.EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
-	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := jobexclusive.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	if err := reserveEnvironmentJobID(core.Context{}, dir, params.ID); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	logPath := filepath.Join(dir, params.ID+".log")
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 
-	job := shared.EnvironmentJob{
+	job := jobstate.EnvironmentJob{
 		ID:               params.ID,
 		Name:             params.Name,
 		State:            EnvironmentJobStateRunning,
@@ -93,11 +94,11 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (shared.Environmen
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		_ = log.Close()
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	recorder := &jobRecorder{dir: dir, job: job}
 	writer := &jobOutputWriter{file: log, limit: params.MaxOutputBytes, onTruncate: func() {
-		recorder.update(func(job *shared.EnvironmentJob) { job.OutputTruncated = true })
+		recorder.update(func(job *jobstate.EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
 	// Never exclusive: no start call could have claimed the environment for it.
@@ -138,8 +139,8 @@ func runTaskEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, stopBeat, 
 		}
 	}
 
-	recorder.update(func(job *shared.EnvironmentJob) {
-		job.State = shared.EnvironmentJobStateExited
+	recorder.update(func(job *jobstate.EnvironmentJob) {
+		job.State = jobstate.EnvironmentJobStateExited
 		job.EndedAt = time.Now()
 		job.ExitCode = &code
 		job.Reason = reason

@@ -16,7 +16,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type DoctorInput struct {
@@ -33,7 +36,7 @@ type DoctorInput struct {
 	RestoreEnvConfigFromBackup string                   `json:"restoreEnvConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the target environment's config.yaml from the matching daily backup (requires explicit tenant and environment) before any tenant/env work"`
 	RepairOrphanedAliases      []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
 	SyncConfig                 bool                     `json:"syncConfig,omitempty" jsonschema:"when true, reconcile the in-pod erun config with the helm-injected ERUN_* env vars (injected wins). Only meaningful inside a runtime pod, where the projection is rewritten without those values whenever the pod is replaced, which silently changes which registry a build resolves and whether a project build script runs"`
-	sharedpkg.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
 // DoctorRepairAliasInput answers the "Re-initialize cloud provider alias?" prompt.
@@ -47,11 +50,11 @@ type DoctorRepairAliasInput struct {
 	SkipLogin     bool   `json:"skipLogin,omitempty" jsonschema:"when true, skip aws sso login and rely on existing credentials"`
 }
 
-func DoctorTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
-		execute := func(preview bool, log io.Writer) (sharedpkg.CommandOutput, error) {
-			var report *sharedpkg.DoctorRootConfigReport
-			output, err := sharedpkg.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
+func DoctorTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		execute := func(preview bool, log io.Writer) (toolio.CommandOutput, error) {
+			var report *toolio.DoctorRootConfigReport
+			output, err := runcmd.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
 				r, runErr := runDoctorToolCommand(runtime, input, runCtx)
 				report = r
 				return runErr
@@ -61,12 +64,12 @@ func DoctorTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 			}
 			return output, err
 		}
-		envelope, err := sharedpkg.RunJobEnvelope(runtime, "doctor", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "doctor", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
 
-func runDoctorToolCommand(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*sharedpkg.DoctorRootConfigReport, error) {
+func runDoctorToolCommand(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*toolio.DoctorRootConfigReport, error) {
 	if input.ClearPendingHelm && input.Rollback {
 		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
 	}
@@ -95,7 +98,7 @@ func runDoctorToolCommand(runtime sharedpkg.RuntimeConfig, input DoctorInput, ru
 }
 
 // runDoctorEnvConfigRestore reports whether the restore was the whole request.
-func runDoctorEnvConfigRestore(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, report *sharedpkg.DoctorRootConfigReport) (bool, error) {
+func runDoctorEnvConfigRestore(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context, report *toolio.DoctorRootConfigReport) (bool, error) {
 	selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup)
 	if selector == "" {
 		return false, nil
@@ -108,8 +111,8 @@ func runDoctorEnvConfigRestore(runtime sharedpkg.RuntimeConfig, input DoctorInpu
 
 // restoreDoctorEnvConfigFromBackup restores the env config before any
 // tenant/env work; the target is pinned to this pod's environment.
-func restoreDoctorEnvConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, input DoctorInput, selector string, report *sharedpkg.DoctorRootConfigReport) error {
-	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func restoreDoctorEnvConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx core.Context, input DoctorInput, selector string, report *toolio.DoctorRootConfigReport) error {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return err
 	}
@@ -164,7 +167,7 @@ func onlyEnvConfigRestoreInput(input DoctorInput) bool {
 		!input.ClearPendingHelm && !input.Rollback
 }
 
-func runDoctorTenantEnvActions(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context) error {
+func runDoctorTenantEnvActions(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context) error {
 	target, err := resolveDoctorOpenResult(runtime, input)
 	if err != nil {
 		return err
@@ -212,12 +215,12 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 
 // runDoctorRootConfigToolFlow returns fatal=true when the root config must stop
 // the flow, e.g. it is corrupted and no repair input was given.
-func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*sharedpkg.DoctorRootConfigReport, bool, error) {
+func runDoctorRootConfigToolFlow(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*toolio.DoctorRootConfigReport, bool, error) {
 	inspection, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return nil, false, err
 	}
-	report := &sharedpkg.DoctorRootConfigReport{Inspection: inspection}
+	report := &toolio.DoctorRootConfigReport{Inspection: inspection}
 
 	if selector := strings.TrimSpace(input.RestoreConfigFromBackup); selector != "" {
 		refreshed, err := restoreDoctorRootConfigFromBackup(runtime, runCtx, inspection, selector, report)
@@ -244,7 +247,7 @@ func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorIn
 	return report, false, nil
 }
 
-func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, inspection model.RootConfigInspection, selector string, report *sharedpkg.DoctorRootConfigReport) (model.RootConfigInspection, error) {
+func restoreDoctorRootConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx core.Context, inspection model.RootConfigInspection, selector string, report *toolio.DoctorRootConfigReport) (model.RootConfigInspection, error) {
 	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
 	if err != nil {
 		return inspection, err
@@ -262,7 +265,7 @@ func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx c
 	return refreshDoctorInspection(runtime, report)
 }
 
-func refreshDoctorInspection(runtime sharedpkg.RuntimeConfig, report *sharedpkg.DoctorRootConfigReport) (model.RootConfigInspection, error) {
+func refreshDoctorInspection(runtime runtimecfg.RuntimeConfig, report *toolio.DoctorRootConfigReport) (model.RootConfigInspection, error) {
 	refreshed, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return model.RootConfigInspection{}, err
@@ -278,7 +281,7 @@ func doctorRootConfigBlocks(inspection model.RootConfigInspection, input DoctorI
 	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
-func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection model.RootConfigInspection, report *sharedpkg.DoctorRootConfigReport) error {
+func runDoctorAliasRepairs(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection model.RootConfigInspection, report *toolio.DoctorRootConfigReport) error {
 	byAlias := make(map[string]model.OrphanedAlias, len(inspection.OrphanedAliases))
 	for _, orphan := range inspection.OrphanedAliases {
 		byAlias[orphan.Alias] = orphan
@@ -471,8 +474,8 @@ func writeDoctorOutput(runCtx core.Context, stdout, stderr string) error {
 }
 
 // resolveDoctorOpenResult pins tenant/environment to this pod's environment.
-func resolveDoctorOpenResult(runtime sharedpkg.RuntimeConfig, input DoctorInput) (config.OpenResult, error) {
-	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func resolveDoctorOpenResult(runtime runtimecfg.RuntimeConfig, input DoctorInput) (config.OpenResult, error) {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return config.OpenResult{}, err
 	}

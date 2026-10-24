@@ -15,7 +15,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
 // A job is an activity lease plus an outcome. The outcome is captured as data
@@ -131,38 +133,38 @@ func resolveEnvironmentJobDurationOverride(envVar string, fallback time.Duration
 // environmentJobSucceeded is the only definition of success: a zero outcome
 // with no leftover processes, no running or failed started jobs, and a clean
 // working tree. An unknown job never succeeds.
-func environmentJobSucceeded(j shared.EnvironmentJob) bool {
-	return j.State == shared.EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 &&
+func environmentJobSucceeded(j jobstate.EnvironmentJob) bool {
+	return j.State == jobstate.EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 &&
 		!j.WorktreeDirty && j.StartedJobFailed == ""
 }
 
 // LoadEnvironmentJob returns one job with its state resolved, persisting any demotion.
-func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (shared.EnvironmentJob, error) {
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (jobstate.EnvironmentJob, error) {
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	resolved, err := resolveEnvironmentJobID(id)
 	if err != nil {
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
-	job, err := shared.ReadEnvironmentJob(filepath.Join(dir, resolved+".json"))
+	job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, resolved+".json"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return shared.EnvironmentJob{}, fmt.Errorf("no job %q in %s/%s", resolved, tenant, environment)
+			return jobstate.EnvironmentJob{}, fmt.Errorf("no job %q in %s/%s", resolved, tenant, environment)
 		}
-		return shared.EnvironmentJob{}, err
+		return jobstate.EnvironmentJob{}, err
 	}
 	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activity.ProcessAlive, build.CurrentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning aged-out records.
-func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]shared.EnvironmentJob, error) {
+func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]jobstate.EnvironmentJob, error) {
 	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activity.ProcessAlive, build.CurrentJobHostname())
 }
 
-func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]shared.EnvironmentJob, error) {
-	dir, err := shared.EnvironmentJobDir(tenant, environment)
+func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]jobstate.EnvironmentJob, error) {
+	dir, err := jobexclusive.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -173,12 +175,12 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 		}
 		return nil, err
 	}
-	jobs := make([]shared.EnvironmentJob, 0, len(entries))
+	jobs := make([]jobstate.EnvironmentJob, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		job, err := shared.ReadEnvironmentJob(filepath.Join(dir, entry.Name()))
+		job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			// An unreadable record would otherwise stay in every listing forever.
 			removeEnvironmentJobFiles(dir, strings.TrimSuffix(entry.Name(), ".json"))
@@ -198,11 +200,11 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 
 // reconcileEnvironmentJob believes "running" only while the recorded pid is
 // alive; otherwise the demotion to unknown is persisted.
-func reconcileEnvironmentJob(dir string, job shared.EnvironmentJob, now time.Time, alive func(int) bool, hostname string) shared.EnvironmentJob {
-	return reconcileEnvironmentJobWithRestartCheck(dir, job, now, alive, hostname, shared.RunOpenKubectl)
+func reconcileEnvironmentJob(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string) jobstate.EnvironmentJob {
+	return reconcileEnvironmentJobWithRestartCheck(dir, job, now, alive, hostname, opentarget.RunOpenKubectl)
 }
 
-func reconcileEnvironmentJobWithRestartCheck(dir string, job shared.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner shared.OpenKubectlRunnerFunc) shared.EnvironmentJob {
+func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
 	// Never persisted: it is meaningless without the read time.
 	job.AliveAgeMs = environmentJobAliveAgeMs(job.LastAliveAt, now)
 	if job.State != EnvironmentJobStateRunning {
@@ -216,7 +218,7 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job shared.EnvironmentJ
 	}
 	// Re-read: the supervisor writes its outcome and then exits, so the record
 	// read above may be stale and must not be overwritten.
-	if fresh, err := shared.ReadEnvironmentJob(filepath.Join(dir, job.ID+".json")); err == nil && fresh.State != EnvironmentJobStateRunning {
+	if fresh, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, job.ID+".json")); err == nil && fresh.State != EnvironmentJobStateRunning {
 		fresh.AliveAgeMs = environmentJobAliveAgeMs(fresh.LastAliveAt, now)
 		fresh.OutputBytes = environmentJobOutputSize(fresh.LogPath, fresh.OutputBytes)
 		fresh.Succeeded = environmentJobSucceeded(fresh)
@@ -229,8 +231,8 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job shared.EnvironmentJ
 	return job
 }
 
-func demoteEnvironmentJobToUnknown(job shared.EnvironmentJob, now time.Time, hostname string, restartRunner shared.OpenKubectlRunnerFunc) shared.EnvironmentJob {
-	job.State = shared.EnvironmentJobStateUnknown
+func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
+	job.State = jobstate.EnvironmentJobStateUnknown
 	job.EndedAt = now
 	job.ExitCode = nil
 	switch {
@@ -252,7 +254,7 @@ func demoteEnvironmentJobToUnknown(job shared.EnvironmentJob, now time.Time, hos
 
 // reconcileSamePodUnknownReason credits a container restart only when it lands
 // at or after the job was last alive.
-func reconcileSamePodUnknownReason(job shared.EnvironmentJob, hostname string, restartRunner shared.OpenKubectlRunnerFunc) (kind, reason string) {
+func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) (kind, reason string) {
 	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, config.DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
 		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
@@ -303,18 +305,18 @@ func gibibytes(bytes int64) float64 {
 }
 
 // environmentJobChildren returns parentID's started jobs, reconciled like every other read.
-func environmentJobChildren(dir, parentID string, now time.Time) []shared.EnvironmentJob {
+func environmentJobChildren(dir, parentID string, now time.Time) []jobstate.EnvironmentJob {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	hostname := build.CurrentJobHostname()
-	var children []shared.EnvironmentJob
+	var children []jobstate.EnvironmentJob
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		job, err := shared.ReadEnvironmentJob(filepath.Join(dir, entry.Name()))
+		job, err := jobstate.ReadEnvironmentJob(filepath.Join(dir, entry.Name()))
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
@@ -325,8 +327,8 @@ func environmentJobChildren(dir, parentID string, now time.Time) []shared.Enviro
 }
 
 // environmentJobRunningChildren excludes handed-off jobs, which are meant to outlive their parent.
-func environmentJobRunningChildren(dir, parentID string, now time.Time) []shared.EnvironmentJob {
-	var running []shared.EnvironmentJob
+func environmentJobRunningChildren(dir, parentID string, now time.Time) []jobstate.EnvironmentJob {
+	var running []jobstate.EnvironmentJob
 	for _, child := range environmentJobChildren(dir, parentID, now) {
 		if child.Handoff {
 			continue
@@ -340,7 +342,7 @@ func environmentJobRunningChildren(dir, parentID string, now time.Time) []shared
 
 // environmentJobFailedChildren excludes handed-off jobs and failures superseded
 // by a later same-named attempt, since a rerun gets a fresh id under one --name.
-func environmentJobFailedChildren(dir, parentID string, now time.Time) []shared.EnvironmentJob {
+func environmentJobFailedChildren(dir, parentID string, now time.Time) []jobstate.EnvironmentJob {
 	children := environmentJobChildren(dir, parentID, now)
 	latestStartByName := make(map[string]time.Time, len(children))
 	for _, child := range children {
@@ -351,7 +353,7 @@ func environmentJobFailedChildren(dir, parentID string, now time.Time) []shared.
 			latestStartByName[child.Name] = child.StartedAt
 		}
 	}
-	var failed []shared.EnvironmentJob
+	var failed []jobstate.EnvironmentJob
 	for _, child := range children {
 		if environmentJobCountsAsFailedChild(child, parentID, latestStartByName) {
 			failed = append(failed, child)
@@ -360,7 +362,7 @@ func environmentJobFailedChildren(dir, parentID string, now time.Time) []shared.
 	return failed
 }
 
-func environmentJobCountsAsFailedChild(child shared.EnvironmentJob, parentID string, latestStartByName map[string]time.Time) bool {
+func environmentJobCountsAsFailedChild(child jobstate.EnvironmentJob, parentID string, latestStartByName map[string]time.Time) bool {
 	if child.Handoff || !child.Finished() || child.Succeeded {
 		return false
 	}
@@ -390,9 +392,9 @@ func environmentJobAliveAgeMs(lastAliveAt, now time.Time) *int64 {
 
 // pruneEnvironmentJobs keeps finished jobs for EnvironmentJobRetention, at most
 // EnvironmentJobHistoryCap of them; running jobs are never pruned.
-func pruneEnvironmentJobs(dir string, jobs []shared.EnvironmentJob, now time.Time) []shared.EnvironmentJob {
-	kept := make([]shared.EnvironmentJob, 0, len(jobs))
-	finished := make([]shared.EnvironmentJob, 0, len(jobs))
+func pruneEnvironmentJobs(dir string, jobs []jobstate.EnvironmentJob, now time.Time) []jobstate.EnvironmentJob {
+	kept := make([]jobstate.EnvironmentJob, 0, len(jobs))
+	finished := make([]jobstate.EnvironmentJob, 0, len(jobs))
 	for _, job := range jobs {
 		if !job.Finished() {
 			kept = append(kept, job)
@@ -422,7 +424,7 @@ func pruneEnvironmentJobs(dir string, jobs []shared.EnvironmentJob, now time.Tim
 
 // AwaitEnvironmentJobResult separates "not finished yet" from every outcome.
 type AwaitEnvironmentJobResult struct {
-	Job shared.EnvironmentJob `json:"job"`
+	Job jobstate.EnvironmentJob `json:"job"`
 	// TimedOut is never true for a job that failed.
 	TimedOut       bool  `json:"timedOut"`
 	WaitedSeconds  int64 `json:"waitedSeconds"`
@@ -493,7 +495,7 @@ func resolveEnvironmentJobID(id string) (string, error) {
 }
 
 // writeEnvironmentJob writes atomically: a status read can land mid-write.
-func writeEnvironmentJob(dir string, job shared.EnvironmentJob) error {
+func writeEnvironmentJob(dir string, job jobstate.EnvironmentJob) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

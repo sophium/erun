@@ -9,7 +9,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 type E2EInput struct {
@@ -18,17 +20,17 @@ type E2EInput struct {
 	Version   string `json:"version,omitempty" jsonschema:"version the suites expect (ERUN_E2E_VERSION) instead of this environment's deployed version; with baseUrl too, the environment is not read at all"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the discovered suites, URLs, deployed version, and exact docker invocations without running them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
 // E2eTool runs each <tenant>-devops/e2e/<component> suite against this server's
 // own environment; no suites is a no-op.
-func E2eTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, E2EInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input E2EInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
+func E2eTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, E2EInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input E2EInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
 		component := strings.TrimSpace(input.Component)
 		baseURL := strings.TrimSpace(input.BaseURL)
 		version := strings.TrimSpace(input.Version)
-		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			runCtx.MCPTool = "e2e"
 			plan, err := e2e.ResolveE2EPlan(config.FindProjectRoot, component)
 			if err != nil {
@@ -52,7 +54,7 @@ func E2eTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 			})
 			return err
 		})
-		envelope, err := shared.RunJobEnvelope(runtime, "e2e", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "e2e", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

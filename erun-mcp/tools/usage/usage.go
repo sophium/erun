@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type UsageInput struct {
@@ -46,14 +47,14 @@ func UsageSizingClaim() string {
 // UsageTool reads cgroup v2 usage directly (no metrics-server). It runs a fixed
 // script, never caller argv, so it is erun:read. Builds run in the erun-dind
 // sidecar, reported separately as `dind`.
-func UsageTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
+func UsageTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 		target, err := resolveUsageOpenResult(runtime, input)
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
 		req := cloud.ShellLaunchParamsFromResult(target)
-		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
+		runCtx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		params := model.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
 		result, err := podruntime.RunRuntimeUsage(runCtx, nil, nil, req, params)
 		if err != nil {
@@ -72,8 +73,8 @@ func usageIntervalFromSeconds(seconds float64) time.Duration {
 
 // resolveUsageOpenResult applies ResolveLocalTarget's refusal first so usage
 // cannot target another environment.
-func resolveUsageOpenResult(runtime sharedpkg.RuntimeConfig, input UsageInput) (config.OpenResult, error) {
-	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func resolveUsageOpenResult(runtime runtimecfg.RuntimeConfig, input UsageInput) (config.OpenResult, error) {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return config.OpenResult{}, err
 	}

@@ -12,7 +12,7 @@ import (
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // A remote-agent/runtime env's jobs run in its pod, so reads go through its MCP
@@ -145,7 +145,7 @@ func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
 
 const defaultJobOutputPageBytes = 65536
 
-func environmentJobsToUI(jobs []shared.EnvironmentJob) []uiEnvironmentJob {
+func environmentJobsToUI(jobs []jobstate.EnvironmentJob) []uiEnvironmentJob {
 	out := make([]uiEnvironmentJob, 0, len(jobs))
 	for _, job := range jobs {
 		out = append(out, environmentJobToUI(job))
@@ -164,7 +164,7 @@ func jobOutputToUI(page jobspkg.EnvironmentJobOutput) uiEnvironmentJobOutput {
 	}
 }
 
-func environmentJobToUI(job shared.EnvironmentJob) uiEnvironmentJob {
+func environmentJobToUI(job jobstate.EnvironmentJob) uiEnvironmentJob {
 	out := uiEnvironmentJob{
 		ID:        job.ID,
 		Name:      job.Name,

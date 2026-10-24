@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 func TestExecRawResolveDir(t *testing.T) {
@@ -14,7 +15,7 @@ func TestExecRawResolveDir(t *testing.T) {
 	if err := os.Mkdir(subdir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	cfg := shared.RuntimeConfig{Context: shared.RuntimeContext{RepoPath: repoRoot}}
+	cfg := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{RepoPath: repoRoot}}
 
 	t.Run("empty dir defaults to the repo root", func(t *testing.T) {
 		got, err := execRawResolveDir(cfg, "")

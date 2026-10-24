@@ -11,7 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 // PinInput selects which erun version an environment's references move to.
@@ -24,14 +27,14 @@ type PinInput struct {
 	Revert      bool   `json:"revert,omitempty" jsonschema:"when true, pin back to the version recorded before the last re-pin"`
 	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, resolve and return the full plan (every site, old and new) without writing anything"`
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	shared.JobEnvelopeInput
+	jobenvelope.JobEnvelopeInput
 }
 
-func PinTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PinInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
-		execute := func(preview bool, log io.Writer) (shared.CommandOutput, error) {
-			var pinned *shared.PinOutput
-			output, err := shared.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
+func PinTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PinInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, jobenvelope.JobEnvelopeOutput, error) {
+		execute := func(preview bool, log io.Writer) (toolio.CommandOutput, error) {
+			var pinned *toolio.PinOutput
+			output, err := runcmd.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
 				out, err := runPinToolCommand(runtime, input, runCtx)
 				if err != nil {
 					return err
@@ -44,13 +47,13 @@ func PinTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 			}
 			return output, err
 		}
-		envelope, err := shared.RunJobEnvelope(runtime, "pin", input.JobEnvelopeInput, input.Preview, execute)
+		envelope, err := jobenvelope.RunJobEnvelope(runtime, "pin", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
 
-func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core.Context) (*shared.PinOutput, error) {
-	tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+func runPinToolCommand(runtime runtimecfg.RuntimeConfig, input PinInput, runCtx core.Context) (*toolio.PinOutput, error) {
+	tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -90,26 +93,26 @@ func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core
 
 // applyPinPlanUnlessPreviewing records the previous version first so a revert
 // works even after a partial rewrite.
-func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Context, plan model.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (shared.PinOutput, error) {
-	out := shared.PinOutput{Plan: plan, Changed: len(plan.Changes())}
+func applyPinPlanUnlessPreviewing(runtime runtimecfg.RuntimeConfig, runCtx core.Context, plan model.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (toolio.PinOutput, error) {
+	out := toolio.PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil
 	}
 	if err := lifecycle.RecordPinPrevious(workDir, tenant, environment, plan.Previous); err != nil {
-		return shared.PinOutput{}, err
+		return toolio.PinOutput{}, err
 	}
 	if err := lifecycle.ApplyPinPlan(plan); err != nil {
-		return shared.PinOutput{}, err
+		return toolio.PinOutput{}, err
 	}
 	// Runtime version/image/chart live in the config store, not the repo.
 	if updated, changed := lifecycle.ApplyPinnedEnvConfig(envConfig, plan); changed {
 		if err := runtime.Store.SaveEnvConfig(tenant, updated); err != nil {
-			return shared.PinOutput{}, err
+			return toolio.PinOutput{}, err
 		}
 	}
 	// deploy refuses a Chart.lock that disagrees with its Chart.yaml.
 	if err := lifecycle.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
-		return shared.PinOutput{}, err
+		return toolio.PinOutput{}, err
 	}
 	out.Applied = true
 	return out, nil
@@ -117,8 +120,8 @@ func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Cont
 
 // resolvePinToolProjectRoot never falls back to the working directory, which is
 // not the tenant repo for an MCP caller.
-func resolvePinToolProjectRoot(runtime shared.RuntimeConfig, input PinInput) (string, error) {
-	projectRoot := shared.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
+func resolvePinToolProjectRoot(runtime runtimecfg.RuntimeConfig, input PinInput) (string, error) {
+	projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 	if projectRoot == "" {
 		return "", fmt.Errorf("no project root to pin: this MCP server has no repo path bound to it, and the call did not supply projectRoot either -- pass projectRoot explicitly, naming the checkout pin should rewrite")
 	}
@@ -127,7 +130,7 @@ func resolvePinToolProjectRoot(runtime shared.RuntimeConfig, input PinInput) (st
 
 // resolvePinToolTarget refuses an unpublished version, which would only fail
 // later at terraform init or chart pull.
-func resolvePinToolTarget(ctx context.Context, runtime shared.RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
+func resolvePinToolTarget(ctx context.Context, runtime runtimecfg.RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
 	if input.Revert {
 		previous, ok := lifecycle.PinPrevious(workDir, tenant, environment)
 		if !ok {

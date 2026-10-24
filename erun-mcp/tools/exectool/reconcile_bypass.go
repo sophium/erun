@@ -7,7 +7,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type ReconcileBypassToolResult struct {
@@ -17,7 +19,7 @@ type ReconcileBypassToolResult struct {
 }
 
 type ExecReconcileBypassInput struct {
-	shared.PlatformAliasInput
+	toolio.PlatformAliasInput
 	RemoteURL      string   `json:"remoteUrl,omitempty" jsonschema:"the github.com remote the ruleset lives on; defaults to the current checkout's origin"`
 	RulesetID      int64    `json:"rulesetId" jsonschema:"the ruleset to check bypasses against"`
 	TargetBranch   string   `json:"targetBranch" jsonschema:"the ruleset's protected branch"`
@@ -25,10 +27,10 @@ type ExecReconcileBypassInput struct {
 	ExpectedActors []string `json:"expectedActors,omitempty" jsonschema:"identities allowed to hold the bypass grant; any other actor's bypass is reported UNEXPECTED_ACTOR"`
 }
 
-func ExecReconcileBypassTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReconcileBypassInput) (*mcp.CallToolResult, ReconcileBypassToolResult, error) {
+func ExecReconcileBypassTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReconcileBypassInput) (*mcp.CallToolResult, ReconcileBypassToolResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReconcileBypassInput) (*mcp.CallToolResult, ReconcileBypassToolResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "exec_reconcile-bypass"
 		result, err := review.ReconcileBypass(ctx, runtime.Store, input.Alias, model.ReconcileBypassParams{
 			RemoteURL:      input.RemoteURL,
@@ -36,10 +38,10 @@ func ExecReconcileBypassTool(runtime shared.RuntimeConfig) func(context.Context,
 			TargetBranch:   input.TargetBranch,
 			Since:          input.Since,
 			ExpectedActors: input.ExpectedActors,
-		}, shared.CloudDependencies(), review.ReconcileBypassDependencies{})
+		}, clouddeps.CloudDependencies(), review.ReconcileBypassDependencies{})
 		if err != nil {
 			return nil, ReconcileBypassToolResult{}, err
 		}
-		return nil, ReconcileBypassToolResult{Preview: input.Preview, Result: result, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+		return nil, ReconcileBypassToolResult{Preview: input.Preview, Result: result, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }

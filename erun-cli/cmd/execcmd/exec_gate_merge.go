@@ -5,17 +5,17 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func newExecGateMergeCmd(findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func newExecGateMergeCmd(findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
 	var (
 		sources    []string
 		target     string
@@ -70,18 +70,18 @@ func newExecGateMergeCmd(findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Com
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecGateMergeCommand(shared.CommandContext(cmd), findProjectRoot, sources, target, remote, underLease)
+			return runExecGateMergeCommand(clicmd.CommandContext(cmd), findProjectRoot, sources, target, remote, underLease)
 		},
 	}
 	cmd.Flags().StringArrayVar(&sources, "source", nil, "Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)")
 	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge(s) land onto (required)")
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
 	cmd.Flags().StringVar(&underLease, "under-lease", "", "Id of an exclusive environment claim this caller already holds, so its own hold does not refuse it")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
+func runExecGateMergeCommand(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}
@@ -184,7 +184,7 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecReportCommitStatusCommand(shared.CommandContext(cmd), args[0], state, statusCtx, description, targetURL, remoteURL)
+			return runExecReportCommitStatusCommand(clicmd.CommandContext(cmd), args[0], state, statusCtx, description, targetURL, remoteURL)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "Commit status state: success, failure, error, or pending (required)")
@@ -192,7 +192,7 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "Short human-readable status, naming which step failed on failure (required)")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "URL a reader clicks through to from the status (optional)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote to report the status against (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -240,14 +240,14 @@ func newExecClosePRCmd() *cobra.Command {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecClosePRCommand(shared.CommandContext(cmd), args[0], target, remoteURL, gatedCommit, landingCommit)
+			return runExecClosePRCommand(clicmd.CommandContext(cmd), args[0], target, remoteURL, gatedCommit, landingCommit)
 		},
 	}
 	cmd.Flags().StringVar(&target, "target", "", "The pull request's base branch (required)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote the pull request lives on (required)")
 	cmd.Flags().StringVar(&gatedCommit, "gated-commit", "", "BRANCH's tip when the merge queue actually fetched and built it (required)")
 	cmd.Flags().StringVar(&landingCommit, "landing-commit", "", "The commit that actually landed on --target, recorded in a comment on the pull request (required)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 

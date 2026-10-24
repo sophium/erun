@@ -3,7 +3,9 @@ package platform
 import (
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -13,9 +15,9 @@ import (
 )
 
 // NewPlatformCmd builds `erun platform`, the client for a hosted platform's control-plane API.
-func NewPlatformCmd(store config.CloudReadStore, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+func NewPlatformCmd(store config.CloudReadStore, promptRunner prompt.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
-	cmd := shared.NewCommandGroup(
+	cmd := clicmd.NewCommandGroup(
 		"platform",
 		"Operate a hosted erun platform's control-plane API",
 		newPlatformWhoamiCmd(store, &alias, deps),
@@ -39,7 +41,7 @@ func newPlatformWhoamiCmd(store config.CloudReadStore, alias *string, deps cloud
 		SilenceUsage: true,
 		Example:      "  erun platform whoami\n  erun platform whoami --erun-alias erun+api.acme.services.erunpaas.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			whoami, err := platform.RunPlatformWhoami(ctx, store, *alias, deps)
 			if err != nil {
 				return err
@@ -49,14 +51,14 @@ func newPlatformWhoamiCmd(store config.CloudReadStore, alias *string, deps cloud
 				return err
 			}
 			if ctx.Output != model.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", shared.QuotedValueOrNone(whoami.Username), whoami.TenantID, shared.QuotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
+				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", textfmt.QuotedValueOrNone(whoami.Username), whoami.TenantID, textfmt.QuotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
 					return err
 				}
 			}
 			return ctx.WriteResult(whoami)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -73,7 +75,7 @@ func newPlatformVersionCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		Example:      "  erun platform version\n  erun platform version --erun-alias erun+api.acme.services.erunpaas.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			info, err := platform.RunPlatformVersion(ctx, store, *alias, deps)
 			if err != nil {
 				return err
@@ -90,12 +92,12 @@ func newPlatformVersionCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(info)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 func newPlatformTenantCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"tenant",
 		"Manage tenants on the erun platform",
 		newPlatformTenantCreateCmd(store, alias, deps),
@@ -117,7 +119,7 @@ func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps
 		SilenceUsage: true,
 		Example:      "  erun platform tenant create --name acme --issuer https://acme.example.com --display-name Acme",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			tenant, err := platform.RunPlatformCreateTenant(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -140,7 +142,7 @@ func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps
 	cmd.Flags().StringVar(&params.OrgFieldKey, "org-field-key", "", "Claim name that carries the org for a shared (multi-tenant) issuer")
 	cmd.Flags().StringVar(&params.OrgFieldValue, "org-field-value", "", "Claim value identifying this tenant under a shared issuer")
 	cmd.Flags().StringVar(&params.DisplayName, "display-name", "", "Human-readable label for the tenant/issuer mapping (defaults to the issuer)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -151,7 +153,7 @@ func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps c
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			tenants, err := platform.RunPlatformListTenants(ctx, store, *alias, deps)
 			if err != nil {
 				return err
@@ -168,7 +170,7 @@ func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps c
 			return ctx.WriteResult(tenants)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -212,7 +214,7 @@ func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *st
 		SilenceUsage: true,
 		Example:      "  erun platform tenant repair-org-mapping --tenant-id 01... --issuer https://auth.example --org-field-key urn:zitadel:iam:user:resourceowner:id --org-field-value 42",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			issuer, err := platform.RunPlatformRepairTenantIssuerOrgMapping(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -233,12 +235,12 @@ func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *st
 	cmd.Flags().StringVar(&params.Issuer, "issuer", "", "OIDC issuer the tenant is mapped under")
 	cmd.Flags().StringVar(&params.OrgFieldKey, "org-field-key", "", "Claim name that carries the org for this shared issuer")
 	cmd.Flags().StringVar(&params.OrgFieldValue, "org-field-value", "", "Org value to set on the tenant's mapping (see platform identity org create)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 func newPlatformIdentityCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"identity",
 		"Administer the erun platform's own identity provider",
 		newPlatformIdentityOrgCmd(store, alias, deps),
@@ -246,7 +248,7 @@ func newPlatformIdentityCmd(store config.CloudReadStore, alias *string, deps clo
 }
 
 func newPlatformIdentityOrgCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+	return clicmd.NewCommandGroup(
 		"org",
 		"Manage organizations on the erun platform's own identity provider",
 		newPlatformIdentityOrgCreateCmd(store, alias, deps),
@@ -268,7 +270,7 @@ func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string,
 		SilenceUsage: true,
 		Example:      "  erun platform identity org create --name acme",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			org, err := platform.RunPlatformCreateOrg(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
@@ -286,6 +288,6 @@ func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string,
 		},
 	}
 	cmd.Flags().StringVar(&params.Name, "name", "", "Organization name")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

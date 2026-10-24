@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -13,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newPlatformEnvCmd(store config.CloudReadStore, alias *string, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
-	return shared.NewCommandGroup(
+func newPlatformEnvCmd(store config.CloudReadStore, alias *string, promptRunner prompt.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+	return clicmd.NewCommandGroup(
 		"env",
 		"Manage hosted environments on the erun platform",
 		newPlatformEnvListCmd(store, alias, deps),
@@ -35,7 +37,7 @@ func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps clou
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			environments, err := platform.RunPlatformListEnvironments(ctx, store, *alias, deps)
 			if err != nil {
 				return err
@@ -52,7 +54,7 @@ func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(environments)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -75,10 +77,10 @@ func writePlatformEnvironmentLine(ctx core.Context, environment model.PlatformEn
 		line += " runtime-version=" + environment.RuntimeVersion
 	}
 	if strings.TrimSpace(environment.ProvisionError) != "" {
-		line += " provision-error=" + shared.QuotedValueOrNone(environment.ProvisionError)
+		line += " provision-error=" + textfmt.QuotedValueOrNone(environment.ProvisionError)
 	}
 	if strings.TrimSpace(environment.DeleteError) != "" {
-		line += " delete-error=" + shared.QuotedValueOrNone(environment.DeleteError)
+		line += " delete-error=" + textfmt.QuotedValueOrNone(environment.DeleteError)
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)
 	return err
@@ -91,7 +93,7 @@ func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			environment, err := platform.RunPlatformGetEnvironment(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -108,7 +110,7 @@ func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud
 			return ctx.WriteResult(environment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -133,7 +135,7 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 		SilenceUsage: true,
 		Example:      "  erun platform env register --name prod --type runtime --context-id 018f... --runtime-version 1.4.2\n  erun platform env register --name dev --type local-agent --adopt --kubernetes-context kind-dev --definition acme/dev",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			var local *model.EnvDefinitionAdoptParams
 			if strings.TrimSpace(localDefinition) != "" {
 				tenant, environment, err := parseLocalEnvironmentRef(localDefinition)
@@ -171,7 +173,7 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 	cmd.Flags().BoolVar(&params.Adopt, "adopt", false, "Register a row for an environment that already exists on this machine, instead of asking the platform to provision one")
 	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Target tenant id (operations-tenant callers only; defaults to the caller's own tenant)")
 	cmd.Flags().StringVar(&localDefinition, "definition", "", "Upload this local environment's portable settings with the registration, as TENANT/ENVIRONMENT")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -204,7 +206,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		Example:      "  erun platform env push acme dev\n  erun platform env push acme dev --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			result, err := platform.RunPlatformPushEnvDefinition(ctx, store, *alias, model.EnvDefinitionPushParams{
 				Tenant:      args[0],
 				Environment: args[1],
@@ -225,12 +227,12 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(result)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 // newPlatformEnvPullCmd pulls the platform's definition into a local env, creating it if absent.
-func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRunner prompt.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params platform.EnvDefinitionPullParams
 	var yes bool
 	cmd := &cobra.Command{
@@ -251,7 +253,7 @@ func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRun
 		SilenceUsage: true,
 		Example:      "  erun platform env pull acme dev\n  erun platform env pull acme dev --environment-id 018f... --repo-path ~/src/acme",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			params.Tenant = args[0]
 			params.Environment = args[1]
 			confirm := pullConfirmation(ctx, promptRunner, args[0], args[1], yes)
@@ -280,7 +282,7 @@ func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRun
 	cmd.Flags().StringVar(&params.LocalRepoPath, "repo-path", "", "Host repo path to record for a new environment of a type that needs one")
 	cmd.Flags().IntVar(&params.LocalPortRangeStart, "port-range-start", 0, "Local port range start for a new environment (default: the lowest free range on this machine)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Accept a two-sided edit without prompting (for non-interactive callers)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -298,7 +300,7 @@ func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cl
 		SilenceUsage: true,
 		Example:      "  erun platform env deploy 018f...\n  erun platform env deploy 018f... --version 1.4.2",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			environment, err := platform.RunPlatformDeployEnvironment(ctx, store, *alias, args[0], params, deps)
 			if err != nil {
 				return err
@@ -316,7 +318,7 @@ func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cl
 		},
 	}
 	cmd.Flags().StringVar(&params.Version, "version", "", "Published version to deploy (defaults to the environment's pinned runtime version)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
@@ -331,7 +333,7 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			environment, err := platform.RunPlatformStopEnvironment(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
@@ -348,13 +350,13 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 			return ctx.WriteResult(environment)
 		},
 	}
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
 // pullConfirmation asks about a two-sided edit. It returns nil under --yes or with no
 // prompt, which makes erun-common refuse the edit rather than resolve it silently.
-func pullConfirmation(ctx core.Context, promptRunner shared.PromptRunner, tenant, environment string, yes bool) func(config.EnvDefinitionPlan) (bool, error) {
+func pullConfirmation(ctx core.Context, promptRunner prompt.PromptRunner, tenant, environment string, yes bool) func(config.EnvDefinitionPlan) (bool, error) {
 	if yes || promptRunner == nil {
 		return nil
 	}
@@ -367,11 +369,11 @@ func pullConfirmation(ctx core.Context, promptRunner shared.PromptRunner, tenant
 				return false, err
 			}
 		}
-		return shared.ConfirmPrompt(promptRunner, fmt.Sprintf("Overwrite the local %s/%s settings above with the platform's", tenant, environment))
+		return prompt.ConfirmPrompt(promptRunner, fmt.Sprintf("Overwrite the local %s/%s settings above with the platform's", tenant, environment))
 	}
 }
 
-func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptRunner prompt.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete ENVIRONMENT_ID",
@@ -389,9 +391,9 @@ func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptR
 		SilenceUsage: true,
 		Example:      "  erun platform env delete 018f...\n  erun platform env delete 018f... -y",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := shared.CommandContext(cmd)
+			ctx := clicmd.CommandContext(cmd)
 			if !ctx.DryRun && !yes {
-				confirmed, err := shared.ConfirmPrompt(promptRunner, fmt.Sprintf("Delete environment %s (irreversible)", args[0]))
+				confirmed, err := prompt.ConfirmPrompt(promptRunner, fmt.Sprintf("Delete environment %s (irreversible)", args[0]))
 				if err != nil {
 					return err
 				}
@@ -416,6 +418,6 @@ func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptR
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt (for non-interactive callers)")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }

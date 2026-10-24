@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
 // diskHeadroomPruneStubDocker answers every read and never returns from the prune.
@@ -27,7 +27,7 @@ func setDiskHeadroomOneGiBFree(t *testing.T, root string) {
 	t.Helper()
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 }
 
 func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
@@ -119,7 +119,7 @@ case "$1" in
 esac`))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
@@ -182,7 +182,7 @@ esac`))
 
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
-	policy := shared.ReleaseDiskHeadroomPolicy
+	policy := diskheadroom.ReleaseDiskHeadroomPolicy
 	policy.Limits = diskHeadroomShortLimits()
 
 	err := awaitHeadroomPreflight(t, ctx, policy)
@@ -201,7 +201,7 @@ esac`))
 // "executable file not found" error.
 func TestDiskHeadroomAbsentExecutableIsNamedNotSpliced(t *testing.T) {
 	t.Setenv("ERUN_DOCKER_BIN", "erun-no-such-docker-binary-for-headroom-test")
-	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}

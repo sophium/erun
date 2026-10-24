@@ -12,7 +12,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, componentDir, suiteDir string) {
@@ -28,9 +29,9 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 	return projectRoot, componentDir, suiteDir
 }
 
-func boundaryResolvers(projectRoot, cwd string) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
+func boundaryResolvers(projectRoot, cwd string) (projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
-	resolveBuildContext := func() (model.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
+	resolveBuildContext := func() (model.DockerBuildContext, error) { return dockerspec.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext
 }
 
@@ -55,10 +56,10 @@ func TestDockerfileTestStageConsumerForms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN go build -o /out/app ./...\n\nFROM scratch\n"+tc.consumer+"\n")
-			if got := shared.DockerfileHasConsumedTestStage(path); got != tc.consumed {
+			if got := dockerspec.DockerfileHasConsumedTestStage(path); got != tc.consumed {
 				t.Fatalf("dockerfileHasConsumedTestStage = %v, want %v", got, tc.consumed)
 			}
-			err := shared.CheckDockerfileTestStageConsumed(path)
+			err := dockerspec.CheckDockerfileTestStageConsumed(path)
 			if (err == nil) != tc.consumed {
 				t.Fatalf("checkDockerfileTestStageConsumed = %v, want refusal %v", err, !tc.consumed)
 			}
@@ -90,16 +91,16 @@ func TestCheckNotE2ESuiteDockerfileScopesToDevopsE2E(t *testing.T) {
 		"/repo/team-devops/e2e/Dockerfile":            false,
 		"":                                            false,
 	} {
-		if err := shared.CheckNotE2ESuiteDockerfile(path); (err != nil) != refused {
+		if err := dockerspec.CheckNotE2ESuiteDockerfile(path); (err != nil) != refused {
 			t.Errorf("checkNotE2ESuiteDockerfile(%q) = %v, want refusal %v", path, err, refused)
 		}
 	}
 }
 
-func testOutcomeBuild(t *testing.T, dockerfile string) shared.DockerBuildSpec {
+func testOutcomeBuild(t *testing.T, dockerfile string) dockerspec.DockerBuildSpec {
 	t.Helper()
 	dir := t.TempDir()
-	return shared.DockerBuildSpec{
+	return dockerspec.DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, dockerfile),
 		Image:          model.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
@@ -107,7 +108,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) shared.DockerBuildSpec {
 	}
 }
 
-func runOutcomeBuild(t *testing.T, buildInput shared.DockerBuildSpec, build DockerImageBuilderFunc) (string, error) {
+func runOutcomeBuild(t *testing.T, buildInput dockerspec.DockerBuildSpec, build DockerImageBuilderFunc) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
@@ -117,7 +118,7 @@ func runOutcomeBuild(t *testing.T, buildInput shared.DockerBuildSpec, build Dock
 
 // A fingerprint promotion reuses an earlier result and must not read as a fresh pass.
 func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
-	succeed := func(shared.DockerBuildSpec, io.Writer, io.Writer) error { return nil }
+	succeed := func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error { return nil }
 
 	rebuilt := testOutcomeBuild(t, consumedTestStageDockerfileContent)
 	rebuilt.Fingerprint = "abc123"
@@ -126,12 +127,12 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		build shared.DockerBuildSpec
+		build dockerspec.DockerBuildSpec
 		run   DockerImageBuilderFunc
 		want  string
 	}{
 		{"built without incremental", testOutcomeBuild(t, consumedTestStageDockerfileContent), succeed, "api: test: passed\n"},
-		{"promote fell back to a rebuild", promoted, func(input shared.DockerBuildSpec, _, _ io.Writer) error {
+		{"promote fell back to a rebuild", promoted, func(input dockerspec.DockerBuildSpec, _, _ io.Writer) error {
 			input.Cache.NotePromoteFallback()
 			return nil
 		}, "api: test: passed\n"},
@@ -151,14 +152,14 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 
 func TestFailedOrDryRunBuildReportsNoTestOutcome(t *testing.T) {
 	build := testOutcomeBuild(t, consumedTestStageDockerfileContent)
-	log, err := runOutcomeBuild(t, build, func(shared.DockerBuildSpec, io.Writer, io.Writer) error { return errors.New("test stage failed") })
+	log, err := runOutcomeBuild(t, build, func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error { return errors.New("test stage failed") })
 	if err == nil || strings.Contains(log, "test:") {
 		t.Fatalf("a failed build must report no test outcome, got err %v, log %q", err, log)
 	}
 
 	var dry bytes.Buffer
 	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &dry, &dry)}
-	if err := RunDockerBuild(ctx, build, func(shared.DockerBuildSpec, io.Writer, io.Writer) error {
+	if err := RunDockerBuild(ctx, build, func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("a dry run must not build")
 		return nil
 	}); err != nil {
@@ -175,11 +176,11 @@ func TestConcurrentBuildsReportTestOutcomesInBuildOrder(t *testing.T) {
 	slow.Image.ImageName = "slow"
 	fast := buildSpecFromDockerfile(t, dir, "fast", "debian:bookworm")
 	fast.Image.ImageName = "fast"
-	ordered, dependencies := resolveTestDependencies(t, []shared.DockerBuildSpec{slow, fast})
+	ordered, dependencies := resolveTestDependencies(t, []dockerspec.DockerBuildSpec{slow, fast})
 
 	var released sync.WaitGroup
 	released.Add(1)
-	build := func(spec shared.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec dockerspec.DockerBuildSpec, _, _ io.Writer) error {
 		if spec.Image.ImageName == "fast" {
 			released.Done()
 			return nil

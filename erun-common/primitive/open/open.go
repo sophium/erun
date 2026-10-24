@@ -16,7 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 	"gopkg.in/yaml.v3"
 )
 
@@ -103,13 +103,13 @@ func OpenParamsForArgs(args []string) (model.OpenParams, error) {
 func loadOpenDefaultEnvironment(store configpkg.OpenStore, tenant string) (string, error) {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
 	if errors.Is(err, configpkg.ErrNotInitialized) {
-		return "", shared.ErrDefaultEnvironmentNotConfigured
+		return "", opentarget.ErrDefaultEnvironmentNotConfigured
 	}
 	if err != nil {
 		return "", err
 	}
 	if tenantConfig.DefaultEnvironment == "" {
-		return "", shared.ErrDefaultEnvironmentNotConfigured
+		return "", opentarget.ErrDefaultEnvironmentNotConfigured
 	}
 	return tenantConfig.DefaultEnvironment, nil
 }
@@ -139,9 +139,9 @@ func InitParamsForOpenTarget(store configpkg.OpenStore, params model.OpenParams)
 }
 
 func initParamsForOpenEnvironmentOnly(store configpkg.OpenStore, environment string) (BootstrapInitParams, error) {
-	resolvedTenant, err := shared.LoadOpenDefaultTenant(store)
+	resolvedTenant, err := opentarget.LoadOpenDefaultTenant(store)
 	if err != nil {
-		if errors.Is(err, shared.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
+		if errors.Is(err, opentarget.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -150,9 +150,9 @@ func initParamsForOpenEnvironmentOnly(store configpkg.OpenStore, environment str
 }
 
 func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, error) {
-	resolvedTenant, err := shared.LoadOpenDefaultTenant(store)
+	resolvedTenant, err := opentarget.LoadOpenDefaultTenant(store)
 	if err != nil {
-		if errors.Is(err, shared.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
+		if errors.Is(err, opentarget.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{ResolveTenant: true}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -160,7 +160,7 @@ func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, 
 
 	defaultEnvironment, err := loadOpenDefaultEnvironment(store, resolvedTenant)
 	if err != nil {
-		if errors.Is(err, shared.ErrDefaultEnvironmentNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
+		if errors.Is(err, opentarget.ErrDefaultEnvironmentNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{Tenant: resolvedTenant}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -170,7 +170,7 @@ func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, 
 }
 
 func ResolveOpen(store configpkg.OpenStore, params model.OpenParams) (configpkg.OpenResult, error) {
-	return shared.ResolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
+	return opentarget.ResolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
 }
 
 // EnsureLocalPortRangePersisted freezes the port choice so unrelated tenants
@@ -213,12 +213,12 @@ func LocalShellSetupScript(result configpkg.OpenResult) string {
 func WaitForShellDeployment(req configpkg.ShellLaunchParams) error {
 	if configpkg.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == configpkg.ExecutionModeLibrary {
 		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, configpkg.RuntimeReleaseName(req.Tenant), cloud.DefaultShellLaunchWaitTimeout); err != nil {
-			return enrichShellDeploymentError(req, err, shared.RunOpenKubectl)
+			return enrichShellDeploymentError(req, err, opentarget.RunOpenKubectl)
 		}
 		return nil
 	}
-	if err := shared.RunOpenKubectl(cloud.KubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
-		return enrichShellDeploymentError(req, err, shared.RunOpenKubectl)
+	if err := opentarget.RunOpenKubectl(cloud.KubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
+		return enrichShellDeploymentError(req, err, opentarget.RunOpenKubectl)
 	}
 	return nil
 }
@@ -247,10 +247,10 @@ func ExecShell(req configpkg.ShellLaunchParams) error {
 		if isShellTakenOverExit(err) {
 			return ErrShellSessionTakenOver
 		}
-		if isShellReplacementExit(err) && shellReplacementPodReady(req, shared.RunOpenKubectl) {
+		if isShellReplacementExit(err) && shellReplacementPodReady(req, opentarget.RunOpenKubectl) {
 			return ErrShellPodReplaced
 		}
-		return enrichShellDeploymentError(req, err, shared.RunOpenKubectl)
+		return enrichShellDeploymentError(req, err, opentarget.RunOpenKubectl)
 	}
 	return nil
 }
@@ -292,7 +292,7 @@ func RemoteWorktreePathForRepoName(repoName string) string {
 
 // APIDeploymentName is templated from `.Values.tenant`, not the Helm release name.
 func APIDeploymentName(tenant string) string {
-	return shared.TenantResourcePrefix(tenant) + "-api"
+	return opentarget.TenantResourcePrefix(tenant) + "-api"
 }
 
 func kubectlExecArgs(req configpkg.ShellLaunchParams, script string) []string {

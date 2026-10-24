@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 type IdleInput struct {
@@ -16,9 +16,9 @@ type IdleInput struct {
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-func IdleTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleInput) (*mcp.CallToolResult, model.EnvironmentIdleStatus, error) {
+func IdleTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleInput) (*mcp.CallToolResult, model.EnvironmentIdleStatus, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleInput) (*mcp.CallToolResult, model.EnvironmentIdleStatus, error) {
-		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, model.EnvironmentIdleStatus{}, err
 		}

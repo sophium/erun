@@ -8,7 +8,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // Agent runs are their own job kind because AI tools print nothing until exit;
@@ -113,14 +113,14 @@ type agentProgressReader struct {
 
 	mu       sync.Mutex
 	pending  []byte
-	progress shared.AgentJobProgress
+	progress jobstate.AgentJobProgress
 }
 
 func newAgentProgressReader(tool string) *agentProgressReader {
-	return &agentProgressReader{tool: tool, progress: shared.AgentJobProgress{Tool: tool}}
+	return &agentProgressReader{tool: tool, progress: jobstate.AgentJobProgress{Tool: tool}}
 }
 
-func (r *agentProgressReader) snapshot() shared.AgentJobProgress {
+func (r *agentProgressReader) snapshot() jobstate.AgentJobProgress {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.progress
@@ -191,7 +191,7 @@ type claudeContentBlock struct {
 	Input json.RawMessage `json:"input"`
 }
 
-func applyClaudeAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
+func applyClaudeAgentEvent(progress *jobstate.AgentJobProgress, raw []byte) bool {
 	var event claudeStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return false
@@ -220,7 +220,7 @@ func applyClaudeAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
 	return true
 }
 
-func applyClaudeAssistantEvent(progress *shared.AgentJobProgress, event claudeStreamEvent) {
+func applyClaudeAssistantEvent(progress *jobstate.AgentJobProgress, event claudeStreamEvent) {
 	if event.Message == nil {
 		return
 	}
@@ -306,7 +306,7 @@ type codexStreamItem struct {
 	} `json:"changes"`
 }
 
-func applyCodexAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
+func applyCodexAgentEvent(progress *jobstate.AgentJobProgress, raw []byte) bool {
 	var event codexStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return false
@@ -333,13 +333,13 @@ func applyCodexAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
 	return true
 }
 
-func applyCodexThreadStartedEvent(progress *shared.AgentJobProgress, event codexStreamEvent) {
+func applyCodexThreadStartedEvent(progress *jobstate.AgentJobProgress, event codexStreamEvent) {
 	if id := strings.TrimSpace(event.ThreadID); id != "" {
 		progress.SessionID = id
 	}
 }
 
-func applyCodexItem(progress *shared.AgentJobProgress, item *codexStreamItem, completed bool) {
+func applyCodexItem(progress *jobstate.AgentJobProgress, item *codexStreamItem, completed bool) {
 	if item == nil {
 		return
 	}

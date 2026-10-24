@@ -4,14 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envcall"
+	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/spf13/cobra"
 )
 
-func newJobOutputCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobOutputCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -42,15 +44,15 @@ func newJobOutputCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "Job whose output to read")
 	cmd.Flags().Int64Var(&offset, "offset", 0, "Byte offset to read from, so a poll continues rather than repeats")
 	cmd.Flags().Int64Var(&maxBytes, "max-bytes", jobspkg.DefaultEnvironmentJobOutputReadBytes, "Most bytes to return in this read")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.ReadEnvironmentJobOutputParams) error {
+func runJobOutput(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params model.ReadEnvironmentJobOutputParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	output, resolved, err := readJobOutput(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -71,8 +73,8 @@ func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params mo
 	return ctx.WriteResult(output)
 }
 
-func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.ReadEnvironmentJobOutputParams) (jobspkg.EnvironmentJobOutput, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.ReadEnvironmentJobOutputParams) (jobspkg.EnvironmentJobOutput, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return jobOutputFromEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
@@ -86,7 +88,7 @@ func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen sha
 	return output, true, nil
 }
 
-func newJobCancelCmd(resolveOpen shared.OpenResolver) *cobra.Command {
+func newJobCancelCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -114,15 +116,15 @@ func newJobCancelCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to cancel")
 	cmd.Flags().StringVar(&signal, "signal", "TERM", "Signal to send: TERM, INT, HUP, or KILL")
-	shared.AddDryRunFlag(cmd)
+	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.CancelEnvironmentJobParams) error {
+func runJobCancel(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params model.CancelEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	ctx := shared.CommandContext(cmd)
+	ctx := clicmd.CommandContext(cmd)
 	result, resolved, err := cancelJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -142,8 +144,8 @@ func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params mo
 	return ctx.WriteResult(result)
 }
 
-func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.CancelEnvironmentJobParams) (jobspkg.CancelEnvironmentJobResult, bool, error) {
-	if !shared.EnvironmentTargetsItself() {
+func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params model.CancelEnvironmentJobParams) (jobspkg.CancelEnvironmentJobResult, bool, error) {
+	if !envcall.EnvironmentTargetsItself() {
 		return cancelJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	result, err := jobspkg.CancelEnvironmentJob(commandCtx, params)

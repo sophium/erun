@@ -6,13 +6,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
+	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // resolveProjectDockerModuleDir resolves the project's docker module independently
 // of the current directory.
-func resolveProjectDockerModuleDir(findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (string, bool, error) {
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
+func resolveProjectDockerModuleDir(findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (string, bool, error) {
+	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return "", false, err
 	}

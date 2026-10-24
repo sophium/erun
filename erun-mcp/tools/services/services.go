@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type ServicesInput struct {
@@ -21,9 +22,9 @@ type ServicesInput struct {
 
 // ServicesTool lists Services with their ports and any erun-expose public
 // address. It only runs `kubectl get`, so it needs erun:read, not erun:admin.
-func ServicesTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, model.EnvironmentServiceList, error) {
+func ServicesTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, model.EnvironmentServiceList, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, model.EnvironmentServiceList, error) {
-		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err
 		}
@@ -31,7 +32,7 @@ func ServicesTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Ca
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err
 		}
-		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
+		runCtx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		result, err := expose.RunListEnvironmentServices(runCtx, cloud.ShellLaunchParamsFromResult(target))
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err

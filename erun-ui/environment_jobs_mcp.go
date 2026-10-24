@@ -9,11 +9,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // loadEnvironmentJobsFromMCP is idle-probed so the Jobs tab never holds an env awake.
-func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]shared.EnvironmentJob, error) {
+func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]jobstate.EnvironmentJob, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
@@ -33,13 +33,13 @@ func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([
 		return nil, err
 	}
 	var payload struct {
-		Jobs []shared.EnvironmentJob `json:"jobs"`
+		Jobs []jobstate.EnvironmentJob `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
 	if payload.Jobs == nil {
-		return []shared.EnvironmentJob{}, nil
+		return []jobstate.EnvironmentJob{}, nil
 	}
 	return payload.Jobs, nil
 }

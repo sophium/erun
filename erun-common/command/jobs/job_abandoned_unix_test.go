@@ -15,7 +15,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // `set -m` gives the backgrounded sleep its own pgid, which the process-group
@@ -48,8 +48,8 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running outside its own process group: %+v", job.State, job.ExitCode, job)
 	}
-	if job.State != shared.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
+	if job.State != jobstate.EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, jobstate.EnvironmentJobStateAbandoned)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running in a session of its own: %+v", job.State, job.ExitCode, job)
 	}
-	if job.State != shared.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
+	if job.State != jobstate.EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, jobstate.EnvironmentJobStateAbandoned)
 	}
 }
 
