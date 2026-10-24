@@ -205,12 +205,9 @@ func (a *App) stopContributeAppForward(selection uiSelection) {
 	a.sendCommandToContributeERunSession(selection, "\x03")
 }
 
-// contributeAppLaunchCommand is what the contribute tab runs for "Open
-// contribute app": rebuild the desktop from the clone, then serve it headless.
-// The rebuild is explicit because the CLI's development wrapper only builds
-// erun; `erun app` then launches the copy build.sh just wrote to erun-ui/bin.
+// The clone's development wrapper rebuilds the desktop before `erun app`.
 func contributeAppLaunchCommand(port int) string {
-	return fmt.Sprintf("\"$HOME/git/erun/erun-ui/build.sh\" && erun app --headless --port %d\n", port)
+	return fmt.Sprintf("erun app --headless --port %d\n", port)
 }
 
 func (a *App) sendCommandToContributeERunSession(selection uiSelection, command string) {

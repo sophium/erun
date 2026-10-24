@@ -76,6 +76,8 @@ FROM cli-build AS cli-test
 # here too (TestCLITestStageCopiesEveryDockerDirectory).
 COPY .dockerignore .gitignore /src/
 COPY .erun/config.yaml /src/.erun/config.yaml
+COPY Formula /src/Formula
+COPY bucket /src/bucket
 COPY erun-devops/docker/erun-backend-api /src/erun-devops/docker/erun-backend-api
 COPY erun-devops/docker/erun-backend-db /src/erun-devops/docker/erun-backend-db
 COPY erun-devops/docker/erun-backend-postgres /src/erun-devops/docker/erun-backend-postgres
@@ -145,7 +147,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cd erun-cli && \
     ERUN_VERSION="${ERUN_VERSION:-$(tr -d '\n' < /src/erun-devops/VERSION)}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${ERUN_DATE}" -o /out/erun . && \
+    go build -ldflags "-X github.com/sophium/erun/cmd/shared.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd/shared.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd/shared.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 

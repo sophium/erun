@@ -57,7 +57,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --section utils --homepage https://github.com/sophium/erun \
         --description "Multi-tenant multi-environment deployment and management tool" \
         --description-line "ERun ships the erun CLI together with the emcp and eapi executables." \
-        --go-build /src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd.buildVersion \
+        --go-build /src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd/shared.buildVersion \
         --go-build /src/erun-mcp:./cmd/emcp:/usr/bin/emcp:github.com/sophium/erun/erun-mcp.buildVersion \
         --go-build /src/erun-backend/erun-backend-api:./cmd/eapi:/usr/bin/eapi \
         --file /src/LICENSE:/usr/share/doc/erun/copyright \

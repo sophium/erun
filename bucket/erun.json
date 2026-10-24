@@ -15,7 +15,7 @@
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
-      "$cliLdflags = \"-s -w -X github.com/sophium/erun/cmd.buildVersion=$version\"",
+      "$cliLdflags = \"-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-cli\"",
       "go build -trimpath -ldflags $cliLdflags -o \"$dir\\erun.exe\" .",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun.exe' }",

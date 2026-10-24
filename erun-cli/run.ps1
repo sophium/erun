@@ -70,9 +70,9 @@ if ($helpRequest -and (Test-Path $CliExe)) {
 }
 
 # --- always rebuild the CLI (CGO disabled; fast) ---------------------------
-$ldflags = "-X github.com/sophium/erun/cmd.buildVersion=$buildVersion " +
-           "-X github.com/sophium/erun/cmd.buildCommit=$buildCommit " +
-           "-X github.com/sophium/erun/cmd.buildDate=$buildDate"
+$ldflags = "-X github.com/sophium/erun/cmd/shared.buildVersion=$buildVersion " +
+           "-X github.com/sophium/erun/cmd/shared.buildCommit=$buildCommit " +
+           "-X github.com/sophium/erun/cmd/shared.buildDate=$buildDate"
 if (-not $quiet) { [Console]::Error.Write(">> rebuilding erun CLI ($buildVersion)... ") }
 $env:CGO_ENABLED = "0"
 try {
