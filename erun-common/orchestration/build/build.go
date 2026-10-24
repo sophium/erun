@@ -1,4 +1,4 @@
-package orchestration
+package build
 
 import (
 	"errors"
@@ -50,10 +50,10 @@ func ResolveBuildExecution(ctx core.Context, store shared.DockerStore, findProje
 	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
 }
 
-// buildExecutionPlansWork reports whether an execution has anything to run. An
+// BuildExecutionPlansWork reports whether an execution has anything to run. An
 // execution that plans none of these does no work and tests nothing, so its
 // success would be indistinguishable from a real pass.
-func buildExecutionPlansWork(execution shared.BuildExecutionSpec) bool {
+func BuildExecutionPlansWork(execution shared.BuildExecutionSpec) bool {
 	return execution.Release != nil ||
 		execution.Script != nil ||
 		len(execution.LinuxPackages) > 0 ||

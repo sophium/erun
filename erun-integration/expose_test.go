@@ -237,8 +237,10 @@ func TestExpose(t *testing.T) {
 		// checkout to read .erun/config.yaml from.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
-			"--services-zone", "services.erunpaas.com", "--platform-namespace", "frs-prod", "--dry-run"},
+		result := erun.Run(t, []string{
+			"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--services-zone", "services.erunpaas.com", "--platform-namespace", "frs-prod", "--dry-run",
+		},
 			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -251,8 +253,10 @@ func TestExpose(t *testing.T) {
 		// rather than resolving a plan from an incomplete pair.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
-			"--services-zone", "services.erunpaas.com", "--dry-run"},
+		result := erun.Run(t, []string{
+			"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--services-zone", "services.erunpaas.com", "--dry-run",
+		},
 			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit with only --services-zone set, got 0:\n%s", result.Combined)
@@ -364,8 +368,10 @@ func TestExpose(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
-			"--services-zone", "services.erunpaas.com", "--platform-namespace", "frs-prod", "--dry-run"},
+		result := erun.Run(t, []string{
+			"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--services-zone", "services.erunpaas.com", "--platform-namespace", "frs-prod", "--dry-run",
+		},
 			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

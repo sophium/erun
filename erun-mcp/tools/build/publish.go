@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -43,7 +43,7 @@ func PublishTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 				RepoPath:        workDir,
 				VersionOverride: strings.TrimSpace(input.Version),
 			}
-			return orchestration.RunPublish(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			return release.RunPublish(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
 		})
 		envelope, err := sharedpkg.RunJobEnvelope(runtime, "publish", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err

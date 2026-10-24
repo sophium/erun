@@ -2107,8 +2107,10 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 		fixture.StubBinaryWithScript(t, stubs, "claude", "printf 'lane work\\n' > uncommitted.txt\nexit 0\n")
 		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
 
-		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
-			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		start := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if start.ExitCode != 0 {
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
@@ -2161,8 +2163,10 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 		fixture.StubBinaryWithScript(t, stubs, "claude", "exit 0\n")
 		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
 
-		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
-			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		start := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if start.ExitCode != 0 {
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
@@ -2215,8 +2219,10 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 		fixture.StubBinaryWithScript(t, stubs, "claude", "printf 'lane work\\n' > uncommitted.txt\nexit 0\n")
 		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
 
-		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
-			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		start := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if start.ExitCode != 0 {
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}

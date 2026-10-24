@@ -1,4 +1,4 @@
-package orchestration
+package deploy
 
 import (
 	"github.com/sophium/erun/erun-common/base/core"

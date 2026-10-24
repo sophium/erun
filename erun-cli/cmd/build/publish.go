@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/command/e2e"
-	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
@@ -41,7 +41,7 @@ func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFi
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
 			defer closeEnvTrace()
-			return orchestration.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
+			return release.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},
 	}
 	shared.AddDryRunFlag(cmd)

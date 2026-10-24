@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/orchestration"
+	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/release"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -41,11 +42,11 @@ func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Projec
 }
 
 func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) error {
-	execution, err := orchestration.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, sharedpkg.DockerCommandTarget{Release: true, Force: force})
+	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, sharedpkg.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err
 	}
-	version := strings.TrimSpace(orchestration.NewBuildResult(execution).Version)
+	version := strings.TrimSpace(buildrun.NewBuildResult(execution).Version)
 	if _, err := fmt.Fprintln(ctx.Stdout, version); err != nil {
 		return err
 	}

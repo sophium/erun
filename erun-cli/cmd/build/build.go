@@ -13,6 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/orchestration"
+	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
+	deployrun "github.com/sophium/erun/erun-common/orchestration/deploy"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
@@ -79,7 +81,7 @@ func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectF
 }
 
 func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target sharedpkg.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
-	execution, err := orchestration.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -103,18 +105,18 @@ func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectR
 		if err := orchestration.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 			return err
 		}
-		return ctx.WriteResult(orchestration.NewBuildResult(execution))
+		return ctx.WriteResult(buildrun.NewBuildResult(execution))
 	}
 	if err := runBuildAndDeploy(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, execution, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps); err != nil {
 		return err
 	}
-	return ctx.WriteResult(orchestration.NewBuildResult(execution))
+	return ctx.WriteResult(buildrun.NewBuildResult(execution))
 }
 
 // runBuildAndDeploy is --deploy's composed step: resolve the deploy specs, then
 // roll the build out.
 func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target sharedpkg.DockerCommandTarget, execution sharedpkg.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
-	if orchestration.BuildExecutionUsesBuildScript(execution) {
+	if buildrun.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
 
@@ -123,7 +125,7 @@ func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjec
 		return errors.New("store does not support deploy resolution")
 	}
 
-	deploySpecs, err := orchestration.ResolveCurrentDeploySpecsForDockerTarget(ctx, buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
+	deploySpecs, err := deployrun.ResolveCurrentDeploySpecsForDockerTarget(ctx, buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -148,13 +150,13 @@ func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFi
 				return errPushVersionRequired
 			}
 			ctx := shared.CommandContext(cmd)
-			pushInput, buildInput, err := orchestration.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+			pushInput, buildInput, err := buildrun.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			return pushpkg.RunPushCommand(ctx, func(ctx core.Context) error {
-				return orchestration.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
+				return buildrun.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 			})
 		},
 	}
@@ -227,20 +229,20 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			buildContext, _ := resolveBuildContext()
 			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
-				pushInput, buildInput, err := orchestration.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+				pushInput, buildInput, err := buildrun.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 				if err != nil {
 					return err
 				}
 				return pushpkg.RunPushCommand(ctx, func(ctx core.Context) error {
-					return orchestration.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
+					return buildrun.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 				})
 			}
-			execution, err := orchestration.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+			execution, err := buildrun.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
 			return pushpkg.RunPushCommand(ctx, func(ctx core.Context) error {
-				return orchestration.RunDockerPushExecution(ctx, execution, buildWithRetry, push)
+				return buildrun.RunDockerPushExecution(ctx, execution, buildWithRetry, push)
 			})
 		},
 	}
@@ -253,7 +255,7 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 }
 
 func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, target *sharedpkg.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
-	execution, err := orchestration.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
+	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
 	}
@@ -261,7 +263,7 @@ func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProject
 	if err := orchestration.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 		return err
 	}
-	version := strings.TrimSpace(orchestration.NewBuildResult(execution).Version)
+	version := strings.TrimSpace(buildrun.NewBuildResult(execution).Version)
 	if version == "" {
 		return errors.New("erun push --build: the build did not mint a version to push")
 	}

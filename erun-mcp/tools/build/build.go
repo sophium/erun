@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/orchestration"
+	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -55,7 +56,7 @@ func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 				if err := orchestration.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime), runtime.Store, sharedpkg.CloudDependencies()); err != nil {
 					return err
 				}
-				built := orchestration.NewBuildResult(execution)
+				built := buildrun.NewBuildResult(execution)
 				result = &built
 				return nil
 			})
@@ -80,7 +81,7 @@ func PushTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallTo
 				return err
 			}
 			return push.RunPushCommand(runCtx, func(runCtx core.Context) error {
-				return orchestration.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime))
+				return buildrun.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime))
 			})
 		})
 		envelope, err := sharedpkg.RunJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
@@ -120,12 +121,12 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeCon
 		}
 		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]shared.DockerBuildSpec{*build})
 		if releaseSpec != nil {
-			execution = orchestration.BuildExecutionSpecWithRelease(execution, *releaseSpec)
+			execution = buildrun.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
 		return buildpkg.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	}
 
-	return orchestration.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+	return buildrun.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 }
 
 func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConfig, projectRoot, component, versionOverride string) (shared.DockerPushExecutionSpec, error) {
@@ -142,7 +143,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConf
 	}
 
 	if component == "" {
-		pushInput, buildInput, err := orchestration.ResolveDockerPushSpec(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+		pushInput, buildInput, err := buildrun.ResolveDockerPushSpec(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 		if err != nil {
 			return shared.DockerPushExecutionSpec{}, err
 		}
@@ -150,7 +151,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConf
 		if buildInput != nil {
 			builds = append(builds, *buildInput)
 		}
-		return orchestration.DockerPushExecutionSpecFromSpecs(builds, []shared.DockerPushSpec{pushInput}), nil
+		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []shared.DockerPushSpec{pushInput}), nil
 	}
 
 	build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
@@ -162,7 +163,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConf
 	}
 	build.Push = true
 
-	return orchestration.DockerPushExecutionSpecFromSpecs([]shared.DockerBuildSpec{*build}, []shared.DockerPushSpec{
+	return buildrun.DockerPushExecutionSpecFromSpecs([]shared.DockerBuildSpec{*build}, []shared.DockerPushSpec{
 		buildpkg.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

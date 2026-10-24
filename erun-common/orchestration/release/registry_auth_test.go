@@ -1,4 +1,4 @@
-package orchestration
+package release
 
 import (
 	"encoding/base64"

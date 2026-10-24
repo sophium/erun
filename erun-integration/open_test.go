@@ -1533,10 +1533,14 @@ func TestOpen(t *testing.T) {
 			}
 		}
 		stubAdoptHolderProbes(t, setup,
-			adoptHolder{port: 26100, pid: 4242,
-				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"},
-			adoptHolder{port: 26122, pid: 4243,
-				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26122:26122 --address 127.0.0.1"},
+			adoptHolder{
+				port: 26100, pid: 4242,
+				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+			},
+			adoptHolder{
+				port: 26122, pid: 4243,
+				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26122:26122 --address 127.0.0.1",
+			},
 		)
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 
@@ -1874,8 +1878,10 @@ func TestOpen(t *testing.T) {
 		// only keeps the golden deterministic across hosts.
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		holderPID := fixture.StartServingPortHolder(t, 26100)
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/adopts_existing_kubectl_port_forward", normalize.Apply(result.Combined))
 	})
@@ -1894,8 +1900,10 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		holderPID := fixture.StartStalePortHolder(t, 26100)
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/previews_replacing_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
 		// Side effect outside the captured streams: dry-run plans the
@@ -1935,8 +1943,10 @@ func TestOpen(t *testing.T) {
 		// non-TTY default in this harness would take the no-shell branch instead.
 		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		holderPID := fixture.StartStalePortHolder(t, 26100)
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, holderPID)
 
@@ -1989,8 +1999,10 @@ func TestOpen(t *testing.T) {
 		envVars = append(envVars, openHostOSOverride)
 		fixture.StartStalePortHolder(t, 26100)
 		const unkillablePID = 999999999
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: unkillablePID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 26100, pid: unkillablePID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -2016,8 +2028,10 @@ func TestOpen(t *testing.T) {
 		// 26100 (nothing is really bound), while the ps stub still answers
 		// for this exact PID — the shape production's isPortForwardProcess
 		// check needs to recognise the recorded PID as its own.
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/previews_reaping_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
@@ -2055,8 +2069,10 @@ func TestOpen(t *testing.T) {
 		envVars = append(envVars, openHostOSOverride)
 		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		deadPID := fixture.StartUnboundPortForwardProcess(t)
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
+		})
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
 
@@ -2143,8 +2159,10 @@ exit 1
 		// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
 		// only keeps the golden deterministic across hosts.
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 88888,
-			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 17000, pid: 88888,
+			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000",
+		})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/refuses_to_bind_when_foreign_process_holds_port", normalize.Apply(result.Combined))
 	})
@@ -2167,8 +2185,10 @@ exit 1
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26133, pid: 88889,
-			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:26133"})
+		stubAdoptHolderProbes(t, setup, adoptHolder{
+			port: 26133, pid: 88889,
+			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:26133",
+		})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/api_forward_targets_the_environments_own_service_port", normalize.Apply(result.Combined))
 	})
@@ -2986,5 +3006,4 @@ exit 1
 			t.Errorf("expected 2 interactive exec calls (replaced + reattach), got %d:\n%s", got, execCalls)
 		}
 	})
-
 }

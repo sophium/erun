@@ -591,8 +591,10 @@ func TestReview(t *testing.T) {
 	t.Run("create_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		args := []string{"review", "create", "--name", "Add widget", "--repository", reviewRepository,
-			"--source-branch", "feature/widget", "--target-branch", "main", "--dry-run"}
+		args := []string{
+			"review", "create", "--name", "Add widget", "--repository", reviewRepository,
+			"--source-branch", "feature/widget", "--target-branch", "main", "--dry-run",
+		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -605,9 +607,11 @@ func TestReview(t *testing.T) {
 	t.Run("create_with_issue_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		args := []string{"review", "create", "--name", "Add widget", "--repository", reviewRepository,
+		args := []string{
+			"review", "create", "--name", "Add widget", "--repository", reviewRepository,
 			"--source-branch", "bug/2212-issue-ref-from-branch", "--target-branch", "main",
-			"--issue", "sophium/erun#2683", "--dry-run"}
+			"--issue", "sophium/erun#2683", "--dry-run",
+		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -690,8 +694,10 @@ func TestReview(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
-		args := []string{"review", "create", "--name", "dup", "--repository", reviewRepository,
-			"--source-branch", "a", "--target-branch", "main"}
+		args := []string{
+			"review", "create", "--name", "dup", "--repository", reviewRepository,
+			"--source-branch", "a", "--target-branch", "main",
+		}
 		first := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if first.ExitCode != 0 {
 			t.Fatalf("first create exit %d: %s", first.ExitCode, first.Combined)
@@ -1295,8 +1301,10 @@ func TestReview(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
-		args := []string{"review", "create", "--name", "json test", "--repository", reviewRepository,
-			"--source-branch", "a", "--target-branch", "main", "--output", "json"}
+		args := []string{
+			"review", "create", "--name", "json test", "--repository", reviewRepository,
+			"--source-branch", "a", "--target-branch", "main", "--output", "json",
+		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

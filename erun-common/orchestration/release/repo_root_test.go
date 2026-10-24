@@ -1,4 +1,4 @@
-package orchestration
+package release
 
 import (
 	"os"

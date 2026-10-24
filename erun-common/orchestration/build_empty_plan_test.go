@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -36,13 +37,13 @@ func TestRunBuildExecutionAcceptsAScriptOnlyPlan(t *testing.T) {
 // An empty plan is refused in dry-run too: the preview must show the failure
 // rather than print an empty plan and exit zero.
 func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
-	if buildExecutionPlansWork(shared.BuildExecutionSpec{}) {
+	if buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{}) {
 		t.Error("an execution with no release, script, image, or chart plans no work")
 	}
-	if !buildExecutionPlansWork(shared.BuildExecutionSpec{Script: &shared.ScriptSpec{Path: "./build.sh"}}) {
+	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{Script: &shared.ScriptSpec{Path: "./build.sh"}}) {
 		t.Error("a project build script is work")
 	}
-	if !buildExecutionPlansWork(shared.BuildExecutionSpec{LinuxPackages: []shared.LinuxPackageSpec{{Name: "erun-ui"}}}) {
+	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{LinuxPackages: []shared.LinuxPackageSpec{{Name: "erun-ui"}}}) {
 		t.Error("a linux package is work")
 	}
 }
