@@ -138,7 +138,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	}
 }
 
-// The regression #1354 exists to prevent: a pod path that happens to share a
+// A pod path that happens to share a
 // name with a real host file (/etc/hosts is the canonical example) must never
 // resolve to that host file just because it falls outside the recognized pod
 // directories.

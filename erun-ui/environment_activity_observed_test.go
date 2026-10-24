@@ -29,7 +29,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
-	// LoadPortForwardState's environmentIsConfigured guard (added for #1049) reads
+	// LoadPortForwardState's environmentIsConfigured guard reads
 	// through the real on-disk ConfigStore, not any App-injected store stub — on
 	// purpose, so a stale record for a deleted environment reads as "no forward"
 	// rather than a live one. adrg/xdg caches ConfigHome at process init instead

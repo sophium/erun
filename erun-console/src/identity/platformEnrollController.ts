@@ -8,8 +8,7 @@ import { describeQueryError } from '../app/queryError';
 // report: a no-op re-enrollment (alreadyEnrolled true on the 'enrolled'
 // branch), a genuine username collision (its own USERNAME_TAKEN code, kept
 // apart as 'conflict' rather than falling into the generic 'error' bucket),
-// and every other failure. Collapsing the first two into one message is
-// exactly the gap erun#1744 asks to close.
+// and every other failure, so the first two never collapse into one message.
 export type PlatformEnrollState =
   | { status: 'idle' }
   | { status: 'enrolling' }

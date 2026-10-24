@@ -17,7 +17,7 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// This file drives erun#1684's role model end to end against a real,
+// This file drives the role model end to end against a real,
 // migrated PostgreSQL and the real handler's own registered route catalog —
 // the same "real database, real authorizer, real routes" standard
 // capabilities_e2e_test.go already holds the whoami capability contract to.
@@ -137,8 +137,7 @@ func securityContextFor(tenantID string, tenantType model.TenantType, userID str
 	return security.Context{TenantID: tenantID, TenantType: string(tenantType), ErunUserID: userID}
 }
 
-// TestTenantUserCannotAdministerTheTenant is erun#1684's first mandatory
-// test: TenantUser cannot create or delete environments, register contexts,
+// TestTenantUserCannotAdministerTheTenant: TenantUser cannot create or delete environments, register contexts,
 // or manage users, invites, roles or org settings -- driven through every
 // real registered route, not by inspecting routeroles' patterns. It also
 // pins the positive half: TenantUser really is permitted everything
@@ -166,18 +165,14 @@ func TestTenantUserCannotAdministerTheTenant(t *testing.T) {
 	_ = admin
 }
 
-// TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant is
-// erun#1684's second mandatory test: TenantAdmin cannot reach any
+// TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant: TenantAdmin cannot reach any
 // operations-gated route, including from inside the OPERATIONS tenant. The
 // tenant's own first user still gets ReadAll/WriteAll (insertFirstTenantUser
 // keeps the platform-operator grant for an OPERATIONS tenant type, since
 // this instance's own root-resolution capabilities live only behind it and
-// no other user exists yet to grant them). The real gap the issue
-// identifies is the *second* user: today every additional user in the
-// OPERATIONS tenant can only ever be granted the same wildcard reach.
-// TenantAdmin is what makes "administers this tenant's own users and
-// environments, but is not a platform operator" finally expressible, so
-// this test grants it to a colleague the same way the operator actually
+// no other user exists yet to grant them). TenantAdmin is what makes
+// "administers this tenant's own users and environments, but is not a
+// platform operator" expressible for every additional user, so this test grants it to a colleague the same way the operator actually
 // would (an explicit roleIds enrollment) and proves it stays a genuinely
 // lesser position.
 func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *testing.T) {
@@ -262,9 +257,8 @@ func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 	}
 }
 
-// TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles is erun#1684's
-// migration-safety test: a user who already holds WriteAll (seeded exactly
-// the way every enrolled user's WriteAll grant looked before this change)
+// TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles is the
+// migration-safety test: a user who already holds a legacy WriteAll grant
 // keeps full effective access after TenantUser/TenantAdmin exist -- both
 // immediately, and after something else (RoleRepository.List) triggers the
 // lazy ensureNarrowerRolesExist backfill for the same tenant. Nothing about
@@ -309,9 +303,9 @@ func TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles(t *testing.T) {
 	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, allowEverything)
 }
 
-// TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable is erun#1684's
-// last mandatory test: a newly enrolled user (no caller-supplied roleIds)
-// gets exactly TenantUser -- not the previous zero-role default -- and the
+// TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable: a newly
+// enrolled user (no caller-supplied roleIds) gets exactly TenantUser -- not
+// zero roles -- and the
 // tenant is still never left unable to grant roles (routes/users.go's
 // existing concern, ErrLastGrantCapableRole), even though TenantUser itself
 // is deliberately not grant-capable.

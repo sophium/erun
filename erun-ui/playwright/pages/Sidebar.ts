@@ -270,7 +270,7 @@ export class Sidebar {
   //
   // Re-activating until the indicator is gone converges on the observable
   // condition rather than betting on one keypress winning the race. A close that
-  // is genuinely broken never converges, so the regression still fails the step.
+  // is genuinely broken never converges, so the step still fails.
   // This is the whole close contract for a spec — do not re-assert the indicator
   // afterwards: a closed environment produces no further traffic, so there is no
   // event to bound a "still closed" check against, and a bare re-check is a race
@@ -397,7 +397,7 @@ export class Sidebar {
 
   // The row's main click target — labelled "Open" once running, "Start"
   // otherwise — carries aria-current so a spec can assert it is (or is not)
-  // the sidebar's single focused row (#1204), mirroring envRowButton().
+  // the sidebar's single focused row, mirroring envRowButton().
   orchestratorRowButton(name: string): Locator {
     return this.erunSection().getByRole('button', {
       name: new RegExp(`^(Open|Start) orchestrator ${name}$`),
@@ -441,7 +441,7 @@ export class Sidebar {
   }
 
   // The tenant name button that opens its dashboard, carrying aria-current
-  // when the dashboard is the sidebar's focused row (#1204).
+  // when the dashboard is the sidebar's focused row.
   tenantDashboardButton(tenant: string): Locator {
     return this.page.getByRole('button', { name: `Open ${tenant} dashboard` });
   }
@@ -471,7 +471,7 @@ export class Sidebar {
   // environments") opens with the plain running light's label. A substring
   // match therefore resolves to the restart-required light whenever the plain
   // one is absent, so "this row shows a plain running dot" would hold on a row
-  // that does not show one — the exact distinction the erun#1319 work is about.
+  // that does not show one.
   orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {
     return this.erunSection().getByRole('img', {
       name: `Orchestrator ${name} is ${state}`,
@@ -479,7 +479,7 @@ export class Sidebar {
     });
   }
 
-  // Distinct from a plain running dot (erun#1319): a live session whose
+  // Distinct from a plain running dot: a live session whose
   // environment scope was edited while it ran still holds its old toolset
   // until restarted, so the row says so rather than reading as a clean
   // "running" that the operator has no reason to doubt.

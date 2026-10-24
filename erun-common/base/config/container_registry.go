@@ -495,9 +495,7 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	// The legacy `repopath` fold is unconditional across all env types:
 	// EffectiveLocalRepoPath already resolved `repopath` for every type via its
-	// fallback, so only the stored field name moves. This intentionally broadens
-	// the old local-agent-only NormalizeEnvConfig backfill, which was
-	// inconsistent with that fallback.
+	// fallback, so only the stored field name moves.
 	if strings.TrimSpace(c.LocalRepoPath) == "" {
 		c.LocalRepoPath = strings.TrimSpace(aux.LegacyRepoPath)
 	}

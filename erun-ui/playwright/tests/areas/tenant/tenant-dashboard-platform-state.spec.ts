@@ -15,9 +15,8 @@ import {
 // instead of one generic "sign in again" sentence. See
 // tenant-dashboard-refresh.spec.ts for why this stages a throwaway env and
 // stubs the RPC layer rather than using the seeded baseline or a real
-// backend — the seeded baseline's only cloud alias is AWS-typed, which is
-// exactly the configuration this issue exists to stop the dashboard from
-// using for the platform.
+// backend — the seeded baseline's only cloud alias is AWS-typed, which the
+// dashboard must never use for the platform.
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -77,8 +76,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
       await expect(app.tenantDashboard.connectApiUrlInput()).toBeVisible();
       // The default must be the platform's own apex host regardless of
-      // tenant name — SEED_TENANT ('pw') is exactly the shape that used to
-      // interpolate into a host that was NXDOMAIN for every tenant but frs.
+      // tenant name, never a host interpolated from SEED_TENANT ('pw').
       await expect(app.tenantDashboard.connectApiUrlInput()).toHaveValue(
         'https://api.erunpaas.com',
       );
@@ -238,7 +236,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // Regression for erun#1820: a not-yet-enrolled caller's self-enroll
+  // A not-yet-enrolled caller's self-enroll
   // attempt is refused by the platform's own auth middleware -- the
   // expected outcome EnrollERunPlatformUser documents -- and must render as
   // the administrator hand-off already sitting on this card, not the raw
@@ -311,7 +309,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // The reported state of #2565's second sub-claim: a local tenant whose
+  // A local tenant whose
   // erun-type alias reaches a *different* platform tenant. Resolution
   // succeeds, whoami answers — for another tenant — and every panel under the
   // heading would be that tenant's reviews, merge queue, users and audit,
@@ -376,11 +374,10 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // Regression guard: the sidebar's own cloud-alias "Log in" control
+  // The sidebar's own cloud-alias "Log in" control
   // (Sidebar.PrimaryCloudAliasControl.tsx, dispatching loginPrimaryCloudProvider
-  // directly, no dashboard recovery attached) must render exactly as before
-  // this change — the seeded baseline's AWS alias is the fixture this issue's
-  // fix must never touch.
+  // directly, no dashboard recovery attached) is unaffected by the dashboard's
+  // platform resolution for the seeded baseline's AWS alias.
   test("the sidebar's own cloud-alias login button is unchanged", async ({ app }) => {
     await app.sidebar.openCloudAliasPopover('pw-aws');
     await expect(app.sidebar.cloudAliasPopoverButton('Log in')).toBeVisible();

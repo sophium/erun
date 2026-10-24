@@ -6,11 +6,9 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// The env hover card used to show one bare "Version" row, so a tenant-line
-// runtime version (e.g. petios's own release line) read as if it were
-// erun's, and the erun version was never shown at all. Its longest value
-// also used to break mid-token across two ragged lines, because the narrow
-// label-sharing column, not the card's `wide` layout, held it.
+// The env hover card shows the tenant-line runtime version and the erun
+// version separately, so one is never read as the other, and its longest
+// value must never break mid-token.
 
 // rowValue resolves a HoverCardRow's dd by its dt's exact label text, rather
 // than a positional dd index -- robust against rows that only render
@@ -133,13 +131,9 @@ test.describe('sidebar env hover card version rows', () => {
     }
   });
 
-  // The longest literal identifier on the card used to sit in the narrow
-  // value column it shares with the label, so a version this long broke
-  // mid-token across two lines -- the `wide` layout (col-spanning both grid
-  // columns) existed to prevent exactly that. #1901 retired `wide` from this
-  // card and truncates identifiers instead (with the full value in `title`),
-  // which is a stronger guarantee: `white-space: nowrap` makes a mid-token
-  // break structurally impossible, not merely unlikely at this card's width.
+  // The card truncates identifiers (with the full value in `title`) rather
+  // than wrapping them: `white-space: nowrap` makes a mid-token break
+  // structurally impossible, not merely unlikely at this card's width.
   //
   // This is asserted via the computed style and the rendered box height
   // rather than `Range.getClientRects()`: Chromium reports TWO overlapping

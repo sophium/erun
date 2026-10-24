@@ -92,8 +92,8 @@ func waitForPodRunning(t *testing.T, admin kubernetes.Interface, namespace, name
 	}
 }
 
-// assertExecForbiddenUnderPreFixRules reproduces the issue's own live
-// reproduction: `kubectl exec` => Forbidden for lack of the pods/exec grant.
+// assertExecForbiddenUnderPreFixRules asserts the broken state:
+// `kubectl exec` => Forbidden for lack of the pods/exec grant.
 func assertExecForbiddenUnderPreFixRules(t *testing.T, config *rest.Config, namespace, podName string) {
 	t.Helper()
 	err := execProbeCommand(config, namespace, podName)
@@ -116,7 +116,7 @@ func assertExecSucceedsUnderFixedRules(t *testing.T, config *rest.Config, namesp
 }
 
 // execProbeCommand runs the exact call `erun expose`'s pdnsutil write makes
-// (erun-common/expose_exec.go's upsertPowerDNSRecord): a `kubectl exec`
+// (command/expose's upsertPowerDNSRecord): a `kubectl exec`
 // against a real pod, negotiating the same SPDY protocol upgrade kubectl
 // itself uses, so an RBAC denial surfaces the same Forbidden a real
 // replace-rrset write would hit.

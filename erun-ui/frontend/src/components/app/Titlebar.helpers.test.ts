@@ -25,7 +25,7 @@ function idleStatus(overrides: Partial<IdleStatus> = {}): IdleStatus {
   };
 }
 
-// Regression for erun#1216 bug 3: a reading the pod never confirmed must not
+// A reading the pod never confirmed must not
 // render with the same confidence as a live one.
 test('a host-only idle reading leads its tooltip with a provenance caveat', () => {
   const lines = idleStatusTooltipLines(idleStatus({ fromPod: false }));

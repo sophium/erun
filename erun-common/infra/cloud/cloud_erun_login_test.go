@@ -69,12 +69,10 @@ func TestERunCloudProviderLoginDeviceFlowPersistsTokensAndCache(t *testing.T) {
 	}
 }
 
-// TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope proves
-// erun#1605's third item degrades gracefully: the org-claim scope is
-// requested by default, but an issuer that has never heard of it (a
-// dedicated/BYO IdP, the common case, not the shipped Zitadel) must still let
-// the login through — exactly as it did before this default was added —
-// rather than breaking on an invalid_scope refusal.
+// TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope: the
+// org-claim scope is requested by default, but an issuer that has never heard
+// of it (a dedicated/BYO IdP, the common case, not the shipped Zitadel) must
+// still let the login through rather than breaking on an invalid_scope refusal.
 func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
@@ -179,8 +177,8 @@ func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 
 // A device grant that cannot complete must not be a dead end: the issuer
 // advertises the endpoint, so auto starts there, but the authorization-code
-// path still has to run when it fails. Regression for a bug where one broken
-// authentication method locked the CLI out entirely.
+// path still has to run when it fails, so one broken authentication method
+// cannot lock the CLI out.
 func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())

@@ -54,7 +54,7 @@ type Capability struct {
 	// see APIRoutePattern.
 	Pattern string
 	// AgentFacing marks a capability declared exempt from needing an
-	// operator entry point. See eruncommon.MCPToolDescriptor.AgentFacing,
+	// operator entry point. See mcptools.MCPToolDescriptor.AgentFacing,
 	// erun-cli/cmd.cliOnlyAgentFacingCommands, and
 	// erun-backend-api/internal/routes.InternalAPIRoutes for the three
 	// declaration sites.

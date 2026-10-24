@@ -298,7 +298,7 @@ function SmtpSettingsBody({
 }
 
 // SmtpSettingsPanel is the console's view of the platform's outbound-mail
-// configuration (issue #1168): every flow that reaches a person out of band
+// configuration: every flow that reaches a person out of band
 // (signup verification, password reset, the enrollment invite in
 // UsersPanel) depends on it, and a freshly deployed platform starts with
 // none configured. Only rendered for an OPERATIONS tenant — see App.tsx.

@@ -52,17 +52,16 @@ func (e *NamespaceDeleteRefusedError) Error() string {
 	return fmt.Sprintf("namespace %q was not deleted: the cluster refused the request:\n%s", e.Namespace, e.Detail)
 }
 
-// TraceEnsureKubernetesNamespace traces the namespace check EnsureKubernetesNamespace
-// performs and, only when the create that would follow is actually going to run,
-// traces that too. A dry run cannot read the cluster to know which way the check
-// resolves without every dry-run scenario in the suite needing a kubectl stub it
-// otherwise has no reason to declare, so it states the create as conditional
-// instead of asserting it: asserting it unconditionally is exactly the defect
-// where a dry run showed a create the real run, finding the namespace
-// already there, never performed. The real run does have a cluster to ask, so it
-// resolves the same question live and traces only the branch that will execute —
-// mirroring announceWorktreeVolumeChange's real/dry-run split for the same class
-// of decision.
+// TraceEnsureKubernetesNamespace traces the namespace check
+// EnsureKubernetesNamespace performs and, only when the create that would
+// follow is actually going to run, traces that too. A dry run cannot read the
+// cluster to know which way the check resolves without every dry-run scenario
+// in the suite needing a kubectl stub it otherwise has no reason to declare, so
+// it states the create as conditional instead of asserting a create the real
+// run may never perform. The real run does have a cluster to ask, so it
+// resolves the same question live and traces only the branch that will execute
+// — mirroring announceWorktreeVolumeChange's real/dry-run split for the same
+// class of decision.
 func TraceEnsureKubernetesNamespace(ctx core.Context, contextName, namespace string) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -172,15 +171,15 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		args = append(args, "--context", contextName)
 	}
 	// Retract any in-flight ACME challenge before the namespace teardown that
-	// would remove the credential its cleanup needs (#1174). Deleting the
-	// namespace first removes the env's DNS-01 token Secret as ordinary
-	// content, and Kubernetes gives no ordering guarantee against cert-manager
-	// finalizing a still-pending Challenge in the same namespace -- so the
-	// finalizer would never clear and the namespace would sit in Terminating
-	// for the full NamespaceDeleteTimeout. Best-effort by design: a cluster
-	// with no cert-manager, or a challenge that will not finalize, must not
-	// block the delete. If a challenge does survive this, the namespace's own
-	// conditions still name it in NamespaceTerminationBlockedError below.
+	// would remove the credential its cleanup needs. Deleting the namespace
+	// first removes the env's DNS-01 token Secret as ordinary content, and
+	// Kubernetes gives no ordering guarantee against cert-manager finalizing a
+	// still-pending Challenge in the same namespace -- so the finalizer would
+	// never clear and the namespace would sit in Terminating for the full
+	// NamespaceDeleteTimeout. Best-effort by design: a cluster with no
+	// cert-manager, or a challenge that will not finalize, must not block the
+	// delete. If a challenge does survive this, the namespace's own conditions
+	// still name it in NamespaceTerminationBlockedError below.
 	retractionNote := retractACMEChallenges(contextName, namespace)
 
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
@@ -275,10 +274,8 @@ const acmeRetractTimeout = 90 * time.Second
 // The distinction matters. A cluster with no cert-manager has no CRDs, the read
 // fails with "the server doesn't have a resource type", and skipping is exactly
 // right at zero cost. A cluster that HAS cert-manager but refuses the read is
-// the opposite: the retraction cannot work, the namespace will wedge, and
-// treating that as "nothing to retract" is how this shipped inert the first
-// time (#1183) -- the read was Forbidden, that was read as "no challenges", and
-// the whole step was skipped with nothing to say so.
+// the opposite: the retraction cannot work, the namespace will wedge, and a
+// Forbidden read must not be mistaken for "nothing to retract".
 func retractACMEChallenges(contextName, namespace string) string {
 	present, err := acmeChallengesPresent(contextName, namespace)
 	if err != nil {

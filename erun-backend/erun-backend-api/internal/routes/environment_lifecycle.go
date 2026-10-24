@@ -48,14 +48,11 @@ const deleteClaimStaleAfter = provision.DeleteClaimStaleAfter
 
 // deleteEnvironment starts tearing down a runtime environment's namespace
 // (when it has one) and its row, the server-side equivalent of `erun
-// delete`. The teardown itself runs asynchronously (#1140): a namespace stuck
-// on an unsatisfiable finalizer can wedge for as long as Kubernetes is
-// willing to sit in Terminating, so this handler claims the delete and starts
-// the durable workflow behind it, then returns without waiting on it — the
-// same 202-then-poll shape createEnvironment/deployEnvironment already use
-// for a durable workflow's own start. A caller polls GET
-// /v1/environments/{id} to watch status converge to gone (204 from a later
-// GET) or deletion-blocked.
+// delete`. The teardown runs asynchronously: a namespace stuck on an
+// unsatisfiable finalizer can sit in Terminating indefinitely, so this
+// handler claims the delete, starts the durable workflow, and returns 202. A
+// caller polls GET /v1/environments/{id} until it is gone (a later GET
+// answers 204) or deletion-blocked.
 func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Request) {
 	if r.deleter == nil {
 		writeError(w, http.StatusNotImplemented, "the deploy executor is not configured")
@@ -155,7 +152,7 @@ func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx cont
 
 // lifecycleInput resolves the placement a stop/delete Job needs: the tenant
 // name (RLS-scoped to the caller), the version the environment last actually
-// deployed, and the cluster it was placed on at create time (#1112) —
+// deployed, and the cluster it was placed on at create time —
 // stop/delete always target that same cluster, never a freshly auto-selected
 // one, mirroring deployInput's tenant resolution.
 func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model.Environment) (provision.EnvLifecycleInput, error) {

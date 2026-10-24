@@ -133,12 +133,10 @@ func reportSetDifference(t *testing.T, from []string, in map[string]bool, format
 	}
 }
 
-// TestMCPOverviewDocumentsEveryTool is the scripted check #1246 asks for: the
-// "Full tool index" table in erun-docs/docs/mcp/overview.md must name exactly
-// the tools erun-common's MCPToolDescriptor table registers -- no fewer (an
-// undocumented tool), no more (a phantom entry like the `logs`/`open` rows
-// that drifted onto the page after both tools were removed from the
-// registry).
+// TestMCPOverviewDocumentsEveryTool: the "Full tool index" table in
+// erun-docs/docs/mcp/overview.md must name exactly the tools mcptools'
+// MCPToolDescriptor table registers -- no undocumented tool and no phantom
+// entry for a removed one.
 func TestMCPOverviewDocumentsEveryTool(t *testing.T) {
 	root := repoRootForOverviewDocTest(t)
 	docPath := filepath.Join(root, "erun-docs", "docs", "mcp", "overview.md")

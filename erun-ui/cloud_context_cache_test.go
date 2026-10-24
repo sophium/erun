@@ -24,10 +24,9 @@ func TestCloudContextCacheSmoothsATransientUnknown(t *testing.T) {
 	}
 }
 
-// TestCloudContextCacheHonoursUnknownPastTTL is the regression for erun#1216:
-// a sustained AWS failure must downgrade the cache to Unknown rather than
-// serve a "running" that may be an hour stale — the case that let the Stop
-// button be offered against state the app could no longer verify.
+// TestCloudContextCacheHonoursUnknownPastTTL: a sustained AWS failure must
+// downgrade the cache to Unknown rather than serve a "running" that may be an
+// hour stale, which would offer the Stop button against unverifiable state.
 func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{

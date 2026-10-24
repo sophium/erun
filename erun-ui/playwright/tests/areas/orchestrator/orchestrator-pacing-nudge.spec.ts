@@ -1,7 +1,7 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtures/seedRoot.js';
 
-// #1260: the desktop re-states the orchestrator pacing contract into a live
+// The desktop re-states the orchestrator pacing contract into a live
 // session every 10 minutes, and reattaches a terminal that died from a crash
 // (never one the operator cleanly quit or Stopped) to the same background agent.
 //
@@ -30,7 +30,7 @@ import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtur
 // (TestOrchestratorRespawnsAfterCrashOntoTheSameAgent,
 // TestOrchestratorCleanExitDoesNotRespawn, TestStopOrchestratorRefusesItsOwnRespawn).
 //
-// #1699's env-aware suppression (a linked environment busy on this
+// The env-aware suppression (a linked environment busy on this
 // orchestrator's own dispatched work must not accrue staleness or take a
 // nudge) is the same unreachable-without-a-real-PTY case, so it is covered the
 // same way: erun-ui/orchestrator_pacing_env_test.go

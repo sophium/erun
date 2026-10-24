@@ -22,11 +22,10 @@ func writeGitStub(t *testing.T, stderr string, exitCode int) {
 }
 
 // TestGitStagedFilesIncludesGitStderr and
-// TestGitChangedWorkingTreeFilesIncludesGitStderr are erun#1768's pattern
-// applied to the git-backed commit helpers: git's own stderr is already
-// captured onto exec.ExitError.Stderr by Output(), and the caller-visible
-// message must include it instead of the content-free "exit status N" a bare
-// "%w" wrap renders.
+// TestGitChangedWorkingTreeFilesIncludesGitStderr cover the git-backed commit
+// helpers: git's own stderr is already captured onto exec.ExitError.Stderr by
+// Output(), and the caller-visible message must include it instead of the
+// content-free "exit status N" a bare "%w" wrap renders.
 func TestGitStagedFilesIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
 	_, err := GitStagedFiles(testTraceContext(false), t.TempDir())

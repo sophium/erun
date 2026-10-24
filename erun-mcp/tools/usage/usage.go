@@ -71,7 +71,7 @@ func UsageSizingClaim() string {
 //
 // On a build-capable environment, `excludesBuilds` is true because every
 // image build actually runs in the erun-dind sidecar, a separate cgroup, not
-// a descendant of this container's -- but eruncommon.RunRuntimeUsage also
+// a descendant of this container's -- but podruntime.RunRuntimeUsage also
 // execs the same reading into that sidecar and returns it as `dind`, so the
 // output states the sidecar's own usage instead of only naming the gap.
 func UsageTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {

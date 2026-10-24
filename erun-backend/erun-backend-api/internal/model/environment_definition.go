@@ -8,7 +8,7 @@ import (
 )
 
 // EnvironmentDefinition is the platform's stored copy of an environment's
-// portable settings — the DB shape of eruncommon.PlatformEnvDefinition,
+// portable settings — the DB shape of erun-common's config.PlatformEnvDefinition,
 // which is what produced it.
 //
 // It is keyed by the environment rather than by an id of its own: a definition

@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestFormatNamespaceConditionsMatchesTheOperatorDiagnosis pins #1140's
-// example verbatim: a namespace stuck on a Challenge finalizer must read as
-// an actionable diagnosis, not a bare timeout.
+// TestFormatNamespaceConditionsMatchesTheOperatorDiagnosis: a namespace stuck
+// on a Challenge finalizer must read as an actionable diagnosis, not a bare
+// timeout.
 func TestFormatNamespaceConditionsMatchesTheOperatorDiagnosis(t *testing.T) {
 	raw := "NamespaceContentRemaining=True\tchallenges.acme.cert-manager.io has 1 resource instances\n" +
 		"NamespaceFinalizersRemaining=True\tacme.cert-manager.io/finalizer in 1 resource instances\n"

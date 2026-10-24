@@ -10,9 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestOrchestratorEnvConfigRoleRoundTrip locks the contract issue erun#1688
-// depends on: a declared role survives config load/save, and an undeclared
-// role neither writes a `role:` key nor round-trips into a default.
+// TestOrchestratorEnvConfigRoleRoundTrip locks the contract: a declared role
+// survives config load/save, and an undeclared role neither writes a `role:`
+// key nor round-trips into a default.
 func TestOrchestratorEnvConfigRoleRoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
@@ -257,13 +257,9 @@ func TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment(t *testing.T)
 	}
 }
 
-// TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment is the
-// end-to-end regression for the refusal itself, driven through the same
-// writer the CLI's `erun orchestrator set-role` calls. Asserted at this level
-// rather than only against the gate above because the gate is a pure function
-// and the defect was that a caller could reach it with a pairing it refuses:
-// the CLI has to inherit the refusal without a line of its own, and this is
-// what proves it does.
+// TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment drives the
+// refusal through the same writer the CLI's `erun orchestrator set-role`
+// calls, proving the CLI inherits it without a line of its own.
 func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 	hostDir := "/home/erun/host-work"
 	store := newOrchestratorRoleStubStore(t, configpkg.EnvConfig{

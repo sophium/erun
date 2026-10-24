@@ -34,7 +34,7 @@ export const loginPrimaryCloudProvider =
       ),
     );
 
-// signInAndRecover is PlatformErrorAlert's own "Log in" thunk (#1392): sign
+// signInAndRecover is PlatformErrorAlert's own "Log in" thunk: sign
 // in, and only once the sign-in itself reports success, run the caller's
 // recovery — re-fetching whatever produced the identity error, or clearing a
 // stale write error so the operator can retry it. A failed sign-in runs no

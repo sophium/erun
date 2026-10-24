@@ -4,7 +4,7 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // An investigation is a full AI agent on the shared account, so the backend
-// refuses to spawn one for a report carrying no diagnostic content (#1029). This
+// refuses to spawn one for a report carrying no diagnostic content. This
 // asserts the observable consequence of that refusal through the same bridge the
 // React tree calls: the error the operator is shown, and a population that did
 // not grow.

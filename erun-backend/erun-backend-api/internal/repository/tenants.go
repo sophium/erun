@@ -104,8 +104,8 @@ func (r *TenantRepository) Create(ctx context.Context, params CreateTenantParams
 // classifyTenantCreateError maps a failure inserting the tenants row itself
 // to the sentinel a caller needs. name's own UNIQUE constraint
 // (tenants_name_key, the column's inline UNIQUE) means a tenant this call
-// did not create already holds the name — an expected, resolvable race
-// (erun#1722), not a fault, and named specifically so it is never confused
+// did not create already holds the name — an expected, resolvable race,
+// not a fault, and named specifically so it is never confused
 // with the tenant_issuers conflict Create's caller checks separately, which
 // is a real "this issuer is already spoken for" refusal with no equivalent
 // resolution. Any other error (including a different unique/check violation)

@@ -104,8 +104,8 @@ func (a *App) RevealHostPath(hostPath string) error {
 // podPathResolution is what ResolveEnvironmentHostPath reports for a path
 // printed inside an environment's pod-side terminal: whether it has a host
 // equivalent this desktop can open, and if not, why not. A pod path must
-// never be resolved against a same-named host file (erun-ui/AGENTS.md and
-// issue #1354) -- "unresolved" is always the safe default.
+// never be resolved against a same-named host file (erun-ui/AGENTS.md) --
+// "unresolved" is always the safe default.
 type podPathResolution struct {
 	// Kind is "mirror" (the env's synced worktree), "artifact" (the synced
 	// outputs mirror), or "unresolved".

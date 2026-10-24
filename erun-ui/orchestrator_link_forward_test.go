@@ -85,12 +85,9 @@ func waitForReconnectCalls(t *testing.T, mu *sync.Mutex, calls *[]string, want i
 	t.Fatalf("reconnect calls = %d, want >= %d", got, want)
 }
 
-// TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen locks the fix:
-// linking a healthy environment to an orchestrator must make it reachable on
-// its own -- the operator is never told a manual `erun open` is the reason
-// their tools work. Before the fix, CreateOrchestrator wired the review
-// directory and nothing else, so an environment nobody had opened by hand
-// stayed unreachable for the whole session.
+// TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen: linking a
+// healthy environment to an orchestrator must make it reachable on its own,
+// not only once someone runs `erun open` by hand.
 func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
@@ -150,11 +147,10 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	}
 }
 
-// TestLinkingAStoppedEnvironmentDoesNotForceStartIt locks the second
-// acceptance criterion: a stopped environment must be left stopped, not
+// TestLinkingAStoppedEnvironmentDoesNotForceStartIt: a stopped environment must be left stopped, not
 // silently started because it got linked to an orchestrator. The forward
 // ensure runs `erun open --reconnect`, which refuses to wake a stopped
-// runtime by design (erun-common/stop.go's DecideRuntimeWake); linking must
+// runtime by design (lifecycle.DecideRuntimeWake); linking must
 // inherit that refusal rather than bypass it, and the operator must see the
 // environment reported as stopped, not failed or running.
 func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
@@ -181,8 +177,7 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 	}
 }
 
-// TestLinkingAnEnvironmentSurfacesAForwardOpenFailure locks the third
-// acceptance criterion: if opening the forward fails for a reason other than
+// TestLinkingAnEnvironmentSurfacesAForwardOpenFailure: if opening the forward fails for a reason other than
 // "stopped" or "genuinely undeployed", the failure must be visible on the
 // sidebar and as a notification -- never silent, leaving a configured MCP
 // entry pointed at nothing with no clue why.

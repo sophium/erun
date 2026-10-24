@@ -49,7 +49,7 @@ func TestIdleOffEnvironment(t *testing.T) {
 		}
 		golden.Equal(t, "idle/off_environment_reports_the_environments_own_answer", normalize.Apply(result.Combined))
 
-		// #1227: asking whether the environment is idle must not itself count as
+		// Asking whether the environment is idle must not itself count as
 		// activity, or polling this command holds the environment awake forever.
 		call := edge.requestFor(t, "tools/call")
 		if !call.IdleProbe {
@@ -106,8 +106,8 @@ func TestJobOffEnvironment(t *testing.T) {
 	// tenant/environment plumbing fix, or the pod was started with no bound
 	// context of its own) must still error -- and the message an operator
 	// actually sees has to name which tool refused and what would satisfy it,
-	// not the bare "tenant and environment are required" dead end erun#1709
-	// reported (that phrasing named no tool, no caller, and no recovery).
+	// not a bare "tenant and environment are required" dead end that names no
+	// tool, no caller, and no recovery.
 	t.Run("status_reports_the_tool_and_the_remedy_when_the_target_is_unresolved", testJobOffEnvironmentStatusReportsTheToolAndTheRemedyWhenTheTargetIsUnresolved)
 }
 
@@ -120,8 +120,8 @@ func testJobOffEnvironmentStartRunsTheWorkInTheEnvironment(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
 	fixture.SeedDesktopIdentity(t, setup)
-	// job_start is gone (#1246): starting a plain command remotely now goes
-	// through exec_raw's wait:false mode, whose own response only confirms
+	// Starting a plain command remotely goes through exec_raw's wait:false
+	// mode, whose own response only confirms
 	// the background start, so the CLI follows up with one exec_job_status
 	// call to learn the full record -- both need their own canned answer.
 	edge := &fakeMCPEdge{ToolResults: map[string]string{
@@ -160,11 +160,9 @@ func testJobOffEnvironmentStartRunsTheWorkInTheEnvironment(t *testing.T) {
 	if calls[1].Tool != "exec_job_status" {
 		t.Fatalf("the environment was asked for %q second, want exec_job_status", calls[1].Tool)
 	}
-	// erun#1709: this host already resolved team/dev to reach this edge, and
-	// must restate it in the call itself rather than leaving the tool to
-	// infer it from the server's own bound context -- the plumbing gap that
-	// let a bare "tenant and environment are required" reach an operator
-	// even though the flags were parsed correctly.
+	// This host already resolved team/dev to reach this edge, and must
+	// restate it in the call itself rather than leaving the tool to infer it
+	// from the server's own bound context.
 	for _, call := range calls {
 		assertToolArgumentsNameTarget(t, call, "team", "dev")
 	}
@@ -254,7 +252,7 @@ func testJobOffEnvironmentAwaitMapsTheEnvironmentsOutcomeOntoTheExitCode(t *test
 	}
 	golden.Equal(t, "job/off_environment_await_maps_the_environments_outcome_onto_the_exit_code", normalize.Apply(result.Combined))
 
-	// #1227: waiting on a job is a read of its state, not new activity in the
+	// Waiting on a job is a read of its state, not new activity in the
 	// environment.
 	call := edge.requestFor(t, "tools/call")
 	if !call.IdleProbe {
@@ -263,7 +261,7 @@ func testJobOffEnvironmentAwaitMapsTheEnvironmentsOutcomeOntoTheExitCode(t *test
 }
 
 func testJobOffEnvironmentStatusReadsTheEnvironmentsJobState(t *testing.T) {
-	// job_status is a pure read, same reasoning as idle (#1227): polling an
+	// job_status is a pure read, same reasoning as idle: polling an
 	// environment's job status must not itself keep it awake.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
@@ -525,7 +523,7 @@ func testActivityLeaseOffEnvironmentTakeHoldsTheLeaseInTheEnvironment(t *testing
 }
 
 func testActivityLeaseOffEnvironmentTakeExclusiveForwardsTheExclusiveClaimToTheEnvironment(t *testing.T) {
-	// erun#1245's exclusive mode has to reach the environment the same way
+	// Exclusive mode has to reach the environment the same way
 	// plain presence already does: through activity_lease_take, counting
 	// as activity, never as an idle probe.
 	skipIfPortsBusy(t, leaseEdgeLocalPort)
@@ -578,7 +576,7 @@ func testActivityLeaseOffEnvironmentListReadsTheEnvironmentsHeldLeases(t *testin
 	if call.Tool != "activity_lease_list" {
 		t.Fatalf("the environment was asked for %q, want activity_lease_list", call.Tool)
 	}
-	// #1227: listing leases only observes them, so it must not itself count as
+	// Listing leases only observes them, so it must not itself count as
 	// activity.
 	if !call.IdleProbe {
 		t.Errorf("expected activity_lease_list to carry the idle-probe header")

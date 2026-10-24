@@ -76,9 +76,8 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 }
 
 // TestCreateEnvironmentRejectsRawKubernetesContext: naming an existing
-// cluster is by contextId (#1112) — a bare kubernetesContext string has no
-// known credential to authenticate with, so it stays refused for a runtime
-// environment even after contextId placement exists.
+// cluster is by contextId — a bare kubernetesContext string has no known
+// credential to authenticate with, so it is refused for a runtime environment.
 func TestCreateEnvironmentRejectsRawKubernetesContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
 	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","kubernetesContext":"primary","runtimeVersion":"1.2.3"}`)
@@ -92,9 +91,8 @@ func TestCreateEnvironmentRejectsRawKubernetesContext(t *testing.T) {
 }
 
 // TestCreateEnvironmentPlacesOnExplicitContext: a runtime environment naming
-// a registered, running contextId with room is placed there (#1112) — the
-// v1 refusal (TestCreateEnvironmentRejectsRawKubernetesContext) only ever
-// covered a bare kubernetesContext string, not a real contextId reference.
+// a registered, running contextId with room is placed there; only a bare
+// kubernetesContext string is refused.
 func TestCreateEnvironmentPlacesOnExplicitContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
 	contexts := &stubContextRepository{cloudContext: model.Context{
@@ -136,7 +134,7 @@ func TestCreateEnvironmentRejectsUnknownContext(t *testing.T) {
 
 // TestCreateEnvironmentRejectsContextAtCapacity: an explicit contextId with
 // no room fails clearly (409, naming the context and its ceiling) rather
-// than persisting a row and failing inside the Job (#1112).
+// than persisting a row and failing inside the Job.
 func TestCreateEnvironmentRejectsContextAtCapacity(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:        model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime},
@@ -161,7 +159,7 @@ func TestCreateEnvironmentRejectsContextAtCapacity(t *testing.T) {
 
 // TestCreateEnvironmentAutoSelectsRunningContextWithRoom: a runtime
 // environment naming no context auto-selects the tenant's own registered
-// context when one is running and has room (#1112).
+// context when one is running and has room.
 func TestCreateEnvironmentAutoSelectsRunningContextWithRoom(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
 	contexts := &stubContextRepository{contexts: []model.Context{
@@ -181,7 +179,7 @@ func TestCreateEnvironmentAutoSelectsRunningContextWithRoom(t *testing.T) {
 }
 
 // TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster: a
-// tenant with no registered contexts keeps the pre-#1112 default — the
+// tenant with no registered contexts keeps the default — the
 // platform's own cluster (empty contextId) — rather than being refused.
 func TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
@@ -197,7 +195,7 @@ func TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster(t *
 
 // TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull: once a
 // tenant has registered contexts, exhausting all of them fails clearly
-// (#1112's "or fail clearly when none qualifies") rather than silently
+// rather than silently
 // falling back to the platform's own cluster, which the caller never asked
 // for.
 func TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull(t *testing.T) {

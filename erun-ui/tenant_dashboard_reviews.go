@@ -13,7 +13,7 @@ import (
 // loadTenantDashboardReviewFilterCounts reports how many reviews are Mine and
 // how many are Waiting on me, independent of whichever filter the caller
 // currently has applied: the Reviews tab's filter buttons need the
-// distribution visible before the caller clicks either one (#1378), not only
+// distribution visible before the caller clicks either one, not only
 // after. Best effort like the other row-enrichment reads: a restricted or
 // failing count simply leaves the corresponding field unset rather than
 // reporting a false zero.
@@ -127,12 +127,9 @@ const maxConcurrentReviewBuildReads = 8
 
 // fetchReviewBuildsConcurrently reads every review's builds in parallel,
 // bounded by maxConcurrentReviewBuildReads, and flattens the results in the
-// same review order the old serial loop used to produce. Every read runs to
-// completion regardless of another review's failure — the old serial loop
-// dropped every review's builds *after* the point it broke on an error, an
-// order-dependent partial result. This keeps every review that did succeed
-// and still reports the first failure, which is both more complete and no
-// longer dependent on where in the list the failure happened to land.
+// review order. Every read runs to completion regardless of another review's
+// failure, so the result keeps every review that succeeded and still reports
+// the first failure, independent of where in the list it landed.
 func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) ([]uiTenantDashboardBuild, error) {
 	perReview := make([][]platformclient.PlatformBuild, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
@@ -195,7 +192,7 @@ func tenantDashboardReviews(reviews []platformclient.PlatformReview, usernames m
 // the read paths (listings, single-review load) have a resolved user
 // directory to enrich with; the write paths in tenant_review_write.go return
 // the review the caller themselves just acted on and use the base converter
-// directly, unresolved (#1378).
+// directly, unresolved.
 func tenantDashboardReviewWithUsername(review platformclient.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
 	converted := tenantDashboardReview(review)
 	converted.AuthorUsername = usernames[review.AuthorUserID]

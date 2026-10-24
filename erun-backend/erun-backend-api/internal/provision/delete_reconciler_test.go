@@ -97,8 +97,8 @@ func testReconciler(environments *fakeReconcilerEnvironments, tenants *fakeRecon
 	return &EnvDeleteReconciler{environments: environments, tenants: tenants, contexts: contexts, deleter: deleter}
 }
 
-// TestReconcileRestartsAMidTeardownEnvironment pins the core contract of
-// #1140: an environment stuck deleting or deletion-blocked converges on its
+// TestReconcileRestartsAMidTeardownEnvironment pins the core contract: an
+// environment stuck deleting or deletion-blocked converges on its
 // own, without an operator noticing and re-issuing the delete.
 func TestReconcileRestartsAMidTeardownEnvironment(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
@@ -156,7 +156,7 @@ func TestReconcileLeavesAFreshInFlightDeleteAlone(t *testing.T) {
 
 // TestReconcileResolvesPlacementForARemoteContext: an environment placed on a
 // registered context must have its delete retried against that same cluster,
-// not the platform's own (#1112 interaction).
+// not the platform's own.
 func TestReconcileResolvesPlacementForARemoteContext(t *testing.T) {
 	environments := &fakeReconcilerEnvironments{environments: []model.Environment{
 		{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "prod", ContextID: "ctx-1", Status: model.EnvironmentStatusDeletionBlocked, RuntimeVersion: "1.0.0"},
@@ -226,12 +226,10 @@ func TestReconcilePropagatesAListError(t *testing.T) {
 	}
 }
 
-// TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart is the regression
-// test for #1166's worst path. The claim has already moved the row to
-// `deleting`, so a failure between the claim and the workflow starting used to
-// leave the row claiming an in-flight delete that did not exist -- strictly
-// less information than before the tick ran, which is exactly the misreporting
-// #1140 was about.
+// TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart: the claim has
+// already moved the row to `deleting`, so a failure between the claim and the
+// workflow starting must record why rather than leave the row claiming an
+// in-flight delete that does not exist.
 func TestReconcileRecordsAReasonWhenAClaimedAttemptCannotStart(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

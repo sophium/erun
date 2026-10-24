@@ -1,11 +1,10 @@
 // Shared copy for the runtime-reconnect flow, reused across the review panel
 // and manage dialog so recovery reads as one consistent action.
 //
-// ReachabilityKind mirrors eruncommon.LocalMCPUnreachableKind: a stopped/
+// ReachabilityKind mirrors mcp.LocalMCPUnreachableKind: a stopped/
 // never-opened environment (informational, "Open") is a different situation
-// from a stale port-forward (a fault, "Reconnect…"), and the backend already
-// tells the two apart -- the review panel used to flatten them into one
-// "connection is down" error regardless (#1230).
+// from a stale port-forward (a fault, "Reconnect…"), so they must not be
+// flattened into one "connection is down" error.
 export type ReachabilityKind = 'not-open' | 'stale-forward';
 
 // The markers mirror the opaque prefixes the Go backend puts on
@@ -40,12 +39,10 @@ interface ReachabilityCopy {
 // what it will achieve. This dialog is reached *from* the unreachable state,
 // so it is shown exactly when the environment may be down for a reason the
 // reconnect cannot address -- and it is the moment an operator is most likely
-// to press it repeatedly. It used to promise that a runtime which is not
-// running "will be redeployed", which is not an unchecked recovery but one the
-// action cannot perform at all: the reconnect runs `erun open --reconnect`,
-// which verifies the runtime is already deployed, refuses outright when it is
-// stopped, and never deploys. Saying so is what keeps the operator from
-// reading a failed attempt as a "it just needs another try".
+// to press it repeatedly. The reconnect runs `erun open --reconnect`, which
+// verifies the runtime is already deployed, refuses outright when it is
+// stopped, and never deploys. Saying so keeps the operator from reading a
+// failed attempt as "it just needs another try".
 const STALE_FORWARD_COPY: ReachabilityCopy = {
   errorTitle: 'Cannot reach the environment runtime',
   errorBody: 'The connection to your environment is down.',
@@ -61,7 +58,7 @@ const STALE_FORWARD_COPY: ReachabilityCopy = {
 // notOpen is the ordinary resting state of an environment nobody has started
 // (or that was stopped) -- not a fault, so the copy neither claims a
 // connection existed to lose nor promises a redeploy for a runtime the local
-// probe never actually checked (#1230).
+// probe never actually checked.
 const NOT_OPEN_COPY: ReachabilityCopy = {
   errorTitle: 'Environment not running',
   errorBody: 'This environment is stopped — open it to continue.',

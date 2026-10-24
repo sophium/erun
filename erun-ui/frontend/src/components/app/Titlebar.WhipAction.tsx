@@ -76,7 +76,7 @@ function whipButtonLabel(count: number): string {
 
 // TitlebarWhipAction is the operator-triggered whip control. Whipping is a
 // write into a live AI session, not a read, so a click never fans out to
-// every configured environment and orchestrator on its own (erun#1700):
+// every configured environment and orchestrator on its own:
 // opening the popover preselects only the sidebar's current focus, and the
 // selection surface underneath (TitlebarWhipTargetPicker) is where "actually,
 // more than that" becomes a deliberate choice, with the three group shortcuts
@@ -119,8 +119,7 @@ export function TitlebarWhipAction(): React.ReactElement {
         return;
       }
       // A fresh open always starts over: no leftover selection or report from
-      // a previous invocation (erun#1700's "remember nothing across
-      // invocations"), and the default is recomputed from whatever the
+      // a previous invocation, and the default is recomputed from whatever the
       // sidebar is focused on right now.
       setOutcome(null);
       setSelection(defaultWhipTargetSelection(defaultTarget));
@@ -138,8 +137,7 @@ export function TitlebarWhipAction(): React.ReactElement {
     // Re-resolve the population immediately before pushing, not just at open
     // or at the last "select all" click: an "all" category follows whoever is
     // eligible right now, including an orchestrator that started after the
-    // popover opened (erun#1700's "group selects follow the population, not a
-    // snapshot").
+    // popover opened: group selects follow the population, not a snapshot.
     void dispatch(whipTargets()).then((freshTargets) => {
       const refs = resolveWhipTargetRefs(selection, freshTargets);
       void dispatch(whipNow(refs)).then((result) => {

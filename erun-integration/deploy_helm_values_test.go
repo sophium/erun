@@ -55,7 +55,7 @@ func testDeployDryRunPlatformAccountBindsClusterAdmin(t *testing.T) {
 }
 
 func testDeployDryRunWithManagedCloudTracesHelmSetStrings(t *testing.T) {
-	// Exercises eruncommon.applyCloudProviderDeployMetadata,
+	// Exercises deploy.applyCloudProviderDeployMetadata,
 	// findCloudContextForKubernetesContext, cloudContextRegionFromName,
 	// and the managed-cloud helm --set-string lines that come from
 	// per-tenant cloud provider/context resolution.
@@ -86,7 +86,7 @@ func testDeployDryRunWithManagedCloudTracesHelmSetStrings(t *testing.T) {
 }
 
 func testDeployDryRunWithAWSClaudeModelsTracesSetStrings(t *testing.T) {
-	// Exercises eruncommon.helmClaudeSetArgs' Models + MaxOutputTokens
+	// Exercises deploy.helmClaudeSetArgs' Models + MaxOutputTokens
 	// branches and NormalizedModels: claude.usebedrock/models/maxoutputtokens
 	// resolve into the runtime chart's claude.useBedrock/availableModels/
 	// maxOutputTokens helm --set-string args.
@@ -127,7 +127,7 @@ func testDeployDryRunWithAWSClaudeModelsTracesSetStrings(t *testing.T) {
 }
 
 func testDeployDryRunWithOpenrouterGatewayTracesSetStrings(t *testing.T) {
-	// Exercises eruncommon.helmClaudeSetArgs' gateway branch: the erun-level
+	// Exercises deploy.helmClaudeSetArgs' gateway branch: the erun-level
 	// catalog in root config resolves into the runtime chart's
 	// claude.openRouter* helm --set-string args. Only the credential's Secret
 	// name travels — a token value never reaches helm argv. This env is also
@@ -207,11 +207,8 @@ func testDeployDryRunSnapshotVersionResetsPostgresDatabase(t *testing.T) {
 }
 
 func testDeployDryRunReleasedVersionDoesNotResetPostgresDatabase(t *testing.T) {
-	// The regression this locks: resolveInstallExistingVersionDeploySpec
-	// used to pass a literal true into deployResetsDatabase, which
-	// short-circuited past the version check via snapshotEnabled ||, so
-	// installing an already-published RELEASED version armed the wipe
-	// exactly like a snapshot did. This scenario is identical to
+	// Installing an already-published RELEASED version must not arm the
+	// database wipe the way a snapshot does. This scenario is identical to
 	// dry_run_snapshot_version_resets_postgres_database except the
 	// version carries no -snapshot- marker, and must resolve
 	// --set api.postgres.reset=false.

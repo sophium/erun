@@ -5,9 +5,8 @@ import type { main } from '../../wailsjs/go/models';
 // defaultWhipTargetSelection is what a freshly opened whip popover starts
 // from: the sidebar's current focus, checked by itself, nothing else. Never
 // "everything" -- an unfocused surface (dashboard, or nothing at all) starts
-// from an empty selection rather than defaulting to every configured target
-// (erun#1700's "an empty selection is not all", read the other way: no
-// default is not a default of all either).
+// from an empty selection rather than defaulting to every configured target:
+// no default is not a default of all.
 export function defaultWhipTargetSelection(defaultTarget: WhipDefaultTarget): WhipTargetSelection {
   if (!defaultTarget) {
     return {
@@ -69,8 +68,7 @@ export function selectAllWhipTargets(selection: WhipTargetSelection): WhipTarget
 // WhipNow requires, against the freshest known population: an "all" category
 // resolves to every id currently listed (so an orchestrator that started
 // after "Select all orchestrators" was clicked, but before Whip actually ran,
-// is still included -- erun#1700's "group selects follow the population, not
-// a snapshot"); a "custom" category resolves to the checked ids that are
+// is still included: group selects follow the population, not a snapshot); a "custom" category resolves to the checked ids that are
 // still present in that population, dropping any that disappeared.
 export function resolveWhipTargetRefs(
   selection: WhipTargetSelection,
@@ -104,8 +102,8 @@ export function resolveWhipTargetRefs(
   return refs;
 }
 
-// countWhipTargets is the count the primary action states before it acts
-// (erun#1700's "state the count before acting"), resolved against the same
+// countWhipTargets is the count the primary action states before it acts,
+// resolved against the same
 // freshest population resolveWhipTargetRefs uses so the number never lies
 // about what a click would actually push.
 export function countWhipTargets(

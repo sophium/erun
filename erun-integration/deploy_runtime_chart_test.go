@@ -114,16 +114,14 @@ func testDeployRealRunPinnedVersionMissingImageErrors(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvRefusesWhenNoRuntimeChartIsConfirmed(t *testing.T) {
-	// Regression #1193: a remote env (Remote=true) has its repopath on the
+	// A remote env (Remote=true) has its repopath on the
 	// remote host's filesystem (e.g. proxmox1: /home/erun/git/erun) and has
 	// no local checkout at all, and the probe seam confirms no candidate --
 	// neither the tenant's own umbrella nor the shared erun-devops chart, in
 	// either registry the ladder searches. Deploy must refuse rather than
 	// substitute the shared chart at the tenant's version: erun-devops is
 	// versioned on erun's own release line, so that coordinate can never
-	// exist. Before the fix this installed exactly that impossible
-	// coordinate (decision trace + a helm upgrade pinned to it); now it
-	// stops before any helm command is built, naming every coordinate it
+	// exist. It stops before any helm command is built, naming every coordinate it
 	// asked and that none was confirmed.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
@@ -144,7 +142,7 @@ func testDeployDryRunRemoteEnvRefusesWhenNoRuntimeChartIsConfirmed(t *testing.T)
 }
 
 func testDeployDryRunRefusesSharedChartConfirmedOnlyAtADifferentVersion(t *testing.T) {
-	// Regression #1193, the exact production shape: the tenant's own
+	// The production shape: the tenant's own
 	// umbrella (team-devops) is never published, and the shared erun-devops
 	// chart genuinely exists -- just on erun's own release line (1.0.201),
 	// not the tenant's requested version (1.0.72). A ladder that only checks

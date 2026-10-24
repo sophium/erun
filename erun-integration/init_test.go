@@ -60,7 +60,7 @@ type remoteInitKubectlStub struct {
 	SSHConfigExists          bool
 	HostConfigVerifyExitCode int
 	LsRemoteFailures         int
-	// RegistryCredentialConfigured answers the #1201 registry-credential-check
+	// RegistryCredentialConfigured answers the registry-credential-check
 	// script: whether the pod appears to have a ghcr.io credential (docker
 	// config, gh session, or GH_TOKEN/GITHUB_TOKEN). Defaults to false (no
 	// credential), matching a freshly-deployed pod.

@@ -75,9 +75,8 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	})
 
 	t.Run("plain env keeps the chart on the deploy registry despite a differing runtime image", func(t *testing.T) {
-		// The regression 49f7f92f introduced: a plain env's chart followed the runtime
-		// image's registry. The chart must stay on the deploy registry — the image
-		// override is an image-only concern the chart does not inherit.
+		// The chart must stay on the deploy registry, not follow the runtime image's
+		// registry: the image override is an image-only concern.
 		target := config.OpenResult{EnvConfig: config.EnvConfig{
 			RuntimeImage:        "ghcr.io/sophium/erun-devops",
 			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}}},
@@ -88,15 +87,12 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	})
 }
 
-// TestPublishedTenantComponentChartRegistry pins erun#1598 defect 1: a
-// tenant's own component charts are published by `erun push` to the DEPLOY
-// registry, never wherever publishedDevopsChartRegistry resolves the SHARED
-// platform chart to (an explicit runtimeregistry, or -- for a
-// cluster-registry env -- the runtime image's own registry). Before the fix,
-// a cluster-registry env with an explicit runtimeregistry (a realistic
-// pairing: runtimeregistry for the platform chart, containerregistries for
-// the tenant's own images) probed the platform-chart registry for the
-// tenant's component chart and could never find it there.
+// TestPublishedTenantComponentChartRegistry: a tenant's own component charts
+// are published by `erun push` to the DEPLOY registry, never wherever
+// publishedDevopsChartRegistry resolves the SHARED platform chart to (an
+// explicit runtimeregistry, or -- for a cluster-registry env -- the runtime
+// image's own registry), so a cluster-registry env with an explicit
+// runtimeregistry must not probe the platform-chart registry for them.
 func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	t.Run("cluster-registry env with an explicit runtimeregistry still resolves components from the deploy registry", func(t *testing.T) {
 		target := config.OpenResult{
@@ -124,7 +120,7 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	})
 }
 
-// TestChartRegistryInsecure pins the other half of erun#1598: only the deploy
+// TestChartRegistryInsecure: only the deploy
 // target's own concretized cluster registry can ever be insecure, and only
 // when the registry under test is that exact resolved host -- a platform
 // registry (ghcr.io) that merely happens to be probed in the same search must
@@ -146,17 +142,13 @@ func TestChartRegistryInsecure(t *testing.T) {
 	}
 }
 
-// TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine pins #1265: a
-// tenant's own <tenant>-devops image is versioned on the tenant's own release
-// line, independent of the erun version the environment runs (as erun pin
-// already documents and enforces — it never rewrites this tag). A persisted
-// runtimeimage naming that image at the tenant's own tag must survive a
-// redeploy verbatim, never get discarded in favour of a guessed
-// <tenant>-devops:<erun-version> tag just because the two happen to share a
-// registry. Before the fix, whether the guess "won" depended on an accident —
-// which registry held the deploy role — reproducing the four-environment
-// matrix from the issue (same recorded image, only the registry wiring
-// differs).
+// TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine: a tenant's own
+// <tenant>-devops image is versioned on the tenant's own release line,
+// independent of the erun version the environment runs (erun pin never
+// rewrites this tag). A persisted runtimeimage naming that image at the
+// tenant's own tag must survive a redeploy verbatim, never be replaced by a
+// guessed <tenant>-devops:<erun-version> tag, whichever registry holds the
+// deploy role (same recorded image, only the registry wiring differs).
 func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 	const (
 		tenant           = "petios"
@@ -231,7 +223,7 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 }
 
 // TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine guards the one
-// staleness signal that remains legitimate after #1265: a runtimeimage still
+// staleness signal that remains legitimate: a runtimeimage still
 // naming the stock erun-devops image on a deploy that has moved to the
 // tenant's own umbrella chart is provably wrong (that line never publishes
 // the stock image), so it is still healed to the umbrella's own image rather
@@ -255,10 +247,9 @@ func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T)
 	if !strings.Contains(trace.String(), "ignoring stale runtimeimage") {
 		t.Fatalf("expected a trace explaining the stock-image staleness, got: %s", trace.String())
 	}
-	// erun#1754: the persisted runtimeimage field must heal too, not just this
-	// deploy's own resolved image -- otherwise the next deploy reads the same
-	// stale stock pin back and re-derives the same workaround forever instead
-	// of ever recording the tenant's own line.
+	// The persisted runtimeimage field must heal too, not just this deploy's
+	// own resolved image, or the next deploy reads the same stale stock pin
+	// back and never records the tenant's own line.
 	const wantPersist = "acme-devops"
 	if persistImage != wantPersist {
 		t.Fatalf("persistImage = %q, want %q (the bare name so the pin stays self-maintaining)", persistImage, wantPersist)

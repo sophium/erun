@@ -16,7 +16,7 @@ import (
 // config has no automatic counterpart of on a hosted platform. It gives the
 // desktop the same registration path `erun platform context create` /
 // `erun platform provision` / `erun platform env register|deploy|stop|delete`
-// already give the CLI, through the same eruncommon.PlatformClient the rest
+// already give the CLI, through the same platformclient.PlatformClient the rest
 // of the dashboard reads and writes through.
 //
 // `erun platform tenant create` and `erun platform user enroll` stay

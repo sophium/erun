@@ -14,10 +14,9 @@ import (
 
 // Every job, lease and idle tool takes a tenant/environment, and none of them can
 // honour one that names a different environment: the work runs in this pod,
-// against this pod's repo and this pod's erun binary. Before this was enforced,
-// job_start accepted a foreign target, echoed it back in its result, and ran here
-// anyway -- so the caller was handed a handle asserting a target the work never
-// reached (#1195). Each of these must refuse.
+// against this pod's repo and this pod's erun binary, so accepting a foreign
+// target would hand back a handle asserting a target the work never reached.
+// Each of these must refuse.
 func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	ctx := context.Background()

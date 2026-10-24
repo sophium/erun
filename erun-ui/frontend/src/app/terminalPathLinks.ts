@@ -7,8 +7,7 @@
 // current working directory to resolve, and this codebase has no per-session
 // cwd tracking today (a PTY's cwd changes with every `cd`, so tracking it
 // accurately needs shell-side cooperation, e.g. OSC 7 -- a larger, separate
-// feature). Out of scope here, matching the precedent #1354 itself set for
-// line/column targets.
+// feature). Line/column targets are out of scope for the same reason.
 export interface PathMatch {
   readonly start: number;
   readonly end: number;

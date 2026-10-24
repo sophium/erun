@@ -89,19 +89,11 @@ func orchestratorShellActivityPath(id string) string {
 // out on the short, shared bound, because nothing will ever explicitly clear
 // it for a session that is gone.
 //
-// An orchestrator id is reused by design on every restart, and sessionAlive is
-// computed per id — from whichever session is live for that id right now —
-// not per the session that actually wrote this report. So a "running" report
-// left behind by a session that has since been replaced would otherwise be
-// protected by its successor's liveness and get the generous bound forever,
-// which is #1274. liveSessionID is the id the desktop currently has recorded
-// as live for this orchestrator; a report naming a different one names a
-// session that is no longer live for real, and is rejected regardless of the
-// staleness bound. Neither an empty report session id (an older write, or a
-// clear which never carries one) nor an empty liveSessionID (no live-session
-// record yet) is treated as a mismatch — there is nothing to compare, and
-// rejecting on that basis alone would make every report unusable before the
-// live-session recorder has ever fired.
+// An orchestrator id is reused on every restart and sessionAlive is computed
+// per id, so a "running" report left by a replaced session would otherwise
+// borrow its successor's liveness forever. A report naming a session other than
+// liveSessionID is rejected regardless of the staleness bound. An empty id on
+// either side is not a mismatch: there is nothing to compare yet.
 func readOrchestratorShellActivity(id string, now time.Time, sessionAlive bool, liveSessionID string) (orchestratorShellActivity, bool) {
 	path := orchestratorShellActivityPath(id)
 	if path == "" {

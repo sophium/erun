@@ -137,8 +137,8 @@ func awaitJobSupervisorExitVia(t *testing.T, setup env.Setup, envVars []string, 
 // two answers that must not be confused for each other.
 //
 // The case with teeth is the unreachable channel: reading a failed status as
-// "no supervisor recorded" is what made the off-environment teardown return
-// without waiting whenever the edge was down. Every result shape below is the
+// "no supervisor recorded" would make the off-environment teardown return
+// without waiting whenever the edge is down. Every result shape below is the
 // one the real binary produces, measured rather than invented -- a job the
 // environment never started answers exit 1 with empty stdout and `no job ...`
 // on stderr, and a channel that stayed unreachable answers 126 with empty
@@ -211,11 +211,9 @@ const parkedProcessEnv = "ERUN_TEST_PARKED_SUPERVISOR"
 // real-job teardown in this package depends on: the wait returns only once
 // the pid the job records is no longer alive.
 //
-// The reported failure -- a teardown that returned on the cancel and left a
-// supervisor still writing into t.TempDir()'s RemoveAll -- is not reproducible
-// as a scenario here: it needs a lease renewal to lose a race by luck, and
-// both off-environment call sites were measured already gone by the time their
-// cancel returned. So the state is forced instead. The supervisor is a real
+// A teardown that returns on the cancel while the supervisor still writes into
+// t.TempDir() needs a lease renewal to lose a race by luck, so the state is
+// forced instead. The supervisor is a real
 // process this test starts and kills itself, and the observer feeding the loop
 // is the same shape as production's (awaitJobSupervisorExitVia): it reports
 // the pid the record carries and makes no liveness judgement of its own, so
@@ -229,21 +227,11 @@ const parkedProcessEnv = "ERUN_TEST_PARKED_SUPERVISOR"
 // deadline here is far below the scenario waits' own: that failure stays
 // bounded and names the loop rather than reading as a hung suite.
 //
-// Known and left open, not worked around: this cannot pass on Windows, because
-// the liveness answer it drives is inert there. ProcessAlive's only Windows
-// probe is os.FindProcess, which succeeds for a process that has exited while
-// any handle to it is open, and Signal(0) answers "not supported by windows"
-// (os/exec_windows.go) -- an error that is neither nil nor EPERM, so it falls
-// through to ProcessAlive's own `return runtime.GOOS == "windows"`. That makes
-// the function constant-true on that platform, so the loop here never observes
-// the transition it asserts and fails on its deadline rather than on a wrong
-// answer. No skip, deliberately: the same answer arms the 30s wait in stopJob
-// and stopOffEnvironmentJob, so Windows needs a real liveness answer
-// (erun-common/process_state_windows.go) rather than a skipped test -- and a
-// skip here would hide the signal while leaving every scenario teardown beside
-// it red for the same reason. Not measured on Windows: no Windows host was
-// available, so this is read from Go's own os package and erun-common's, and a
-// Windows run should treat it as a claim to verify rather than an observation.
+// This cannot pass on Windows: os.FindProcess succeeds for an exited process
+// while a handle is open and Signal(0) is unsupported, so ProcessAlive is
+// constant-true there. No skip, deliberately: the same answer arms the 30s
+// wait in stopJob and stopOffEnvironmentJob, so Windows needs a real liveness
+// answer (base/core/process_state_windows.go), not a hidden signal.
 func TestAwaitJobSupervisorGoneWaitsOutALivePid(t *testing.T) {
 	t.Parallel()
 	if os.Getenv(parkedProcessEnv) == "1" {

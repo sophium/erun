@@ -29,17 +29,15 @@ func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias s
 // RunPlatformVersion reports the build actually serving a hosted erun
 // platform's own API, over GET /v1/platform — the same unauthenticated route
 // `erun cloud init erun` already calls to discover the issuer and client ids.
-// It answers erun#2052's gap directly: `whoami` proves the caller is
-// authenticated and reachable, but returns identity, not build, so there was
-// no way to ask a deployed control plane what version it is running.
+// Unlike `whoami`, which returns identity, it reports the build.
 // Unauthenticated on purpose: a client has to be able to compare the plane's
 // version before it can even mint a token against it (the same reason
 // PlatformInfo's other discovery fields -- issuer, client ids -- are
 // unauthenticated), and the fields it returns are this instance's own
 // self-description, never tenant data. This still goes through the resolved
-// alias (not a bare --api-url) so the same call keeps working when the
-// alias's cached credentials are stale or expired -- exactly the state a
-// caller troubleshooting a 404/401 on some other route is likely to be in.
+// alias (not a bare --api-url) so the same call keeps working when the alias's
+// cached credentials are stale or expired -- exactly the state a caller
+// troubleshooting a 404/401 on some other route is likely to be in.
 func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (platformclient.PlatformInfo, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -425,9 +423,9 @@ func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore
 
 // RunPlatformDeleteEnvironment starts tearing down a runtime environment's
 // namespace and its row, the server-side equivalent of `erun delete`. See
-// PlatformClient.DeleteEnvironment: the teardown itself runs asynchronously
-// (#1140), so the returned environment reflects the claim (status
-// "deleting"), not a completed removal.
+// PlatformClient.DeleteEnvironment: the teardown itself runs asynchronously, so
+// the returned environment reflects the claim (status "deleting"), not a
+// completed removal.
 func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {

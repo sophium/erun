@@ -55,13 +55,12 @@ func TestGoldenTimingBlocksAreOrderInvariant(t *testing.T) {
 // build -> publish -> api plus release and sync-remote beside publish. Two
 // captures of exactly that table are built below, differing only in the order
 // the run measured its children in and in which boundaries an unrelated
-// writer's line landed on -- which is the difference a loaded machine
-// produced against the recorded golden, and every landing used to split the
-// table into fragments that were each sorted on their own.
+// writer's line landed on -- the difference a loaded machine produces
+// against the recorded golden.
 //
 // Unlike the golden-driven test above, this needs no golden to carry an
-// interleaved line today: after a row's own multi-line message is rendered
-// indented (erun-common/timing.go), no recorded table has one left, so a
+// interleaved line: a row's own multi-line message is rendered indented
+// (core.RenderStepTimingRows), so no recorded table has one, and a
 // probe driven by the committed goldens would assert nothing at all while
 // still reporting green.
 func TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput(t *testing.T) {
@@ -167,11 +166,11 @@ func reverseTimingSiblings(s string) string {
 
 // timingBlockEndIndentAware returns the end of the table the header at
 // headerIdx opens. It prefers the block's own footer -- the line
-// reportStepTiming writes after the table -- and falls back to the
+// core.ReportStepTiming writes after the table -- and falls back to the
 // indentation rule when there is none, matching where the canonicalizer stops
 // reordering. Using indentation alone here would cut the probe off at the
-// first interleaved stderr line, which is precisely the boundary the
-// canonicalizer no longer draws, so the probe would skip asserting the
+// first interleaved stderr line, a boundary the canonicalizer does not
+// draw, so the probe would skip asserting the
 // property on exactly the golden shapes this file exists to check.
 func timingBlockEndIndentAware(lines []string, bodyStart int) int {
 	const footer = "timing record written to "

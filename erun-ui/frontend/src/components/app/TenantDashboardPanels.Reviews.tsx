@@ -367,7 +367,7 @@ function AdvanceMergeQueueConfirm({
 
 // displayReviewAuthor renders "You" for the signed-in user's own reviews,
 // then the resolved tenant-user-directory username, then the raw author id
-// as a last resort (#1378) — never a bare implementation-facing id when a
+// as a last resort — never a bare implementation-facing id when a
 // human name is available.
 function displayReviewAuthor(
   review: UITenantDashboardReview,
@@ -407,8 +407,7 @@ function ReviewAuthorAvatar({ name }: { name: string }): React.ReactElement {
 // carries the avatar plus a two-line title/metadata stack so the title can
 // dominate the row (larger, heavier, full-strength foreground) while author,
 // branches, updated time, and thread count read as a subordinate second line
-// — a dense grid of eight equal columns gave nothing for the eye to land on
-// (#1378). Status and Threads stay their own narrow columns so their badges
+// — a dense grid of equal columns gives the eye nothing to land on. Status and Threads stay their own narrow columns so their badges
 // keep a fixed, predictable width.
 function ReviewsTable({
   reviews,

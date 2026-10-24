@@ -63,7 +63,7 @@ func (r EnvironmentRoutes) placementOwnerTenantFor(ctx context.Context, environm
 
 // errCrossClusterPlacementUnsupported is the actionable refusal for a runtime
 // environment that names a raw kubernetesContext string rather than a
-// registered contextId: this platform's placement machinery (#1112) resolves
+// registered contextId: this platform's placement machinery resolves
 // a cluster's server URL and admin-token credential from a `contexts` row —
 // a bare context name has neither, so honoring it would still silently
 // deploy to the wrong place (or nowhere real). Register the cluster with
@@ -89,8 +89,8 @@ func (e *placementCapacityError) Error() string { return e.detail }
 
 // resolvedPlacement is the target cluster a runtime environment's deploy/
 // stop/delete Job authenticates against. The zero value places into the
-// platform's own cluster — the only option before #1112, and still the
-// default for a tenant that has registered no context of its own.
+// platform's own cluster, the default for a tenant that has registered no
+// context of its own.
 type resolvedPlacement struct {
 	ContextID         string
 	KubernetesContext string
@@ -103,8 +103,7 @@ type resolvedPlacement struct {
 const contextStatusRunning = "running"
 
 // placementServerURL is the k3s API server a bootstrapped context answers on
-// (eruncommon.configureCloudKubeContext targets every cloud context the same
-// way).
+// (cloud.configureCloudKubeContext targets every cloud context the same way).
 func placementServerURL(publicIP string) string {
 	return "https://" + strings.TrimSpace(publicIP) + ":6443"
 }
@@ -122,15 +121,14 @@ func placementFromContext(cloudContext model.Context) resolvedPlacement {
 }
 
 // resolvePlacement decides which cluster (if any) a runtime environment's
-// deploy targets (#1112). Only runtime environments are ever server-side
-// deployed, so a non-runtime environment's context/kubernetesContext are
-// opaque references with no placement decision to make — passed through
-// exactly as the caller sent them, unchanged from before #1112 existed. A
+// deploy targets. Only runtime environments are ever server-side deployed,
+// so a non-runtime environment's context/kubernetesContext are opaque
+// references passed through exactly as the caller sent them. A
 // runtime environment naming a raw kubernetesContext is refused outright
 // (see errCrossClusterPlacementUnsupported); one naming a contextId
 // validates it resolves for the caller's tenant and has room. A runtime
 // environment naming neither auto-selects the tenant's own registered
-// contexts, preserving the pre-#1112 default (the platform's own cluster)
+// contexts, falling back to the platform's own cluster
 // for the common case of a tenant that has registered none.
 func (r EnvironmentRoutes) resolvePlacement(ctx context.Context, environment model.Environment) (resolvedPlacement, error) {
 	if environment.Type != model.EnvironmentTypeRuntime {
@@ -163,10 +161,9 @@ func (r EnvironmentRoutes) resolvePlacement(ctx context.Context, environment mod
 // A tenant with no registered contexts places into the platform's own
 // cluster — a real, working placement, not a failure. A tenant that HAS
 // registered contexts but none currently qualify (none running, or all at
-// capacity) fails clearly instead of silently falling back, matching #1112's
-// "or fail clearly (naming why) when none qualifies": once a tenant has
-// opted into multi-cluster placement, a request that cannot honor it must
-// say so rather than land somewhere the caller did not ask for.
+// capacity) fails clearly instead of silently falling back: once a tenant
+// has opted into multi-cluster placement, a request that cannot honor it
+// must say so rather than land somewhere the caller did not ask for.
 func (r EnvironmentRoutes) autoSelectPlacement(ctx context.Context) (resolvedPlacement, error) {
 	contexts, err := r.contexts.List(ctx)
 	if err != nil {
@@ -197,9 +194,8 @@ func (r EnvironmentRoutes) autoSelectPlacement(ctx context.Context) (resolvedPla
 }
 
 // validatePlacementCapacity fails clearly, naming the context and its
-// ceiling, when a placement candidate has no room — the "or fail clearly"
-// half of #1112's ask, rather than accepting the request and failing inside
-// the Job.
+// ceiling, when a placement candidate has no room, rather than accepting the
+// request and failing inside the Job.
 func (r EnvironmentRoutes) validatePlacementCapacity(ctx context.Context, cloudContext model.Context) error {
 	count, err := r.environments.CountByContext(ctx, cloudContext.ContextID)
 	if err != nil {

@@ -5,9 +5,8 @@ import { formatUITrace, type UITraceEntry } from './uiTraceBuffer';
 
 // The Diagnostics console's one-click, paste-ready bug report. It carries
 // whatever evidence the current DiagnosticsContext resolves to, rather than a
-// single environment-shaped report: an orchestrator session used to leave
-// this reading "environment: none selected" with no trace at all (#1241),
-// which is the empty-panel bug this contract exists to fix. An unavailable
+// single environment-shaped report, so an orchestrator session never reads
+// "environment: none selected" with no trace at all. An unavailable
 // trace/log keeps its reason line — "unreachable" is itself evidence.
 // Mirrors the Activities drawer's "Copy failure report".
 export interface DiagnosticsLinkedEnv {

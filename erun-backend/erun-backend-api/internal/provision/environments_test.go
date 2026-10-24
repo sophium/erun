@@ -261,7 +261,7 @@ func TestDeployJobParamsExposeTargetIP(t *testing.T) {
 // TestDeployJobParamsExposePlatformCoordinates: the services zone and
 // platform namespace the control plane already knows for its own purposes
 // (DNS-01 cert issuance, Job placement) thread through so the chained expose
-// step can resolve a hostname without a git checkout (#1086).
+// step can resolve a hostname without a git checkout.
 func TestDeployJobParamsExposePlatformCoordinates(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{

@@ -181,7 +181,7 @@ func renderStubArmLines(lines []string) string {
 
 // SeedAWSSharedConfig writes <home>/.aws/config with one SSO profile, using
 // the modern sso_session indirection so the parser's session-index path
-// (erun-common/aws_sso_config.go) is exercised. Returns the SSO start URL it
+// (erun-common/base/config/aws_sso_config.go) is exercised. Returns the SSO start URL it
 // wrote so tests can assert it flowed through.
 func SeedAWSSharedConfig(t testing.TB, setup env.Setup, accountID, profileName string) string {
 	t.Helper()

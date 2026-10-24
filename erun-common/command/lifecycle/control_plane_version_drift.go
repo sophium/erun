@@ -16,28 +16,27 @@ import (
 )
 
 // control_plane_version_drift.go answers a question neither `erun exec
-// route-check` nor GET /v1/platform's bare version number answers alone:
-// is a deployed erun-hosted control plane running the newest version erun's
-// own registry has PUBLISHED -- deployed-vs-published, not deployed-vs-main
-// (erun#2052). A route can merge, close its issue, and still 404 on every
-// live plane for months because nothing compares "merged" against "rolled
-// out"; version_drift.go's TenantVersionDrift answers the neighboring
-// question (drift between environments in one tenant) but has no registry
-// baseline to compare against, and route-check proves a route's reachability
-// on one already-chosen plane without ever asking whether that plane itself
-// is current.
+// route-check` nor GET /v1/platform's bare version number answers alone: is a
+// deployed erun-hosted control plane running the newest version erun's own
+// registry has PUBLISHED -- deployed-vs-published, not deployed-vs-main.
+// Without it a merged route can still 404 on every live plane because nothing
+// compares "merged" against "rolled out"; TenantVersionDrift answers the
+// neighboring question (drift between environments in one tenant) but has no
+// registry baseline to compare against, and route-check proves a route's
+// reachability on one already-chosen plane without ever asking whether that
+// plane itself is current.
 //
-// The surfaces a plane links to ride along on the same check (erun#2070): each
-// plane's own GET /v1/platform response names both its console's URL
-// (PlatformInfo.ConsoleURL) and its documentation site's
-// (PlatformInfo.DocsURL) -- neither is configured as a separate alias -- and
-// each answers the identical deployed-vs-published question about itself at
-// GET /version.json, a static file stamped from ERUN_VERSION at image build
-// time (erun-devops/AGENTS.md's erun-console chart bullet; the docs site
-// publishes the same file through Cloudflare Pages). Every surface ships at
-// the same erun release version, so the one registry lookup that establishes
-// the plane's published baseline also answers for its console and its docs
-// site -- no second registry probe.
+// The surfaces a plane links to ride along on the same check: each plane's own
+// GET /v1/platform response names both its console's URL
+// (PlatformInfo.ConsoleURL) and its documentation site's (PlatformInfo.DocsURL)
+// -- neither is configured as a separate alias -- and each answers the
+// identical deployed-vs-published question about itself at GET /version.json, a
+// static file stamped from ERUN_VERSION at image build time
+// (erun-devops/AGENTS.md's erun-console chart bullet; the docs site publishes
+// the same file through Cloudflare Pages). Every surface ships at the same erun
+// release version, so the one registry lookup that establishes the plane's
+// published baseline also answers for its console and its docs site -- no
+// second registry probe.
 //
 // The docs site is checked as its own surface rather than folded into the
 // console's because the two deploy independently: a console can be current
@@ -142,24 +141,22 @@ type ControlPlaneVersionDrift struct {
 	PublishedVersionError string `json:"publishedVersionError,omitempty"`
 }
 
-// ResolveControlPlaneVersionDrift compares every configured erun-hosted
-// control plane's deployed version (GET /v1/platform, unauthenticated)
-// against the newest version erun's own registry has published. Under
-// ctx.DryRun neither call is made -- every plane that would be probed, and
-// the registry lookup that would establish the published baseline, are
-// traced instead, matching route-check's own no-network-call dry-run
-// contract (erun-common/route_check.go). deps is normalized the same way
-// every other CloudDependencies-accepting entrypoint normalizes it, so a
-// caller passing DefaultCloudDependencies() (whose FetchPlatformInfo starts
-// nil) gets the real unauthenticated call.
+// ResolveControlPlaneVersionDrift compares every configured erun-hosted control
+// plane's deployed version (GET /v1/platform, unauthenticated) against the
+// newest version erun's own registry has published. Under ctx.DryRun neither
+// call is made -- every plane that would be probed, and the registry lookup
+// that would establish the published baseline, are traced instead, matching
+// route-check's own no-network-call dry-run contract (command/expose's
+// route_check.go). deps is normalized the same way every other
+// CloudDependencies-accepting entrypoint normalizes it, so a caller passing
+// DefaultCloudDependencies() (whose FetchPlatformInfo starts nil) gets the real
+// unauthenticated call.
 //
-// alias, when non-empty, narrows the check to that one configured alias
-// instead of every configured erun-hosted alias: every sibling
-// platform-touching command (`gate list`, `platform whoami`, ...) accepts
-// --erun-alias to target one plane, but this report had no way to avoid
-// probing every configured one even when the caller only cares about a
-// single plane. An alias that is not configured, or that names a
-// non-erun-hosted provider, is an error rather than a silently empty report.
+// alias, when non-empty, narrows the check to that one configured alias instead
+// of every configured erun-hosted alias, like the --erun-alias every sibling
+// platform-touching command accepts. An alias that is not configured, or that
+// names a non-erun-hosted provider, is an error rather than a silently empty
+// report.
 func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished registry.RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
 	deps = cloud.NormalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)

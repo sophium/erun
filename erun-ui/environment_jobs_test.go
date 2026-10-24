@@ -26,7 +26,7 @@ func isolateJobsCache(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 }
 
-// jobsTestStore resolves one tenant/env so eruncommon.ResolveOpen succeeds; the
+// jobsTestStore resolves one tenant/env so open.ResolveOpen succeeds; the
 // exact port only needs to be deterministic, not any particular value.
 func jobsTestStore(t *testing.T) stubUIStore {
 	t.Helper()
@@ -44,13 +44,10 @@ func jobsTestStore(t *testing.T) stubUIStore {
 	}
 }
 
-// TestLoadEnvironmentJobsReadsThroughAReachablePodEdge is the regression test
-// for the desktop reading only its own host's job store: a remote-agent
+// TestLoadEnvironmentJobsReadsThroughAReachablePodEdge: a remote-agent
 // environment's jobs run in its pod, so when the pod is reachable the job the
 // pod itself reports must be what the Jobs tab sees, not an empty local
-// directory that has nothing to do with that pod. Before the fix this failed
-// because LoadEnvironmentJobs never consulted the MCP edge at all -- it always
-// read the (here, empty) local store and returned no jobs.
+// directory that has nothing to do with that pod.
 func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 	isolateJobsCache(t)
 	var gotEndpoint string
@@ -79,8 +76,7 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 	}
 }
 
-// TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty is the sibling
-// regression: a stale port-forward (something holds the port, the edge never
+// TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty: a stale port-forward (something holds the port, the edge never
 // answers) means a pod may well be running jobs that cannot currently be
 // asked about. Silently falling back to the (here, empty) local store would
 // render the same "No jobs yet" the operator cannot distinguish from a

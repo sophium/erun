@@ -34,22 +34,17 @@ func getOrchestratorWhipConfig() orchestrator.WhipConfig {
 }
 
 // refreshOrchestratorWhipConfig re-reads ~/.erun/config.yaml's whip override
-// and resolves it against today's defaults. Best-effort: a missing or
-// unreadable root config resolves to the zero ERunConfig, whose nil Whip
-// override keeps orchestratorWhipConfig on exactly today's behaviour — the same
-// "unconfigured install is unaffected" contract erun-common's ResolveWhipConfig
-// makes for every transport.
+// and resolves it against the defaults. Best-effort: a missing or unreadable
+// root config resolves to the defaults, as orchestrator.ResolveWhipConfig does
+// for every transport.
 func refreshOrchestratorWhipConfig() {
 	config, _, _ := configpkg.LoadERunConfig()
 	setOrchestratorWhipConfig(orchestrator.ResolveWhipConfig(config.Whip))
 }
 
 // decideOrchestratorWhip is decideOrchestratorPacing's explicit-aware form: a
-// manual, operator-triggered whip (explicit=true) ignores staleness — the
-// operator clicking/invoking it now is the assertion that this session should
-// be pushed regardless of how recently it moved — but never bypasses the cap
-// or an already-capped session, exactly as DecideWhip's explicit contract
-// requires.
+// manual, operator-triggered whip (explicit=true) ignores staleness but never
+// bypasses the cap or an already-capped session, as DecideWhip requires.
 func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
 	candidate := orchestrator.WhipCandidate{
 		Kind: orchestrator.WhipTargetOrchestrator,
@@ -106,7 +101,7 @@ func orchestratorPacingReasonFromWhip(reason orchestrator.WhipReason) orchestrat
 
 // whipDecisionFromOrchestratorPacing is orchestratorPacingDecisionFromWhip's
 // inverse, used by WhipNow (whip.go) to fold an orchestrator outcome into the
-// same eruncommon.WhipResult shape the environment side reports in.
+// same orchestrator.WhipResult shape the environment side reports in.
 func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) orchestrator.WhipDecision {
 	switch decision {
 	case orchestratorPacingNudge:
@@ -202,18 +197,12 @@ func (a *App) whipOrchestratorsNow(want map[string]struct{}) []orchestratorWhipO
 		outcomes = append(outcomes, orchestratorWhipOutcome{id: row.id, name: row.name, decision: decision, reason: reason})
 		whipped[row.id] = struct{}{}
 	}
-	// orchestratorPacingRows enumerates the sessions this desktop holds, so on
-	// its own it answers "who could be nudged", not "who was considered". A
-	// requested orchestrator that was never opened has no session and would
-	// therefore be absent from the report entirely -- and an omission reads as
-	// "not a target", where a skip names its reason. The environment half
-	// already lists configs for this reason, as does ListWhipOrchestratorCandidates
-	// on the CLI/MCP transports; this keeps the desktop honest the same way.
+	// orchestratorPacingRows only covers sessions this desktop holds; a
+	// requested orchestrator that was never opened must still be reported with
+	// a skip reason rather than silently omitted.
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
-		// Report what is known rather than nothing: the sessions above are still
-		// a truthful partial answer, and swallowing them to signal a config read
-		// failure would trade one silence for a larger one.
+		// The sessions above are still a truthful partial answer.
 		return outcomes
 	}
 	for _, config := range configs {

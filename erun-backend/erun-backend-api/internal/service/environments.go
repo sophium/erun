@@ -29,8 +29,8 @@ type DeployRunner interface {
 	Run(ctx context.Context, params deployexec.DeployJobParams) (deployexec.Result, error)
 }
 
-// UsageRecorder records a per-tenant metering event (#605). Optional: a nil
-// recorder simply records nothing, matching behavior before metering existed.
+// UsageRecorder records a per-tenant metering event. Optional: a nil
+// recorder records nothing.
 type UsageRecorder interface {
 	Record(ctx context.Context, event model.UsageEvent) error
 }
@@ -56,9 +56,9 @@ type EnvironmentProvisioner struct {
 }
 
 // NewEnvironmentProvisioner wires the provisioner. usage may be nil, which
-// records no metering event (Provision behaves exactly as before metering
-// existed). credentials may be nil, which refuses (rather than silently
-// deploying unauthenticated) any environment that names a context (#1112);
+// records no metering event. credentials may be nil, which refuses (rather
+// than silently deploying unauthenticated) any environment that names a
+// context;
 // every environment placed into the platform's own cluster is unaffected
 // either way.
 func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter, usage UsageRecorder, credentials deployexec.PlacementCredentialResolver) *EnvironmentProvisioner {
@@ -90,7 +90,7 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	// any later step: a run that fails past this point still leaves the cluster
 	// carrying it, and an operator recovering needs the env to name it.
 	// deployexec chains the environment's exposure onto the same Job but never
-	// lets its failure fail the Job (#1086) — the deploy already landed a
+	// lets its failure fail the Job — the deploy already landed a
 	// healthy workload, so a DNS/Ingress problem downstream of it must not read
 	// as a failed provision. ExposeError names that failure distinctly instead,
 	// leaving Status/ProvisionError to mean exactly "did the deploy land".

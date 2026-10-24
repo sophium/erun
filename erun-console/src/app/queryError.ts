@@ -1,8 +1,8 @@
 import { isRecord } from 'erun-kit';
 
 // Reads a human message (and, where present, an HTTP status and machine
-// {code, message} envelope code -- e.g. TENANT_UNRESOLVED vs NOT_ENROLLED,
-// erun#1721) out of whatever shape a platformApi RTK Query mutation/query
+// {code, message} envelope code -- e.g. TENANT_UNRESOLVED vs NOT_ENROLLED)
+// out of whatever shape a platformApi RTK Query mutation/query
 // rejected or errored with: the shared PlatformApiError
 // ({message, status, code}) for a transport/HTTP failure, or RTK Query's own
 // thrown-in-transformResponse shape for a malformed body.

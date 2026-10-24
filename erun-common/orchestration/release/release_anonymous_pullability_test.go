@@ -119,11 +119,10 @@ type probeStatusCase struct {
 var probeStatusCases = []probeStatusCase{
 	{name: "pullable manifest reports true", manifestStatus: http.StatusOK, wantPullable: true},
 	{name: "denied manifest reports false, not an error", manifestStatus: http.StatusForbidden},
-	// This is the 1.0.219 regression: a private ghcr package refuses the
-	// anonymous token request itself with 401, before a manifest request is
-	// even made. That refusal is a conclusive answer -- "a stranger cannot
-	// pull this" -- not a failure to reach the registry, so it must resolve
-	// like any other denial: false, no error.
+	// A private ghcr package refuses the anonymous token request itself with
+	// 401, before a manifest request is even made. That refusal is a
+	// conclusive "a stranger cannot pull this", not a failure to reach the
+	// registry, so it resolves like any other denial: false, no error.
 	{name: "401 on the token request reports false, not an error", tokenStatus: http.StatusUnauthorized},
 	{name: "403 on the token request reports false, not an error", tokenStatus: http.StatusForbidden},
 	// A non-auth manifest status is not a conclusive answer about
@@ -166,12 +165,10 @@ func TestProbeAnonymousManifestPullAtTokenRequestUnreachable(t *testing.T) {
 	}
 }
 
-// This is the regression for the defect release-time verification used to
-// have: verifyPublishedReleaseArtifacts re-resolves a manifest through
-// `docker manifest inspect`, which authenticates with whatever the local
-// daemon has stored, so it can never observe whether a stranger with no
-// credential at all could pull the same image. This probe must never send
-// one, in either direction: not on the token exchange, and not folded into
+// verifyPublishedReleaseArtifacts re-resolves a manifest through `docker
+// manifest inspect`, which authenticates with whatever the local daemon has
+// stored, so it cannot observe whether a stranger could pull the image. This
+// probe must never send a credential: not on the token exchange, and not in
 // the manifest request's own Authorization header.
 func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
@@ -266,11 +263,10 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *t
 	}
 }
 
-// This is the property erun#1587 found missing: a baselined image is a
-// record that the package is *currently* private, not a promise it will stay
-// that way. Once it probes as anonymously pullable, the entry is a lie that
-// would otherwise let this check silently no-op forever, so the release must
-// fail and name the stale entry to remove.
+// A baselined image records that the package is *currently* private, not a
+// promise it will stay that way. Once it probes as anonymously pullable, the
+// entry would let this check silently no-op forever, so the release must fail
+// and name the stale entry to remove.
 func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNowPullable(t *testing.T) {
 	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
@@ -302,8 +298,8 @@ func realProbeAt(server *httptest.Server) shared.AnonymousPullProbeFunc {
 	}
 }
 
-// This is the 1.0.219 regression itself: ghcr refuses the anonymous token
-// request for a known-private package with 401. That refusal must be
+// ghcr refuses the anonymous token request for a known-private package with
+// 401. That refusal must be
 // reported and the release must proceed, because the baseline already
 // records this image as known not anonymously pullable.
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedTokenRequestRefused(t *testing.T) {

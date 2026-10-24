@@ -45,14 +45,10 @@ func readHostAWSCredentialsFile(t *testing.T, homeDir string) string {
 	return string(data)
 }
 
-// TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile is
-// the regression test for erun#1923: two refreshes landing on the pod at
-// close to the same moment — `erun open` firing one while another `erun open`
-// or `erun cloud refresh` is still mid-flight against the same environment —
-// used to share one fixed intermediate filename, so both writers' appends
-// could land in it before either moved it into place, leaving the erun-host
-// profile written twice. A single successful write is not evidence this is
-// fixed; only the file's content after concurrent writers race is.
+// TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile:
+// two refreshes landing on the pod at close to the same moment must not leave
+// the erun-host profile written twice. Only the file's content after
+// concurrent writers race proves it; a single successful write does not.
 func TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile(t *testing.T) {
 	homeDir := t.TempDir()
 	const writers = 12

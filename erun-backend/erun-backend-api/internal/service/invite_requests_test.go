@@ -104,7 +104,7 @@ func joinInviteRequest() model.InviteRequest {
 	}
 }
 
-// TestApproveJoinEnrolsSubjectAndMintsInvite locks the issue's two required
+// TestApproveJoinEnrolsSubjectAndMintsInvite locks the two required
 // effects of approving a join request: the verified subject is enrolled
 // into the caller's own (already-authorized) tenant, and an invite is minted
 // for that same tenant through the existing repository.InviteRepository.Create
@@ -186,8 +186,8 @@ func TestApproveCreateTenantRegistersTenantEnrolsFirstUserAndMintsInvite(t *test
 	}
 }
 
-// TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts is
-// erun#1722's reproduction: the requested tenant name was registered
+// TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts: the
+// requested tenant name was registered
 // out-of-band between the request being raised and decided (a race, not a
 // mistake). Approving must not 500 on the resulting unique violation and
 // must not leave the request PENDING with no reachable outcome — it enrols

@@ -1,5 +1,5 @@
-// UI read-model types for the Ports tab's public-exposure surface (issue
-// #1351). Configured/Restricted keep the three empty states distinct: not
+// UI read-model types for the Ports tab's public-exposure surface.
+// Configured/Restricted keep the three empty states distinct: not
 // applicable to this environment, you may not see this, and genuinely empty.
 export interface UIExposureList {
   configured: boolean;

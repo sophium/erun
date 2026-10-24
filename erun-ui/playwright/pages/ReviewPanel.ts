@@ -96,7 +96,7 @@ export class ReviewPanel {
   }
 
   // changedFilesEnvLabel locates the changed-files tree's own copy of the
-  // shared ReviewEnvLabel (#1314) — scoped to the tree container so it can't
+  // shared ReviewEnvLabel — scoped to the tree container so it can't
   // also match the diff panel's or the review-layers block's copy of the same
   // "tenant / environment" text.
   changedFilesEnvLabel(envKey: string): Locator {
@@ -187,10 +187,10 @@ export class ReviewPanel {
 
   // envSectionHeader locates the sticky per-environment header the diff panel
   // renders above each linked environment's section once more than one target
-  // is shown (#1178). Scoped to DiffList's sticky header class combination
+  // is shown. Scoped to DiffList's sticky header class combination
   // (unique in the frontend source) rather than a plain text match: the
-  // changed-files tree renders its own per-env header with the same label
-  // text (#1314 made the two share one ReviewEnvLabel treatment), and other
+  // changed-files tree renders its own per-env header with the same
+  // ReviewEnvLabel text, and other
   // surfaces (sidebar rows, tab labels) can also contain it. envKey is the
   // internal `tenant/environment` form; the rendered label spaces the slash
   // ("tenant / environment"), so this reformats before matching.
@@ -237,23 +237,20 @@ export class ReviewPanel {
   }
 
   // The changed-files tree renders a short status line rather than its own
-  // copy of the diff panel's alert for the same per-env slot (#1230) — the
+  // copy of the diff panel's alert for the same per-env slot — the
   // diff panel is the one place a linked environment's outage renders as an
   // actionable alert, so this locator only ever matches once per environment.
   //
-  // Scoped to the panel's diff region rather than the whole page, which is what
-  // "the diff panel's alert" has to mean: the sidebar's orchestrator restore
-  // notices are role="alert" too, so a page-wide count was reading a surface
-  // these specs never meant to read. A notice left behind by an earlier spec in
-  // the same worker then inflated the count, and only sometimes, because which
-  // worker runs which spec varies per run. Every other alert assertion in this
-  // suite is already scoped to the surface it is about.
+  // Scoped to the panel's diff region rather than the whole page: the
+  // sidebar's orchestrator restore notices are role="alert" too, and one left
+  // behind by an earlier spec in the same worker would inflate a page-wide
+  // count.
   errorAlerts(): Locator {
     return this.diffContentRegion().getByRole('alert');
   }
 
   // reachabilityStatuses locates the informational "environment not running"
-  // status DiffErrorAlert renders for the not-open reachability kind (#1230).
+  // status DiffErrorAlert renders for the not-open reachability kind.
   // Unlike errorAlerts() this is role="status", not role="alert": it is not a
   // fault, so it must not be announced as one (WCAG 4.1.3 / Nielsen #1). Scoped
   // to the diff region for the same reason errorAlerts() is: toasts announce as

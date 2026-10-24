@@ -21,8 +21,8 @@ export function DiffList(): React.ReactElement {
     return <ReviewStatus>No environment selected</ReviewStatus>;
   }
   // One section per environment, in the orchestrator's configured order. A
-  // single environment renders exactly as before -- no header, no chrome -- so
-  // the env-tab case is visually unchanged (#1178).
+  // single environment renders with no header and no chrome, so the env-tab
+  // case stays plain.
   const multi = targets.length > 1;
   return (
     <>
@@ -225,7 +225,7 @@ function resolveDiffCommitHash(diff: DiffResult | null | undefined): string {
 
 // diffErrorCopy resolves the title/body/technical-detail text and whether this
 // is the informational not-running case, as one pure step so DiffErrorAlert
-// itself only has layout branching left (#1230 pushed the complexity here).
+// itself only has layout branching left.
 function diffErrorCopy(
   message: string,
   reconnectable: boolean | undefined,
@@ -256,7 +256,7 @@ export function DiffErrorAlert({
 }): React.ReactElement {
   // A stopped/never-opened environment is the ordinary resting state, not a
   // fault -- it renders as an informational status, not a red alert, with
-  // "Open" as the primary action instead of "Reconnect…" (#1230).
+  // "Open" as the primary action instead of "Reconnect…".
   const { notRunning, title, body, technicalMessage, action } = diffErrorCopy(
     message,
     reconnectable,

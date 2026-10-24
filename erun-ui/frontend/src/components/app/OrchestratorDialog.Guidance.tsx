@@ -43,7 +43,7 @@ function useOrchestratorGuidancePaths(orchestratorId: string): GuidancePaths | n
 // choice the titlebar's IDE buttons already offer, so this introduces no
 // second editor setting. Labelled for what each layer is rather than its
 // filename, with the resolved path shown as secondary text so the operator
-// learns the CLAUDE.<id>.md convention by seeing it (#1231).
+// learns the CLAUDE.<id>.md convention by seeing it.
 export function OrchestratorGuidanceSection({
   orchestratorId,
 }: {

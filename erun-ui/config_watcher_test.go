@@ -31,8 +31,7 @@ func TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated(t *testing.T) {
 	}
 }
 
-// TestStartConfigWatcherSurfacesAStartupFailure is the regression for
-// erun#1216 bug 4: a failed watcher start must reach the user as an
+// TestStartConfigWatcherSurfacesAStartupFailure: a failed watcher start must reach the user as an
 // actionable notification instead of leaving config-change detection
 // silently and permanently off.
 func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {

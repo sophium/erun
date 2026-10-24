@@ -100,8 +100,8 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 
 // TestActivityTraceLineHandlerStartsAndFinishesSSHDInit: `erun sshd init` runs
 // piped into the shared Local shell, which never produces a PTY exit, so the
-// `==> SSHD init ...` trace lines are its only completion signal — the same
-// structural defect erun#1268 fixed for doctor.
+// `==> SSHD init ...` trace lines are its only completion signal, as with
+// doctor.
 func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
@@ -208,12 +208,12 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	}
 }
 
-// TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession guards the fix for
+// TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession guards against
 // the deploy⇄reopen loop: a remote-agent `erun open` re-runs the remote-worktree
 // bootstrap and prints the init lifecycle ("==> Initializing" / "==> Initialized"),
 // but only the Local session that runs `erun init` may own it. Honoring it from an
-// open/ai session made the desktop fire a spurious deploy, which rolled the pod,
-// killed the open shell, respawned it, and re-emitted the line — an endless loop.
+// open/ai session would fire a spurious deploy, which rolls the pod, kills the
+// open shell, respawns it, and re-emits the line — an endless loop.
 func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}

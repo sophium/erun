@@ -139,8 +139,8 @@ type ConsumedInvite struct {
 // runs under WithinSystemTx (erun_operations, no tenant scoping) rather than
 // the normal authenticated WithinTx. ErrNotFound/ErrInviteExpired/
 // ErrInviteConsumed are distinguished so the accept flow can tell an
-// invitee exactly why their link doesn't work, per #1483's own requirement
-// that a stale link says so plainly instead of failing generically.
+// invitee exactly why their link doesn't work, so a stale link says so
+// plainly instead of failing generically.
 func (r *InviteRepository) ConsumeByToken(ctx context.Context, token string) (ConsumedInvite, error) {
 	token = strings.TrimSpace(token)
 	var result ConsumedInvite

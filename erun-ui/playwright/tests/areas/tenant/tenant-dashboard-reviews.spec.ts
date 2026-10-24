@@ -254,7 +254,7 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
   });
 });
 
-// Discovery (#1378): an author column and unresolved-thread count readable
+// Discovery: an author column and unresolved-thread count readable
 // from the row, plus the Mine/Waiting-on-me one-click filters and their own
 // distinct "nothing matches this filter" empty state.
 test.describe('tenant dashboard — reviews discovery (#1378)', () => {
@@ -436,8 +436,8 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
 // review's threads are still open — so they must report the same number. They
 // come from two different reads: the dashboard row's own per-review
 // enrichment, which is best effort, and the detail dialog's comment load,
-// which holds the threads. A row whose enrichment produced no count used to
-// render a bare dash while the dialog over it said "1 unresolved".
+// which holds the threads. A row whose enrichment produced no count must not
+// render a bare dash while the dialog over it says "1 unresolved".
 test.describe('tenant dashboard — the reviews row and the detail dialog agree on thread count', () => {
   test('a row with no computed count reports the dialog’s count once the review has been opened', async ({
     app,
@@ -499,7 +499,7 @@ test.describe('tenant dashboard — the reviews row and the detail dialog agree 
   });
 });
 
-// Resolution (#1378): a thread's status is visible and actionable from the
+// Resolution: a thread's status is visible and actionable from the
 // review detail dialog, offered only on a thread's root.
 test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
   test('resolving a thread flips its status, the action to Reopen, and the header count', async ({

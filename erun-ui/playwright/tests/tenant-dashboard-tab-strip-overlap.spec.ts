@@ -10,22 +10,18 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// Regression coverage for the tenant dashboard's tab strip overlapping
-// itself between ~700px and ~1000px (#2145). The strip is deliberately
-// wrapping — the desktop overrides the primitive's single-row layout so a
-// narrow <main> gets a second line rather than tabs pushed off-screen — but
-// the override never took: the primitive pins the list's height under a
-// variant-scoped selector (group-data-[orientation=horizontal]/tabs:h-9),
-// which outranks a plain h-auto on specificity, so tailwind-merge kept both
-// and the taller of the two lost. The tabs wrapped; the box they wrap inside
-// stayed one row tall. The overflowing second row painted over whatever the
-// panel rendered beneath it, and at 900px "API log" landed under the
-// "+ New review" button — not merely ugly, but unclickable.
+// The tenant dashboard's tab strip must not overlap itself between ~700px and
+// ~1000px. The strip is deliberately wrapping — the desktop overrides the
+// primitive's single-row layout so a narrow <main> gets a second line rather
+// than tabs pushed off-screen — but the primitive pins the list's height
+// under a variant-scoped selector (group-data-[orientation=horizontal]/tabs:h-9),
+// which outranks a plain h-auto on specificity. If the box stays one row tall,
+// the overflowing second row paints over the panel beneath it and can make
+// controls like "+ New review" unclickable.
 //
-// What the pre-existing narrow-viewport spec could not see: it asserts each
-// tab is fully on screen *horizontally* (narrow-viewport-shell.spec.ts's
-// isFullyOnScreen), and a tab on an overflowing second row satisfies that
-// perfectly. The failure was vertical the whole time. So this spec asserts
+// narrow-viewport-shell.spec.ts's isFullyOnScreen only checks each tab is
+// fully on screen *horizontally*, which a tab on an overflowing second row
+// satisfies; the failure is vertical. So this spec asserts
 // the strip actually contains the rows it wraps into, that no tab overlaps
 // another, that no tab overlaps the panel controls below it, and that every
 // tab still wins its own hit test.
@@ -34,20 +30,15 @@ import {
 // widths inside it (900 — the reported reproduction — and 820), the sidebar
 // collapse breakpoint that sits inside it (758), and one width on each side
 // of the band (1200, 640), so a fix that merely moves the broken band rather
-// than removing it still fails here. Measured against the pre-fix build,
-// every width except 1200 failed — 640 included, so the reported band was
-// the vantage the captures were taken from, not the edge of the defect.
+// than removing it still fails here.
 //
 // Staging mirrors tenant-dashboard-reviews.spec.ts: a throwaway env with an
 // apiUrl plus a stubbed LoadTenantDashboard, since the inert harness
 // deliberately has no collaboration API to read. Every panel is
 // unrestricted, because the defect is a property of the full-length strip.
 //
-// The strip was nine tabs when #2145 was reported, grew to ten with the
-// Pipeline tab, and is nine again now that the Gates tab is gone. A tab
-// added later is exactly the change that can push a wrapped second row back
-// over the panel controls, which is the defect this spec exists to catch, so
-// the count is pinned.
+// A tab added later is exactly the change that can push a wrapped second row
+// back over the panel controls, so the count is pinned.
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 1200 };
 
@@ -269,11 +260,9 @@ test.describe('tenant dashboard tab strip — the reported tab stays clickable (
 
       // Playwright hit-tests an element before clicking it, so a tab a
       // button has covered fails here rather than silently clicking the
-      // button. This is a guard, not the reproduction: against the pre-fix
-      // build the 900px overlap was 14px tall and left the tab's own centre
-      // clear, so this passed while the geometry above did not. The overlap
-      // is what reproduces the report; this keeps the tab clickable as the
-      // strip's layout changes again later.
+      // button. This is a guard, not the reproduction: a small overlap can
+      // leave the tab's own centre clear, so the geometry above is what
+      // catches it; this keeps the tab clickable as the strip's layout changes.
       await app.tenantDashboard.selectTab('API log');
       await expect(app.tenantDashboard.tab('API log')).toHaveAttribute('aria-selected', 'true');
       await expect(app.tenantDashboard.activePanel()).toBeVisible();

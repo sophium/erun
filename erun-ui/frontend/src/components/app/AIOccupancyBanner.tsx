@@ -10,7 +10,7 @@ interface AIOccupancyBannerProps {
   onShowJobs?: () => void;
 }
 
-// AIOccupancyBanner is the "while in the tab" half of erun#1221: a persistent,
+// AIOccupancyBanner is the "while in the tab" half of AI occupancy: a persistent,
 // non-blocking reminder — not a one-time toast — that another job is still
 // working in this environment while the operator's own AI tab is open.
 // Visually mirrors ActivityLockOverlay so a comparable "something else is

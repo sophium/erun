@@ -36,10 +36,9 @@ func testDeployDryRunRemoteEnvDeploysTenantComponentChartsByReference(t *testing
 }
 
 func testDeployDryRunRemoteEnvComponentThreadsResolvedOIDCIssuer(t *testing.T) {
-	// Regression: an empty computed api.oidcAllowedIssuers used
-	// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and
-	// helm's --set always beats -f, so it silently clobbered whatever the
-	// operator configured under that key in the published chart's
+	// An empty computed api.oidcAllowedIssuers must not be passed as
+	// `--set-string api.oidcAllowedIssuers=`: helm's --set always beats -f,
+	// so it would silently clobber whatever the operator configured under that key in the published chart's
 	// values.<env>.yaml. Its sibling above
 	// (dry_run_remote_env_deploys_published_components) locks the empty case —
 	// no --set-string for the key at all, so -f wins. Here a cloud-provider
@@ -258,9 +257,8 @@ func testDeployComponentsRejectsUnknownName(t *testing.T) {
 func testDeployDefaultDeploysRuntimeOnlyNotStrayNonOptinChart(t *testing.T) {
 	// Opt-in-only: a non-opt-in, non-runtime chart (here team-docs)
 	// present in the tree must NOT deploy by default — only the runtime does.
-	// Locks the stray-default fix: previously any chart outside the
-	// hardcoded opt-in set deployed by elimination (e.g. a disabled docs
-	// chart shipped on every deploy).
+	// A chart outside the opt-in set must not deploy by elimination (e.g. a
+	// disabled docs chart shipped on every deploy).
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -286,9 +284,9 @@ func testDeploySavedDeployComponentsDriveSelectionWithoutFlag(t *testing.T) {
 func testDeploySavedDeployComponentsShadowingPlanRefusesToDeploy(t *testing.T) {
 	// When a saved deploy.components set wins over a repo k8s.deployments
 	// plan that names more, a plain deploy must not silently roll out the
-	// stale subset forever (erun#1712: a component added to the plan after
-	// the saved selection was written sat a whole release behind because
-	// nothing besides a trace line ever said so). It refuses instead,
+	// stale subset forever (a component added to the plan after the saved
+	// selection was written would otherwise sit a release behind unnoticed).
+	// It refuses instead,
 	// naming exactly what the plan asked for beyond the saved set and both
 	// ways out — adopt it via `erun init --components`, or return to the
 	// plan by clearing the saved selection.
@@ -319,7 +317,7 @@ func testDeployExplicitComponentsStillNarrowsAndDoesNotResurrectShadowedPlanExtr
 	// install only what was named — the fix must never react to a shadowed
 	// saved selection by widening what actually gets installed, which would
 	// resurrect a component an operator could have deliberately narrowed
-	// away, the opposite failure from the one erun#1712 reports.
+	// away.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")

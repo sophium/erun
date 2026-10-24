@@ -10,10 +10,9 @@ import {
 
 const OCCUPANT_LEASE = 'job-fix-1201';
 
-// erun#1221: opening the AI tab on an environment already held by another
-// job's activity lease used to silently start a second agent with no
-// indication. These specs stage a real lease file (the same on-disk shape
-// eruncommon.TakeEnvironmentActivityLease writes) so the headless harness
+// Opening the AI tab on an environment already held by another job's
+// activity lease must not silently start a second agent. These specs stage a real lease file (the same on-disk shape
+// activity.TakeEnvironmentActivityLease writes) so the headless harness
 // drives the actual Go read path, not a mocked RPC.
 test.describe('AI tab occupancy notice', () => {
   test('shows who is already here and starts a second agent only on confirmation', async ({
@@ -133,9 +132,8 @@ test.describe('AI tab occupancy notice', () => {
 
     const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
     // No cap of its own: a waitFor-family call resolves to the budget the
-    // enclosing test declared, and the 20s this used to carry sat below that
-    // 30s budget -- it failed a merely slow spawn with the rest of the clock
-    // still unspent.
+    // enclosing test declared, so a merely slow spawn does not fail with the
+    // rest of the clock still unspent.
     await aiTab.waitFor({ state: 'visible' });
     await aiTab.click();
 
@@ -152,9 +150,8 @@ test.describe('AI tab occupancy notice', () => {
     writeHeldLease(tenant, environment, JOB_LEASE);
 
     // The next idle-status poll (every 1s) picks up the swapped lease. Its
-    // budget is this test's own, not the 15s cap that used to sit below it --
-    // a poll merely slower than that cap failed a test with half its clock
-    // still unspent.
+    // budget is this test's own, so a merely slow poll does not fail the test
+    // with clock still unspent.
     await expect(viewJobs).toBeVisible(withTestBudget());
 
     removeHeldLease(tenant, environment, JOB_LEASE);

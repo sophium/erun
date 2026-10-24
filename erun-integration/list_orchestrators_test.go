@@ -11,7 +11,7 @@ import (
 )
 
 func testListWithOrchestratorEnvironmentRoles(t *testing.T) {
-	// Locks erun#1688's contract: erun list shows each orchestrator's
+	// erun list shows each orchestrator's
 	// linked environments with their role, and an undeclared role
 	// renders distinctly ("undeclared") rather than guessing a default.
 	setup := env.New(t)
@@ -40,7 +40,7 @@ func testListWithOrchestratorEnvironmentRoles(t *testing.T) {
 }
 
 func testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment(t *testing.T) {
-	// Locks erun#1770's own naming worry: type and role now share the
+	// Type and role share the
 	// spelling "runtime" for two different things. The tenant's own
 	// environment carries `type: runtime` (its worktree/pod shape); the
 	// orchestrator link to that same environment carries `role=runtime`
@@ -66,7 +66,7 @@ func testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment(t *testing.T) 
 
 func testListWithOrchestratorPairingInvalidBeforeTheRoleGateExisted(t *testing.T) {
 	// `erun orchestrator set-role` now refuses a role
-	// `eruncommon.OrchestratorEnvRoleAllowed` would not have let the
+	// `config.OrchestratorEnvRoleAllowed` would not have let the
 	// desktop link this environment with in the first place, but a
 	// config written before that gate existed can still carry the
 	// invalid pairing on disk (role=code against a runtime-type

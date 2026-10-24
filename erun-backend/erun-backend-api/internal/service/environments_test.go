@@ -168,7 +168,7 @@ func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
 }
 
 // TestProvisionRecordsExposeErrorButStaysRunning: a deploy Job that succeeds
-// overall (deployexec's chained expose never fails the Job itself — #1086)
+// overall (deployexec's chained expose never fails the Job itself)
 // must still land the environment in `running`, with the chained expose
 // step's own failure recorded distinctly rather than as a provision failure.
 func TestProvisionRecordsExposeErrorButStaysRunning(t *testing.T) {
@@ -297,7 +297,7 @@ func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
 }
 
 // TestProvisionRecordsUsageEventOnSuccess: a successful deploy records the
-// namespace resource caps that were applied, the metering hook for #605.
+// namespace resource caps that were applied, for metering.
 func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{}
@@ -347,7 +347,7 @@ func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
 // TestProvisionRefusesWhenPlacementCredentialUnavailable: an environment
 // naming a context but no resolver configured (e.g. no cipher) must fail
 // clearly rather than silently running the deploy Job unauthenticated
-// against a cluster it cannot reach (#1112).
+// against a cluster it cannot reach.
 func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	status := &recordingStatusWriter{}
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded}

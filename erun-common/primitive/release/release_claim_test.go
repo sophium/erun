@@ -20,7 +20,7 @@ func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T)
 	now := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 
 	// Two distinct pids stand in for two distinct orchestrator processes
-	// releasing the same version concurrently, as erun#1619 actually happened.
+	// releasing the same version concurrently.
 	firstPID, secondPID := os.Getpid(), os.Getpid()+1
 
 	firstHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}

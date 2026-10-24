@@ -12,7 +12,7 @@ import (
 )
 
 // platform_client_builds.go extends PlatformClient with the tenant-wide
-// build history (erun#1954): GET/POST /v1/builds, the same resource
+// build history: GET/POST /v1/builds, the same resource
 // platform_client_reviews.go's review-nested ListBuilds/CreateBuild cover,
 // but for a build with no review attached.
 

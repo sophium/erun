@@ -16,8 +16,8 @@ import type { DiffLine } from '@/types';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
 // DiffLineCommentAction starts a new top-level review thread anchored to this
-// diff line — the gap ReviewDetailDialog.Comments.tsx used to call out as
-// deferred, since only the diff panel knows which line was clicked.
+// diff line. It lives here because only the diff panel knows which line was
+// clicked.
 //
 // The affordance is revealed on hover or keyboard focus, the way the sidebar's
 // per-row actions already are: the diff is the densest reading surface in the
@@ -116,7 +116,7 @@ export function DiffLineCommentAction({
 // no-active-review case names the Reviews tab, which lives in the tenant
 // dashboard — a different surface from this diff panel — so the popover
 // navigates there in one click rather than leaving the reader to find it on
-// their own (#1388). The other two reasons are actionable exactly where the
+// their own. The other two reasons are actionable exactly where the
 // operator already stands (commit the change, request access), so they stay
 // message-only.
 function DiffLineCommentBlocked({

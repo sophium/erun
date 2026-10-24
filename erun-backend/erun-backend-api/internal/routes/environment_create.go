@@ -116,9 +116,7 @@ func validateAdoptInput(adopt bool, environment model.Environment) error {
 
 // resolveCreateEnvironmentTenantScope resolves and authorizes the tenant
 // this create targets (see resolveTargetTenant), writing the response itself
-// on failure so createEnvironment only needs to check ok — split out to keep
-// createEnvironment's own branching under the cyclomatic-complexity budget.
-// homeCtx is the caller's own, unscoped context; scopedCtx is already
+// on failure so createEnvironment only needs to check ok. homeCtx is the caller's own, unscoped context; scopedCtx is already
 // resolved to the target tenant (see scopedContextForTenant); crossTenant
 // tells the caller whether that target differs from the caller's own.
 func (r EnvironmentRoutes) resolveCreateEnvironmentTenantScope(w http.ResponseWriter, req *http.Request, requestedTenantID string) (homeCtx, scopedCtx context.Context, targetTenantID string, crossTenant, ok bool) {
@@ -137,13 +135,11 @@ func (r EnvironmentRoutes) resolveCreateEnvironmentTenantScope(w http.ResponseWr
 }
 
 // resolveCreateEnvironmentPlacement resolves and persists the create-time
-// placement decision (#1112) for an ordinary request, or leaves it at the
-// zero value for an adopt request — split out to keep createEnvironment's
-// own branching under the cyclomatic-complexity budget. An adopt request
-// skips placement entirely: it describes an environment the platform will
-// never place or deploy, so its kubernetesContext is opaque descriptive
-// metadata, not a placement decision — applying the runtime placement rules
-// to it would wrongly refuse the exact raw kubernetesContext adopt requires.
+// placement decision for an ordinary request, or leaves it at the zero value
+// for an adopt request. An adopt request skips placement entirely: the
+// platform never places or deploys it, so its kubernetesContext is opaque
+// metadata, and the runtime placement rules would wrongly refuse the raw
+// kubernetesContext adopt requires.
 func (r EnvironmentRoutes) resolveCreateEnvironmentPlacement(w http.ResponseWriter, req *http.Request, environment *model.Environment, adopt bool) (resolvedPlacement, bool) {
 	if adopt {
 		return resolvedPlacement{}, true
@@ -158,8 +154,7 @@ func (r EnvironmentRoutes) resolveCreateEnvironmentPlacement(w http.ResponseWrit
 }
 
 // enforceCreateEnvironmentResourceQuota runs enforceRuntimeResourceQuotaOnCreate
-// only for an ordinary runtime create — split out to keep createEnvironment's
-// own branching under the cyclomatic-complexity budget. An adopted environment
+// only for an ordinary runtime create. An adopted environment
 // consumes no platform-managed cluster capacity (it is never placed or
 // deployed), so the runtime resource-quota floor and aggregate budget do not
 // apply to it.
@@ -263,8 +258,8 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 // writeStartProvisioningError answers a failure to enqueue the durable
 // workflow. The environment row stays exactly as persistAndMaybeProvision
 // already left it (registered, not provisioning) — nothing was attempted, so
-// nothing needs unwinding. A missing tenant runtime image is no longer this
-// path: it now selects the canonical-image bootstrap instead of failing here.
+// nothing needs unwinding. A missing tenant runtime image does not reach this
+// path: it selects the canonical-image bootstrap instead.
 func writeStartProvisioningError(w http.ResponseWriter, ctx context.Context, err error) {
 	logServerErrorForRoute(ctx, "POST /v1/environments", err)
 	writeError(w, http.StatusInternalServerError, "failed to start provisioning")
@@ -273,12 +268,10 @@ func writeStartProvisioningError(w http.ResponseWriter, ctx context.Context, err
 // previewCreateEnvironment resolves and returns the same ordered plan a
 // non-preview call with the same body would run, without creating the row —
 // provisionPlan for an ordinary create, or adoptPlan for an adopt request
-// (never provisionPlan: it always renders an unconditional "deploy:" line
-// for a runtime environment, which would misrepresent an adopt request that
-// never deploys — the "preview that cannot model what submit does" defect
-// class). Since resolvePlacement already ran before this is reached for a
-// non-adopt request, environment.ContextID is already the resolved placement
-// decision, and the only way this diverges from what a non-preview call
+// (provisionPlan always renders a "deploy:" line for a runtime environment,
+// which would misrepresent an adopt request that never deploys). For a
+// non-adopt request resolvePlacement has already run, so
+// environment.ContextID is the resolved placement decision, and the only way this diverges from what a non-preview call
 // would do is the quota check, which — like /v1/provision — reports rather
 // than 409s so the full intended plan is still visible.
 func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota, adopt bool) {

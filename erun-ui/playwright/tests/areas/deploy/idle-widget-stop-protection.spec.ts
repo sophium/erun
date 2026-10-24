@@ -276,7 +276,7 @@ test.describe('idle widget stop protection', () => {
     await transitionPill.waitFor({ state: 'visible' });
 
     // Pure-UI affordance — stays enabled by the design choice we
-    // codified (env-touching only). A regression here
+    // codified (env-touching only). Failing here
     // would mean someone added the env-running gate to the wrong
     // button group.
     const diffPanelToggle = page.getByRole('button', { name: 'Toggle diff panel' });
@@ -407,7 +407,7 @@ test.describe('idle widget stop protection', () => {
       }
       if (body.method === 'StartCloudContext') {
         startCloudContextCalls++;
-        // The call we assert must NOT happen; return a value so a regression
+        // The call we assert must NOT happen; return a value so a violation
         // fails with an assertion error instead of hanging.
         return route.fulfill(envelope({ name: ctxName, status: 'running' }));
       }
@@ -555,13 +555,12 @@ test.describe('idle widget stop protection', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // A failed stop used to surface as a bare "exit status 1" while the
-  // instance kept running. The desktop now shows the classifier's actionable
-  // message (naming the unlock lever) and keeps reporting the running state,
-  // never a false "stopped". A real AWS OperationNotPermitted can't be staged
-  // headless, so the RPC rejects with the exact message the classifier emits;
-  // the classification itself is owned by
-  // erun-common/cloud_context_power_error_test.go.
+  // A failed stop shows the classifier's actionable message (naming the
+  // unlock lever) and keeps reporting the running state, never a false
+  // "stopped". A real AWS OperationNotPermitted can't be staged headless, so
+  // the RPC rejects with the exact message the classifier emits; the
+  // classification itself is owned by
+  // infra/cloud/cloud_context_power_error_test.go.
   test('a failed stop surfaces the actionable reason and keeps the running state', async ({
     app,
     page,
@@ -611,7 +610,7 @@ test.describe('idle widget stop protection', () => {
     await expect(stopButton).toBeVisible(withTestBudget());
   });
 
-  // Regression for erun#1216 bug 3: a reading LoadIdleStatus assembled on
+  // A reading LoadIdleStatus assembled on
   // the host (fromPod: false, taken when the pod could not be reached) must
   // not render with the same confidence as a live pod-confirmed one.
   test('idle badge names the pod provenance caveat for a reading the pod never confirmed', async ({
@@ -651,17 +650,13 @@ test.describe('idle widget stop protection', () => {
 
   // The widget mounts only after a LoadIdleStatus poll reports a managed
   // cloud context, so everything below it is a state transition owned by that
-  // poll round trip rather than a render that has already happened. Asserting
-  // the control with a bare `toBeVisible()` capped the step at expect's 10s
-  // default inside a test that declares 30s, so a poll that is merely slow
-  // reds the test with two thirds of its own clock unspent. The hold below is
+  // poll round trip rather than a render that has already happened. A bare
+  // `toBeVisible()` would cap the step at expect's 10s default inside a test
+  // that declares more, so a poll that is merely slow would fail with most of
+  // its own clock unspent. The hold below is
   // deliberately just past that default: the smallest delay that
   // discriminates, applied at the read the mount waits on rather than by
   // loading the machine, so the reproduction is deterministic on a quiet host.
-  //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; converged on the control's own arrival, it passes when the poll
-  // actually answers.
   test('a widget that mounts past the step cap is waited out, not cut off', async ({
     app,
     page,

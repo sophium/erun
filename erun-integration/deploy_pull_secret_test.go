@@ -199,7 +199,7 @@ func testDeployDryRunRemoteEnvImagePullSecrets(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvImagePullSecretRefreshedFromHostCredential(t *testing.T) {
-	// An ECR authorization token expires after twelve hours (#1256), so a
+	// An ECR authorization token expires after twelve hours, so a
 	// pull secret named once via --image-pull-secret and never refreshed
 	// eventually rots. When the host running `erun deploy` already has a
 	// credential for the deploy registry (docker config, or the AWS CLI
@@ -231,12 +231,10 @@ func testDeployDryRunRemoteEnvImagePullSecretRefreshedFromHostCredential(t *test
 }
 
 func testDeployDryRunRemoteEnvImagePullSecretCoversRuntimeImageOverrideRegistry(t *testing.T) {
-	// #1328: a runtimeimage pinned to a registry other than the env's
+	// A runtimeimage pinned to a registry other than the env's
 	// containerRegistry (e.g. built into one registry, deployed from
-	// another) left the refreshed pull secret uncovered for the registry
-	// the pod actually pulls from — before this fix, resolution only ever
-	// tried containerRegistry's host, so a credential known for the
-	// image's own registry was never even attempted. Here DOCKER_CONFIG
+	// another) needs the refreshed pull secret to cover the registry the
+	// pod actually pulls from, not just containerRegistry's host. Here DOCKER_CONFIG
 	// carries a credential for the runtimeimage's own registry
 	// (otherregistry.example) but NOT for the fixture's containerregistry
 	// (registry.example): before the fix this applied no secret at all
@@ -309,9 +307,8 @@ func testDeployRealRunRefusesBeforeRolloutWhenPrivateRuntimeImageHasNoPullCreden
 
 // A deploy running inside the target env's own runtime pod has none of the
 // three credential routes resolveGHCRBasicAuth knows -- no docker config, no gh
-// session, no GH_TOKEN/GITHUB_TOKEN -- so before this fix every read of the
-// tenant's private chart was anonymous, ghcr refused to mint a token, and deploy
-// refused the read as unconfirmed. The env already declares where the credential
+// session, no GH_TOKEN/GITHUB_TOKEN -- so an anonymous read of the tenant's
+// private chart would be refused. The env already declares where the credential
 // lives: its imagepullsecrets names a dockerconfigjson Secret in its own
 // namespace that the pod's service account can read. The pod resolves it from
 // there instead of falling back to anonymous.

@@ -19,7 +19,7 @@ import (
 // tenant/environment are the target whipOneEnvironmentNow already resolved
 // and used to pick endpoint -- restating them in the call itself, rather than
 // leaving the tool to infer them from the server's own bound context, is the
-// stronger assertion the resolveLocalTarget contract (erun-mcp/runtime.go)
+// stronger assertion the ResolveLocalTarget contract (erun-mcp's tools/shared)
 // asks callers to make: a stale edge pointed at the wrong environment then
 // surfaces as a named mismatch instead of a silent act on the wrong one.
 func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (orchestrator.WhipResult, error) {
@@ -43,7 +43,7 @@ func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, b
 }
 
 // decodeWhipMCPResult turns one "whip" tool CallToolResult into a
-// eruncommon.WhipResult, pulled out of whipEnvironmentViaMCP so the decode
+// orchestrator.WhipResult, pulled out of whipEnvironmentViaMCP so the decode
 // path can be driven directly in tests without a live MCP round trip.
 func decodeWhipMCPResult(result *mcp.CallToolResult) (orchestrator.WhipResult, error) {
 	// A tool-reported failure comes back as a populated CallToolResult with

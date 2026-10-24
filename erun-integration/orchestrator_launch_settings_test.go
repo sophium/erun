@@ -10,7 +10,7 @@ import (
 // `erun orchestrator set-gateway`, `set-model` and `set-effort`, the CLI
 // counterparts of the desktop dialog's launch controls for
 // OrchestratorConfig.UseGateway, .Model and .Effort. Every refusal here is
-// decided by eruncommon.ValidateOrchestratorLaunchSettings against the
+// decided by orchestrator.ValidateOrchestratorLaunchSettings against the
 // orchestrator as it would be after the write, so the gateway and model
 // scenarios cross each other: a model refused only because the gateway is on,
 // and a gateway refused only because of the model already recorded.

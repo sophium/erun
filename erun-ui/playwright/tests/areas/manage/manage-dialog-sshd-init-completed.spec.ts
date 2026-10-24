@@ -1,14 +1,11 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// erun#1276: sshd-init's hidden-session tracking had the same structural
-// defect erun#1268 fixed for Run Doctor — `StartSSHDInitSession` always
-// returns kind "local" (it pipes `erun sshd init` into the shared Local
-// shell), so the tracking call keyed on a dedicated-session exit was
-// unreachable, and the outcome was never recorded anywhere. The fix follows
-// the same pattern: `erun sshd init` now emits `==> SSHD init ...` /
-// `==> SSHD init done` / `==> SSHD init failed` trace lines, and a new
-// `sshd-init-completed` Wails event carries the outcome to the Manage
-// dialog's SSH access section.
+// `StartSSHDInitSession` always returns kind "local" (it pipes
+// `erun sshd init` into the shared Local shell), so there is no dedicated
+// session exit to track, as with Run Doctor. Instead `erun sshd init` emits
+// `==> SSHD init ...` / `==> SSHD init done` / `==> SSHD init failed` trace
+// lines, and the `sshd-init-completed` Wails event carries the outcome to the
+// Manage dialog's SSH access section.
 //
 // The CLI actually emitting those trace lines is Go-side and cannot be
 // observed in this harness: the inert `erun` stub exits immediately for any

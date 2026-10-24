@@ -71,7 +71,7 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	}
 	// Exactly one unreachable env is the unambiguous case: the notice can only
 	// mean this env, so it carries the deploy action and is tagged with it
-	// (#1390) rather than leaving the "deploy or reopen" remedy unreachable.
+	// rather than leaving the "deploy or reopen" remedy unreachable.
 	wantTag := [4]string{"frs", "dev", notificationSourceOrchestratorEdgeUnreachable, notificationActionDeploy}
 	gotTag := [4]string{payload.Tenant, payload.Environment, payload.Source, payload.Action}
 	if gotTag != wantTag {
@@ -79,12 +79,9 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable is the
-// regression for the case that used to get the least help: several edges down
-// at once collapsed into one combined notice carrying no action, so the
-// orchestrator with the most broken edges was told about them with nothing to
-// click. Every unreachable env now gets its own env-scoped notice carrying the
-// same deploy action the single-env case gets -- not one env picked for the
+// TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable: with several
+// edges down at once, every unreachable env gets its own env-scoped notice
+// carrying the same deploy action the single-env case gets -- not one env picked for the
 // whole set, and not a notice that merely mentions the others.
 func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))

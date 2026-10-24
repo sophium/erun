@@ -2,7 +2,7 @@
 // hyperlinks alike). A terminal renders untrusted output -- an agent or a
 // build log can print anything -- so `javascript:`, `data:`, and `file:` must
 // never be activatable: `file:` from a pod-side tab is exactly the host/pod
-// path confusion #1354 exists to prevent, wearing a URL instead of a path.
+// path confusion path links guard against, wearing a URL instead of a path.
 const ACTIVATABLE_URL_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 
 export function activatableUrl(raw: string): URL | null {

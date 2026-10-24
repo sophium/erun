@@ -19,12 +19,10 @@ func reconcilingReview(status model.ReviewStatus, verifier fakeMergeVerifier) (*
 	return reviews, svc
 }
 
-// TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus is the transition
-// erun#2575 is about: a review whose work landed without the queue — a GitHub
-// squash merge — reaches MERGED from wherever it was sitting, on the
-// verifier's word that the branch's changes really are in the target. Before
-// this it could never move at all, so it sat OPEN forever and made the OPEN
-// count grow by one for every change that landed that way.
+// TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus: a review whose
+// work landed without the queue — a GitHub squash merge — reaches MERGED from
+// wherever it was sitting, on the verifier's word that the branch's changes
+// really are in the target, rather than sitting OPEN forever.
 func TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus(t *testing.T) {
 	for _, status := range []model.ReviewStatus{model.ReviewStatusOpen, model.ReviewStatusReady, model.ReviewStatusFailed} {
 		t.Run(string(status), func(t *testing.T) {

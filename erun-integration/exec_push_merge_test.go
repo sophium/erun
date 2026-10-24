@@ -58,7 +58,7 @@ func testExecPushRefusesBranchMismatch(t *testing.T) {
 func testExecPushRealRunLandsTheBranchOnTheRemote(t *testing.T) {
 	// A real bare remote, not a stubbed git call, so "the branch actually
 	// landed on the remote" is an observable fact — the whole point of a
-	// typed push primitive over `raw` running `git push` (#1199).
+	// typed push primitive over `raw` running `git push`.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	remote := seedBareOrigin(t, setup)
@@ -185,10 +185,10 @@ func testExecMergeConflictRealRunLeavesTheWorktreeMidMerge(t *testing.T) {
 }
 
 func testExecMergeRealRunRegeneratesConflictingAtlasSum(t *testing.T) {
-	// erun#2025: the ordinary `erun exec merge` path (an author syncing a
-	// feature branch with main before opening a PR) hits the identical
-	// by-construction atlas.sum conflict whenever both branches add a
-	// migration. This proves the fix applies there too, not just to the
+	// The ordinary `erun exec merge` path (an author syncing a feature branch
+	// with main before opening a PR) hits the identical by-construction
+	// atlas.sum conflict whenever both branches add a migration. This proves
+	// the regeneration applies there too, not just to the
 	// gate-merge batch path.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)

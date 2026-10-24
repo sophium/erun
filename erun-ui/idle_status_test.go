@@ -7,11 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestIdleStatusToUICarriesFromPodProvenance is the regression for
-// erun#1216 bug 3: the idle widget rendered a confident countdown with no
-// way to tell whether the reading came from the pod's own idle monitor or
-// was assembled on the host because the pod could not be reached — the same
-// moment the sidebar might be showing the environment as unreachable.
+// TestIdleStatusToUICarriesFromPodProvenance: the idle widget must be able to
+// tell whether a reading came from the pod's own idle monitor or was
+// assembled on the host because the pod could not be reached.
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
 	status := activity.EnvironmentIdleStatus{StopEligible: true}

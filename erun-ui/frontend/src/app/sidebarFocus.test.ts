@@ -47,10 +47,9 @@ function stateWith(fields: {
   } as unknown as RootState;
 }
 
-// #1204: the tenant dashboard, an orchestrator's session, and an
-// environment's session used to be three independently-computed "active"
-// booleans across three components. selectSidebarFocus is the single value
-// they must all derive from instead, so at most one of them is ever true.
+// The tenant dashboard, an orchestrator's session, and an environment's
+// session all derive "active" from selectSidebarFocus, so at most one of them
+// is ever true.
 
 test('an open tenant dashboard wins even over a stale active session', () => {
   // A dashboard opened while an orchestrator's session was still the last

@@ -202,7 +202,7 @@ func kubernetesAPIServerUnreachableSignal(output string) bool {
 // recognize. Neither is evidence the deployment is absent. Reuses
 // isKubernetesContextMissingMessage for the context-missing case it already
 // covers instead of a second matcher for the same signal. Names the
-// kubectl context for the unreachable-API-server case (erun#1766): erun
+// kubectl context for the unreachable-API-server case: erun
 // already knows it from its own configuration, so the message can identify
 // the target cluster without depending on a substring of kubectl's own
 // output surviving whatever later truncates the message for display.
@@ -244,10 +244,8 @@ var klogUnhandledErrorPattern = regexp.MustCompile(`^"Unhandled Error"\s+err="(.
 
 // sanitizeKubectlFailureOutput reduces kubectl's raw combined output to the
 // one sentence an operator can act on, rather than pasting a klog line
-// verbatim (erun#1766: a toast rendered that line at a fixed width, so the
-// goroutine id and source location survived while the API server address --
-// the one piece of the message that actually named a cause -- was what got
-// cut off). It scans from the last non-blank line backward, strips klog's
+// verbatim: a fixed-width toast would keep the goroutine id and source
+// location and cut off the API server address that names the cause. It scans from the last non-blank line backward, strips klog's
 // frame if present, and unwraps an "Unhandled Error" carrier down to its
 // err= text; a line with neither shape is returned frame-stripped as-is, so
 // an unrecognized failure still reaches the operator rather than

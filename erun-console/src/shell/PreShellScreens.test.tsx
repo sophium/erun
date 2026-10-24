@@ -189,7 +189,7 @@ describe('NotEnrolledScreen', () => {
   });
 });
 
-// erun#1721: this screen is the "unresolvable" counterpart to NotEnrolledScreen
+// This screen is the "unresolvable" counterpart to NotEnrolledScreen
 // above -- shown when the API cannot tell which tenant a token resolves to,
 // as distinct from a genuinely-unenrolled identity. It must not repeat the
 // "an operator must enrol you" copy, since the caller may already be enrolled.
@@ -246,7 +246,7 @@ describe('TenantUnresolvedScreen', () => {
   });
 });
 
-// erun#1752: shown when resolution failed for an internal reason (already
+// Shown when resolution failed for an internal reason (already
 // sanitized server-side into a safe message) rather than a real answer about
 // enrolment. It must never claim the caller isn't enrolled, and -- unlike
 // NotEnrolledScreen -- must never offer an enroll command: whatever link

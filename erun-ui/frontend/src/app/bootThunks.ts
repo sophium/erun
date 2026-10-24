@@ -24,7 +24,7 @@ import {
 import { loadInterruptedActivityNotice } from './windowCloseThunks';
 
 // Seeds each env's busy/reachable row from the poller's own last observation
-// (erun#1216) — the same snapshot-seeding shape loadOrchestrators uses for
+// — the same snapshot-seeding shape loadOrchestrators uses for
 // the orchestrator rows, needed here for the same reason: the env-activity
 // Wails event only fires on a transition, so a boot with no prior transition
 // to replay (a page reload, not a process restart) would otherwise render a
@@ -53,7 +53,7 @@ function seedEnvNodes(dispatch: AppDispatch, tenants: UITenant[]): void {
 
 // The generated UIState type says tenants is never null, but that is a
 // promise about the Go struct, not about what actually crosses the wire — a
-// stub, or a future backend regression, can still send JSON null. Array.isArray
+// stub or a backend bug can still send JSON null. Array.isArray
 // is a real runtime check here, not a redundant null-coalesce against an
 // already-narrowed type, so boot() cannot crash on this before the titlebar
 // even has a chance to say why.
@@ -131,7 +131,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     );
     // A previous launch's confirmed "close anyway" may have interrupted a
     // build/deploy/release with no record until now; report it once, right
-    // after the state it interrupted has loaded (erun#1214).
+    // after the state it interrupted has loaded.
     await dispatch(loadInterruptedActivityNotice());
     if (reportBootLoadOutcome(dispatch, loaded)) {
       return;
@@ -163,10 +163,9 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 // omits them. It deliberately does NOT touch version suggestions: those are
 // resolved per-env by whichever dialog is open (each owns/refreshes its own), and
 // getInitialState always recomputes them for the sidebar-selected env — so writing
-// them here clobbered an open picker with the wrong env's versions on every
-// environment-change tick (e.g. leaving only the upstream fallback while a tenant
-// build fired deltas). It must also not touch the env-init dialog's
-// kubernetes-context list: a stale environments-changed tick used to wipe a
+// them here would clobber an open picker with the wrong env's versions on every
+// environment-change tick. It must also not touch the env-init dialog's
+// kubernetes-context list, or a stale environments-changed tick would wipe a
 // populated dropdown.
 export const reloadStateAfterEnvironmentChange =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
@@ -200,9 +199,8 @@ export const reloadStateAfterEnvironmentChange =
       dispatch(setTenants(loaded.tenants));
       dispatch(setCloudProviders(loaded.cloudProviders ?? current.cloudProviders));
     } catch (error) {
-      // Env-change reloads are best-effort, but swallowing the failure
-      // silently used to leave the sidebar stale after a successful
-      // `erun init`. Log it so the failure is visible; callers that depend on
+      // Env-change reloads are best-effort, but a silently swallowed failure
+      // leaves the sidebar stale after a successful `erun init`. Log it; callers that depend on
       // the new env surfacing (handleEnvironmentInitialized) retry rather than
       // trusting a single best-effort pass.
       console.error('reloadStateAfterEnvironmentChange failed:', error);

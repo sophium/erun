@@ -145,7 +145,7 @@ var Routes = map[string]Roles{
 
 	// builds.go — reporting/reading a review's builds is part of driving it.
 	// GET/POST /v1/builds is the same build-history surface, tenant-wide
-	// rather than review-nested (erun#1954). A review's own builds are part
+	// rather than review-nested. A review's own builds are part
 	// of reading that review — `erun review show` fetches them alongside its
 	// comments — and recording the build of the prepared merge commit is the
 	// whole reason the machine role exists. The tenant-wide list is not: see
@@ -253,8 +253,7 @@ var Routes = map[string]Roles{
 	"GET /v1/pipeline": TenantUserClass,
 
 	// contexts.go — reading registered contexts is TenantUser; registering a
-	// new one is tenant administration (explicitly named in the issue this
-	// classification implements).
+	// new one is tenant administration.
 	"GET /v1/contexts":              TenantUserClass,
 	"POST /v1/contexts":             TenantAdminOnly,
 	"GET /v1/contexts/{context_id}": TenantUserClass,

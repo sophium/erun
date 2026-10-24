@@ -14,8 +14,8 @@ interface ReattachRepaintDeps {
 
 // QUIET_WINDOW_MS mirrors the Go side's aiRepaintInputQuiet: how recently input
 // must have arrived for the poller to stand down for one tick. Kept in sync
-// deliberately -- both exist for the same reason, resizing a line mid-edit
-// corrupted the submitted prompt (#1330).
+// deliberately -- both exist for the same reason: resizing a line mid-edit
+// corrupts the submitted prompt.
 const QUIET_WINDOW_MS = 1500;
 
 // TerminalReattachRepaint forces a reattached main-screen TUI (Claude) to repaint.
@@ -56,8 +56,8 @@ export class TerminalReattachRepaint {
   // after the shrink has begun is invisible to it. That is the reachable window
   // -- dtach hands a reattached client a cleared screen, so "blank" is exactly
   // the state a pane is in when someone switches in and types -- and letting
-  // the 650ms restore land mid-line reflowed the buffer being edited, which
-  // corrupted the submitted prompt (#1330).
+  // the 650ms restore land mid-line reflows the buffer being edited, which
+  // corrupts the submitted prompt.
   //
   // So input finishes any in-flight cycle NOW, restoring the geometry
   // immediately instead of at the end of the hold -- the restore still has to

@@ -253,19 +253,12 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 	}
 }
 
-// TestAttachCreatesSessionDirectoryOnAFreshPod is the regression test for the
-// defect the console's MCP attach-session Playwright spec found by
-// actually driving a real browser against a real emcp instance with no prior
-// CLI session: eruncommon.RemoteAppSessionSocketDir is container-local and
-// nothing in the runtime image's boot path creates it -- so a freshly
-// deployed or restarted pod that has never had a CLI-driven session
-// (`erun open --ai`, a linked orchestrator) has no session directory at all
-// until this handler creates one itself. Before the fix this failed with
-// `dtach: ...: No such file or directory` surfaced as raw shell stderr piped
-// into the client's own byte stream, and a misdiagnosed "taken-over" outcome
-// (the owner-file write failing open reads identically to a real rival
-// claiming the socket) -- exactly the "unknown must not render as a definite
-// value" property this file's own doc comment calls out.
+// TestAttachCreatesSessionDirectoryOnAFreshPod: activity.RemoteAppSessionSocketDir
+// is container-local and nothing in the runtime image's boot path creates it,
+// so a pod that has never had a CLI-driven session (`erun open --ai`, a linked
+// orchestrator) has no session directory until this handler creates one.
+// Without it, dtach's stderr would leak into the client's byte stream and a
+// failed owner-file write would read as a definite "taken-over" outcome.
 func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
 	if err := os.RemoveAll(activity.RemoteAppSessionSocketDir); err != nil {

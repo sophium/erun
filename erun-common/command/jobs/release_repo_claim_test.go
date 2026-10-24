@@ -77,11 +77,11 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 }
 
 // TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset
-// reproduces the shape a real release actually writes (erun#1637):
-// ERUN_ORCHESTRATOR_ID is unset in every in-pod release, so the holder
-// carries only a tenant. Two environments of that same tenant racing the
-// same version must still be told apart in the refusal — "tenant erun"
-// alone does not say which environment to go look at.
+// reproduces the shape a real release actually writes: ERUN_ORCHESTRATOR_ID is
+// unset in every in-pod release, so the holder carries only a tenant. Two
+// environments of that same tenant racing the same version must still be told
+// apart in the refusal — "tenant erun" alone does not say which environment to
+// go look at.
 func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(t *testing.T) {
 	envA := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, envA)
@@ -230,10 +230,9 @@ func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
 	}
 }
 
-// TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt is the
-// regression test for erun#1668: a renewal used to rewrite StartedAt to the
-// renewal time, so a release running for an hour with periodic renewals
-// always looked a couple of minutes old in the claim blob.
+// TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt: a
+// renewal must not rewrite StartedAt, or a long release with periodic
+// renewals looks only minutes old in the claim blob.
 func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *testing.T) {
 	env := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, env)

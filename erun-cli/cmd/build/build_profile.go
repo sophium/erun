@@ -10,7 +10,7 @@ import (
 )
 
 // buildProfileCommandName is the timing-record command prefix `erun build`
-// writes under ~/.erun/timing/ (timingRecordFileName in erun-common/timing.go).
+// writes under ~/.erun/timing/ (core.TimingRecordFileName).
 const buildProfileCommandName = "build"
 
 func newBuildProfileCmd() *cobra.Command {

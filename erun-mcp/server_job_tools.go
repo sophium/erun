@@ -50,11 +50,9 @@ func registerIdleStopTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfi
 	}, aisessions.AiSessionsTool(runtime))
 }
 
-// registerJobTools registers the exec_job_* family (#1246, following the
-// rename #1186 already decided: `job` becomes a sub-family of `exec`) plus
-// exec_agent, the job-starting tool that belongs beside them for the same
-// reason #1186 gave -- the tool that starts a job and the tools that query it
-// should live in one family. job_start itself is gone rather than aliased:
+// registerJobTools registers the exec_job_* family (`job` is a sub-family of
+// `exec`) plus exec_agent, since the tool that starts a job and the tools that
+// query it belong in one family. job_start itself is gone rather than aliased:
 // its command mode and agent mode had incompatible schemas, so a single
 // compatibility shim would have meant shipping a tool whose input shape lied
 // about what it accepted. Its command mode is exec_raw's wait:false path and
@@ -115,7 +113,7 @@ func registerJobTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
 	}, jobs.JobCancelTool(runtime))
 
 	// Deprecated aliases for the five renamed job tools, kept callable for one
-	// release (the same window #1186 used for the exec_* renames). job_start
+	// release (the same window as the exec_* renames). job_start
 	// has no equivalent alias: see the function comment above for why.
 	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_attach",

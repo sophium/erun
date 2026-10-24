@@ -252,7 +252,7 @@ variable "base_domain_name" {
 
   # A server block for a cluster-internal zone would shadow CoreDNS's own
   # kubernetes plugin and send every .svc.cluster.local lookup to a public
-  # resolver, killing in-cluster service discovery outright (#1165). The regex
+  # resolver, killing in-cluster service discovery outright. The regex
   # above happily accepts "cluster.local".
   validation {
     condition = var.base_domain_name == null || var.base_domain_name == "" || !contains(
@@ -278,7 +278,7 @@ variable "coredns_forward_upstreams" {
   # serving from its already-loaded config, so nothing looks wrong until its next
   # restart -- a node drain, an eviction, an upgrade -- at which point the
   # cluster has no DNS at all and the cause is a terraform apply from days
-  # earlier (#1165). Validating here turns that into an apply-time error.
+  # earlier. Validating here turns that into an apply-time error.
   validation {
     condition = var.coredns_forward_upstreams == null || alltrue([
       for upstream in var.coredns_forward_upstreams :

@@ -13,7 +13,7 @@ import (
 )
 
 // PlatformClient is the transport-neutral client for a hosted erun platform's
-// erun-backend-api: the contract erun-cli and erun-mcp both drive in stage B,
+// erun-backend-api: the contract erun-cli and erun-mcp both drive,
 // kept free of Cobra and the MCP SDK so it stays usable as a plain library.
 // Every method takes a bearer minted immediately before the request (see
 // PlatformTokenMinter), mirroring the MCP client's minted-per-call token so a
@@ -183,7 +183,7 @@ type PlatformEnvironment struct {
 	DeployedVersion   string `json:"deployedVersion,omitempty"`
 	// DeleteError names why a delete attempt did not tear the namespace down
 	// (the namespace's own conditions, verbatim, when it is stuck on an
-	// unsatisfiable finalizer) when Status is "deletion-blocked" (#1140).
+	// unsatisfiable finalizer) when Status is "deletion-blocked".
 	DeleteError string    `json:"deleteError,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`

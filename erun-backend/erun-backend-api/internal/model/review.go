@@ -32,11 +32,10 @@ type Review struct {
 	// (erun_current_user_id()); a client-supplied value is never persisted.
 	AuthorUserID string `json:"authorUserId" bun:"author_user_id,scanonly"`
 	// Repository is the repository the review's branches belong to, as a
-	// canonical remote identity (eruncommon.RepositoryIdentity), so a tenant
-	// serving more than one repository can tell whose review this is. Empty
-	// means none was recorded: the column is nullable because reviews created
-	// before the platform recorded one have nothing to backfill from, and it
-	// is set the first time a report names a repository for one.
+	// canonical remote identity (erun-common's model.RepositoryIdentity), so a
+	// tenant serving more than one repository can tell whose review this is.
+	// Empty means none was recorded; it is set the first time a report names a
+	// repository for one.
 	Repository   string `json:"repository,omitempty" bun:"repository,nullzero"`
 	Name         string `json:"name" bun:"name"`
 	TargetBranch string `json:"targetBranch" bun:"target_branch"`

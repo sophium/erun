@@ -14,7 +14,7 @@ import (
 // single review's own detail — its comment threads, recorded builds, and its
 // position in its target branch's merge queue — plus replying to an existing
 // comment thread. Loaded lazily, one review at a time, from a row the
-// operator opens in the Reviews panel (#1199).
+// operator opens in the Reviews panel.
 
 // LoadReviewDetail loads one review's detail. Each sub-read is gated and
 // degrades independently, mirroring LoadTenantDashboard's own panels: a

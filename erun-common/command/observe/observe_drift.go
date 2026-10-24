@@ -91,8 +91,8 @@ func foundReleaseDrift(req config.ShellLaunchParams, release *clusterread.Observ
 // component name matches a running container by name but not by image — the
 // exact class the runtime chart's own container-naming convention makes
 // possible (a container is named after its imageOverrides key, e.g.
-// "erun-devops"), and the exact finding #1448 exists for: a helm release can
-// name one image while the cluster runs another, hand-patched one.
+// "erun-devops"): a helm release can name one image while the cluster runs
+// another, hand-patched one.
 func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
 	if len(release.ImageOverrides) == 0 {
 		return nil

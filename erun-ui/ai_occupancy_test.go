@@ -55,8 +55,7 @@ func takeTestLease(t *testing.T, name string) {
 	}
 }
 
-// TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent pins erun#1221:
-// opening the AI tab on an environment already held by another job's activity
+// TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent: opening the AI tab on an environment already held by another job's activity
 // lease must not silently launch a competing agent. Unless the caller confirms,
 // the start is reported back as occupied and no PTY is spawned.
 func TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent(t *testing.T) {

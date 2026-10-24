@@ -8,15 +8,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
-// live: cgroup v2 present, an unlimited memory.max, cgroup v1 (or no cgroup
-// fs at all), and a script that could not read a file. None of these are
-// reachable from the dry-run integration subprocess (dry-run never runs the
-// script), and the real-run path needs a live cgroup v2 container the
-// harness does not have, so the fixture matrix belongs here rather than in
-// erun-integration. Table-driven with the comparisons factored into
-// top-level assert helpers, so the number of fixtures does not grow this
-// function's own cyclomatic complexity.
+// TestParseRuntimeUsageReadings covers the fixture shapes measured live: cgroup
+// v2 present, an unlimited memory.max, cgroup v1 (or no cgroup fs at all), and
+// a script that could not read a file. None of these are reachable from the
+// dry-run integration subprocess (dry-run never runs the script), and the
+// real-run path needs a live cgroup v2 container the harness does not have, so
+// the fixture matrix belongs here rather than in erun-integration.
 func TestParseRuntimeUsageReadings(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second

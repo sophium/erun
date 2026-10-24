@@ -51,10 +51,9 @@ func TestHostedRegistryProbeNamesAnUnresolvableHost(t *testing.T) {
 	}
 }
 
-// TestErunRegistryRefusesWhenUnreachable is the red-then-green case for #1494
-// item 4: choosing the hosted registry must fail at the choice, naming the
-// reason, rather than writing an environment whose every push resolves to a
-// host that is not there.
+// TestErunRegistryRefusesWhenUnreachable: choosing the hosted registry must
+// fail at the choice, naming the reason, rather than writing an environment
+// whose every push resolves to a host that is not there.
 func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 	runner := setup.BootstrapRunner{BootstrapInitDependencies: setup.BootstrapInitDependencies{
 		ProbeHostedRegistry: func(context.Context) setup.HostedRegistryStatus {

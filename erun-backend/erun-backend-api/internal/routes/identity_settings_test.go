@@ -41,8 +41,7 @@ func TestUpdateOrgSettingsPassesOnlyProvidedFields(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgSettingsThreadsAllowRegister locks the actual lever #1482
-// asks for: closing (or reopening) self-registration must reach the
+// TestUpdateOrgSettingsThreadsAllowRegister: closing (or reopening) self-registration must reach the
 // Zitadel client's params, the same way forceMfa already does.
 func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
@@ -120,8 +119,7 @@ func TestGetSMTPSettingsForbidsNonOperationsTenant(t *testing.T) {
 	}
 }
 
-// TestGetSMTPSettingsReportsUnconfigured locks the visibility fix (issue
-// #1168): the platform must be able to report "mail is not configured"
+// TestGetSMTPSettingsReportsUnconfigured: the platform must be able to report "mail is not configured"
 // through this surface, cleanly, rather than only via Zitadel's own
 // unhandled 404.
 func TestGetSMTPSettingsReportsUnconfigured(t *testing.T) {

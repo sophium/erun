@@ -52,10 +52,9 @@ func TestPlatformClientAuthenticatedCallSendsMintedBearer(t *testing.T) {
 	}
 }
 
-// TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of the
-// AuditEventTypeMCP fix (erun#763): erun-backend-api can only classify a call
-// as MCP-driven if the request actually carries this header, so a
-// regression here would silently widen the dead-audit-type gap again.
+// TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of
+// AuditEventTypeMCP: erun-backend-api can only classify a call as MCP-driven
+// if the request actually carries this header.
 func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get(MCPToolAuditHeader); got != "review_show" {

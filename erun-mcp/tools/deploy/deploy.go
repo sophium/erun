@@ -31,7 +31,7 @@ type DeployInput struct {
 	NoMCPAuth        bool   `json:"no_mcp_auth,omitempty" jsonschema:"when true, deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission"`
 	// MaxCPU/MaxMemory/MaxStorage cap the environment's namespace with a
 	// Kubernetes ResourceQuota+LimitRange for this deploy; all three must be set
-	// together (eruncommon.ValidateNamespaceResourceQuota), or none.
+	// together (config.ValidateNamespaceResourceQuota), or none.
 	MaxCPU     string `json:"max_cpu,omitempty" jsonschema:"Kubernetes CPU quantity (e.g. 4) capping the environment's namespace via a ResourceQuota+LimitRange; requires max_memory and max_storage too. Omit all three to use the env's saved namespace quota, if any"`
 	MaxMemory  string `json:"max_memory,omitempty" jsonschema:"Kubernetes memory quantity (e.g. 8Gi) capping the environment's namespace; requires max_cpu and max_storage too"`
 	MaxStorage string `json:"max_storage,omitempty" jsonschema:"Kubernetes storage quantity (e.g. 80Gi) capping the environment's namespace; requires max_cpu and max_memory too"`

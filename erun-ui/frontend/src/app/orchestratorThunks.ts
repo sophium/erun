@@ -44,9 +44,8 @@ import type { AppThunk } from './store';
 // selection currently applies (see selectSidebarFocus in ./selectors), so
 // handing an orchestrator the pane must clear the other two here, once,
 // rather than at every call site that starts, opens, or restarts one — a
-// caller that dispatched setSessionId directly used to leave the tenant
-// dashboard painted over the session the sidebar now highlighted as focused
-// (#1204).
+// caller that dispatches setSessionId directly leaves the tenant dashboard
+// painted over the session the sidebar highlights as focused.
 const focusOrchestratorSession =
   (sessionId: number): AppThunk =>
   (dispatch) => {

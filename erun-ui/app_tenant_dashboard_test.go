@@ -33,15 +33,11 @@ func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T)
 	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
-// TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo is the
-// regression for the self-contradicting dashboard surface: a local tenant is
-// bound to a platform tenant only by whichever alias its credential reaches,
+// TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo: a local tenant
+// is bound to a platform tenant only by whichever alias its credential reaches,
 // so the rows every panel renders can belong to a tenant that is not the one
 // the dashboard was opened from — an `frs` dashboard listing `erun`'s reviews
-// and queue. The desktop read the platform's own tenant name off whoami and
-// dropped it, so nothing on the surface said whose rows those were; the
-// heading named the local tenant and the panels rendered another tenant's
-// data underneath it.
+// and queue. The surface must name the platform tenant whoami reports.
 //
 // The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
 // platform answers "erun", which is the disagreement, not the agreement:
@@ -64,16 +60,15 @@ func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) 
 	}
 }
 
-// TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne is the
-// regression for a local tenant presenting another platform tenant's rows as
-// its own. Attaching an erun-type alias to a local tenant's
+// TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne: a local
+// tenant must not present another platform tenant's rows as its own. Attaching an erun-type alias to a local tenant's
 // cloudprovideraliases gives that tenant's dashboard a route to the platform,
 // resolved through the alias — so a tenant named `frs` renders `erun`'s
 // reviews, queue, users and audit under its own name, behind the write
 // controls (create a review, advance a merge queue, approve an invitation)
 // that act on them. Nothing in either config links the two namespaces; the
 // platform's own name for the tenant behind the bearer is the only thing that
-// can say whether the rows are this local tenant's, and nothing compared it.
+// can say whether the rows are this local tenant's.
 //
 // The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
 // platform answers "erun", so the two do not correspond. This drives the real
@@ -137,7 +132,7 @@ func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *uiTenantDashboar
 // TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond pins
 // the two halves of the correspondence check that are not "the names differ":
 // a platform that reports no name leaves nothing to compare, so its dashboard
-// is read exactly as it was before this check existed, and an unnamed local
+// is read without the check, and an unnamed local
 // tenant is never refused on a comparison that was never made.
 func TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond(t *testing.T) {
 	for _, tc := range []struct {
@@ -385,10 +380,9 @@ func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path s
 }
 
 // TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled
-// is the regression: a 401 whoami response can mean three different things
-// per its {code, message} envelope (erun-backend-api's auth.go) -- the
-// dashboard used to collapse all of them into "not enrolled", which is false
-// advice for the other two. TENANT_UNRESOLVED and RESOLUTION_FAILED must
+// a 401 whoami response can mean three different things per its
+// {code, message} envelope (erun-backend-api's auth.go), and "not enrolled"
+// is false advice for two of them. TENANT_UNRESOLVED and RESOLUTION_FAILED must
 // fall through to the generic whole-dashboard error instead of asserting an
 // enrollment answer that is not true.
 func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled(t *testing.T) {
@@ -491,8 +485,8 @@ func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
 	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
 		got := strings.Join(args, "\n")
 		// The erun-backend-api chart's Deployment/Service is <tenant>-api
-		// (eruncommon.APIDeploymentName), not the runtime's <tenant>-devops
-		// Deployment: the erun-backend-api container never exists there (#1197).
+		// (open.APIDeploymentName), not the runtime's <tenant>-devops
+		// Deployment: the erun-backend-api container never exists there.
 		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\n-l\napp=frs-api\n--prefix\n-c\nerun-backend-api\n--tail\n400"
 		if got != want {
 			t.Fatalf("unexpected kubectl args:\n%s", got)

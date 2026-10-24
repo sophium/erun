@@ -55,8 +55,7 @@ test('activity:state events populate the queue drawer', async ({ app, page }) =>
 });
 
 // The launcher is named for what the drawer holds (every recovery-relevant
-// action: init/build/release/open/deploy), not for one command among them
-// (#1218 — it was previously labelled "Open deploy queue" with a Rocket icon).
+// action: init/build/release/open/deploy), not for one command among them.
 test('activity launcher is labelled for the drawer it opens, not one command', async ({
   app,
   page,
@@ -85,13 +84,12 @@ test('activity launcher is labelled for the drawer it opens, not one command', a
 });
 
 // How long the held-emit cases below hold the activity event for. The clock it
-// has to disagree with is the one the pre-fix convergence inherited: `expect`
-// and `expect.poll` with no explicit timeout resolve to `expect.timeout`
+// has to disagree with: `expect` and `expect.poll` with no explicit timeout
+// resolve to `expect.timeout`
 // (playwright.config.ts sets 10s on POSIX), and that deadline is a give-up
 // point rather than a lower bound. 12s clears it with room for the CDP round
 // trip between the poll's clock starting and the route handler seeing the POST,
-// and still lands well inside the budget each step now runs on -- so the cases
-// pass on the fixed code for the right reason. A shorter hold stops reliably
+// and still lands well inside the budget each step runs on. A shorter hold stops reliably
 // disagreeing with the clock it exists to disagree with.
 const EMIT_HOLD_MS = 12_000;
 

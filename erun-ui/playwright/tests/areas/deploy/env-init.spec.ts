@@ -117,11 +117,9 @@ async function stubDialogCluster(
 
 // stubDialogClusterWithRegistryFailure makes a context resolve and its
 // capacity load, but the cluster-registry probe (LoadClusterRegistry) fail —
-// a VPN hiccup or an RBAC gap, not a real "no registry deployed" answer. This
-// used to be a bare `catch { ... }` that silently reset
-// clusterRegistry/useClusterRegistry with no error surfaced anywhere,
-// indistinguishable from "no in-cluster registry found". The dialog must show
-// the probe failure instead.
+// a VPN hiccup or an RBAC gap, not a real "no registry deployed" answer. The
+// dialog must show the probe failure rather than reading as "no in-cluster
+// registry found".
 async function stubDialogClusterWithRegistryFailure(page: Page): Promise<void> {
   await stubDialogCluster(page, 'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER');
 }
@@ -259,9 +257,9 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Regression guard: an environments-changed tick used to wipe the kube-context
-    // dropdown because the Go uiState never carried that field. Firing the event
-    // while the dialog is open must leave the same surface visible. The harness's
+    // An environments-changed tick must not wipe the kube-context dropdown:
+    // firing the event while the dialog is open must leave the same surface
+    // visible. The harness's
     // kubectl stub reports no contexts, so that surface is the empty state, never a
     // populated select.
     await app.sidebar.openInitDialog();
@@ -294,14 +292,10 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Regression (the reported bug): the submit gate only checked that the
-    // Kubernetes-context *list* was non-empty — never that a context was actually
-    // selected or a container registry chosen. A context can be available yet
-    // unselected (the reported state), so the button looked active, but clicking
-    // hit the invalid-selection branch whose only feedback was a native validity
-    // bubble the Wails WebView does not render — Create silently did nothing. The
-    // gate now derives from the same required-field rules submit enforces and
-    // surfaces the first missing value, walking the fields as the user fills them.
+    // A context can be available yet unselected, and the Wails WebView does not
+    // render native validity bubbles, so the submit gate must derive from the
+    // same required-field rules submit enforces and surface the first missing
+    // value, walking the fields as the user fills them.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
@@ -407,10 +401,9 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: VersionNotices used to render inside the version popover,
-  // whose open state required suggestions.length > 0 — so a listing failure
-  // (zero suggestions, one notice) computed the exact recovery advice and
-  // then put it in a surface that could structurally never open.
+  // VersionNotices must render outside the version popover, whose open state
+  // requires suggestions.length > 0 — a listing failure (zero suggestions,
+  // one notice) would otherwise hide its recovery advice.
   test('shows the version recovery advice even when the popover has nothing to list', async ({
     app,
     page,
@@ -434,8 +427,8 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // Visible directly, without ever opening the (now correctly disabled,
-    // nothing-to-pick) popover. The notices are the answer to the
+    // Visible directly, without ever opening the (disabled, nothing-to-pick)
+    // popover. The notices are the answer to the
     // LoadVersionSuggestions read, so they converge on arriving rather than on
     // expect's 10s default.
     await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled(withTestBudget());
@@ -448,9 +441,9 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: the in-app route that unblocks a user with no local kubectl
-  // context (Settings → Cloud aliases → Add AWS account → Cloud contexts →
-  // Init provisions a managed cluster) was never named on this screen.
+  // This screen names the in-app route that unblocks a user with no local
+  // kubectl context (Settings → Cloud aliases → Add AWS account → Cloud
+  // contexts → Init provisions a managed cluster).
   test('names the managed-cloud-cluster route when no Kubernetes contexts are found', async ({
     app,
   }) => {
@@ -467,9 +460,9 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  // erun#1217: this dialog IS the documented Windows getting-started path
-  // (erun-docs/docs/getting-started/first-environment.md), but its recovery
-  // copy assumed macOS (~/.zshenv, brew) unconditionally.
+  // This dialog IS the documented Windows getting-started path
+  // (erun-docs/docs/getting-started/first-environment.md), so its recovery
+  // copy must not assume macOS (~/.zshenv, brew).
   test.describe('on a Windows user agent', () => {
     test.use({
       userAgent:
@@ -490,9 +483,8 @@ test.describe('environment init dialog', () => {
     });
   });
 
-  // erun#1217: a fresh install's container registry field offered no
-  // placeholder, no helper, and no suggestions — nothing to go on for a
-  // required free-text value.
+  // A fresh install's container registry field must offer something to go on
+  // for a required free-text value.
   test('explains the container registry format and the auto-detect route when nothing is detected', async ({
     app,
     page,
@@ -548,11 +540,8 @@ test.describe('environment init dialog', () => {
   // here rather than the tens a genuinely loaded machine would. It is injected
   // at LoadRuntimeResourceStatus -- the read this step waits on -- rather than
   // by loading the machine, so the reproduction is deterministic on a quiet
-  // host.
-  //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; converged on the state the read produces, it passes when the
-  // reading actually lands.
+  // host. Converged on the state the read produces, it passes when the reading
+  // actually lands.
   test('a capacity reading that lands past the step cap is waited out, not cut off', async ({
     app,
     page,

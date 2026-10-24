@@ -104,7 +104,7 @@ function buildLink(
 // resolved against the tab's own filesystem: a host-side tab opens the path
 // directly, a pod-side tab is mapped onto its environment's host mirror (or
 // left unresolved with a stated reason) -- never resolved against a
-// same-named host file (#1354).
+// same-named host file.
 export function createPathLinkProvider(
   terminal: Terminal,
   deps: PathLinkProviderDeps,

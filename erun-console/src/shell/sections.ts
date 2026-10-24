@@ -14,7 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 
-// Identity administration (issue #1209) is restricted server-side to an
+// Identity administration is restricted server-side to an
 // OPERATIONS tenant; gating the nav entries here too keeps a COMPANY-tenant
 // operator from ever seeing an entry whose panel would just come back 403.
 export const OPERATIONS_TENANT_TYPE = 'OPERATIONS';
@@ -44,9 +44,8 @@ const BASE_SECTIONS: ConsoleSection[] = [
   { id: 'environments', label: 'Environments', icon: Server },
   { id: 'provisioning', label: 'Cloud contexts', icon: Cloud },
   { id: 'mcp-access', label: 'MCP access', icon: KeyRound },
-  // Unlike the OPERATIONS-only sections below, invites (#1483) are every
-  // tenant's own way to add members now that self-registration is closed
-  // (#1482) — a COMPANY tenant needs this exactly as much as an OPERATIONS
+  // Unlike the OPERATIONS-only sections below, invites are every tenant's own
+  // way to add members since self-registration is closed — a COMPANY tenant needs this exactly as much as an OPERATIONS
   // one, so it belongs in the base set every tenant type sees.
   { id: 'invites', label: 'Invites', icon: UserPlus },
   // Requests is every tenant's own queue too: a COMPANY

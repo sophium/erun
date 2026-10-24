@@ -44,7 +44,7 @@ func TestCreateContextRejectsMissingRequiredFields(t *testing.T) {
 
 // TestCreateContextRejectsInvalidName: the name becomes both a Kubernetes
 // label value and a kubeconfig context name a placed Job's `erun` command
-// composes via shellJoin argv (#1112), so it must be a DNS-1123 label like
+// composes via shellJoin argv, so it must be a DNS-1123 label like
 // an environment name — not free text.
 func TestCreateContextRejectsInvalidName(t *testing.T) {
 	cases := map[string]string{

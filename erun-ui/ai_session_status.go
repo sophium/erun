@@ -12,18 +12,12 @@ import (
 )
 
 // ai_session_status.go is the desktop's read of the structured AI-session
-// status model (erun-common/ai_session_status.go) for an environment's AI tab.
+// status model (base/model/ai_session_status.go) for an environment's AI tab.
 //
-// The sidebar badge used to be a pure function of PTY output volume: five
-// seconds of output latched "working" on, three seconds of silence latched it
-// off. Volume cannot represent the state the model exists to carry. A session
-// blocked on the human prints nothing, which is exactly what a finished one
-// looks like from the stream; and the pod heartbeat held the latch the other
-// way, because a live `claude` process kept the row spinning after its turn had
-// ended — so an Agent waiting on an answer read as working for as long as its
-// process lived, which is the one thing an operator most needs to see.
-//
-// So the badge asks the tool. The environment's own `erun activity ai-session
+// PTY output volume cannot represent this state: a session blocked on the
+// human prints nothing, exactly like a finished one, and a live `claude`
+// process keeps the pod heartbeat up after its turn has ended. So the badge
+// asks the tool. The environment's own `erun activity ai-session
 // status` resolves busy / awaiting-input / exited / oom-killed from the last
 // turn-boundary event the tool's own hooks reported, with no elapsed-time input
 // — which is what makes "waiting on you" representable at all. Output volume

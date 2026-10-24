@@ -40,7 +40,7 @@ export class Titlebar {
 
   // Env-scoped titlebar controls: the two IDE buttons and the contribute
   // toggle. These render only when the active session is an environment tab,
-  // not an orchestrator session (#1178).
+  // not an orchestrator session.
   vscodeButton(): Locator {
     return this.page.getByRole('button', { name: /VS Code/i });
   }
@@ -157,8 +157,8 @@ export class Titlebar {
     });
   }
 
-  // The primary action's own label states the resolved count before it acts
-  // (erun#1700), so it has no fixed accessible name -- match the shared
+  // The primary action's own label states the resolved count before it acts,
+  // so it has no fixed accessible name -- match the shared
   // prefix instead.
   whipRunButton(): Locator {
     return this.whipPanel().getByRole('button', { name: /^Whip(ping…| \d+ target)/ });

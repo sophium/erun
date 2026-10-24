@@ -109,7 +109,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
-	// A closed local port is the "nobody opened it" shape (#1230), not a stale
+	// A closed local port is the "nobody opened it" shape, not a stale
 	// forward — the review panel needs the two apart to stop presenting a
 	// stopped environment as a broken connection.
 	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_NOT_OPEN: ") {
@@ -124,7 +124,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 // case to the not-open one above: the local port is still held (a live
 // listener), but the edge behind it never answers, so the review panel must
 // treat this as an actual fault worth reconnecting rather than an
-// informational "not running" state (#1230).
+// informational "not running" state.
 func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{

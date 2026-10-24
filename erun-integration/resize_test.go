@@ -306,17 +306,16 @@ func testResizeDryRunApplyRecommendationTracesTheEvidence(t *testing.T) {
 }
 
 func testResizeDryRunApplyRecommendationHoldsCPUAtLiveLimit(t *testing.T) {
-	// Regression for the bug where the apply plan was built from the
-	// configured runtimepod (silent in-pod, so it normalizes to the
-	// package defaults cpu=4/16384Mi) instead of the live cgroup limits
-	// the verdict itself is scored against. Fixture mirrors a real
+	// The apply plan must be built from the live cgroup limits the verdict
+	// is scored against, not the configured runtimepod (silent in-pod, so it
+	// normalizes to the package defaults cpu=4/16384Mi). Fixture mirrors a real
 	// environment running at 12 CPUs / 23552Mi with a silent config: the
 	// verdict says "cpu hold from 12" and "memory lower ... from
 	// 23552Mi", so the resolved plan must carry cpu=12 through unchanged
 	// and read memory's "from" as 23552Mi, never fall back to cpu=4 or
 	// memory 16384Mi. The leading space on each needle keeps the check from
 	// tripping on the unrelated, default-valued "dind-cpu=4"/"dind-memory=20Gi"
-	// fields the same trace line now also carries.
+	// fields the same trace line also carries.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -432,7 +431,7 @@ func appendEnvConfigForTest(t testing.TB, setup env.Setup, tenant, environment, 
 // into the isolated cache root, bypassing the real `erun activity lease take`
 // command: this test only needs a lease to already be held when `resize`
 // runs, not to exercise the take path itself. Mirrors the on-disk shape
-// erun-common/activity_lease.go's takeExclusiveEnvironmentActivityLease
+// activity's takeExclusiveEnvironmentActivityLease
 // writes (exclusiveEnvironmentActivityLeaseDir, keyed by sanitized scope).
 func seedHeldExclusiveLease(t testing.TB, setup env.Setup, tenant, environment, orchestrator, name string) {
 	t.Helper()

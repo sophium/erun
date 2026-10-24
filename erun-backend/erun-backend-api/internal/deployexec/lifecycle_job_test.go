@@ -129,11 +129,11 @@ func TestUnexposeFailureFromOutput(t *testing.T) {
 	}
 }
 
-// TestNamespaceDeleteFailureFromOutput pins the interaction #1140 is about:
-// `erun delete` exits 0 (and prints "deleted") even when the remote namespace
-// teardown itself failed, so the API cannot trust the Job's own exit code —
-// it has to read the --output json result back out of the captured output.
-// eruncommon.Context.WriteResult pretty-prints (json.MarshalIndent), and the
+// TestNamespaceDeleteFailureFromOutput pins that `erun delete` exits 0 (and
+// prints "deleted") even when the remote namespace teardown itself failed, so
+// the API cannot trust the Job's own exit code — it has to read the
+// --output json result back out of the captured output.
+// core.Context.WriteResult pretty-prints (json.MarshalIndent), and the
 // Job's combined stdout+stderr log carries the plain-text audit/trace lines
 // around it, so the fixture mirrors both: multi-line JSON, not a single line.
 func TestNamespaceDeleteFailureFromOutput(t *testing.T) {
@@ -190,8 +190,8 @@ func assertLifecycleBootstrapScript(t *testing.T, name string, command []string,
 	}
 }
 
-// TestAllLifecycleJobsShareTheBootstrapPrelude is the structural regression
-// test ensuring every Job builder's command is `sh -c` carrying the
+// TestAllLifecycleJobsShareTheBootstrapPrelude ensures every Job builder's
+// command is `sh -c` carrying the
 // bootstrap prelude, checked generically over the builders rather than one
 // hand-written assertion per Job, so a lifecycle Job added later cannot ship
 // without it.
@@ -262,13 +262,12 @@ func TestLauncherRunsStopAndDelete(t *testing.T) {
 	}
 }
 
-// TestLauncherDeleteAttemptsGetDistinctJobs is the regression test for the
-// replay this Job name once had: two delete attempts against the same
-// environment must land on two distinct Jobs, and the second attempt must
-// surface its own outcome rather than a still-live prior attempt's cached
-// terminal result. Each attempt's Job is seeded with a different outcome
-// specifically so a wrongly-shared name would be caught by the assertion on
-// the second result, not just by the name comparison.
+// TestLauncherDeleteAttemptsGetDistinctJobs checks that two delete attempts
+// against the same environment land on two distinct Jobs, and the second
+// surfaces its own outcome rather than a prior attempt's cached terminal
+// result. Each attempt's Job is seeded with a different outcome so a
+// wrongly-shared name is caught by the result assertion, not just the name
+// comparison.
 func TestLauncherDeleteAttemptsGetDistinctJobs(t *testing.T) {
 	params := testDeleteParams()
 	firstID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -414,9 +413,8 @@ func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, 
 	return func() *batchv1.Job { return createdJob }
 }
 
-// TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops is the
-// regression test for erun#1678: a stop issued after a previous stop Job already
-// went terminal must run a fresh Job to a fresh outcome, never replay the
+// TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops checks that a
+// stop issued after a previous stop Job already went terminal must run a fresh Job to a fresh outcome, never replay the
 // old one's cached result. The old Job is seeded Failed specifically so a
 // wrongly-replayed outcome is caught by the outcome assertion, not just by
 // the job count.
@@ -459,11 +457,10 @@ func TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops(t *testing.T) {
 	}
 }
 
-// TestRunStopWhileStopJobStillRunningReWatchesIt is the dedup test erun#1678
-// asks to be preserved: a stop issued while a previous stop Job is still in
-// flight must re-watch that same Job rather than starting a second one. The
-// "create" reactor fails the test outright if a second Job is ever created,
-// so this catches the fix regressing into "always mint a fresh Job".
+// TestRunStopWhileStopJobStillRunningReWatchesIt pins the dedup: a stop issued
+// while a previous stop Job is still in flight must re-watch that same Job
+// rather than starting a second one. The "create" reactor fails the test
+// outright if a second Job is ever created.
 func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 	params := testStopParams()
 	inFlightID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -526,8 +523,7 @@ func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 	}
 }
 
-// TestStopAfterRedeploySequenceEndsStopped reproduces the exact sequence
-// erun#1678 reported: stop, redeploy, stop again. The redeploy's own Job shares
+// TestStopAfterRedeploySequenceEndsStopped runs stop, redeploy, stop again. The redeploy's own Job shares
 // the identical tenant+environment labels every lifecycle Job carries (and
 // is left running, to prove it), so this also pins that activeStopJobName's
 // name-prefix filter tells a deploy Job apart from a stop Job rather than

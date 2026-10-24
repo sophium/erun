@@ -293,7 +293,7 @@ func loadTenantDashboardUsers(ctx context.Context, client *platformclient.Platfo
 
 // tenantDashboardUsernamesFromRoster resolves every tenant user id to its
 // display username from an already-read roster. Every caller of the map falls
-// back to the raw id it was given when a name is missing (#1378).
+// back to the raw id it was given when a name is missing.
 func tenantDashboardUsernamesFromRoster(users []platformclient.PlatformUser) map[string]string {
 	names := make(map[string]string)
 	for _, user := range users {
@@ -345,10 +345,8 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 
 // loadTenantDashboardBuilds reuses the review list the Reviews panel already
 // fetched rather than re-listing it, and reads each review's builds
-// concurrently: a tenant with many reviews used to pay one round trip per
-// review under this panel's own share of the whole dashboard's single
-// request timeout, so a big tenant read out as a timed-out API error instead
-// of a slow-but-successful load.
+// concurrently: one sequential round trip per review would exhaust this
+// panel's share of the dashboard's single request timeout for a big tenant.
 func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
 	switch {
@@ -374,8 +372,8 @@ func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.Platf
 
 // appendUnattachedTenantDashboardBuilds merges GET /v1/builds' unattached
 // (no-review) builds into the same Builds panel the review-linked read above
-// populates -- an ordinary `erun build` self-reports here now too
-// (erun#1954), not only a build recorded against a review. Best-effort: a
+// populates -- an ordinary `erun build` self-reports here too, not only a
+// build recorded against a review. Best-effort: a
 // caller who cannot read this newer route, or a read that fails, does not
 // blank builds the review-side read already found; it only becomes the
 // panel's own restriction/error when the review-side had none of its own to

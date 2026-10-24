@@ -68,8 +68,7 @@ func invitesContext(tenantID, tenantType, userID string) context.Context {
 	})
 }
 
-// TestInviteCreateListRevoke locks the operator-facing CRUD contract (#1483
-// items 2/3): a created invite is listed as outstanding, and revoking it
+// TestInviteCreateListRevoke locks the operator-facing CRUD contract: a created invite is listed as outstanding, and revoking it
 // both removes it from that list and refuses a second revoke.
 func TestInviteCreateListRevoke(t *testing.T) {
 	db, tenantID := invitesDatabase(t)
@@ -105,8 +104,8 @@ func TestInviteCreateListRevoke(t *testing.T) {
 	}
 }
 
-// TestInviteConsumeByTokenIsSingleUse locks #1483's single-use requirement:
-// a second accept of the same token is refused, asserted against the
+// TestInviteConsumeByTokenIsSingleUse locks the single-use requirement: a
+// second accept of the same token is refused, asserted against the
 // persisted row (consumed_at set), not just the returned error.
 func TestInviteConsumeByTokenIsSingleUse(t *testing.T) {
 	db, tenantID := invitesDatabase(t)
@@ -138,7 +137,7 @@ func TestInviteConsumeByTokenIsSingleUse(t *testing.T) {
 }
 
 // TestInviteConsumeByTokenRefusesExpiredAndUnknownTokens locks the other two
-// states #1483 asks to distinguish plainly: an expired invite and one that
+// states to distinguish plainly: an expired invite and one that
 // never existed.
 func TestInviteConsumeByTokenRefusesExpiredAndUnknownTokens(t *testing.T) {
 	db, tenantID := invitesDatabase(t)

@@ -3,7 +3,7 @@ import type { Locator } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// The ERUN section is the host-side control plane (#795): a top-level block
+// The ERUN section is the host-side control plane: a top-level block
 // above ENVIRONMENTS holding the cross-env AI Orchestrators, with the erun-global
 // actions (Settings, Doctor) carried in its header.
 test.describe('ERUN sidebar section', () => {
@@ -28,7 +28,7 @@ test.describe('ERUN sidebar section', () => {
     await expect(app.globalConfigDialog.locator()).toBeVisible();
   });
 
-  // Full env-parity for the orchestrator row (#795): a shape-encoded status dot
+  // Full env-parity for the orchestrator row: a shape-encoded status dot
   // and a single "…" that opens the management dialog, where delete is gated
   // behind an explicit confirmation — no inline stop/start/restart/delete.
   test('orchestrator row shows a status dot and manages via a confirming "…" dialog', async ({
@@ -57,7 +57,7 @@ test.describe('ERUN sidebar section', () => {
     await expect(app.sidebar.orchestratorDetailsButton(SEED_ORCHESTRATOR)).toBeVisible();
   });
 
-  // #1231: the manage dialog reveals both guidance layers rather than making
+  // The manage dialog reveals both guidance layers rather than making
   // the operator guess the CLAUDE.<id>.md filename convention. This covers the
   // observable invariant the headless harness can reach — both entries render,
   // labelled for what they are, each with its resolved host path — without

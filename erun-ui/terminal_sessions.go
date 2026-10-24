@@ -316,8 +316,8 @@ type managedTerminal struct {
 	// nudge changes pty geometry behind the user's back, so it must not fire
 	// into a pane someone is typing into and must abandon a hold in progress
 	// the moment they start: holding the pty a row short across a keystroke
-	// reflowed the line being edited and corrupted the submitted prompt
-	// (#1330). inputGen is a counter rather than a flag so a nudge can tell
+	// reflows the line being edited and corrupts the submitted prompt.
+	// inputGen is a counter rather than a flag so a nudge can tell
 	// "input since I was scheduled" from "input at some point".
 	lastInputAt time.Time
 	inputGen    uint64

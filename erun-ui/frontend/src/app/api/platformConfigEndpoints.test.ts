@@ -7,7 +7,7 @@ import { describe, it } from 'vitest';
 
 import { wailsQueryFn } from './wailsBaseQuery';
 
-// erun#1283's proof that the console's httpBaseQuery and the desktop's
+// Proof that the console's httpBaseQuery and the desktop's
 // wailsBaseQuery contract resolve the identical shared endpoint definition
 // (buildPlatformConfigEndpoints, defined once in erun-kit) to the identical
 // model — see erun-kit/src/api/platformConfigEndpoints.test.ts for the

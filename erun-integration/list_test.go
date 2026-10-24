@@ -23,7 +23,7 @@ func TestList(t *testing.T) {
 	}{
 		{"help", testListHelp},
 
-		// erun#1985: `erun list --tenant` reports erun-version drift across a
+		// `erun list --tenant` reports erun-version drift across a
 		// tenant's own environments instead of the full listing, and
 		// --gate-environment additionally flags whether the environment driving
 		// that tenant's merge-queue gate runs an older erun version than any
@@ -36,11 +36,10 @@ func TestList(t *testing.T) {
 		{"version_drift_gate_environment_not_found", testListVersionDriftGateEnvironmentNotFound},
 		{"version_drift_gate_environment_version_unresolved", testListVersionDriftGateEnvironmentVersionUnresolved},
 
-		// `version=none` used to collapse three distinct situations -- nothing
-		// deployed, a release deployed but this config never learned its
-		// version, and a cluster erun could not even reach -- and dropped all
-		// three from the drift verdict silently. These four scenarios lock each
-		// rendering plus the dry-run trace that makes the live check auditable.
+		// Three distinct situations must not collapse into `version=none` or drop
+		// silently from the drift verdict: nothing deployed, a release deployed
+		// but this config never learned its version, and an unreachable cluster.
+		// These four scenarios lock each rendering plus the dry-run trace that makes the live check auditable.
 		{"version_drift_environment_confirmed_not_deployed", testListVersionDriftEnvironmentConfirmedNotDeployed},
 		{"version_drift_resolves_live_version_from_deployed_release", testListVersionDriftResolvesLiveVersionFromDeployedRelease},
 		{"version_drift_environment_cluster_unreachable", testListVersionDriftEnvironmentClusterUnreachable},
@@ -49,7 +48,7 @@ func TestList(t *testing.T) {
 		{"version_drift_unresolved_environment_json_output", testListVersionDriftUnresolvedEnvironmentJSONOutput},
 		{"version_drift_json_output", testListVersionDriftJSONOutput},
 
-		// erun#2052: `list` is a reporting command and always exits 0 on its own
+		// `list` is a reporting command and always exits 0 on its own
 		// findings; --fail-on-drift is the opt-in that lets one invocation of a
 		// drift report be wired into a gate instead (erun-cli/AGENTS.md § "Exit-
 		// Code Contract: Reporting Commands Vs Gating Checks").
@@ -62,7 +61,7 @@ func TestList(t *testing.T) {
 		{"with_seeded_host_env", testListWithSeededHostEnv},
 		{"platform_account_env_shows_enabled", testListPlatformAccountEnvShowsEnabled},
 
-		// erun#1746: runtime-version alone reads as an erun version even when it
+		// runtime-version alone reads as an erun version even when it
 		// is not one, and a Helm release name can disagree with the image it
 		// actually runs. These four scenarios lock the shapes `erun list` must
 		// tell apart: a tenant's own aligned line, erun's own stock line, the
@@ -78,8 +77,8 @@ func TestList(t *testing.T) {
 		// runtime chart whose own values decide the image) is already covered by
 		// every plain SeedTenantEnv scenario above, e.g. with_seeded_tenant_env:
 		// it never sets runtimerunningimage, so "line undetermined" is exactly
-		// what its golden now shows. Must never guess a line from the tenant name
-		// instead, the way erun#1746 was filed over.
+		// what its golden shows. Must never guess a line from the tenant name
+		// instead.
 		{"with_orchestrator_environment_roles", testListWithOrchestratorEnvironmentRoles},
 		{"with_orchestrator_runtime_role_on_a_runtime_type_environment", testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment},
 		{"with_orchestrator_pairing_invalid_before_the_role_gate_existed", testListWithOrchestratorPairingInvalidBeforeTheRoleGateExisted},
@@ -233,8 +232,8 @@ func testListExplicitRuntimeType(t *testing.T) {
 
 func testListLegacyRemoteYAMLMigratesToRuntime(t *testing.T) {
 	// A legacy remote=true env with no build-here signal migrates to Type=runtime on
-	// read, preserving the old remote-worktree / no-local-build semantics the retired
-	// remote/snapshot fields used to provide.
+	// read, preserving the remote-worktree / no-local-build semantics of the retired
+	// remote/snapshot fields.
 	setup := env.New(t)
 	fixture.SeedLegacyRemoteTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

@@ -16,9 +16,8 @@ export interface ScopeTenant {
 // for a different one via a fresh OIDC sign-in. Selecting a target here only
 // changes the `tenantId` list queries send (e.g.
 // environmentsApi.useListEnvironmentsQuery); the caller's own identity, and
-// every permission check the API makes with it, never change (erun#1816).
-// `value` is undefined for "my own tenant" (the default, and every caller's
-// ordinary behavior before this existed); a defined value is a tenant other
+// every permission check the API makes with it, never change.
+// `value` is undefined for "my own tenant" (the default); a defined value is a tenant other
 // than the caller's own. `tenants` is fetched once by the caller
 // (shell/AppShell.tsx) and shared with the Environments panel's tenant
 // badges, rather than fetched again here. `active` is the currently rendered

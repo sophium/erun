@@ -3,20 +3,20 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
-// OrchestratorEnvRole mirrors the Go eruncommon.OrchestratorEnvRole values:
+// OrchestratorEnvRole mirrors the Go config.OrchestratorEnvRole values:
 // what an orchestrator uses a linked environment for. '' is undeclared, never
 // a default of either 'code', 'build', or 'runtime'.
 export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
 
 // OrchestratorAlias is the erun platform alias a host-side orchestrator
 // declares as its own: which configured erun-type cloud alias it acts as.
-// Mirrors the Go eruncommon.OrchestratorConfig.Alias. '' declares none of its
+// Mirrors the Go config.OrchestratorConfig.Alias. '' declares none of its
 // own, which is the default and leaves the orchestrator following this
 // machine's own alias.
 export type OrchestratorAlias = string;
 
 // OrchestratorUseGateway, OrchestratorModel and OrchestratorEffort mirror the
-// Go eruncommon.OrchestratorConfig.UseGateway/Model/Effort: how the
+// Go config.OrchestratorConfig.UseGateway/Model/Effort: how the
 // orchestrator's Claude session launches. false routes nothing through the
 // erun-level gateway catalog, and '' is the default model or effort, never a
 // value of its own.
@@ -54,9 +54,9 @@ export interface OrchestratorEnvRef {
 // attaches to. A definition needs at least one of the two. Transient ones
 // (Investigate) are not persisted.
 //
-// `busy` is the snapshot half of the fix: the sidebar spinner used to be
-// lit only by the ai-activity event, so a fetch that lands after the event (a
-// fresh mount, a window reopen) had no way to know the true state. loadOrchestrators
+// `busy` is the snapshot half of the busy state: the ai-activity event alone
+// cannot tell a fetch that lands after it (a fresh mount, a window reopen) the
+// true state. loadOrchestrators
 // seeds aiBusyBySession from this field on every fetch — see planOrchestratorBusySeed
 // — so the event and the snapshot write the same store field instead of
 // competing for it.
@@ -75,7 +75,7 @@ export interface OrchestratorInfo {
   busy: boolean;
   // busyAtUnix is when that busy report was written. Optional because a
   // report can predate the field; the label degrades rather than inventing a
-  // duration (#1343).
+  // duration.
   busyAtUnix?: number;
   transient: boolean;
   shellRunning: boolean;
@@ -126,8 +126,7 @@ export interface OrchestratorInfo {
   // orchestrator's live session was actually spawned with against what it is
   // linked to right now: true means an edit changed the scope while the
   // session was running, so it still holds tools for an environment it was
-  // unlinked from and none for one newly linked — only Restart re-wires it
-  // (erun#1319).
+  // unlinked from and none for one newly linked — only Restart re-wires it.
   restartRequired: boolean;
   // roleChanged is true when a linked environment's role was edited while
   // this session was running. Distinct from restartRequired: unlike the
@@ -200,12 +199,11 @@ export const orchestratorsSlice = createSlice({
     },
     // setEnvActivityForOrchestratorEnvs is the live half of the activity join:
     // a fetch (setOrchestrators) joins the poller's snapshot onto each env ref
-    // at that instant, but nothing previously kept it current between fetches,
-    // so a card could still show an outage the poller had already cleared. This
-    // patches every ref across every orchestrator that names the given
+    // at that instant; this keeps it current between fetches, so a card never
+    // shows an outage the poller has already cleared. It patches every ref across every orchestrator that names the given
     // tenant/environment, driven by the same env-activity event that already
     // updates the sidebar row (see envStatusSlice.setEnvActivityForEnv), so the
-    // two never read from inputs of different ages again.
+    // two never read from inputs of different ages.
     setEnvActivityForOrchestratorEnvs(
       state,
       action: PayloadAction<{

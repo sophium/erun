@@ -244,9 +244,8 @@ func traceDeployComponentSelection(ctx core.Context, selected []string, source s
 // beyond the saved set (nil when there is no shadowing). Selection tiers still
 // never merge; the caller turns a non-empty result into a refusal
 // (guardSavedSelectionShadowingPlan) rather than silently deploying the stale
-// subset — a plain `erun deploy` used to do exactly that, which is how
-// frs-oci-registry sat a whole release behind before anyone happened to
-// compare chart versions by hand instead of checking health (erun#1712).
+// subset, which would leave the unselected components a release behind while
+// still reporting healthy.
 func traceSavedSelectionShadowingPlan(ctx core.Context, selected []string, source string, plan configpkg.ProjectK8sConfig) []string {
 	if source != deploySelectionSourceSaved {
 		return nil

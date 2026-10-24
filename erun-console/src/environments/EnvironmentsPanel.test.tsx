@@ -230,10 +230,8 @@ describe('EnvironmentsPanel deploy flow', () => {
     expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
   });
 
-  // #1170: the API refuses a deploy on a row whose delete is outstanding, so
-  // offering the button meant an operator clicked it and got a raw Kubernetes
-  // admission error back. Before the API guard existed it was worse: the deploy
-  // was accepted and overwrote the teardown state.
+  // The API refuses a deploy on a row whose delete is outstanding, so offering
+  // the button would only lead to a raw Kubernetes admission error.
   it('offers no Deploy control for an environment that is being deleted', () => {
     renderWithStore(
       <EnvironmentsPanel
@@ -289,7 +287,7 @@ describe('EnvironmentsPanel deploy flow', () => {
   });
 });
 
-// erun#1816: while an OPERATIONS caller is scoped to another tenant, every
+// While an OPERATIONS caller is scoped to another tenant, every
 // row must name it -- otherwise the row reads as the caller's own.
 describe('EnvironmentsPanel tenant scope', () => {
   const OWN_TENANT_ENV: Environment = { ...RUNTIME_ENV, tenantId: 'tenant-own' };

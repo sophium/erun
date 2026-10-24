@@ -252,20 +252,13 @@ func isOrchestratorNoAskStopGuardBlock(block any) bool {
 	return false
 }
 
-// orchestratorSessionStartMatcher is a single pattern matching every source
-// this hook cares about, rather than separate matcher blocks carrying the same
-// three commands: SessionStart's matcher is tested as a regex against the
-// event's source, and alternation is already how this file scopes a matcher to
-// more than one value (see orchestratorShellActivityHookBlocks' "TaskOutput|
-// TaskStop"). Several blocks with identical hooks would mean every SessionStart
-// command is stored multiple times on disk for no behavioral gain.
+// orchestratorSessionStartMatcher is one regex alternation over every
+// SessionStart source this hook cares about, rather than duplicate blocks.
 //
-// clear and compact both fire SessionStart, and both were missing here (#1232):
-// a /clear drops the injected CLAUDE.<id>.md role layer from context even
-// though the file survives on disk, and a compaction forks the transcript to a
-// new session id that the live-session record then never picks up. Printing
-// the contract again on either is harmless (plain stdout, not a file append);
-// omitting it is not.
+// clear and compact are included because a /clear drops the injected
+// CLAUDE.<id>.md role layer from context, and a compaction forks the transcript
+// to a new session id the live-session record must pick up. Re-printing the
+// contract is harmless.
 const orchestratorSessionStartMatcher = "startup|resume|clear|compact"
 
 // orchestratorSessionStartHook is the SessionStart hook block: the contract-
@@ -288,11 +281,9 @@ func orchestratorSessionStartHook(dir string) []any {
 }
 
 // isOrchestratorSessionStartHookBlock reports whether a settings hook block is
-// one of ours, so a rewrite recognizes and replaces any block(s) it previously
-// wrote -- whether that is today's single combined-matcher block or the pair of
-// per-source blocks an earlier version of this file installed -- instead of
-// stacking another copy beside them. The contract-injection command's fallback
-// text is unique to us and present regardless of which shape wrote it.
+// one of ours, so a rewrite replaces any block(s) it wrote, including the
+// legacy per-source pair, instead of stacking another copy. The
+// contract-injection command's fallback text is unique to us in every shape.
 func isOrchestratorSessionStartHookBlock(block any) bool {
 	group, ok := block.(map[string]any)
 	if !ok {

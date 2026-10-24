@@ -198,7 +198,7 @@ func TestCreateHumanUserSendsInviteWithNoPassword(t *testing.T) {
 }
 
 // TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow locks the
-// no-SMTP fallback (issue #1168): Zitadel only skips its initialization
+// no-SMTP fallback: Zitadel only skips its initialization
 // email when the email is marked verified AND a password is set (confirmed
 // live -- either alone still leaves the account in USER_STATE_INITIAL
 // waiting on a link nothing will ever send), so a caller-supplied

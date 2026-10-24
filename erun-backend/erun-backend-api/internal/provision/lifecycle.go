@@ -26,7 +26,7 @@ type EnvLifecycleRunner interface {
 
 // EnvironmentRowDeleter hard-deletes an environment's row once its namespace
 // (if any) is confirmed torn down, or records why a delete attempt did not
-// reach that point (#1140). `running` must never survive a call to Delete:
+// reach that point. `running` must never survive a call to Delete:
 // every path through it ends in either the row being gone or MarkDeleteBlocked
 // naming the blocker.
 // Both methods take the owning tenant explicitly: this lifecycle runs behind
@@ -68,10 +68,9 @@ type EnvLifecycleInput struct {
 	// never successfully deployed, so there is no namespace to touch.
 	RunningVersion string
 	// ContextID/PlacementKubernetesContext/PlacementServerURL name the cluster
-	// this environment was placed on (#1112), read back from its persisted
+	// this environment was placed on, read back from its persisted
 	// context_id — never a fresh placement decision. Empty ContextID means the
-	// platform's own cluster, exactly as every environment before this
-	// existed. The admin-token credential is resolved fresh from
+	// platform's own cluster. The admin-token credential is resolved fresh from
 	// PlacementCredentialResolver at Job-build time, never carried here.
 	ContextID                  string
 	PlacementKubernetesContext string
@@ -93,7 +92,7 @@ type EnvLifecycleInput struct {
 // persists the environment row accordingly. Stop still runs synchronously
 // from the HTTP handler that calls it — a scale-to-zero is a short kubectl
 // operation. Delete does not: EnvDeleter wraps it in a durable DBOS workflow
-// (#1140) precisely because a namespace teardown can run long or wedge
+// precisely because a namespace teardown can run long or wedge
 // entirely (a DNS-01 solver that stops answering, for example), so the HTTP
 // handler that starts one must not be the thing waiting on it.
 type EnvLifecycle struct {
@@ -114,7 +113,7 @@ type EnvLifecycle struct {
 // metering event. imageChecker may be nil, which skips the published-image
 // fallback and always names the tenant's own image. credentials may be nil,
 // which refuses (rather than silently deploying unauthenticated) any
-// environment that names a context (#1112); every environment placed into
+// environment that names a context; every environment placed into
 // the platform's own cluster is unaffected either way. identities may be nil,
 // which revokes no machine identity on delete.
 func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker, credentials deployexec.PlacementCredentialResolver, identities MachineIdentityRevoker) *EnvLifecycle {
@@ -192,7 +191,7 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 // deployed, since there is nothing to tear down) and, only once that
 // succeeds, removes its row. Every other outcome — the Job itself could not
 // be launched, it ran but did not finish, or it finished but the namespace
-// teardown inside it did not (#1140, a namespace stuck on an unsatisfiable
+// teardown inside it did not (a namespace stuck on an unsatisfiable
 // finalizer) — moves the row to deletion-blocked naming why, rather than
 // silently leaving a caller unable to tell "still there" from "gone".
 //
@@ -227,7 +226,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 	}
 	// The namespace is gone but the row is not yet: a failure here would leave
 	// the row in `deleting` with no reason, contradicting this method's own
-	// contract that every non-success outcome names why (#1166). Record it, so
+	// contract that every non-success outcome names why. Record it, so
 	// a retry has something to act on -- the namespace teardown is already
 	// done, so the retry's own delete is a no-op and only the row removal is
 	// re-attempted.

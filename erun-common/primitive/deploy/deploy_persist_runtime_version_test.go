@@ -105,8 +105,7 @@ func persistOrFatal(t *testing.T, ctx core.Context, specs []DeploySpec, save fun
 	}
 }
 
-// TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage pins the fix for
-// erun#1754: RuntimeVersion and RuntimeImage are one coordinate, so whatever
+// TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage: RuntimeVersion and RuntimeImage are one coordinate, so whatever
 // writes the version back after a deploy must write the image in the same
 // commit -- but only when the resolution actually knows a concrete name for
 // it (PersistRuntimeImage), never clobbering an operator's own pin with a

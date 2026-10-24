@@ -145,10 +145,9 @@ test('input defers the cycle through the quiet window but does not disarm it', (
 
   // Once the quiet window elapses with the screen still blank, the poller must
   // still repaint it. This is the only repaint path left for an orchestrator
-  // pane (#1332's Go-side WINCH nudge is dead code for that session kind), so
-  // permanently disarming on the first keystroke left the pane blank for the
-  // rest of the session -- exactly the defect behind the operator's blind,
-  // concatenated retype (#1330 follow-up).
+  // pane (the Go-side WINCH nudge does not apply to that session kind), so
+  // permanently disarming on the first keystroke would leave the pane blank
+  // for the rest of the session.
   vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'a still-blank pane must be repainted once typing pauses');
   assert.deepEqual(lastResizeCall(), [7, 120, 26]);

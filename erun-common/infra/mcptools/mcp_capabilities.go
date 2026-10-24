@@ -29,19 +29,18 @@ const (
 	// scoped to this tier only for a mobile client to reconnect to a running
 	// session without also carrying `exec_raw`/`build`/`deploy`/`delete`.
 	MCPCapabilityAttach MCPCapability = "erun:attach"
-	// MCPCapabilityOperate permits driving the lifecycle of an environment
-	// that already exists -- deploying an already-published version into it,
+	// MCPCapabilityOperate permits driving the lifecycle of an environment that
+	// already exists -- deploying an already-published version into it,
 	// starting or stopping its cloud context, resizing its runtime pod --
 	// without granting anything that decides what environments exist
 	// (`init`/`delete`/`context_init`/`terraform`) or that runs arbitrary code
 	// in one (`exec_raw` and the rest of the `exec_*` family, `build`/`push`,
-	// which drive an arbitrary Dockerfile and publish to the registry). This
-	// is the tier a loseable, sometimes-unattended, screenshot/clipboard-
-	// exposed mobile client needs for erun#1107's Phase 3 -- operating an
-	// environment -- without also being minted the same `erun:admin` a
-	// developer's own attended machine holds. It grants neither read nor
-	// admin, and neither of those grants it back, the same isolation
-	// `erun:attach` already established.
+	// which drive an arbitrary Dockerfile and publish to the registry). This is
+	// the tier a loseable, sometimes-unattended, screenshot/clipboard-exposed
+	// mobile client needs to operate an environment without also being minted
+	// the same `erun:admin` a developer's own attended machine holds. It grants
+	// neither read nor admin, and neither of those grants it back, the same
+	// isolation `erun:attach` already established.
 	MCPCapabilityOperate MCPCapability = "erun:operate"
 )
 
@@ -55,8 +54,7 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"idle":    {},
 	// environment composes list/idle/doctor's own resolvers and never exposes
 	// doctor's mutating recovery flags (clearPendingHelm/rollback) — the
-	// authenticated-edge read model erun#1105 needs a scoped mobile caller to
-	// reach.
+	// authenticated-edge read model a scoped mobile caller needs to reach.
 	"environment": {},
 	// ai_sessions only reads what "erun activity ai-session report" already
 	// wrote; it has no write path of its own.
@@ -122,7 +120,7 @@ var mcpOperateTools = map[string]struct{}{
 func MCPToolCapability(tool string) MCPCapability {
 	// Resolve a retired name first, so a caller still using `diff` authorizes
 	// exactly as one using `exec_diff` -- otherwise the rename would silently
-	// promote a read-only tool to requiring admin (#1186).
+	// promote a read-only tool to requiring admin.
 	current := MCPToolCurrentName(tool)
 	if _, ok := mcpReadOnlyTools[current]; ok {
 		return MCPCapabilityRead

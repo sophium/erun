@@ -17,15 +17,12 @@ import (
 var errOrchestratorNudgeHistoryUnreadable = errors.New("orchestrator nudge history file is unreadable")
 
 // The cumulative pacing history (orchestrator.go's pacingAutoNudgeCount /
-// pacingWhipCount / pacingLastCappedAtUnix and their timestamps) used to live
-// only on the in-memory orchestratorSession, so a desktop restart reset it to
-// zero while the orchestrator's terminal session -- and the pacer nudging it
-// -- carried on unaffected. The hover card then read "Not nudged" for a
-// session that had been nudged continuously, exactly the ambiguity the
-// cumulative counters exist to remove from the live cap gauge. This file is
-// the durable half: written on every nudge and read back whenever a session
-// for that orchestrator id is (re)spawned, so the record outlives the
-// process the same way the pacing it describes does.
+// pacingWhipCount / pacingLastCappedAtUnix and their timestamps) must survive a
+// desktop restart, because the orchestrator's terminal session -- and the pacer
+// nudging it -- carries on regardless; otherwise the hover card reads "Not
+// nudged" for a session that has been nudged continuously. This file is the
+// durable half: written on every nudge and read back whenever a session for
+// that orchestrator id is (re)spawned.
 //
 // It is keyed by orchestrator id and kept as one file, the same shape as
 // orchestrator-open.json (orchestrator_open_state.go), for the same reason:
@@ -180,9 +177,8 @@ func (a *App) persistOrchestratorNudgeHistory(entry orchestratorNudgeHistoryEntr
 }
 
 // writeOrchestratorNudgeHistoryEntry upserts one orchestrator's record and
-// persists the full set atomically (temp file + rename, the same pattern
-// erun-common's config writers use for exactly this reason -- see
-// eruncommon.WriteFileAtomic) so a crash mid-write never leaves this file
+// persists the full set atomically (config.WriteFileAtomic: temp file +
+// rename) so a crash mid-write never leaves this file
 // half-written for every OTHER orchestrator's history along with this one's.
 //
 // If the existing file is unreadable, this refuses to write rather than

@@ -371,13 +371,12 @@ func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error)
 // authErrorCode reports the machine-readable code for a resolution failure so
 // a client can render "no tenant matched this token" apart from "you are not
 // enrolled" instead of collapsing both into one generic message — the
-// distinction the not-enrolled UI otherwise cannot make (erun#1721).
+// distinction the not-enrolled UI otherwise cannot make.
 // RESOLUTION_FAILED is a third, distinct outcome: an internal error (a
 // database failure IdentityRepository already sanitized into
 // repository.ErrIdentityResolutionFailed) rather than a real answer about
 // enrolment, so a client must not tell the caller they need enrolling, or
-// that their tenant could not be determined — neither claim is true here
-// (erun#1752).
+// that their tenant could not be determined — neither claim is true here.
 func authErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrTenantNotResolved):

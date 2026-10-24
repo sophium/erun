@@ -17,7 +17,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// list_control_planes_test.go covers `erun list --control-planes` (erun#2052):
+// list_control_planes_test.go covers `erun list --control-planes`:
 // every configured erun-hosted control plane's deployed version, compared
 // against the newest version erun's own registry has actually published.
 // route-check proves a route is reachable on a plane already assumed to be
@@ -44,7 +44,7 @@ func controlPlaneRegistryStub(t testing.TB, tags ...string) *httptest.Server {
 
 // controlPlaneStub serves GET /v1/platform reporting version, standing in
 // for a deployed control plane. An optional consoleURL is reported as the
-// response's consoleUrl field -- erun#2070's discovery mechanism: a plane and
+// response's consoleUrl field -- the console discovery mechanism: a plane and
 // its console are never configured as separate aliases, so the console
 // version check finds its target here, the same call that reports the
 // plane's own version. Reports its own listener address as apiUrl, the same
@@ -273,7 +273,7 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("real_run_json_output", testListControlPlanesRealRunJSONOutput)
 
-	// erun#2052: --fail-on-drift is the opt-in that lets this reporting
+	// --fail-on-drift is the opt-in that lets this reporting
 	// command's own finding be wired into a gate -- without it this whole
 	// file's scenarios are right that the command always exits 0
 	// (erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands Vs
@@ -306,16 +306,11 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("real_run_json_output_two_aliases_sharing_a_backend_does_not_double_count", testListControlPlanesRealRunJSONOutputTwoAliasesSharingABackendDoesNotDoubleCount)
 
-	// Follow-up: identity must never be guessed from DNS/host alone
-	// when neither alias's own GET /v1/platform self-reports an apiUrl -- an
-	// older platform that predates the field, modeled here via
-	// controlPlaneStubAt with an empty identityAPIURL. Both stubs listen on
-	// 127.0.0.1 (only their ports differ), which is exactly the shape that
-	// used to collapse incorrectly: a DNS-based fallback identity resolved
-	// both hosts to the same loopback address and dropped the port,
-	// silently merging two genuinely distinct backends into one reported
-	// plane. erun-common no longer keys identity on DNS at all when the
-	// self-declared signal is missing, so these must stay two backends.
+	// Identity must never be guessed from DNS/host alone when neither
+	// alias's GET /v1/platform self-reports an apiUrl (an older platform,
+	// modeled via controlPlaneStubAt with an empty identityAPIURL). Both
+	// stubs listen on 127.0.0.1 with different ports, so a DNS-based identity
+	// would merge two distinct backends; these must stay two backends.
 
 	t.Run("real_run_two_aliases_with_no_self_declared_identity_stay_separate", testListControlPlanesRealRunTwoAliasesWithNoSelfDeclaredIdentityStaySeparate)
 

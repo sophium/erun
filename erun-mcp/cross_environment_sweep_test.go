@@ -149,8 +149,8 @@ func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 }
 
 // terraformTestStore adds ResolveEffectiveKubernetesContext to listToolStore,
-// the one extra method eruncommon.TerraformStore needs beyond OpenStore; the
-// terraform tool falls back to a real eruncommon.ConfigStore (reading this
+// the one extra method terraform.TerraformStore needs beyond OpenStore; the
+// terraform tool falls back to a real config.ConfigStore (reading this
 // machine's actual ~/.config/erun) when the wired store does not implement
 // TerraformStore, which is not what a hermetic test wants.
 type terraformTestStore struct {

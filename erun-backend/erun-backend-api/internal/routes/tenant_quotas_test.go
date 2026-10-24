@@ -137,7 +137,7 @@ func getQuotaAs(t *testing.T, tenantType model.TenantType, tenantID string, read
 
 // TestGetQuotaReturnsTheCallersOwnRow: an Operator can see their own tenant's
 // quota — the same read admission itself uses — without an operations-scoped
-// token (#605, #1113).
+// token.
 func TestGetQuotaReturnsTheCallersOwnRow(t *testing.T) {
 	want := model.TenantQuota{
 		MaxEnvironments: 10, MaxCPUMillicores: 8000, MaxMemoryMB: 17832, MaxStorageGB: 72,

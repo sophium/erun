@@ -173,8 +173,8 @@ func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.Met
 
 // startIdleMetricsTicker feeds erun_idle_eligibility and
 // erun_terminal_input_seconds_since_last from the same read-only idle-status
-// resolution the `idle` MCP tool already exposes (eruncommon.
-// ResolveStoredEnvironmentIdleStatus), so the gauges can never disagree with
+// resolution the `idle` MCP tool already exposes
+// (activity.ResolveStoredEnvironmentIdleStatus), so the gauges can never disagree with
 // what an agent calling `idle` sees. It samples once immediately so a scrape
 // right after boot does not read a zero-value gauge as "eligible"/"just typed".
 func startIdleMetricsTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {

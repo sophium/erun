@@ -70,8 +70,8 @@ func TestCreateInviteForOwnTenantIsAllowedForAnyTenantType(t *testing.T) {
 	}
 }
 
-// TestCreateInviteForAnotherTenantRequiresOperations locks #1483 item 4's
-// coarse gate: a COMPANY-tenant caller cannot mint an invite for a tenant
+// TestCreateInviteForAnotherTenantRequiresOperations locks the coarse
+// gate: a COMPANY-tenant caller cannot mint an invite for a tenant
 // other than their own.
 func TestCreateInviteForAnotherTenantRequiresOperations(t *testing.T) {
 	store := &stubInviteStore{}
@@ -168,7 +168,7 @@ func TestInviteAcceptSucceeds(t *testing.T) {
 	}
 }
 
-// TestInviteAcceptReportsEachTokenStatePlainly locks #1483 item 7: a stale
+// TestInviteAcceptReportsEachTokenStatePlainly: a stale
 // or revoked link says exactly why, rather than a generic failure.
 func TestInviteAcceptReportsEachTokenStatePlainly(t *testing.T) {
 	cases := []struct {

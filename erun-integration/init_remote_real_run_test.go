@@ -102,11 +102,10 @@ func testInitRemoteRealRunExistingRepoPulls(t *testing.T) {
 }
 
 func testInitRemoteRealRunGhcrRegistryMissingCredentialRefuses(t *testing.T) {
-	// #1201: init deployed a pod configured to build+push to ghcr.io, but the
-	// pod itself never authenticated (no docker config, no gh session, no
-	// GH_TOKEN). Before this fix, init reported success and the failure only
-	// surfaced 7 minutes into the first `erun release`, at the push. Init must
-	// now refuse right after the deploy, before ever touching git/SSH setup --
+	// Init deployed a pod configured to build+push to ghcr.io, but the pod
+	// itself has no credential (no docker config, no gh session, no
+	// GH_TOKEN), which would otherwise surface only at the first `erun
+	// release` push. Init must refuse right after the deploy, before ever touching git/SSH setup --
 	// no repository state probe, no SSH key output.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
@@ -137,7 +136,7 @@ func testInitRemoteRealRunGhcrRegistryMissingCredentialRefuses(t *testing.T) {
 }
 
 func testInitRemoteRealRunGhcrRegistryCredentialConfiguredSucceeds(t *testing.T) {
-	// The other half of #1201: a pod that already has a ghcr.io credential
+	// The other half: a pod that already has a ghcr.io credential
 	// (the operator authenticated it, or it inherited one from a prior push)
 	// must not be blocked by the new check -- init completes normally.
 	setup := env.New(t)

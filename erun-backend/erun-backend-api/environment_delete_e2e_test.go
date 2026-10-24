@@ -71,10 +71,9 @@ func seedDeleteTestEnvironment(t *testing.T, ctx context.Context, repo *reposito
 	return created
 }
 
-// TestClaimDeleteTakesExclusiveOwnership pins the concurrency guard #1140
-// needs: a second delete request must not restart a teardown that is already
-// in flight, or two concurrent deletes could both launch a Job against the
-// same namespace.
+// TestClaimDeleteTakesExclusiveOwnership pins the concurrency guard: a second
+// delete request must not restart a teardown that is already in flight, or two
+// concurrent deletes could both launch a Job against the same namespace.
 func TestClaimDeleteTakesExclusiveOwnership(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -124,13 +123,10 @@ func TestClaimDeleteReclaimsAStaleAttempt(t *testing.T) {
 }
 
 // TestClaimDeleteAlwaysReclaimsABlockedAttempt pins the "no operator
-// re-issue needed" half: a previously blocked delete reached a terminal
-// outcome, so a fresh attempt (from the operator or the reconciler) must not
-// wait out any staleness window. The claim itself must not clear
-// delete_error: ClaimDelete's own doc comment records that clearing it on
-// claim left the row looking uninformative for as long as the new attempt
-// took to reach the same conclusion, so the previous blocker's reason must
-// still read back until the new attempt's own outcome overwrites it.
+// re-issue needed" half: a blocked delete reached a terminal outcome, so a
+// fresh attempt must not wait out any staleness window. The claim must not
+// clear delete_error: the previous blocker's reason still reads back until the
+// new attempt's own outcome overwrites it.
 func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -154,8 +150,8 @@ func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	}
 }
 
-// TestMarkDeleteBlockedRecordsTheReason pins the diagnosis half of #1140: the
-// namespace's own blocker must survive as readable state, not just a log line.
+// TestMarkDeleteBlockedRecordsTheReason pins that the namespace's own blocker
+// survives as readable state, not just a log line.
 func TestMarkDeleteBlockedRecordsTheReason(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -173,9 +169,9 @@ func TestMarkDeleteBlockedRecordsTheReason(t *testing.T) {
 	}
 }
 
-// TestCountExcludesEnvironmentsMidTeardown pins the quota-accounting half of
-// #1140: an environment whose teardown has been requested must not lock the
-// tenant out of its own allowance through a delete it cannot complete.
+// TestCountExcludesEnvironmentsMidTeardown pins that an environment whose
+// teardown has been requested does not lock the tenant out of its own
+// allowance through a delete it cannot complete.
 func TestCountExcludesEnvironmentsMidTeardown(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	_ = seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)

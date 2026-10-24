@@ -70,7 +70,7 @@ function OperationsSectionContent({
 }
 
 // SectionContent renders exactly one panel for the active section — the main
-// pane switches wholesale rather than stacking every panel, per #1207. Split
+// pane switches wholesale rather than stacking every panel. Split
 // out of AppShell purely to keep AppShell under the module's
 // max-lines-per-function budget.
 function SectionContent({
@@ -154,7 +154,7 @@ function sectionLabel(sections: ConsoleSection[], active: ConsoleSectionId): str
   return sections.find((section) => section.id === active)?.label ?? '';
 }
 
-// AppShell is the console's app shell (#1207): a persistent sidebar for
+// AppShell is the console's app shell: a persistent sidebar for
 // navigation, a header carrying identity + sign-out, and a main pane that
 // switches on a single derived `active` value rather than stacking every
 // panel vertically.
@@ -183,10 +183,9 @@ export function AppShell({
 }): React.ReactElement {
   const { sections, active, onSelect } = useSectionNavigation(config.tenant);
   const { theme, toggleTheme } = useTheme();
-  // scopeTenantId is undefined for "my own tenant" -- the default, and every
-  // caller's ordinary behavior before the scope selector existed. Local state
+  // scopeTenantId is undefined for "my own tenant", the default. Local state
   // rather than a store slice: it has no reason to survive past this signed-in
-  // session (shell/ScopeSelector.tsx, erun#1816).
+  // session (see shell/ScopeSelector.tsx).
   const [scopeTenantId, setScopeTenantId] = React.useState<string | undefined>(undefined);
   // The full tenant list backs both the scope selector's options and the
   // Environments panel's per-row tenant badge; skipped for a non-OPERATIONS

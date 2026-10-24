@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten is the whole contract of
-// #1175, and it is the inverse of the shared CLAUDE.md's. erun overwrites the
+// TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten is the inverse of the
+// shared CLAUDE.md's contract. erun overwrites the
 // shared file on every launch, which is why an edit there is silently discarded;
 // the role file must survive every launch instead, or it is the same dead end.
 func TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten(t *testing.T) {

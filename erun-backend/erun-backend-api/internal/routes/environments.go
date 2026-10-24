@@ -17,10 +17,10 @@ type EnvironmentRepository interface {
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
 	// CountByContext reports how many environments already occupy a placement
-	// candidate, for the capacity check (#1112).
+	// candidate, for the capacity check.
 	CountByContext(ctx context.Context, contextID string) (int, error)
 	// CountByType reports how many of the caller's tenant's environments are
-	// of the given type, for the aggregate resource-budget check (#1113).
+	// of the given type, for the aggregate resource-budget check.
 	CountByType(ctx context.Context, envType model.EnvironmentType) (int, error)
 	// The mutating methods below take the owning tenant explicitly, alongside
 	// the environment id. They are reached both from here — where the row was
@@ -33,7 +33,7 @@ type EnvironmentRepository interface {
 	// workflow (see writeStartProvisioningError), so the environment does not
 	// stay stranded in provisioning.
 	MarkDeployFailed(ctx context.Context, tenantID, environmentID, reason string) error
-	// ClaimDelete takes exclusive ownership of a delete attempt (#1140),
+	// ClaimDelete takes exclusive ownership of a delete attempt,
 	// mirroring ClaimDeploy: false means another delete already holds it.
 	ClaimDelete(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeleteBlocked records a delete claim that never reached the durable
@@ -42,7 +42,7 @@ type EnvironmentRepository interface {
 	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
-// PlacementContextRepository is the read access placement (#1112) needs: list
+// PlacementContextRepository is the read access placement needs: list
 // the tenant's own registered contexts (RLS-scoped) for auto-selection, and
 // fetch one by id to validate an explicit request and read its coordinates.
 type PlacementContextRepository interface {
@@ -55,8 +55,7 @@ type PlacementContextRepository interface {
 
 // EnvironmentProvisioner starts the durable server-side deploy of an
 // environment — once on create, and again for each explicit deploy. Optional:
-// when nil, the environment routes only register rows (no live deploy),
-// matching the pre-executor behavior.
+// when nil, the environment routes only register rows (no live deploy).
 type EnvironmentProvisioner interface {
 	Start(provision.EnvProvisionInput) error
 	StartDeploy(provision.EnvProvisionInput) error
@@ -70,7 +69,7 @@ type EnvironmentLifecycle interface {
 }
 
 // EnvironmentDeleter starts an already-registered runtime environment's
-// delete attempt asynchronously (#1140): the durable workflow behind it may
+// delete attempt asynchronously: the durable workflow behind it may
 // run long or wedge entirely (a stuck namespace finalizer), so the route that
 // starts one must not be the thing waiting on it. Optional: when nil, the
 // delete route reports 501, the same "executor not configured" shape as a nil
@@ -93,7 +92,7 @@ type EnvironmentRoutes struct {
 	// tenants resolves the caller's tenant name (not UUID) for the deploy, which
 	// forms the <tenant>-<env> namespace and runtime release name.
 	tenants ConfigTenantRepository
-	// contexts resolves placement candidates (#1112): the tenant's own
+	// contexts resolves placement candidates: the tenant's own
 	// registered clusters, read-only from this route's point of view.
 	contexts PlacementContextRepository
 	// provisioner is nil when live env provisioning is not wired; then create

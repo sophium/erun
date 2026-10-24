@@ -31,21 +31,20 @@ type LoadState =
   // Signed in with the identity provider, but the API does not recognise the
   // identity — it belongs to no tenant yet. Distinct from signed-out because
   // the recovery is completely different: signing in again just repeats the
-  // same successful sign-in and lands here once more (#1167).
+  // same successful sign-in and lands here once more.
   | { status: 'not-enrolled'; token: string }
   // Signed in, and the caller may well already be enrolled somewhere — the
   // API could simply not determine which tenant this token resolves to (a
   // shared, org-scoped issuer whose token carries no matching org claim, most
   // commonly). Distinct from not-enrolled because "ask an operator to enrol
-  // you" is advice that cannot work here (erun#1721).
+  // you" is advice that cannot work here.
   | { status: 'tenant-unresolved'; token: string; message: string }
   // Authenticated, but the API's own resolution failed because of an
   // internal error (repository.ErrIdentityResolutionFailed, sanitized
   // server-side of any raw database detail) rather than a real answer about
   // enrolment or tenant resolution. Distinct from both states above: neither
   // "ask an operator to enrol you" nor "you may already be enrolled
-  // elsewhere" is true advice here, and no enrolment command is offered
-  // (erun#1752).
+  // elsewhere" is true advice here, and no enrolment command is offered.
   | { status: 'resolution-error'; token: string; message: string }
   | { status: 'error'; message: string };
 
@@ -67,15 +66,15 @@ interface ConfigQueryPhase {
 
 // A 401 means at least three completely different things depending on
 // whether a token was held, and — once one is — which of three causes the
-// API itself reports via its {code, message} envelope (erun#1721, erun#1752).
+// API itself reports via its {code, message} envelope.
 // With no token the caller is simply signed out. With a token, the identity
 // provider authenticated them and the API still said no: either this
 // identity really is not enrolled anywhere (NOT_ENROLLED, telling them to
-// sign in again is a loop, #1167), or the API could not determine which
+// sign in again is a loop), or the API could not determine which
 // tenant this token resolves to at all (TENANT_UNRESOLVED) — a state the
 // caller may already be enrolled past, so "ask an operator to enrol you"
 // would be wrong advice — or resolution failed for an internal reason
-// unrelated to either (RESOLUTION_FAILED, erun#1752) — neither piece of
+// unrelated to either (RESOLUTION_FAILED) — neither piece of
 // advice above is true here either, and no enrolment command is offered.
 // Anything else 401-shaped falls back to the same not-enrolled card the API
 // has always produced for an unclassified auth rejection.
@@ -127,10 +126,8 @@ interface PlatformInfo {
 }
 
 // usePlatformInfo resolves the instance's white-label surface from discovery
-// (GET /v1/platform) and mirrors the brand into the document title — the one
-// thing that used to be a hardcoded literal (`erun console`) despite the
-// value already being fetched and parsed for OIDC config. The remaining fields
-// are optional and left undefined when the backend has it unset (#1327);
+// (GET /v1/platform) and mirrors the brand into the document title. The
+// remaining fields are optional and left undefined when the backend has them unset;
 // callers fall back to bundled product-level defaults, never a hardcoded
 // instance name.
 function usePlatformInfo(): PlatformInfo {

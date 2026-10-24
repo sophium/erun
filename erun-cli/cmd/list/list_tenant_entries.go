@@ -141,12 +141,12 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 }
 
 // runtimeVersionLabel names the release line beside the bare runtime-version
-// number: a number alone reads as an erun version even when it rides a
-// tenant's own devops line, and two environments in the same tenant can ride
-// different lines from each other (erun#1746). An environment that has never
-// deployed still reads "none", unchanged; one that has deployed but recorded
-// no resolved image reads distinctly as "line undetermined" rather than
-// guessing a line from the tenant name.
+// number: a number alone reads as an erun version even when it rides a tenant's
+// own devops line, and two environments in the same tenant can ride different
+// lines from each other. An environment that has never deployed still reads
+// "none", unchanged; one that has deployed but recorded no resolved image reads
+// distinctly as "line undetermined" rather than guessing a line from the tenant
+// name.
 func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult) string {
 	version := shared.ValueOrNone(env.RuntimeVersion)
 	if env.RuntimeVersionLine == nil {

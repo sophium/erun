@@ -12,7 +12,7 @@ test('appendDisplayBuffer retains everything under the budget', () => {
   assert.deepEqual(sessions.displayBuffer(1), ['a\n', 'b\n']);
 });
 
-// The regression #1322 exists to prevent: a long-running (or background,
+// A long-running (or background,
 // never-viewed) session must not grow its retained buffer without limit.
 test('appendDisplayBuffer bounds retention once the line budget is exceeded', () => {
   const sessions = new TerminalSessionRegistry();
@@ -53,7 +53,7 @@ test('a session has no snapshot until one is captured', () => {
   assert.equal(sessions.snapshot(1), undefined);
 });
 
-// This is the mechanism #1322's fix relies on: capturing a snapshot clears the
+// Bounded switch-back replay relies on this: capturing a snapshot clears the
 // buffer, so a later switch back replays only the delta since, not the whole
 // session history.
 test('captureSnapshot records the snapshot and clears the display buffer', () => {

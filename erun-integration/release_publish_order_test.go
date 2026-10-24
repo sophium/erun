@@ -15,12 +15,8 @@ import (
 )
 
 func testReleaseRealRunPublishesBeforeTheTagReachesOrigin(t *testing.T) {
-	// Regression. A release used to run only its git stages: it
-	// tagged, announced, and bumped the version without ever building or
-	// publishing an image or a chart, so the announced version was
-	// undeployable and the gap only surfaced at the next deploy's chart
-	// pull. Release now publishes between its local stages and its
-	// outward-facing ones. Real git against a bare origin proves the
+	// A release publishes between its local stages and its outward-facing
+	// ones, so an announced version is always deployable. Real git against a bare origin proves the
 	// ordering behaviourally: the publish stage runs, the read-back
 	// verification resolves each image and chart, and only then does the
 	// tag reach origin. docker and helm are stubbed because the harness has
@@ -30,8 +26,7 @@ func testReleaseRealRunPublishesBeforeTheTagReachesOrigin(t *testing.T) {
 	seedBareOrigin(t, setup)
 
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -58,13 +53,12 @@ func testReleaseRealRunPublishFailureLeavesNoPublicTag(t *testing.T) {
 	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
 	fixture.StubBinary(t, stubs, "helm", "")
 
-	// #1201: give the registry-credential preflight a resolvable credential
+	// Give the registry-credential preflight a resolvable credential
 	// so this scenario still reaches the simulated docker failure it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
@@ -78,11 +72,8 @@ func testReleaseRealRunPublishFailureLeavesNoPublicTag(t *testing.T) {
 }
 
 func testReleaseRealRunRefusesWhenTheBaseBranchMovedBeforeTheBuild(t *testing.T) {
-	// Regression. A release established that it could fast-forward
-	// once, in sync-remote, and then spent the whole build before pushing
-	// anything; a base branch that moved in between was discovered at the
-	// final push, with everything already public. The branch is now re-read
-	// immediately before the build, and a release that cannot land refuses
+	// The base branch is re-read immediately before the build, so one that
+	// moved after sync-remote is caught before anything is public, and a release that cannot land refuses
 	// while nothing is published and the version file is untouched.
 	//
 	// git is stubbed so the re-read reports a moved branch deterministically:
@@ -105,8 +96,7 @@ exit 0
 	envVars = append(envVars, stubPublishToolchain(t, setup)...)
 
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit when the base branch moved before the build, got 0: %s", result.Combined)
@@ -119,12 +109,9 @@ exit 0
 }
 
 func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
-	// Regression, the other half. Releasing 1.0.176, a pull request
-	// merged to main while the release was building: the images, the charts
-	// and the tag all went public, and then the final push was rejected, so
-	// the repository carried neither the packaging commit nor the version
-	// bump and VERSION still read the version just published. The push now
-	// rebases onto the moved branch and retries.
+	// A base branch that moves while the release builds, after everything
+	// went public, must not strand the packaging commit and version bump:
+	// the final push rebases onto the moved branch and retries.
 	//
 	// The helm stub is what moves origin. helm first runs inside the publish
 	// stage, which places the move exactly where the real one landed — after
@@ -135,7 +122,7 @@ func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
 
 	// The GitHub release entry is created when the linux packages are
 	// attached, after the push. The gh stub's marker proves a rejected push
-	// no longer strands it.
+	// does not strand it.
 	githubReleaseCreated := filepath.Join(setup.Home, "github-release-created")
 	mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
 	fixture.RunGit(t, setup.Cwd, "add", ".")
@@ -163,14 +150,13 @@ func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
 	}, "\n"))
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm", "gh")...)
 	envVars = append(envVars,
-		// #1201: give the registry-credential preflight a resolvable credential
+		// Give the registry-credential preflight a resolvable credential
 		// so this scenario still reaches the moved-branch-absorption it is about.
 		"GH_TOKEN=integration-test-token",
 	)
 
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -256,10 +242,8 @@ func testReleaseRealRunNamesTheRejectedDevelopAndDoesNotRebaseMain(t *testing.T)
 }
 
 func testReleaseRealRunRefusesWhenAnotherOrchestratorIsAlreadyReleasingTheVersion(t *testing.T) {
-	// Regression for erun#1619: two orchestrators driving the same runtime
-	// pod could both pass every preflight and race the same release, the
-	// loser discovering the collision only via a tag mismatch after minutes
-	// of wasted publishing. Pre-claiming the exact exclusive lease scope
+	// Two orchestrators driving the same runtime pod must not race the same
+	// release. Pre-claiming the exact exclusive lease scope
 	// release itself takes — via the activity lease CLI, sharing this
 	// scenario's XDG_CACHE_HOME — simulates "another orchestrator got there
 	// first". release must refuse before it ever touches git — sync-remote

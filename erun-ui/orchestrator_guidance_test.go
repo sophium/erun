@@ -52,8 +52,7 @@ func TestRevealOrchestratorGuidanceResolvesBothLayers(t *testing.T) {
 	}
 }
 
-// TestRevealOrchestratorGuidanceSeedsAbsentRoleFile covers the acceptance
-// criterion from #1231: revealing an orchestrator's role layer before it has
+// TestRevealOrchestratorGuidanceSeedsAbsentRoleFile: revealing an orchestrator's role layer before it has
 // ever launched must seed the file rather than fail or open nothing, so the
 // button never reveals a missing file.
 func TestRevealOrchestratorGuidanceSeedsAbsentRoleFile(t *testing.T) {

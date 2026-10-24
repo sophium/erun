@@ -123,7 +123,7 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	waitForEnsureCount(t, &ensures, &ensuresMu, 2, 2*time.Second)
 }
 
-// TestEnsureFailureNotificationDedupesPerEpisode locks the fix: a runtime
+// TestEnsureFailureNotificationDedupesPerEpisode: a runtime
 // that stays unreachable must surface its "Could not reach the runtime"
 // notification once per failure episode, not on every ensure retry — otherwise
 // the banner re-appears the instant the user dismisses it. The sidebar row is
@@ -240,12 +240,12 @@ func capturedEnsureApp(
 	return app, emits
 }
 
-// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the fix: a
+// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight: a
 // deploy for the env being in flight IS the recovery the runtime-unreachable
 // banner would recommend ("Deploy the environment …"), and the deploy-progress
-// overlay already communicates it. Surfacing a contradictory failed status +
-// banner on top of the running deploy is the confusion this fixes, so the
-// failure must stay quiet while a deploy locks the env's terminals.
+// overlay already communicates it, so the failure must stay quiet rather than
+// show a contradictory failed status + banner while a deploy locks the env's
+// terminals.
 func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -291,7 +291,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	}
 	// The message names "Deploy the environment ..." as the fix, and the app
 	// can perform it, so the notification must carry the action the frontend
-	// renders a button for (#1390) rather than leaving the remedy unreachable.
+	// renders a button for rather than leaving the remedy unreachable.
 	if note.Action != notificationActionDeploy {
 		t.Fatalf("notification action = %q, want %q", note.Action, notificationActionDeploy)
 	}
@@ -329,14 +329,14 @@ func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 		t.Fatalf("notification must name the way back, got %q", note.Message)
 	}
 	// The remedy here is opening the env, which the row itself already offers
-	// on click — not a deploy — so this notification must carry no action
-	// (#1390: an action-less remedy must not get a manufactured button).
+	// on click — not a deploy — so this notification must carry no action:
+	// an action-less remedy must not get a manufactured button.
 	if note.Action != "" {
 		t.Fatalf("notification action = %q, want none", note.Action)
 	}
 }
 
-// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the fix: once
+// TestEnsureSuccessClearsRuntimeUnreachableNotification: once
 // the runtime is reachable again, the "Could not reach the runtime …" banner is
 // stale, so a successful ensure clears it (tagged by env + source so an
 // unrelated toast is left alone).

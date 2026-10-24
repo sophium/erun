@@ -26,7 +26,7 @@ export const cancelAdvanceMergeQueue = (): AppThunk => (dispatch) => {
 
 // clearAdvanceMergeQueueError drops a stale advance-queue write error once a
 // sign-in it prompted has succeeded, leaving the confirm step in place so the
-// operator retries Confirm themselves (#1392).
+// operator retries Confirm themselves.
 export const clearAdvanceMergeQueueError = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ error: '' }));
 };

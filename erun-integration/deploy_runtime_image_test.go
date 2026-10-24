@@ -62,9 +62,9 @@ func testDeployDryRunRemoteEnvUmbrellaIgnoresStaleStockRuntimeimage(t *testing.T
 
 func testDeployDryRunRemoteEnvUmbrellaHonoursTenantsOwnRuntimeimageTag(t *testing.T) {
 	// A pin naming the tenant's OWN team-devops image at a tag that disagrees
-	// with the deploy version used to be discarded as "provably redundant"
-	// and silently replaced with a guessed team-devops:<erun-version> tag.
-	// That guess conflated two independent version lines: the tenant's own
+	// with the deploy version must not be replaced with a guessed
+	// team-devops:<erun-version> tag, which would conflate two independent
+	// version lines: the tenant's own
 	// image is versioned on the tenant's own release line (exactly what
 	// `erun pin` already documents and enforces — it never rewrites this
 	// tag), so a tag that disagrees with the deploy version is the expected,
@@ -116,13 +116,11 @@ func testDeployDryRunRemoteEnvStatedChartIgnoresStaleStockRuntimeimage(t *testin
 }
 
 func testDeployDryRunRuntimeChartFlagRescuesAStockRuntimeImageOverride(t *testing.T) {
-	// erun#1249: an env recorded at an old runtimechart version, deployed with
+	// An env recorded at an old runtimechart version, deployed with
 	// --version/--runtime-image/--runtime-chart together moving it forward.
-	// Before the fix, the image inference read the env's stale recorded chart
-	// version -- the --runtime-chart override was only applied to the deploy
-	// spec afterward -- concluded the stock erun-devops image could not be
-	// published "on another line", and silently substituted a tenant image
-	// tag that was never built (ImagePullBackOff). The operator's own image
+	// Image inference must read the --runtime-chart override, not the env's
+	// stale recorded chart version, or it substitutes a tenant image tag that
+	// was never built (ImagePullBackOff). The operator's own image
 	// and chart must both install exactly as stated.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
@@ -183,12 +181,11 @@ func testDeployDryRunRuntimeChartFlagAloneHealsAPersistedStockRuntimeimageMemo(t
 }
 
 func testDeployDryRunRemoteEnvExplicitRuntimeImageWinsOnTheTenantsOwnVersionLine(t *testing.T) {
-	// erun#1249 second variant: the tenant's runtime image rides its own
-	// project's version line (VERSION symlinked to the project's release, not
-	// erun's), so an explicit --runtime-image shares a repository with the
-	// deploy's inferred default image but differs only by tag. Before the fix,
-	// staleRuntimeImageTrace treated that as a leftover pin and silently
-	// substituted the inferred tag, which the operator had never published.
+	// The tenant's runtime image rides its own project's version line
+	// (VERSION symlinked to the project's release, not erun's), so an
+	// explicit --runtime-image shares a repository with the deploy's inferred
+	// default image but differs only by tag. staleRuntimeImageTrace must not
+	// treat that as a leftover pin and substitute the inferred tag.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -305,12 +302,10 @@ func testDeployDryRunRuntimeImageOverrideNoK8sTreeUsesPublishedChart(t *testing.
 }
 
 func testDeployRealRunHealsStaleRuntimeimageWhenMovingOntoTheTenantsOwnLine(t *testing.T) {
-	// erun#1754: frs/build's exact drift. The env's persisted runtimeimage
-	// still names the stock erun-devops image, but this deploy confirms
-	// the tenant's own frs-devops chart (the existing staleness check
-	// already resolves the CORRECT image for THIS deploy) -- what
-	// erun#1754 found missing is that the persisted runtimeimage field
-	// never healed to match, so a later deploy that does not repeat this
+	// The env's persisted runtimeimage still names the stock erun-devops
+	// image, but this deploy confirms the tenant's own frs-devops chart (the
+	// staleness check already resolves the CORRECT image for THIS deploy) --
+	// the persisted runtimeimage field must heal to match too, or a later deploy that does not repeat this
 	// exact chart confirmation would read the same stale stock pin back.
 	// Real-run: persistence only happens outside --dry-run. runtimeimage
 	// must heal to the bare tenant name (self-maintaining, no registry, no
@@ -336,7 +331,7 @@ func testDeployRealRunHealsStaleRuntimeimageWhenMovingOntoTheTenantsOwnLine(t *t
 }
 
 func testDeployRealRunRefusesCrossLineRuntimeImageSwitchBeforeAnyMutation(t *testing.T) {
-	// erun#1754's severity case: this env's last confirmed deploy actually
+	// The severe case: this env's last confirmed deploy actually
 	// ran the tenant's own frs-devops image (runtimerunningimage), but the
 	// persisted runtimeimage still names stock erun-devops and this
 	// deploy's own chart confirmation does not this time land on the
@@ -365,9 +360,9 @@ func testDeployRealRunRefusesCrossLineRuntimeImageSwitchBeforeAnyMutation(t *tes
 }
 
 func testDeployDryRunConsistentStockRuntimeImageEnvDeploysUnchanged(t *testing.T) {
-	// The legitimate case erun#1754 says must keep working with no new
-	// friction: an env that deliberately rides the stock erun-devops
-	// image on erun's own release line (frs/local in the issue), redeployed
+	// The legitimate case that must keep working with no new friction: an
+	// env that deliberately rides the stock erun-devops image on erun's own
+	// release line, redeployed
 	// at a newer erun version. Both the recorded runtimeimage and the last
 	// confirmed runtimerunningimage name the same (stock) release line, so
 	// neither the persisted-image healing nor the new cross-line guard

@@ -34,7 +34,7 @@ type AISessionRoutes struct {
 // RegisterAISessionRoutes wires the environment's own AI-session self-report
 // and its read-back: the structured busy/idle/awaiting-input status model
 // erun-common already resolves locally for the desktop and per-env MCP (see
-// erun-common/ai_session_status.go), now reportable and readable over the
+// base/model/ai_session_status.go), reportable and readable over the
 // authenticated edge so a caller with no local kubeconfig/port-forward can
 // see it too.
 func RegisterAISessionRoutes(register ProtectedRouteRegistrar, sessions AISessionRepository, environments EnvironmentGetter) {
@@ -56,11 +56,11 @@ type reportAISessionEventRequest struct {
 	ExitReason string `json:"exitReason"`
 }
 
-// validAISessionEvents mirrors erun-common's unexported validAISessionEventKind
-// set (erun-common/ai_session_status.go) via its exported constants, so an
+// validAISessionEvents mirrors erun-common's unexported validAISessionEventKinds
+// set (base/model/ai_session_status.go) via its exported constants, so an
 // unrecognized event is refused here rather than silently resolving to Idle —
 // the "unknown must not render as a definite value" property
-// eruncommon.ResolveAISessionStatus's own default case protects locally.
+// modelpkg.ResolveAISessionStatus's own default case protects locally.
 var validAISessionEvents = map[string]bool{
 	string(modelpkg.AISessionEventTurnStart): true,
 	string(modelpkg.AISessionEventToolUse):   true,
@@ -131,9 +131,9 @@ func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request
 }
 
 // resolveAISessionStatus converts the persisted row to the same
-// eruncommon.AISessionStatus shape LoadAISessionStatuses resolves locally, so
-// a caller reading this contract (once a read route exists) sees exactly the
-// desktop/MCP view, never a second, drifting resolution of the same states.
+// modelpkg.AISessionStatus shape activity.LoadAISessionStatuses resolves
+// locally, so a caller sees exactly the desktop/MCP view, never a second,
+// drifting resolution of the same states.
 func resolveAISessionStatus(event model.AISessionEvent) modelpkg.AISessionStatus {
 	return modelpkg.ResolveAISessionStatus(modelpkg.AISessionRecord{
 		SessionID:  event.SessionID,

@@ -65,13 +65,10 @@ func TestAuthMiddlewareLogsAuditEventForAuthorizedRequest(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall pins the fix for the
-// dead AuditEventTypeMCP gap (erun#763): an MCP tool call authenticates with
-// the same bearer token as any other caller, so PlatformClient.WithMCPTool's
-// header is the only thing that tells this request apart from a plain API
-// call. If erun-mcp ever stopped setting eruncommon.MCPToolAuditHeader, this
-// test would start seeing the request logged as type API with no tool name,
-// exactly the silent regression the gap left in place before this fix.
+// TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall pins AuditEventTypeMCP:
+// an MCP tool call authenticates with the same bearer token as any other
+// caller, so PlatformClient.WithMCPTool's header (platformclient.MCPToolAuditHeader)
+// is the only thing that tells this request apart from a plain API call.
 func TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall(t *testing.T) {
 	var event AuditEvent
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{

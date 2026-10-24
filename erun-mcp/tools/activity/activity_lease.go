@@ -112,10 +112,9 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 // params.ID is still the caller's raw, unsanitized input at this point — the
 // store only sanitizes it inside TakeEnvironmentActivityLease, which has not
 // run yet — so it is resolved through the same normalisation the store uses
-// before comparing against the stored, already-sanitized lease.ID. Comparing
-// the raw value directly is how erun#1652 happened: a lease id needing
-// sanitisation (a space, a slash, a colon) never matched its stored form, so
-// every renewal misread as a fresh claim.
+// before comparing against the stored, already-sanitized lease.ID; otherwise
+// a lease id needing sanitisation (a space, a slash, a colon) never matches
+// its stored form and every renewal misreads as a fresh claim.
 func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params activity.TakeEnvironmentActivityLeaseParams) bool {
 	id, err := activity.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
 	if err != nil {

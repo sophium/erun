@@ -204,7 +204,7 @@ test.describe('manage dialog runtime usage panel', () => {
     // The sharpest form of the fail-soft contract: not one of these three
     // fields was measurable against a limit, so the panel renders NO meter at
     // all. A zero-width bar would read as "0%, idle" rather than "unknown" --
-    // which is the confident-wrong-number failure #1336 exists to prevent.
+    // a confident wrong number.
     await expect(panel.getByRole('meter')).toHaveCount(0);
 
     await app.manageDialog.cancel();
@@ -487,15 +487,12 @@ test.describe('manage dialog runtime usage panel', () => {
   // it carries no timeout of its own: `toContainText` has no waitFor
   // equivalent, so it resolves to expect's 10s default rather than the budget
   // this test declares. Under contention a read that is merely slow therefore
-  // reds the step with the test's own clock unspent, which is how a loaded
-  // machine turns into a failing branch nobody touched. The hold below is
+  // fails the step with the test's own clock unspent. The hold below is
   // deliberately just past that 10s default: the smallest delay that
   // discriminates, so the suite pays seconds here rather than the tens a
   // genuinely loaded machine would.
   //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; with the read pointed at that budget it passes at the read's real
-  // arrival. The delay is injected at a named RPC (this spec's own
+  // The delay is injected at a named RPC (this spec's own
   // LoadRuntimeUsage stub) rather than by loading the machine, so the
   // reproduction is deterministic on a quiet host -- the same shape
   // sidebar-pom-convergence-budget.spec.ts uses for the POM steps.

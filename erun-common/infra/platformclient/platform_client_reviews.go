@@ -18,8 +18,7 @@ import (
 // platform_client_reviews.go extends PlatformClient with the collaboration
 // surface (reviews, comments, builds, merge queue) so erun-cli's `erun
 // review` and erun-mcp's `review_*` tools share one client and one set of
-// wire shapes, rather than each hand-rolling HTTP against erun-backend-api
-// (#1199).
+// wire shapes, rather than each hand-rolling HTTP against erun-backend-api.
 
 // PlatformReview mirrors model.Review's JSON shape.
 type PlatformReview struct {
@@ -78,7 +77,7 @@ type PlatformReviewer struct {
 type PlatformBuild struct {
 	BuildID  string `json:"buildId"`
 	TenantID string `json:"tenantId"`
-	// ReviewID is empty for a build with no review attached (erun#1954).
+	// ReviewID is empty for a build with no review attached.
 	ReviewID   string `json:"reviewId,omitempty"`
 	ReviewName string `json:"reviewName,omitempty"`
 	// EnvironmentID is the environment the build ran in, when the caller

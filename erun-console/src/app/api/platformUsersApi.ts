@@ -81,7 +81,7 @@ export const platformUsersApi = platformApi.injectEndpoints({
 
     // enrollPlatformUser invalidates 'Tenants' as well as 'PlatformUsers':
     // it is the one write that can change a tenant's user count, which the
-    // Tenants view's inert-tenant flag (erun#1744) reads from listTenants.
+    // Tenants view's inert-tenant flag reads from listTenants.
     enrollPlatformUser: builder.mutation<
       EnrollPlatformUserResult,
       { token: string; input: EnrollPlatformUserInput }

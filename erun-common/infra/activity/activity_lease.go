@@ -538,11 +538,11 @@ func capEnvironmentActivityLeaseExpiry(startedAt, expiresAt time.Time) time.Time
 	return expiresAt
 }
 
-// ResolveEnvironmentActivityLeaseID resolves a caller-supplied lease id (or
-// its fallback, typically the lease name) to the sanitized form the store
-// persists and keys files by. A caller that needs to compare a raw id against
-// a stored lease's ID must resolve it through here first — comparing the raw
-// value against the sanitized one is how erun#1652 happened.
+// ResolveEnvironmentActivityLeaseID resolves a caller-supplied lease id (or its
+// fallback, typically the lease name) to the sanitized form the store persists
+// and keys files by. A caller that needs to compare a raw id against a stored
+// lease's ID must resolve it through here first; a raw id never matches the
+// sanitized one.
 func ResolveEnvironmentActivityLeaseID(id, fallback string) (string, error) {
 	value := strings.TrimSpace(id)
 	if value == "" {

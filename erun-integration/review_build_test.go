@@ -109,7 +109,7 @@ func testReviewRecordBuildWithoutVersionRefused(t *testing.T) {
 
 func testReviewRecordBuildFailedKnownInfrastructureSignatureRefused(t *testing.T) {
 	// A failed build whose --failure-detail names one of erun's own known
-	// infrastructure signatures (see erun-common/build_failure_classifier.go)
+	// infrastructure signatures (see primitive/build/build_failure_classifier.go)
 	// is refused locally -- before any network call -- rather than recorded
 	// FAILED: a build has no INCONCLUSIVE result, so recording it would move
 	// the review out of the merge queue for a network/registry blip that is
@@ -176,8 +176,7 @@ func testReviewRequeueDryRunTracesResolvedCall(t *testing.T) {
 
 func testReviewRequeueRealRunMovesMergeBackToReady(t *testing.T) {
 	// create -> record-build (READY) -> queue advance (MERGE) -> requeue
-	// (READY), covering the real MERGE -> READY recovery round trip
-	// erun#2241 asked for: a review wedged at MERGE (e.g. by a batched
+	// (READY), covering the real MERGE -> READY recovery round trip: a review wedged at MERGE (e.g. by a batched
 	// gate-merge whose sibling landed but was never promoted) can be
 	// freed without a raw HTTP call.
 	setup := env.New(t)

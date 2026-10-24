@@ -73,7 +73,7 @@ func parseEd25519PublicKey(publicPEM []byte) (ed25519.PublicKey, error) {
 // Sign mints a token whose sub is the ERun user, aud is the per-env audience,
 // and iss is the fixed in-pod file:// path the deploy injects the backend's
 // public key at — so the edge verifies it against that key. scope carries the
-// requested capability tier (see erun-common/mcp_capabilities.go) into the
+// requested capability tier (see infra/mcptools/mcp_capabilities.go) into the
 // token's claims; the caller (mcp_token.go's route) is responsible for
 // validating and defaulting it before it reaches here, since an absent scope
 // resolving to admin is exactly the desktop's own compatibility default

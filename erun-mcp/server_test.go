@@ -148,7 +148,7 @@ func TestEndpointURL(t *testing.T) {
 // tool appeared or vanished, and its failure message prints unreadable struct
 // pointers. Kept at package scope so the test function stays within funlen.
 var wantRegisteredTools = []string{
-	// Sorted. The four exec_* names joined the surface with #1186's rename;
+	// Sorted. The four exec_* names joined the surface with the exec rename;
 	// diff/raw/write/commit remain as deprecated aliases for one release.
 	// job's five query verbs moved to exec_job_* (job_* remain as deprecated
 	// aliases for one release) and exec_agent joined the surface; job_start's

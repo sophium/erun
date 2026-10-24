@@ -25,7 +25,7 @@ func doctorInstallationScenarios(t *testing.T) {
 }
 
 func testDoctorDryRunReportsRuntimeImageRegistryMismatch(t *testing.T) {
-	// #1328: a runtimeimage pinned to one registry (an ECR build host)
+	// A runtimeimage pinned to one registry (an ECR build host)
 	// while runtimeregistry names another (the deploy/chart registry)
 	// leaves the pod unable to pull unless a credential happens to
 	// resolve for the image's own registry at deploy time. This is a
@@ -43,7 +43,7 @@ func testDoctorDryRunReportsRuntimeImageRegistryMismatch(t *testing.T) {
 }
 
 func testDoctorDryRunReportsRuntimeImageLineMismatch(t *testing.T) {
-	// erun#1754: a runtimeimage naming the stock erun-devops image while
+	// A runtimeimage naming the stock erun-devops image while
 	// the env's last confirmed deploy (runtimerunningimage) actually ran a
 	// tenant's own <tenant>-devops image is static config drift a health
 	// check exists to catch -- comparing the two image fields needs no

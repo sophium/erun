@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// These are erun#1768's pattern applied to the release tag-replay helpers:
+// The release tag-replay helpers must keep git's stderr:
 // git's stderr is already captured onto exec.ExitError.Stderr by Output(),
 // and each caller (findReplayedReleaseTagCommit, moveReleaseTagOnto) folds
 // the bare error straight into an operator-facing message, so dropping the

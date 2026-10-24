@@ -30,7 +30,7 @@ func canReadTenantRoles(capabilities model.PlatformCapabilities) bool {
 	return !capabilities.Known() || capabilities.Allows(http.MethodGet, "/v1/roles")
 }
 
-// The remedy values are eruncommon.PlatformAccessRemedy, the one type both
+// The remedy values are platformclient.PlatformAccessRemedy, the one type both
 // this and a denial's own sentence name the role from — a second local shape
 // would be a copy that can drift from the command it describes.
 //

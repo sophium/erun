@@ -37,8 +37,7 @@ type uiEnvironment struct {
 	APIURL         string `json:"apiUrl,omitempty"`
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	// RuntimeVersionLine, ErunVersion, and RuntimeImageLineMismatch mirror
-	// eruncommon.ListEnvironmentResult's own fields of the same name -- see
-	// erun-common/runtime_version_line.go and erun-common/list.go. The
+	// lifecycle.ListEnvironmentResult's own fields of the same name. The
 	// environment hover card is the only consumer today.
 	RuntimeVersionLine       *deploy.RuntimeVersionLine                `json:"runtimeVersionLine,omitempty"`
 	ErunVersion              *deploy.ErunVersion                       `json:"erunVersion,omitempty"`
@@ -204,7 +203,7 @@ type uiEnvironmentStopResult struct {
 	Namespace      string `json:"namespace"`
 	AlreadyStopped bool   `json:"alreadyStopped"`
 	// RemainingComponents names the platform components the stop deliberately
-	// left running (eruncommon.StopEnvironmentResult.RemainingComponents): a
+	// left running (lifecycle.StopEnvironmentResult.RemainingComponents): a
 	// stop scales the runtime Deployment alone, so an outcome that does not say
 	// which component pods it left holding capacity reads as a stop that did not
 	// finish.
@@ -226,11 +225,11 @@ type uiRuntimeRunState struct {
 	DesiredReplicas int    `json:"desiredReplicas"`
 	ReadyReplicas   int    `json:"readyReplicas"`
 	// Stopped is Present && DesiredReplicas == 0, mirroring
-	// eruncommon.RuntimeRunState.Stopped — deliberately distinct from "pods
+	// lifecycle.RuntimeRunState.Stopped — deliberately distinct from "pods
 	// exist but are not ready", which is an unhealthy environment.
 	Stopped bool `json:"stopped"`
 	// RemainingComponents names the platform components a stop of this
-	// environment would leave running (eruncommon.StopRemainingComponents), so
+	// environment would leave running (lifecycle.StopRemainingComponents), so
 	// the control can say what it will not touch before it is pressed rather
 	// than leaving the surviving pods to be read afterwards as a failed stop.
 	RemainingComponents []string `json:"remainingComponents,omitempty"`
@@ -326,7 +325,7 @@ type uiOpenRouterModel struct {
 	ID      string `json:"id"`
 	Context int    `json:"context,omitempty"`
 	// RequiresReasoningEcho mirrors the catalog's own declaration (see
-	// OpenRouterModel in erun-common/openrouter.go). It travels through this
+	// config.OpenRouterModel). It travels through this
 	// type rather than being dropped because the desktop catalog editor writes
 	// the whole catalog back on save: a field the conversion did not carry would
 	// be removed by the first edit, silently returning the model to the
@@ -381,9 +380,9 @@ const (
 	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
 )
 
-// uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
+// uiExposedService mirrors clusterread.ExposedService for the Ports tab list.
 // TLSReady/TLSNotReadyReason are meaningful only when Scheme is "https": see
-// eruncommon.ExposedService for why Scheme alone cannot say whether the URL
+// clusterread.ExposedService for why Scheme alone cannot say whether the URL
 // is actually safe to open yet.
 type uiExposedService struct {
 	Service           string `json:"service"`
@@ -524,7 +523,7 @@ type startSessionResult struct {
 }
 
 // uiEnvironmentLease is one activity lease surfaced from
-// eruncommon.EnvironmentActivityLease so the desktop can name the job already
+// activity.EnvironmentActivityLease so the desktop can name the job already
 // working in an environment. PID and lease ID are implementation detail, not
 // shown; SecondsHeld is precomputed so the renderer never redoes the time math.
 type uiEnvironmentLease struct {

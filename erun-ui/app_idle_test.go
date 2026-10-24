@@ -306,10 +306,8 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	}
 }
 
-// TestIdleStatusToUICarriesLeases pins erun#1221: idle status already resolves
-// the leases holding an environment, but the UI projection dropped them before
-// this fix — the AI tab occupancy notice and any future consumer (#1245,
-// #1241) both read this field, so a silent regression here breaks them too.
+// TestIdleStatusToUICarriesLeases: the UI projection must keep the leases idle
+// status resolves, because the AI tab occupancy notice reads this field.
 func TestIdleStatusToUICarriesLeases(t *testing.T) {
 	now := time.Now()
 	status := idleStatusToUI(activity.EnvironmentIdleStatus{

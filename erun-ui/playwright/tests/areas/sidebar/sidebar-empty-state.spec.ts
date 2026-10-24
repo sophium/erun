@@ -3,11 +3,9 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { AppShell } from '../../../pages/index.js';
 
-// erun#1217: the zero-tenant empty state promised a kubeconfig-import feature
-// that does not exist anywhere in the app (no affordance, no Wails binding,
-// no CLI command — a repo-wide grep for kubeconfig import returns exactly
-// this one sentence), and the sidebar's "+" was labelled "...remote
-// environment" for a dialog that offers three env types. Stub a bare
+// The zero-tenant empty state must promise only what the app offers (there is
+// no kubeconfig import), and the sidebar's "+" must not be labelled
+// "...remote environment" for a dialog that offers three env types. Stub a bare
 // LoadState response (zero tenants) rather than the AppShell fixture's
 // seeded baseline, which always carries tenant `pw` — so the route must be
 // registered before the app's own boot navigation, not through the `app`

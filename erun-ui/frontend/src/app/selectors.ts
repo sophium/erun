@@ -130,12 +130,10 @@ export const selectDialogKubernetesContext = (state: RootState, contexts: string
 // session is currently active, or null when the active session is an
 // environment tab.
 //
-// This derivation used to live inline in TerminalTabStrip, which was the only
-// component that had it. The titlebar never got it, so its right-hand cluster
-// went on acting on state.selection.selected -- the SIDEBAR's environment
-// selection, which is independent of which terminal tab is active. With an
-// orchestrator tab focused, "Open in VS Code" opened an IDE against an
-// environment the orchestrator may not even be linked to (#1178).
+// Shared so the titlebar does not act on state.selection.selected -- the
+// SIDEBAR's environment selection, which is independent of which terminal tab
+// is active. With an orchestrator tab focused, that would open "Open in VS
+// Code" against an environment the orchestrator may not even be linked to.
 //
 // It returns the orchestrator rather than a boolean because a cross-env surface
 // needs its `environments` list, not just the knowledge that one is active.
@@ -153,12 +151,9 @@ export const selectIsOrchestratorSession = (state: RootState): boolean =>
   selectActiveSessionOrchestrator(state) !== null;
 
 // selectSidebarFocus names the one thing the sidebar highlights and the main
-// pane shows. The tenant dashboard, an orchestrator's session, and an
-// environment's session each used to compute their own "active" condition
-// from a different state slice, so a tenant dashboard row and an orchestrator
-// row could both render selected at once while the pane showed only one of
-// them (#1204). Every sidebar row derives its highlight from this single
-// value instead. The tenant dashboard takes priority regardless of a stale
+// pane shows. Every sidebar row derives its highlight from this single value,
+// so a tenant dashboard row and an orchestrator row can never both render
+// selected while the pane shows only one of them. The tenant dashboard takes priority regardless of a stale
 // terminal.sessionId left over from before it opened; an orchestrator session
 // takes priority over an environment selection for the same reason.
 export const selectSidebarFocus = (state: RootState): SidebarFocus => {
@@ -182,7 +177,7 @@ export const selectSidebarFocus = (state: RootState): SidebarFocus => {
 // already established, translated into the id/name a whip target row uses.
 // The tenant dashboard and "nothing focused" both resolve to null rather than
 // falling back to any environment or orchestrator -- an unfocused whip must
-// have no default, never "everything" (erun#1700).
+// have no default, never "everything".
 export const selectWhipDefaultTarget = (state: RootState): WhipDefaultTarget => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {
@@ -242,9 +237,9 @@ export type DiagnosticsContext =
 
 // selectDiagnosticsContext mirrors selectReviewTargets' own precedence
 // (orchestrator session over sidebar selection) rather than introducing a
-// second notion of "what's active" — an orchestrator session used to leave
-// the Diagnostics panel reading "environment: none selected" with no trace,
-// because it derived its context from state.selection.selected alone (#1241).
+// second notion of "what's active": deriving it from state.selection.selected
+// alone would leave an orchestrator session's Diagnostics panel reading
+// "environment: none selected" with no trace.
 export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {

@@ -6,15 +6,12 @@ import (
 )
 
 // VerifyGHCRPushScope and VerifyGHCRCanPushImage/VerifyGHCRCanPushChart both
-// treat "no credential resolved" as inconclusive -- the same bucket as a
-// network hiccup or an unreachable registry -- so a release proceeds to spend
-// a full multi-arch build on a pod that has never once authenticated to
-// ghcr.io. That is not actually ambiguous: GHCR never accepts an anonymous
-// push, to any repository, public or private, so a pod with no docker config
-// entry, no gh session, and no GH_TOKEN/GITHUB_TOKEN is certain to fail at the
-// real push. This check answers that certain case up front, before the other
-// two (which need a resolved credential to say anything at all), so it is
-// checked first (#1201).
+// treat "no credential resolved" as inconclusive, like a network hiccup. But
+// GHCR never accepts an anonymous push, so a pod with no docker config entry,
+// no gh session, and no GH_TOKEN/GITHUB_TOKEN is certain to fail at the real
+// push. This check answers that certain case up front, before the other two
+// (which need a resolved credential to say anything at all), so a release
+// does not spend a full multi-arch build first.
 
 // MissingGHCRCredentialError is returned when no credential source resolves
 // for a ghcr.io push at all. It is distinct from MissingGHCRPushScopeError

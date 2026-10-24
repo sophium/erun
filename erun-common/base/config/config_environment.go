@@ -110,13 +110,13 @@ type EnvConfig struct {
 	// last actually resolved for this env's pod (imageOverrides.erun-devops, or
 	// the chart's own stock default when no override applied) -- healed
 	// alongside RuntimeVersion by PersistRuntimeVersionFromDeploySpecs. `erun
-	// list` reads it to name which release line RuntimeVersion's number
-	// belongs to (erun's own vs. a tenant's own <tenant>-devops line; see
-	// erun#1746). Unlike RuntimeImage above, it is never read back to
-	// influence a deploy's own image choice, and stays empty whenever the
-	// resolution path that produced the deploy could not know the image (a
-	// repo-local runtime chart's own values decide it) -- callers must render
-	// that as undetermined, never guess a line from the tenant name alone.
+	// list` reads it to name which release line RuntimeVersion's number belongs
+	// to (erun's own vs. a tenant's own <tenant>-devops line). Unlike
+	// RuntimeImage above, it is never read back to influence a deploy's own
+	// image choice, and stays empty whenever the resolution path that produced
+	// the deploy could not know the image (a repo-local runtime chart's own
+	// values decide it) -- callers must render that as undetermined, never
+	// guess a line from the tenant name alone.
 	RuntimeRunningImage string `yaml:"runtimerunningimage,omitempty" json:"runtimeRunningImage,omitempty"`
 	// RuntimeChart names the runtime chart this env rides, as an OCI reference
 	// that may carry its own version. The chart and the runtime image are separate
@@ -171,9 +171,8 @@ type EnvConfig struct {
 	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
 	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 	// Deprecated: host AWS credential delivery is now driven by whether an AWS
-	// cloud alias is attached (HasAWSCloudAlias), not by a separate toggle —
-	// attaching an alias means "act on my behalf here". The field is retained
-	// so existing configs still parse; it no longer affects behavior.
+	// cloud alias is attached (HasAWSCloudAlias). Retained only so existing
+	// configs still parse; it has no effect.
 	RemoteHostCredentials bool `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
 	// AutoUpgrade opts this env into the "Upgrade all" set, redeploying it to the
 	// latest version for its UpgradeChannel when its RuntimeVersion lags.
@@ -327,8 +326,7 @@ func (c EnvConfig) RuntimeImageRegistryMismatch() (imageRegistry, runtimeRegistr
 // PersistRuntimeVersionFromDeploySpecs) name different release lines --
 // stock erun-devops vs a tenant's own <tenant>-devops. A version number alone
 // cannot name a line (the same number is valid on both), but an image name
-// always can, so this needs no live cluster read: it is the persisted half
-// of the pairing erun#1754 was filed over, readable from config alone.
+// always can, so this needs no live cluster read.
 // mismatched is false whenever either field is empty or fails to parse as a
 // runtime image reference -- an environment with no recorded history yet has
 // nothing to disagree with, and this must never guess.

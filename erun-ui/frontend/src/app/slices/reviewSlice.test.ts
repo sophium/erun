@@ -23,7 +23,7 @@ function diff(marker: string): DiffResult {
   return { rawDiff: marker, summary: { fileCount: 1, additions: 1, deletions: 0 } };
 }
 
-// #1178: diffByEnv is deliberately sparse (Record<string, EnvDiffState |
+// diffByEnv is deliberately sparse (Record<string, EnvDiffState |
 // undefined>), not a plain Record. A key that was never written must read as
 // undefined -- never emptyEnvDiffState's contents mutated in place, and never
 // another environment's slot.
@@ -41,7 +41,7 @@ test("setEnvDiff creates only the written environment's slot, defaulted from emp
   assert.equal(state.diffByEnv['c/d'], undefined);
 });
 
-// The core #1178 guarantee: writing one environment's error must never touch
+// The core guarantee: writing one environment's error must never touch
 // another's slot, so a stopped environment's failure cannot blank a healthy
 // one's diff.
 test("setEnvDiffError only ever mutates the targeted environment's slot", () => {
@@ -94,7 +94,7 @@ test('pruneEnvDiffs drops environments outside the kept set and leaves the rest 
 
 // ReviewBase, ReviewCommits, scope and commit are per-repository state, so a
 // scope/commit chosen for one linked environment must never appear on
-// another's slot (#1178, item 5 of the cross-env diff panel guarantee).
+// another's slot.
 test('scope and commit selection is independent per environment', () => {
   let state = initial();
   state = reviewReducer(state, setEnvReviewScope({ envKey: 'a/alpha', scope: 'all' }));

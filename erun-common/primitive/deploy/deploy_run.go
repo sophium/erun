@@ -83,7 +83,7 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (configpkg.ProjectK
 // `erun deploy` from inside the tenant's own checkout gets the plan read from
 // underneath them, the same as a local-repo deploy would. Every branch traces
 // its decision so "the plan is genuinely absent" and "the plan could not be
-// reached" are never the same silent outcome (#1116).
+// reached" are never the same silent outcome.
 func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
 	configuredPath := strings.TrimSpace(resolvedTarget.RepoPath)
 	plan, err := loadProjectK8sPlanForRepo(configuredPath, resolvedTarget.Environment)
@@ -333,9 +333,8 @@ func runPublishedValuesPull(ctx core.Context, pull *publishedValuesPull, target 
 }
 
 // ensureDeployNamespace creates the deploy's namespace if it is missing. A var
-// so a test can prove it runs before the secret applies that require it --
-// trace order cannot, because the trace already claimed this order while the
-// code did not follow it.
+// so a test can prove it runs before the secret applies that require it;
+// trace order alone cannot prove that.
 var ensureDeployNamespace NamespaceEnsurerFunc = kube.EnsureKubernetesNamespace
 
 // applyPreRolloutResources creates the namespace and applies everything that

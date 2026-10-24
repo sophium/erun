@@ -15,10 +15,9 @@ export interface McpToken {
 // tool, including delete/terraform/init and the RCE-capable `raw`. The mint
 // form offers it as an explicit escalation from the default MCP_OPERATE_SCOPE
 // below -- full capability remains available for an operator who is handing
-// a token to their own choice of MCP client and genuinely needs it (the case
-// erun#1877 calls out as defensible), but requesting it also requires the
-// delete-environment entitlement server-side, so it is no longer the mint
-// form's default the way it was before `erun:operate` existed.
+// a token to their own choice of MCP client and genuinely needs it, but
+// requesting it also requires the delete-environment entitlement server-side,
+// so it is not the mint form's default.
 export const MCP_ADMIN_SCOPE = 'erun:admin';
 
 // MCP_ATTACH_SCOPE mirrors erun-common's `erun:attach` capability tier: it

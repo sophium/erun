@@ -14,7 +14,7 @@ import (
 
 // reviewAPIStubServer runs a minimal, stateful erun-backend-api double
 // covering every route `erun review` drives, so real-run scenarios exercise
-// erun-common/platform_client_reviews.go's request/response handling —
+// platformclient's review request/response handling —
 // including a real create -> list -> show -> comment -> close round trip —
 // rather than only its --dry-run trace branch.
 func reviewAPIStubServer(t testing.TB) *httptest.Server {

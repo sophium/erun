@@ -22,14 +22,12 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// The merge queue no longer runs anything itself: the environment
-// that promotes a review to MERGE does the fetch/merge/build/push locally,
+// The merge queue runs nothing itself: the environment that promotes a review to MERGE does the fetch/merge/build/push locally,
 // with its own already-warm checkout and daemon, then reports the outcome.
 // This gate proves the platform's half of that contract — accepting a
 // verified MERGED report and refusing an unverified one — against a real
-// migrated Postgres and a real (local, file://) git remote. No cluster, no
-// DBOS workflow, and no Kubernetes Job are involved, because none exist
-// anymore for this to be a gate on.
+// migrated Postgres and a real (local, file://) git remote. No cluster, DBOS
+// workflow, or Kubernetes Job is involved.
 type mergeQueueE2E struct {
 	databaseURL string
 }
@@ -367,7 +365,7 @@ func TestMergeQueueRefusesABuildOfTheGatedTip(t *testing.T) {
 }
 
 // TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget is the property the
-// merge queue exists for, re-homed to the new architecture: a merge built
+// merge queue exists for: a merge built
 // against a target tip that is no longer current must never become MERGED,
 // even though the reported commit really is (now) on the branch. Producing
 // this without a second, well-behaved environment racing the first means
@@ -424,14 +422,13 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	}
 }
 
-// TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween is
-// the fix for erun#2250: the release flow enqueued by review A's own MERGED
+// TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween: the
+// release flow enqueued by review A's own MERGED
 // transition pushes its "[skip ci]" commits straight to main — no review, no
 // gate — before review B's merge is reported. Review B's own merge commit is
 // therefore no longer an immediate child of review A's merge commit, but
 // review A's merge commit is still really its ancestor, so the report is
-// accepted rather than refused forever the way strict parent equality used
-// to refuse it.
+// accepted rather than refused forever by strict parent equality.
 func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -484,16 +481,14 @@ func reconcileMerged(t *testing.T, baseURL, reviewID, remoteURL string) (int, me
 	return e2eReportMerged(t, baseURL, reviewID, "", remoteURL)
 }
 
-// TestReconcileMergedAcceptsASquashLandedBranchEndToEnd is the defect this
-// change fixes, driven through the real HTTP route against a real migrated
+// TestReconcileMergedAcceptsASquashLandedBranchEndToEnd is driven through the real HTTP route against a real migrated
 // Postgres and a real (local, file://) git remote: a review whose branch
 // landed by squash merge reaches MERGED even though it never entered the
 // merge queue, never had a build recorded, and has none of its commits as
 // ancestors of the target.
 //
 // The test asserts that last part itself — the branch tip really is not an
-// ancestor of main, so the check report-merged used to run could never have
-// held — rather than assuming the setup produced a squash.
+// ancestor of main, so an ancestry check could never have held — rather than assuming the setup produced a squash.
 func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)

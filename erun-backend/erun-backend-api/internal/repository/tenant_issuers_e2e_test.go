@@ -27,7 +27,7 @@ func tenantIssuersDatabase(t *testing.T) *sql.DB {
 }
 
 // TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills proves the
-// migration path for erun#1605's second defect: an issuer already registered
+// migration path: an issuer already registered
 // single-tenant (org_field_key NULL, the state first-identity bootstrap
 // leaves an already-deployed platform in) can be converted to org-scoped, and
 // the existing tenant's own mapping is backfilled with an org value in the
@@ -90,10 +90,9 @@ func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) 
 	}
 }
 
-// TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping proves the
-// erun#1721 acceptance criterion that ambiguity between two candidate
-// tenant_issuers rows for the same (issuer, org) is impossible by
-// construction, not a runtime coin flip: the UNIQUE NULLS NOT DISTINCT
+// TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping proves that
+// ambiguity between two candidate tenant_issuers rows for the same
+// (issuer, org) is impossible by construction, not a runtime coin flip: the UNIQUE NULLS NOT DISTINCT
 // (issuer, org_field_value) constraint refuses a second row before
 // ResolveTenantByIssuer's exact-match query could ever see two candidates for
 // the same resolution key.

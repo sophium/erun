@@ -10,12 +10,10 @@ import {
 import type { AppShell } from '../../../pages/index.js';
 
 // The review surface's keyboard model (erun-ui/AGENTS.md § "The keyboard
-// model the review surface still owes", issue #1421): next/previous changed
-// file, next/previous hunk, and starting a review in the diff panel; reply
-// and resolve/unresolve on the focused comment thread in the review detail
-// dialog. Every binding here is a regression against that decision if it
-// ever silently stops firing, since it was reachable no other way before
-// this spec existed.
+// model the review surface still owes"): next/previous changed file,
+// next/previous hunk, and starting a review in the diff panel; reply and
+// resolve/unresolve on the focused comment thread in the review detail
+// dialog.
 
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -194,8 +192,7 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
   // The hold below is deliberately just past that 10s default: the smallest
   // delay that discriminates. It is injected at a named RPC (this spec's own
   // LoadDiff stub) rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
-  // with 20s of its own budget unused.
+  // deterministic on a quiet host.
   test('a diff read that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -422,7 +419,7 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
       const replyInput = dialog.replyInput();
       await expect(replyInput).toBeFocused();
 
-      // Typing in the composer must still type -- this is the regression
+      // Typing in the composer must still type -- this is the breakage
       // most likely to be introduced by a new binding and least likely to
       // be noticed. The typed text itself contains 'r' and is followed by a
       // real Enter press, exercising both bindings' guard at once.

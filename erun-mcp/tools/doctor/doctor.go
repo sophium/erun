@@ -379,7 +379,7 @@ func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParam
 
 // writeDoctorPodUnreachableSkip reports a doctor section skipped because an
 // earlier section already confirmed the cluster is unreachable
-// (eruncommon.DeployDiagnosisResult.ClusterUnreachable), instead of paying
+// (deploy.DeployDiagnosisResult.ClusterUnreachable), instead of paying
 // another multi-minute kubectl timeout to rediscover the same fact. Mirrors
 // the CLI's reportPodSkippedUnreachable
 // (erun-cli/cmd/doctor/doctor_pod_diagnosis.go).

@@ -149,7 +149,7 @@ func TestDeployEnvironmentRejectsConcurrentDeploy(t *testing.T) {
 // TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor: an operator can lower a
 // tenant's quota (PUT .../quota) after the environment already exists; the
 // next deploy must refuse before claiming, rather than claim the environment
-// and only discover the shortfall as a five-minute rollout timeout (#1061).
+// and only discover the shortfall as a five-minute rollout timeout.
 func TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	environments := runtimeEnvironment()
 	prov := &stubEnvironmentProvisioner{}

@@ -20,7 +20,7 @@ interface TerminalFocusDeps {
 // rather than user-initiated: a tab respawn fires whenever a session drops, and
 // a session drops on every env stop, idle-stop and pod replacement. Without the
 // guard erun yanks the desktop in front of whatever the operator was actually
-// using, mid-sentence (#1338).
+// using, mid-sentence.
 //
 // The guard is re-checked before each of the three attempts rather than once up
 // front. The later two exist to land after a re-render, and focus can leave the
@@ -28,7 +28,7 @@ interface TerminalFocusDeps {
 // attempt steal focus the user had already moved elsewhere.
 export function scheduleTerminalFocus(deps: TerminalFocusDeps): void {
   const focusIfSafe = (): void => {
-    // Cross-application: never PULL the window forward (#1338).
+    // Cross-application: never PULL the window forward.
     if (!deps.windowIsActive()) {
       return;
     }

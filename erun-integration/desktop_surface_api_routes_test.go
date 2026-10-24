@@ -101,9 +101,9 @@ func stringKeysOf(composite *ast.CompositeLit, dest map[string]bool) {
 // Wails, never through a literal path in TypeScript (see
 // desktopsurface.Capability.WailsBinding). Each entry is verified on both
 // ends before it is added here: the named erun-ui/*.go method calls the
-// eruncommon.PlatformClient method that issues this exact route (e.g.
+// platformclient.PlatformClient method that issues this exact route (e.g.
 // AddReviewer -> client.AddReviewer -> "POST /v1/reviews/{review_id}/reviewers"
-// in erun-common/platform_client_reviews.go), and the same method name is
+// in erun-common/infra/platformclient/platform_client_reviews.go), and the same method name is
 // called from erun-ui/frontend/src. A shared entry point that loads several
 // routes at once (erun-ui/tenant_review_detail.go's LoadReviewDetail, called
 // from erun-ui/frontend/src/app/api/reviewDetailApi.ts, fans out to
@@ -122,17 +122,17 @@ var apiRouteWailsBindings = map[string]string{
 	"POST /v1/reviews/merge-queue/override-advance":              "OverrideAdvanceMergeQueue",
 	"POST /v1/provision":                                         "PreviewPlatformProvision",
 	"POST /v1/environments/{environment_id}/stop":                "StopPlatformEnvironment",
-	// ExposeEnvironmentService -> eruncommon.RunExposeService ->
+	// ExposeEnvironmentService -> expose.RunExposeService ->
 	// resolveExposeDNSUpserter -> (only when an erun platform alias is
 	// configured, never for the direct-pdnsutil path) client.
 	// SetEnvironmentHostname -> "PUT /v1/environments/{environment_id}/hostname"
-	// (erun-common/expose_platform_dns.go); UnexposeEnvironment
+	// (erun-common/command/expose/expose_platform_dns.go); UnexposeEnvironment
 	// is the same chain through RunUnexposeService/DeleteEnvironmentHostname
 	// for the DELETE. Called from
 	// erun-ui/frontend/src/components/app/ManageDialogPortsExposures.tsx via
 	// app/manageExposureThunks.ts -- the Ports tab's existing expose/unexpose
 	// controls, which need no new UI for this: the platform-route decision is
-	// automatic on the shared eruncommon path both transports already call.
+	// automatic on the shared erun-common path both transports already call.
 	"PUT /v1/environments/{environment_id}/hostname":    "ExposeEnvironmentService",
 	"DELETE /v1/environments/{environment_id}/hostname": "UnexposeEnvironment",
 	// GetMyTenantInviteRequest -> client.MyInviteRequest -> "GET
@@ -146,16 +146,16 @@ var apiRouteWailsBindings = map[string]string{
 	// CheckHostedDefinitionDrift -> hostedDefinitionDriftFor ->
 	// client.GetEnvironmentDefinition -> "GET
 	// /v1/environments/{environment_id}/definition" in
-	// erun-common/platform_client.go. Called from
+	// erun-common/infra/platformclient/platform_client.go. Called from
 	// erun-ui/frontend/src/app/hostedDefinitionDrift.ts, which the Manage
 	// dialog's General tab reads through HostedDefinitionSection.tsx -- the
 	// hosted-marker panel, whose "Check for updates" control is this route's
 	// desktop entry point. The route's literal path never appears in
 	// TypeScript for the same reason the other entries here do not: the
-	// desktop reaches the platform through eruncommon.PlatformClient.
+	// desktop reaches the platform through platformclient.PlatformClient.
 	"GET /v1/environments/{environment_id}/definition": "CheckHostedDefinitionDrift",
 	// UploadHostedDefinition -> uploadHostedDefinition ->
-	// eruncommon.PushEnvironmentDefinition -> client.PutEnvironmentDefinition
+	// platform.PushEnvironmentDefinition -> client.PutEnvironmentDefinition
 	// -> "PUT /v1/environments/{environment_id}/definition". Called from
 	// erun-ui/frontend/src/app/hostedDefinitionDrift.ts, which
 	// HostedDefinitionSection.tsx's "Upload to platform" control reads
@@ -168,7 +168,7 @@ var apiRouteWailsBindings = map[string]string{
 	"PUT /v1/environments/{environment_id}/definition": "UploadHostedDefinition",
 	// LoadTenantDashboard -> appendUnattachedTenantDashboardBuilds ->
 	// client.ListAllBuilds -> "GET /v1/builds" (erun-ui/tenant_dashboard.go,
-	// erun-common/platform_client_builds.go) -- merges an unattached build
+	// erun-common/infra/platformclient/platform_client_builds.go) -- merges an unattached build
 	// into the same Builds tab the review-nested read above already
 	// populates.
 	"GET /v1/builds": "LoadTenantDashboard",

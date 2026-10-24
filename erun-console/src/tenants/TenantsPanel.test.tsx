@@ -383,8 +383,7 @@ describe('TenantsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
     const dialog = await screen.findByRole('dialog');
-    // Told before confirming, not discovered after (erun#1744 acceptance
-    // criterion): the notice is visible as soon as the dialog opens.
+    // Told before confirming, not discovered after: the notice is visible as soon as the dialog opens.
     expect(within(dialog).getByText(/will be granted TenantAdmin/)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText('Username', { exact: false }), {

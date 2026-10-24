@@ -14,7 +14,7 @@ import (
 )
 
 func testDeleteRealRunRetractsChallengesBeforeDeletingTheNamespace(t *testing.T) {
-	// #1174: namespace teardown removes the env's DNS-01 token Secret as
+	// Namespace teardown removes the env's DNS-01 token Secret as
 	// ordinary content, and Kubernetes gives no ordering guarantee against
 	// cert-manager finalizing a still-pending Challenge in the same
 	// namespace. The Challenge's cleanup needs that Secret to retract its
@@ -73,11 +73,10 @@ exit 0
 }
 
 func testDeleteRealRunReportsARefusedChallengeReadInsteadOfSkippingSilently(t *testing.T) {
-	// #1183: the retraction shipped inert. Its challenge read was Forbidden
-	// (the delete Job's ServiceAccount had no access to
-	// acme.cert-manager.io), the code folded every error into "no
-	// challenges here", and the whole step was skipped with nothing to say
-	// so -- so the namespace wedged for its full timeout exactly as before.
+	// A Forbidden challenge read (e.g. the delete Job's ServiceAccount has no
+	// access to acme.cert-manager.io) must not be folded into "no challenges
+	// here", or the step is skipped silently and the namespace wedges for its
+	// full timeout.
 	//
 	// A cluster without cert-manager must still skip silently; that is the
 	// next scenario. A cluster that HAS it and refuses the read must say so,
@@ -182,7 +181,7 @@ func testDeleteRealRunNamespaceDeleteFailureWarnsAndContinues(t *testing.T) {
 }
 
 func testDeleteRealRunWithOutputJSONReportsNamespaceDeleteFailure(t *testing.T) {
-	// The hosted delete Job (#1140) reads this exact shape back out of its
+	// The hosted delete Job reads this exact shape back out of its
 	// own captured output to tell a blocked namespace teardown apart from
 	// a clean one, since the command's own exit code stays 0 either way.
 	setup := env.New(t)
@@ -202,10 +201,8 @@ func testDeleteRealRunWithOutputJSONReportsNamespaceDeleteFailure(t *testing.T) 
 
 func testDeleteRealRunRefusedNamespaceDeleteReportsTheRefusalNotATimeout(t *testing.T) {
 	// A delete the cluster refuses outright -- here RBAC, in milliseconds --
-	// used to be reported as a twenty-minute termination timeout carrying the
-	// namespace's termination conditions, sending an operator to investigate
-	// finalizers when the real fault was a missing grant. It must instead
-	// report kubectl's own refusal and name the permission problem. The
+	// must not be reported as a termination timeout, which would send an
+	// operator to investigate finalizers. It must report kubectl's own refusal and name the permission problem. The
 	// challenge read is refused by the same kubeconfig, which is what proves
 	// the retraction note is left out too: it warns about holding up a delete
 	// that here was never in flight.

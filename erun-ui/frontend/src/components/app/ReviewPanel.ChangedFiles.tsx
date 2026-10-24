@@ -30,14 +30,14 @@ export function ChangedFileTree(): React.ReactElement {
 
 // ChangedFileTreeSection owns one environment's tree and loading state. A
 // stopped environment renders its own empty state in its own section while
-// every other environment keeps rendering -- the single-slot version cleared
-// the one shared diff, so one unreachable env blanked them all (#1178).
+// every other environment keeps rendering, so one unreachable env never
+// blanks them all.
 //
 // It deliberately does NOT duplicate DiffList's actionable DiffErrorAlert: the
 // two surfaces render the same env slot, and rendering the full alert (with
 // its own Retry/Reconnect/Open buttons) in both the tree aside and the main
-// diff panel at once read as two unrelated reports of the same outage
-// (#1230). The tree shows a short status line instead and points at the diff
+// diff panel at once reads as two unrelated reports of the same outage. The
+// tree shows a short status line instead and points at the diff
 // panel, which keeps the one actionable report.
 function ChangedFileTreeSection({
   target,

@@ -102,10 +102,9 @@ function applyReviewDiffSuccess(
   }
 }
 
-// applyReviewDiffFailure writes only THIS environment's slot. The single-slot
-// version cleared the one shared diff, so one stopped environment blanked every
-// other linked env's diff -- and an orchestrator's environments are rarely all
-// running at once, so that was the everyday case (#1178).
+// applyReviewDiffFailure writes only THIS environment's slot, so one stopped
+// environment does not blank every other linked env's diff -- an
+// orchestrator's environments are rarely all running at once.
 function applyReviewDiffFailure(
   dispatch: Parameters<AppThunk>[0],
   getState: () => ReturnType<typeof import('./store').store.getState>,
@@ -199,8 +198,8 @@ async function loadOneReviewDiff(
     // args, and the timer's own re-arm only guards against stacking a second
     // tick on itself -- not against a manual click arriving mid-tick. RTK
     // Query's condition() bails a forced refetch out from under a pending
-    // request for the same query before ever looking at forceRefetch (see
-    // erun#1953's getInitialState fix), so without this wait the click would
+    // request for the same query before ever looking at forceRefetch (as
+    // reloadStateAfterEnvironmentChange handles for getInitialState), so without this wait the click would
     // silently inherit the in-flight tick's result instead of its own.
     const diff = await fetchTargetDiff(dispatch, target, diffOptions);
     applyReviewDiffSuccess(dispatch, getState, envKey, diff);
@@ -277,10 +276,10 @@ function scheduleReviewDiffRefresh(
   const state = getState();
   // An orchestrator session has linked environments but no sidebar selection
   // of its own, so this arms off the resolved env set rather than
-  // state.selection.selected -- which would have stopped the refresh outright
-  // for exactly the cross-env case (#1178). Keep this guard identical to the
-  // timer callback's own below; a mismatch here left periodic review-diff
-  // refresh permanently dead for every orchestrator session.
+  // state.selection.selected, which would stop the refresh outright for
+  // exactly the cross-env case. Keep this guard identical to the timer
+  // callback's own below; a mismatch leaves periodic review-diff refresh
+  // permanently dead for every orchestrator session.
   if (!state.layout.reviewOpen || reviewTargets(state).length === 0) {
     return;
   }

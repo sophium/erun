@@ -278,7 +278,7 @@ function formatCreatedAt(createdAt: string): string {
 }
 
 // TenantUserCountBadge is the Tenants view's own noticing point for an inert
-// tenant (erun#1744): a tenant registered through the product but with no
+// tenant: a tenant registered through the product but with no
 // console-reachable way to add a user reads identically to a healthy one
 // unless the zero itself is flagged here, where it was created. `undefined`
 // (the count did not load, rather than genuinely being zero) renders as

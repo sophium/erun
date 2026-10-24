@@ -121,11 +121,8 @@ func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing
 }
 
 // TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport pins
-// the property eruncommon.RecordAISessionEvent enforces locally
-// (previouslyReportedAISessionTool): a later event that omits Tool must not
-// blank out the one a prior event already reported, so a long-running
-// session's tool column never goes empty mid-conversation just because a
-// bare turn-end omitted it.
+// the property activity.RecordAISessionEvent enforces locally: a later event
+// that omits Tool must not blank out the one a prior event already reported.
 func TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport(t *testing.T) {
 	sessions, environments, ctx, _ := aiSessionsDatabase(t)
 	env, err := environments.Create(ctx, model.Environment{Name: "prod", Type: model.EnvironmentTypeRuntime})

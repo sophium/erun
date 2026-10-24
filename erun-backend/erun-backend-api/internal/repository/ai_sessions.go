@@ -20,10 +20,10 @@ func NewAISessionRepository(txs *TxManager) *AISessionRepository {
 
 // Record upserts the last-reported event for one (environment, session):
 // this is the environment's own self-report replacing whatever it last said,
-// mirroring eruncommon.RecordAISessionEvent's local-file "one writer, latest
+// mirroring activity.RecordAISessionEvent's local-file "one writer, latest
 // event wins" contract. An event that omits Tool carries the previously
 // reported one forward (COALESCE against the existing row) rather than
-// blanking it, matching eruncommon's previouslyReportedAISessionTool.
+// blanking it, matching activity's previouslyReportedAISessionTool.
 func (r *AISessionRepository) Record(ctx context.Context, event model.AISessionEvent) (model.AISessionEvent, error) {
 	var recorded model.AISessionEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -44,7 +44,7 @@ func (r *AISessionRepository) Record(ctx context.Context, event model.AISessionE
 
 // List returns every recorded session event for one environment, sorted by
 // session id for a stable, diffable listing — the DB-backed twin of
-// eruncommon.LoadAISessionStatuses. Scoped explicitly by tenant_id from the
+// activity.LoadAISessionStatuses. Scoped explicitly by tenant_id from the
 // security context rather than left to RLS: erun_operations' policy is
 // unconditional, so an OPERATIONS caller naming another tenant's
 // environmentID would otherwise read that tenant's session events.

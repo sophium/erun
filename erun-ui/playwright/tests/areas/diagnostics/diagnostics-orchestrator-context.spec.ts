@@ -3,13 +3,10 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The Diagnostics panel used to derive its evidence from the sidebar's
-// environment selection alone, so an orchestrator session — which never
-// touches that selection — left it reading "environment: none selected" with
-// no trace: an operator opening Diagnostics with an orchestrator focused hit
-// a blank panel in the context they spend most of their time in (#1241).
-// This spec drives the fix: an orchestrator session gets its own context
-// (identity, linked environments, its own log), and the "Report an erun
+// An orchestrator session never touches the sidebar's environment selection,
+// so the Diagnostics panel must not derive its evidence from that alone. An
+// orchestrator session gets its own context (identity, linked environments,
+// its own log), and the "Report an erun
 // issue" action opens a prefilled github.com/sophium/erun issue for whatever
 // context is active.
 //

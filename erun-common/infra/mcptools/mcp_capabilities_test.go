@@ -44,11 +44,11 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 	}
 }
 
-// The boundary erun#1107's Phase 3 needs: a caller that only ever drives the
-// lifecycle of an environment that already exists -- deploying a published
-// version, starting/stopping its cloud context, resizing its runtime pod --
-// must not need erun:admin, but must still be refused everything that
-// decides what environments exist or runs arbitrary code in one.
+// A caller that only ever drives the lifecycle of an environment that already
+// exists -- deploying a published version, starting/stopping its cloud context,
+// resizing its runtime pod -- must not need erun:admin, but must still be
+// refused everything that decides what environments exist or runs arbitrary
+// code in one.
 func TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle(t *testing.T) {
 	for _, tool := range []string{"deploy", "context_start", "context_stop", "resize"} {
 		if got := MCPToolCapability(tool); got != MCPCapabilityOperate {
@@ -120,8 +120,8 @@ func TestANearMissRoleNeverResolvesToOperate(t *testing.T) {
 	}
 }
 
-// This is erun:admin's regression guard: adding a fourth tier must not widen
-// or narrow what an admin token could already do.
+// Adding a fourth tier must not widen or narrow what an admin token could
+// already do.
 func TestAddingOperateDoesNotChangeWhatAdminCanDo(t *testing.T) {
 	admin := AdminMCPCapabilitySet()
 	for _, tool := range []string{

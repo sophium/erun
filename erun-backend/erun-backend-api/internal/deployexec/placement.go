@@ -1,5 +1,5 @@
-// placement.go carries a lifecycle Job's target cluster (#1112): the
-// deploy/stop/delete Job runs in the platform's own cluster as always, but
+// placement.go carries a lifecycle Job's target cluster: the
+// deploy/stop/delete Job runs in the platform's own cluster, but
 // its `erun` command authenticates against whichever cluster the
 // environment was placed on, via a kubeconfig this package seeds.
 package deployexec
@@ -18,7 +18,7 @@ import (
 )
 
 // PlacementCredentialResolver resolves a context's live k3s admin token
-// immediately before a deploy/stop/delete Job needs it (#1112) — satisfied by
+// immediately before a deploy/stop/delete Job needs it — satisfied by
 // repository.ContextCredentialRepository.Get. Callers (service.
 // EnvironmentProvisioner, provision.EnvLifecycle) resolve it fresh on every
 // run, including a resumed one, so it is never part of a checkpointed DBOS
@@ -58,8 +58,7 @@ func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialReso
 
 // PlacementParams names the cluster a lifecycle Job's `erun` command targets.
 // The zero value keeps the Job targeting its own cluster via its
-// ServiceAccount token, unchanged from before multi-cluster placement
-// existed (#1112).
+// ServiceAccount token.
 type PlacementParams struct {
 	// TenantID is the tenant that owns ContextID. It is never interpolated
 	// into a script: it is the owner the admin-token credential is fetched

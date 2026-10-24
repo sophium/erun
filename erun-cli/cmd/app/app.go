@@ -94,7 +94,7 @@ func newAppRestartCmd() *cobra.Command {
 
 // runAppRestartCommand resolves the orchestrator asking for the restart (the
 // flag, else the environment an orchestrator session already carries), then
-// defers entirely to eruncommon.RestartDesktopApp: the running desktop is the
+// defers entirely to core.RestartDesktopApp: the running desktop is the
 // only thing that holds the open orchestrators, so this command never
 // re-implements the restart.
 func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
@@ -208,7 +208,7 @@ func LaunchAppProcess(stdout, stderr io.Writer, executable string, args []string
 	return cmd.Process.Release()
 }
 
-// newAppProcessCommand delegates to the shared eruncommon.DesktopAppCommand so
+// newAppProcessCommand delegates to the shared core.DesktopAppCommand so
 // the CLI and the desktop app's self-restart build the launch identically.
 func newAppProcessCommand(goos string, executable string, args []string) *exec.Cmd {
 	return core.DesktopAppCommand(goos, executable, args)

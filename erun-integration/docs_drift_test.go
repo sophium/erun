@@ -63,9 +63,8 @@ func significantWords(signature string) []string {
 // The values are the ones github.com/adrg/xdg applies per GOOS -- the library
 // erun-common reads ConfigHome from -- not what os.UserConfigDir happens to
 // return: paths_darwin.go falls back to ~/Library/Application Support,
-// paths_unix.go to ~/.config, and paths_windows.go to %LOCALAPPDATA% (the
-// per-platform table this page carried previously said %AppData%, which is
-// what os.UserConfigDir uses on Windows and is not where ERun looks).
+// paths_unix.go to ~/.config, and paths_windows.go to %LOCALAPPDATA% (not
+// %AppData%, which is what os.UserConfigDir uses on Windows).
 //
 // Only the entry for the running GOOS can be exercised live: GOOS is fixed at
 // process start and xdg computes ConfigHome once in package init, so a Linux
@@ -151,10 +150,8 @@ func hostConfigBase(t *testing.T) string {
 
 // TestConfigLocationsDocMatchesResolver cross-checks the per-user config tree
 // documented in erun-docs/docs/reference/config-locations.md against the paths
-// erun-common actually resolves. The page previously placed the tree at
-// "~/.config/erun on Linux/macOS" and named the tenant config tenant.yaml;
-// both were wrong, and both are the kind of detail that rots silently because
-// nothing compared the prose to the resolver that produces it.
+// erun-common actually resolves -- the kind of detail that rots silently
+// unless the prose is compared to the resolver that produces it.
 //
 // What this catches: the tree's file and directory names drifting from the
 // resolver (a renamed config file, a tenant config under a different name),
@@ -223,9 +220,9 @@ func assertConfigTreeMatchesResolver(t *testing.T, docPath, doc, globalPath, ten
 			t.Errorf("%s: the per-user tree no longer nests %s, but erun-common resolves %s", docPath, dir, tenantPath)
 		}
 	}
-	// The specific regression this page carried: a tenant config under a name
-	// erun never reads. Checked by name as well as through the resolver,
-	// so the failure reads as the historical bug rather than a generic miss.
+	// A tenant config under a name erun never reads. Checked by name as well
+	// as through the resolver, so the failure reads as that specific mistake
+	// rather than a generic miss.
 	if present["tenant.yaml"] {
 		t.Errorf("%s: the per-user tree names the tenant config tenant.yaml, but erun-common resolves %s", docPath, tenantPath)
 	}
@@ -233,7 +230,7 @@ func assertConfigTreeMatchesResolver(t *testing.T, docPath, doc, globalPath, ten
 
 // TestBuildInfrastructureSignaturesAreDocumented cross-checks erun-common's
 // own known-infrastructure-failure signature list
-// (eruncommon.BuildInconclusiveSignatures, the exact strings `review
+// (build.BuildInconclusiveSignatures, the exact strings `review
 // record-build` matches before refusing to record a failed build) against
 // erun-docs/docs/agent-reference/skills-spec.md, the one page that specs that
 // refusal's trigger condition. It catches the list and the spec drifting apart
@@ -280,17 +277,12 @@ var docDriftEnvNamePattern = regexp.MustCompile(`ERUN_[A-Z0-9_]+`)
 // erun-docs/docs/reference/env-vars.md, the one page that enumerates what erun
 // reads out of the environment.
 //
-// That page was hand-maintained and covered only the environment/pod-scoped
-// names. A host-side orchestrator session has no pod, so it found every
-// variable on the page and none of its own -- including ERUN_ORCHESTRATOR_ID,
-// which the shared orchestrator contract makes the session's identity: scope is
-// resolved by matching it against the orchestrators: list in config.yaml, and
-// RESUME-NOTE.<id>.md is named from it. An undocumented identity variable is
-// one an orchestrator cannot look up when it needs to know what it is, and
-// nothing but prose said the page had to list it.
+// A host-side orchestrator session has no pod, so the page must list its own
+// variables too -- including ERUN_ORCHESTRATOR_ID, the session's identity: scope
+// is resolved by matching it against the orchestrators: list in config.yaml.
 //
 // Two sources, because the names have two owners. The launcher-set list is
-// code-owned: eruncommon.OrchestratorSessionEnvVars is what erun-ui's spawn site
+// code-owned: orchestrator.OrchestratorSessionEnvVars is what erun-ui's spawn site
 // reads, so a variable added to a session without being documented fails here
 // instead of shipping. ERUN_DEV_BIN_DIR belongs to the development wrapper
 // erun-cli/run.sh, which no Go list can see, so it is read from the script.

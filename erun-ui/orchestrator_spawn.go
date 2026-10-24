@@ -55,7 +55,7 @@ var claudeAgentIDPattern = regexp.MustCompile(`^[0-9a-f]{6,64}$`)
 
 // buildOrchestratorLaunch composes a transient session's host-shell invocation
 // at launch's effort on launch's model. Both are spliced unquoted, which is safe
-// only because eruncommon.ResolveOrchestratorLaunch admits nothing but a plain
+// only because orchestrator.ResolveOrchestratorLaunch admits nothing but a plain
 // model token and a known effort level.
 func buildOrchestratorLaunch(goos string, launch orchestrator.OrchestratorLaunch, initialPrompt, mcpConfigPath string) (string, []string) {
 	quote := shellQuote

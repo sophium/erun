@@ -259,9 +259,8 @@ func (s *ReviewService) headOfMergeQueue(ctx context.Context, repositoryIdentity
 // that records none names no repository to be one of several, so it neither
 // makes a queue ambiguous nor resolves one: one named repository beside any
 // number of unrecorded rows is still one repository's queue, which is what a
-// tenant that predates repository identity has. Counting the absence as a
-// second repository refused that tenant's queue outright, and the rows it
-// refused to advance were the tenant's own.
+// tenant that predates repository identity has; counting the absence as a
+// second repository would refuse that tenant's own queue.
 func (s *ReviewService) refuseAmbiguousQueue(ctx context.Context, targetBranch string) error {
 	queued, err := s.reviews.QueuedRepositories(ctx, targetBranch)
 	if err != nil {
@@ -288,7 +287,7 @@ func (s *ReviewService) promoteToMerge(ctx context.Context, review model.Review)
 	return s.reviews.Update(ctx, review)
 }
 
-// unresolvedThreadCount mirrors eruncommon.CountUnresolvedThreads's rule (a
+// unresolvedThreadCount mirrors review.CountUnresolvedThreads's rule (a
 // root comment, ParentCommentID unset, whose Status is still OPEN) over the
 // backend's own model.Comment rather than importing the transport-facing
 // erun-common client type for a five-line loop.

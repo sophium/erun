@@ -78,7 +78,7 @@ type DockerBuildSpec struct {
 	// CgroupParent names the cgroup every RUN-instruction container this build
 	// creates should nest under, so it inherits a real, enforced CPU quota
 	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as
-	// a sibling cgroup (erun#2255). Left empty outside an injected runtime pod.
+	// a sibling cgroup. Left empty outside an injected runtime pod.
 	// See buildContainerCPUCapCgroupParent.
 	CgroupParent string
 	// DockerSecrets carries the build secrets declared under `docker.secrets`
@@ -93,8 +93,8 @@ type DockerBuildSpec struct {
 	// build-cgroup cost (nil for a promote, which runs no docker build), and
 	// (when a real `docker build` ran) its captured `--progress=plain`
 	// output, which a caller can mine for a per-Dockerfile-step timing
-	// breakdown. It lets a caller attach per-architecture timing (see Context.
-	// timingPlatformObserver in timing.go) without DockerImageBuilderFunc
+	// breakdown. It lets a caller attach per-architecture timing (see
+	// core.Context.TimingPlatformObserver) without DockerImageBuilderFunc
 	// needing a signature change, since executeDockerBuild sets this field on
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
@@ -166,7 +166,7 @@ type DockerCommandTarget struct {
 	// Release is set: a release build always publishes every platform erun
 	// supports, regardless of any override.
 	Platforms []string
-	// Component selects one components: entry (project_components_config.go) for
+	// Component selects one components: entry (base/config/project_components_config.go) for
 	// a monorepo that declares more than one docker/k8s/version root. Empty
 	// auto-selects the lone entry when exactly one is declared, or resolves
 	// through the project-global paths: block when no components: map exists;

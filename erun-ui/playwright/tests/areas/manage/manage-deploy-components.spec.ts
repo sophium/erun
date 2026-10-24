@@ -67,7 +67,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     const saveDefault = app.manageDialog.saveDeployComponentsButton();
 
     // The heading is version-scoped for every env type — the experience matches a
-    // runtime env (see #737 below), not a version-free local-only variant.
+    // runtime env (see below), not a version-free local-only variant.
     await expect(app.manageDialog.deployComponentsHeading()).toHaveText(
       'Components in 1.0.0 to deploy',
     );
@@ -77,7 +77,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(saveDefault).toBeDisabled();
 
     // The checklist is a published-version view: a local-agent env shows the same
-    // canonical component charts published at 1.0.0 as a runtime env would (#737),
+    // canonical component charts published at 1.0.0 as a runtime env would,
     // never its local working-tree chart directories. The version, not the env's
     // source, decides which charts exist.
     for (const component of [
@@ -408,7 +408,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
   }) => {
     // The tenant's own pw-devops chart is published at the version, so the runtime
     // row names it — the label must reflect the chart the deploy installs, not the
-    // canonical erun-devops fallback it used to always claim.
+    // canonical erun-devops fallback.
     await stubRuntimeDeployRow(page, 'pw-devops');
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
@@ -467,13 +467,10 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     });
   }
 
-  // The checklist's helper promises "Deploy rolls out exactly the checked charts",
-  // and an empty selection was the one state it could not keep that in. The
-  // desktop threads no --components flag for it, so `erun deploy` read it as an
-  // omitted flag -- "unspecified" -- and fell through the precedence tiers to the
-  // runtime chart alone (bootstrap/heal). Unchecking the runtime and pressing
-  // Deploy rolled out the one chart the operator had just declined, and a runtime
-  // upgrade restarts the environment's pod (#2384).
+  // The checklist's helper promises "Deploy rolls out exactly the checked charts".
+  // An empty selection threads no --components flag, which `erun deploy` reads as
+  // "unspecified" and falls through to the runtime chart alone (bootstrap/heal),
+  // restarting the pod the operator just declined to touch.
   test('an emptied checklist disables Deploy rather than rolling the runtime chart alone (#2384)', async ({
     app,
     page,

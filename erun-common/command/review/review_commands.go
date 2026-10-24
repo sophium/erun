@@ -419,25 +419,22 @@ func RunReviewReportMerged(ctx core.Context, store config.CloudReadStore, alias,
 	})
 }
 
-// RunReviewRequeue moves a review stuck at MERGE back to READY, at the tail
-// of its target branch's merge queue rather than the head, freeing the
-// merge-queue slot so a different review can be promoted. This reuses the
-// exact PATCH .../status call the backend's own missed-merge-window path
-// already accepts (a bare "READY" with no buildId; see requeueMergingReview
-// in erun-backend-api) rather than adding new API surface — nothing before
-// this command could invoke it (erun#2241), even though the server has
-// always allowed it.
+// RunReviewRequeue moves a review stuck at MERGE back to READY, at the tail of
+// its target branch's merge queue rather than the head, freeing the merge-queue
+// slot so a different review can be promoted. This reuses the exact PATCH
+// .../status call the backend's own missed-merge-window path already accepts (a
+// bare "READY" with no buildId; see requeueMergingReview in erun-backend-api)
+// rather than adding new API surface.
 //
 // The review is fetched first so a caller that is not at MERGE is refused
 // before the write, naming the status the review actually holds. The server
-// refuses that case just as clearly now — requeueMergingReview's own refusal
-// names the status rather than reporting a review the caller can see as
-// missing — so this is a fail-fast on the same rule, not a substitute for it.
+// refuses that case too, so this is a fail-fast on the same rule, not a
+// substitute for it.
 //
-// Unlike RunReviewMergeQueueOverrideAdvance, this bypasses no safety gate —
-// the server already treats MERGE -> READY as unconditionally valid for any
-// review at MERGE — so it takes no --reason: there is no gate to make
-// accountable, and the status endpoint has no field to persist one in.
+// Unlike RunReviewMergeQueueOverrideAdvance, this bypasses no safety gate — the
+// server already treats MERGE -> READY as unconditionally valid for any review
+// at MERGE — so it takes no --reason: there is no gate to make accountable, and
+// the status endpoint has no field to persist one in.
 func RunReviewRequeue(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" {
 		return platformclient.PlatformReview{}, fmt.Errorf("review id is required")

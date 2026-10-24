@@ -34,9 +34,8 @@ type EnvProvisionInput struct {
 	Environment   string `json:"environment"`
 	Version       string `json:"version"`
 	// ContextID/PlacementKubernetesContext/PlacementServerURL name the target
-	// cluster (#1112) this environment was placed on at create time: empty
-	// means the platform's own cluster, exactly as every environment placed
-	// before this existed. Non-secret coordinates only — the admin-token
+	// cluster this environment was placed on at create time: empty means the
+	// platform's own cluster. Non-secret coordinates only — the admin-token
 	// credential is resolved fresh from ContextCredentialRepository at
 	// Job-build time (EnvironmentProvisioner.Provision), never checkpointed
 	// here.
@@ -103,18 +102,16 @@ type EnvDeployConfig struct {
 	ImagePullSecrets []string
 	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key,
 	// threaded to every deploy Job as DeployJobParams.MCPAuthPublicKeyPEM so
-	// the runtime's MCP edge trusts tokens the backend mints for the console
-	// Empty (no MCP signing key configured) leaves every deploy Job
-	// exactly as it was before this existed — the edge stays loopback-only.
+	// the runtime's MCP edge trusts tokens the backend mints for the console.
+	// Empty (no MCP signing key configured) keeps the edge loopback-only.
 	MCPAuthPublicKeyPEM string
 	// TLSCertSigner/TLSBrokerURL/TLSWebhookGroup/ACMEEmail/ACMEServer provision
 	// the env's per-env wildcard TLS certificate through the DNS-01 broker:
 	// deployJobParams mints a per-env token with TLSCertSigner and
 	// threads it plus these coordinates to the deploy Job, which passes them to
 	// the chained `erun expose` (see deployexec.DeployJobParams). A nil signer
-	// or an empty TLSBrokerURL/ACMEEmail leaves every deploy Job exactly as it
-	// was before this existed — expose still applies the Ingress/DNS, its TLS
-	// secretName just never gets populated.
+	// or an empty TLSBrokerURL/ACMEEmail means expose still applies the
+	// Ingress/DNS, but its TLS secretName never gets populated.
 	TLSCertSigner   DNS01TokenSigner
 	TLSBrokerURL    string
 	TLSWebhookGroup string
@@ -127,7 +124,7 @@ type EnvDeployConfig struct {
 	// legacy <name>-devops image, confirms it missing, and silently falls
 	// back to the canonical erun-devops image even when the platform actually
 	// publishes <declared>-devops. Empty (ERUN_TENANT unset) never reports a
-	// substitution, matching every deploy before this existed.
+	// substitution.
 	PlatformTenant string
 }
 

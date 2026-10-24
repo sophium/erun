@@ -40,8 +40,7 @@ func writeRootConfig(t *testing.T, body string) {
 // TestRefreshOrchestratorWhipConfigUnconfiguredKeepsTodaysText is half of the
 // "configurable message, default-preserving" contract: an install with no
 // whip section in ~/.erun/config.yaml (or no config file at all) must resolve
-// to exactly today's constant text -- behaviour does not change for anyone
-// who configures nothing.
+// to exactly the default constant text.
 func TestRefreshOrchestratorWhipConfigUnconfiguredKeepsTodaysText(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 
@@ -109,13 +108,9 @@ func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	}
 }
 
-// TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately is the other
-// half of the issue: an explicit, operator-triggered whip goes through the
-// same sendOrchestratorPacingNudge write the automatic pacer uses (so it
-// still costs against the shared cap, unchanged), but must register in its
-// own cumulative pacingWhipCount/pacingLastWhipAtUnix history rather than
-// being indistinguishable from an automatic nudge -- or invisible, which was
-// the reported defect.
+// TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately: an explicit
+// whip shares the automatic pacer's write and cap, but must register in its
+// own pacingWhipCount/pacingLastWhipAtUnix history.
 func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
@@ -183,13 +178,10 @@ func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testin
 	}
 }
 
-// TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators is the regression
-// test for the desktop's own blast-radius bug (erun#1700): an orchestrator not
-// in the requested set must not be nudged at all -- not merely omitted from
-// the report after being pushed anyway. It asserts against the recording
-// session's own write, not just the returned outcome list, so a filter that
-// only trimmed the report (while still pushing everyone) would still fail
-// this test.
+// TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators: an orchestrator
+// not in the requested set must not be nudged at all. It asserts against the
+// recording session's writes, so a filter that only trimmed the report would
+// still fail.
 func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0

@@ -223,7 +223,7 @@ export interface ManageDialogState {
   // operator runs it. healthLoading gates the in-flight indicator.
   health: UIEnvironmentHealth | null;
   healthLoading: boolean;
-  // The Ports tab's public-exposure surface (issue #1351). Exposures is loaded
+  // The Ports tab's public-exposure surface. Exposures is loaded
   // automatically alongside the rest of the dialog's read models, matching
   // deployComponents; exposeForm/exposeBusy/exposeError track the "Expose a
   // service" form, and unexposeConfirming/unexposeBusy/unexposeError track the
@@ -315,7 +315,7 @@ export interface ReconnectState {
   environment: string;
   // Which reachability shape triggered this reconnect, so the dialog and
   // status panel can say "Open" for a stopped environment and "Reconnect" for
-  // a stale forward instead of one fixed script for both (#1230).
+  // a stale forward instead of one fixed script for both.
   kind: ReachabilityKind;
   // Rolling buffer of the latest reconnect output lines, not the full transcript.
   lines: string[];

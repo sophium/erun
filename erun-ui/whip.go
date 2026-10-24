@@ -20,8 +20,8 @@ import (
 // environment/orchestrator by default, or whatever the operator checked in the
 // selection surface -- and passes it here. An empty list is refused rather
 // than read as "every target": fanning a live-session write across every
-// configured environment and orchestrator on a single click is exactly the
-// blast radius this replaces (erun#1700). Every requested target still lands
+// configured environment and orchestrator on a single click is too wide a
+// blast radius. Every requested target still lands
 // in the returned report, pushed or skipped with its reason, so a click
 // answers "did it run" without the operator hunting for a refresh.
 func (a *App) WhipNow(targets []uiWhipTargetRef) (uiWhipReport, error) {
@@ -116,7 +116,7 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 }
 
 // whipOneEnvironmentNow pushes one environment's own AI session through its
-// MCP edge, reusing the pod's own decision (eruncommon.RunLocalEnvironmentWhip,
+// MCP edge, reusing the pod's own decision (orchestrator.RunLocalEnvironmentWhip,
 // run by the "whip" MCP tool) rather than re-deriving it host-side. An
 // environment the desktop has no live edge to at all -- nobody has opened it
 // in this session -- is reported not-alive without attempting the call. A
@@ -180,7 +180,7 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 }
 
 // orchestratorWhipOutcomeToResult folds one orchestratorWhipOutcome into the
-// same eruncommon.WhipResult shape the environment side already reports in,
+// same orchestrator.WhipResult shape the environment side already reports in,
 // so WhipNow's report is one flat list rather than two differently-shaped
 // ones. Pushed is inferred from the decision: the reconciler does not
 // separately surface a nudge write failure or an in-flight typing deferral to

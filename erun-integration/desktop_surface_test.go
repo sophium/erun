@@ -299,9 +299,9 @@ func camelCaseFlagName(name string) string {
 
 // cliFlagCapabilities returns one Capability per flag on an operator-facing
 // command -- the granularity the gate was missing when it reasoned only about
-// whole commands. A capability delivered as new flags on a command that
-// already has a desktop surface used to pass unexamined, so a filter or
-// selection dimension could ship CLI-only with nothing noticing.
+// whole commands, so a filter or selection dimension delivered as new flags
+// on a command that already has a desktop surface cannot ship CLI-only
+// unnoticed.
 //
 // Only a command's own flags count: an inherited persistent flag belongs to
 // the ancestor that registered it and would otherwise be re-audited once per
@@ -352,15 +352,13 @@ func resolveCommandPath(root *cobra.Command, path string) *cobra.Command {
 }
 
 // operatorConfigCapabilities returns one Capability per registry entry in
-// eruncommon.OperatorSettableConfigFields -- a config field an operator is
+// config.OperatorSettableConfigFields -- a config field an operator is
 // expected to set through some product surface, not by hand-editing
 // config.yaml. Unlike the other three enumerations, there is no fully-
 // automatic discovery for this source (a struct field carries no
 // "operator-settable" marker to walk), so the registry itself is the
-// enumeration: it exists because OrchestratorEnvConfig.Role shipped with a
-// reader (`erun list`) and no writer, and none of the other three
-// enumerations could see the gap because a bare config field is none of a
-// route, an MCP tool, or a CLI command.
+// enumeration: a bare config field is none of a route, an MCP tool, or a CLI
+// command, so none of the other three enumerations can see it.
 func operatorConfigCapabilities() []desktopsurface.Capability {
 	fields := config.OperatorSettableConfigFields
 	capabilities := make([]desktopsurface.Capability, 0, len(fields))
@@ -381,11 +379,11 @@ func operatorConfigCapabilities() []desktopsurface.Capability {
 // command has no way in from an operator surface -- erun-ui/frontend or
 // erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
 // mode 3). See erun-integration/AGENTS.md,
-// erun-common/mcp_tools.go's AgentFacing field, erun-cli/cmd/command_tree.go's
+// erun-common/infra/mcptools/mcp_tools.go's AgentFacing field, erun-cli/cmd/command_tree.go's
 // cliOnlyAgentFacingCommands and cliOnlyAgentFacingFlags,
 // erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes, and
-// erun-common/operator_settable_config.go's OperatorSettableConfigFields for
-// the declaration mechanisms.
+// erun-common/base/config/operator_settable_config.go's
+// OperatorSettableConfigFields for the declaration mechanisms.
 func TestDesktopSurfaceGate(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -427,15 +425,12 @@ func capabilityNamed(t testing.TB, capabilities []desktopsurface.Capability, nam
 	return desktopsurface.Capability{}
 }
 
-// TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand is the
-// regression test for the granularity the gate used to work at. Against an
+// TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand locks
+// flag-level granularity. Against an
 // operator surface that references the command `erun review list` but nothing
 // about its --status filter, command granularity reports no gap at all, and
 // flag granularity reports the filter -- so a capability shipped as new flags
-// on a command that already has a desktop surface can no longer pass
-// unexamined. Review discovery's filters are the live instance that motivated
-// this: the CLI grew seven of them while the gate kept asking only whether
-// `review list` had a surface.
+// on a command that already has a desktop surface cannot pass unexamined.
 func TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand(t *testing.T) {
 	t.Parallel()
 

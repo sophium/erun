@@ -30,9 +30,8 @@ func testListVersionDriftTenantNotFound(t *testing.T) {
 }
 
 func testListVersionDriftReportsEveryEnvironmentAndTheMax(t *testing.T) {
-	// erun's own reported incident: two environments in one tenant on
-	// different erun versions, with nothing surfacing the drift. build
-	// stays behind at 1.0.246 while code4 already runs 1.0.247.
+	// Two environments in one tenant on different erun versions must surface
+	// the drift. build stays behind at 1.0.246 while code4 already runs 1.0.247.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
@@ -234,9 +233,8 @@ func testListFailOnDriftRequiresTenantOrControlPlanes(t *testing.T) {
 }
 
 func testListFailOnDriftWithTenantBehindMaxExitsNonZero(t *testing.T) {
-	// The real defect this exists to catch: build is behind code4, and
-	// nothing surfaced it before erun#2052 -- with --fail-on-drift, the
-	// report itself is now what a schedule can gate on.
+	// build is behind code4; with --fail-on-drift the report itself is what a
+	// schedule can gate on.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")

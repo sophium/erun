@@ -85,8 +85,7 @@ func newComponentBuildFixture(t *testing.T) string {
 	return projectRoot
 }
 
-// TestBuildToolBuildsComponentWithMultiPlatformSpec locks erun#1248: a
-// component build on an environment whose build script is not disabled must
+// TestBuildToolBuildsComponentWithMultiPlatformSpec: a component build on an environment whose build script is not disabled must
 // still resolve a real, buildable docker spec (matching what the no-component
 // path resolves via newDockerBuildSpec) rather than a spec with no platforms,
 // which builds and pushes nothing while still reporting success.
@@ -204,23 +203,22 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	}
 }
 
-// stubKubectlAlwaysSucceeds points the ERUN_KUBECTL_BIN seam (eruncommon.Command)
-// at a script that exits 0 unconditionally, so eruncommon.RunHelmDeploy's own
+// stubKubectlAlwaysSucceeds points the ERUN_KUBECTL_BIN seam (core.Command)
+// at a script that exits 0 unconditionally, so deploy.RunHelmDeploy's own
 // namespace-ensure — which runs before the pre-rollout secret applies and is not
 // reachable through RuntimeConfig.EnsureKubernetesNamespace (see
-// eruncommon.WrapHelmChartDeployerWithNamespaceEnsure and
+// deploy.WrapHelmChartDeployerWithNamespaceEnsure and
 // TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets) — never shells out to
 // a real cluster. Without it, these tests depend on the host's kubeconfig
 // happening to have a context named "cluster-remote"/"cluster-dev", which no real
 // machine does.
 //
 // `get secret ... -o json` is answered as NotFound rather than the same bare
-// success every other invocation gets: eruncommon's image-pull-secret refresh
-// (deploy_image_pull_secret.go's existingImagePullSecretAuths) reads a named
-// Secret back before merging into it, and a bare `exit 0` with no stdout is not
-// valid JSON, so it failed to parse. NotFound is exactly what a first deploy
+// success every other invocation gets: the image-pull-secret refresh
+// (registry.ExistingImagePullSecretAuths) reads a named Secret back before
+// merging into it, and a bare `exit 0` with no stdout is not valid JSON. NotFound is exactly what a first deploy
 // into a fresh namespace sees, and it is the shape every other image-pull-secret
-// test already uses (see imagePullSecretKubectlStub in erun-common).
+// test already uses (see primitive/deploy's imagePullSecretKubectlStub).
 func stubKubectlAlwaysSucceeds(t *testing.T) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kubectl")
@@ -232,7 +230,7 @@ func stubKubectlAlwaysSucceeds(t *testing.T) {
 }
 
 // stubGHCRDockerCredential points DOCKER_CONFIG at a fixture carrying a fake
-// ghcr.io credential, so eruncommon.resolveOCIRegistryBasicAuth resolves one
+// ghcr.io credential, so registry.ResolveOCIRegistryBasicAuth resolves one
 // deterministically for these tests regardless of what the host machine
 // actually has logged in -- without this, a remote init's runtime deploy
 // (which defaults the tenant's own image onto ghcr.io) would take its
@@ -249,11 +247,11 @@ func stubGHCRDockerCredential(t *testing.T) {
 }
 
 // fakeRemoteRepositoryStateRunner fakes RunRemoteCommand for a remote-init
-// flow that reaches the repository-state script, answering the #1201
+// flow that reaches the repository-state script, answering the
 // registry-credential-check script (identified by its own content, since
 // every remote-exec call shares this one seam) with "credential configured"
 // so these tests keep exercising repository interaction rather than tripping
-// the new check.
+// that check.
 func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpkg.ShellLaunchParams, string) (kube.RemoteCommandResult, error) {
 	return func(_ configpkg.ShellLaunchParams, script string) (kube.RemoteCommandResult, error) {
 		if strings.Contains(script, ".docker/config.json") {

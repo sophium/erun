@@ -211,8 +211,7 @@ func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
 	}
 }
 
-// TestListUsersDistinguishesEnrolledFromIdPOnly locks the core of #1482's
-// Users-page fix: a self-registered IdP account with no erun mapping must
+// TestListUsersDistinguishesEnrolledFromIdPOnly: a self-registered IdP account with no erun mapping must
 // not render identically to an actual tenant member. It also proves the
 // machine-account signal survives the merge unchanged.
 func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
@@ -251,9 +250,8 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 // TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
 // half: an enrolled row's own erun username travels alongside the
 // IdP's own username field rather than being merged away, so a client can
-// render both when they diverge instead of rendering only the IdP one under
-// a caller who is used to seeing their erun username everywhere else
-// (whoami's own `username`, reviews, audit entries). The row's own `id` is
+// render both when they diverge, since the erun username is what a caller
+// sees everywhere else (whoami's `username`, reviews, audit entries). The row's own `id` is
 // asserted too: it is the OIDC subject, the one stable value that actually
 // joins the two directories, and it must keep flowing through unrenamed for
 // a client to recognize "this is the same person" against whoami's subject.

@@ -206,7 +206,7 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (activi
 // context): the runtime pod resolves its own namespace since the caller has
 // no --namespace to pass in from outside. The target is the erun-backend-api
 // chart's Deployment/Service name (<tenant>-api, per
-// eruncommon.APIDeploymentName) selected with -l/--prefix rather than
+// open.APIDeploymentName) selected with -l/--prefix rather than
 // deployment/<name>, so a transient multi-pod rollout names which replica the
 // log came from instead of kubectl quietly picking one.
 const apiLogMCPRawCommand = `namespace=${ERUN_NAMESPACE:-}; if [ -z "$namespace" ] && [ -r /var/run/secrets/kubernetes.io/serviceaccount/namespace ]; then namespace=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace); fi; kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "$namespace" logs -l app="${ERUN_TENANT:-erun}-api" --prefix -c erun-backend-api --tail 400`

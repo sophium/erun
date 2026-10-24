@@ -10,9 +10,9 @@ import (
 
 // runtime_sizing.go wires the Runtime tab's sizing recommendation and its
 // "Resize to this" action to the same `erun resize` primitive the CLI and MCP
-// transports use (erun-common/runtime_resize.go). The standing recommendation
+// transports use (lifecycle's runtime_resize.go). The standing recommendation
 // is derived from usage history retained inside the pod
-// (erun-common/runtime_usage_history.go) and never leaves it, so both reads
+// (deploy.RuntimeUsageHistory) and never leaves it, so both reads
 // here run `erun resize` itself over kubectl exec rather than re-deriving the
 // recommendation host-side from data the desktop cannot see.
 //
@@ -33,18 +33,16 @@ var runtimeSizingActionLine = regexp.MustCompile(`^resize: \S+/\S+ (cpu|memory) 
 var runtimeSizingNoOpLine = regexp.MustCompile(`^resize: \S+/\S+ is already sized at `)
 
 // runtimeSizingVerdictLine and runtimeSizingEvidenceLine match the trace lines
-// traceRuntimeSizingRecommendation (erun-common/runtime_resize.go) emits
-// before it acts -- one line per resource verdict, then the evidence window
-// they were computed from. Without these the tab could show what changed but
-// never why, which is the same "verdict but no evidence" gap `erun list`
-// already solved under `runtime-pod:`.
+// lifecycle's traceRuntimeSizingRecommendation emits before it acts -- one line
+// per resource verdict, then the evidence window they were computed from, so
+// the tab can show why a change is recommended, not only what changes.
 var (
 	runtimeSizingVerdictLine  = regexp.MustCompile(`^resize: \S+/\S+ sizing: (.+)$`)
 	runtimeSizingEvidenceLine = regexp.MustCompile(`^resize: \S+/\S+ sizing-evidence: (.+)$`)
 )
 
 // uiRuntimeSizingAction is one resource's resolved change, mirroring
-// eruncommon.RuntimeResizeAction.
+// lifecycle.RuntimeResizeAction.
 type uiRuntimeSizingAction struct {
 	Resource string `json:"resource"`
 	From     string `json:"from"`

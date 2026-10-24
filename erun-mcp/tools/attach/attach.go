@@ -22,7 +22,7 @@ import (
 // The MCP transport (erun-mcp/server.go's mcp.NewStreamableHTTPHandler) is
 // JSON-RPC request/response, not a duplex byte stream, so a live PTY needs a
 // second surface: a WebSocket sitting beside it in the same authenticated
-// edge. This file is that surface. It execs eruncommon.RemoteAppSessionAttachLines'
+// edge. This file is that surface. It execs open.RemoteAppSessionAttachLines'
 // script as a local subprocess of this pod -- never a Kubernetes API call --
 // because the whole point of putting this here is that `emcp` already runs
 // inside the pod holding the dtach socket, so reaching it needs no
@@ -68,7 +68,7 @@ type AttachControlMessage struct {
 // once, immediately before it closes the socket. It is how an evicted or
 // ended client learns *why* the byte stream stopped, instead of reading a
 // silent close as indistinguishable from a network stall -- the property
-// eruncommon.ResolveAISessionAttachOutcome exists to compute, and root
+// open.ResolveAISessionAttachOutcome exists to compute, and root
 // AGENTS.md's "an unknown must not render as a definite value" rule applies
 // to this wire message exactly as it does to that function's own return
 // value: AISessionAttachOutcomeUnknown is a real, sent value here, never

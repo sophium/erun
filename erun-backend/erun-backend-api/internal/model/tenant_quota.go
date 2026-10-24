@@ -11,7 +11,7 @@ import (
 // MaxCPUMillicores/MaxMemoryMB/MaxStorageGB are a per-environment namespace
 // ceiling: every runtime environment this tenant provisions gets a
 // ResourceQuota/LimitRange capped at these values, identically. MaxTotal*
-// (#1113) is the separate aggregate tenant-wide budget: since every
+// is the separate aggregate tenant-wide budget: since every
 // environment's cap is the same per-environment value, admission projects
 // (existing runtime environment count + 1) * the per-environment cap against
 // MaxTotal* and refuses a create that would exceed it.

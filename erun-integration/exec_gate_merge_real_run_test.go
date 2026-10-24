@@ -16,9 +16,9 @@ import (
 )
 
 // atlasBin resolves the real atlas binary from the host PATH so a scenario
-// can seed and validate a real Atlas migration checksum end to end (erun#2025):
-// the erun-devops Dockerfile's test stage now installs atlas for exactly this
-// reason, so — per this suite's "nothing may gate on host capability" rule —
+// can seed and validate a real Atlas migration checksum end to end: the
+// erun-devops Dockerfile's test stage installs atlas for exactly this reason,
+// so — per this suite's "nothing may gate on host capability" rule —
 // this fails loudly rather than skipping when it is unexpectedly absent.
 func atlasBin(t testing.TB) string {
 	t.Helper()
@@ -309,14 +309,11 @@ func testExecGateMergeRealRunCarriesAHardWrappedTrailerWhole(t *testing.T) {
 }
 
 func testExecGateMergeRealRunAcceptsAUrlRemote(t *testing.T) {
-	// The reported failure: --remote takes a URL, not only a configured
-	// remote name. A URL creates no remote-tracking refs, so the ref the
-	// checkout and every squash-merge used to name ("<remote>/<branch>")
-	// does not exist for one, and the run died with "is not a commit and a
-	// branch 'main' cannot be created from it" while --dry-run exited 0
-	// having traced that same impossible ref. A file:// URL carries the ":"
-	// and "//" that made it unnameable as a ref, so it reproduces the
-	// report without reaching the network.
+	// --remote takes a URL, not only a configured remote name. A URL creates
+	// no remote-tracking refs, so "<remote>/<branch>" does not exist for one
+	// and must not be named by the checkout or any squash-merge. A file://
+	// URL carries the ":" and "//" that make it unnameable as a ref without
+	// reaching the network.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	remoteRoot := seedBareOrigin(t, setup)
@@ -532,11 +529,11 @@ func testExecGateMergeRealRunAllSourcesConflictRefuses(t *testing.T) {
 }
 
 func testExecGateMergeRealRunBatchLandsMigrationsWithConflictingAtlasSum(t *testing.T) {
-	// erun#2025: migrations/atlas.sum is a generated checksum over every
-	// migration file in the directory, so two branches that each add a
-	// migration conflict on it by construction — the acceptance test this
-	// scenario locks: two such branches batch-gate together with nothing
-	// for a human to resolve. It also proves the fix doesn't weaken what
+	// migrations/atlas.sum is a generated checksum over every migration file
+	// in the directory, so two branches that each add a migration conflict on
+	// it by construction; two such branches must batch-gate together with
+	// nothing for a human to resolve. It also proves the resolution doesn't
+	// weaken what
 	// atlas.sum is for: after the batch lands, the real `atlas migrate
 	// validate` still passes, and a migration edited after the fact is
 	// still caught.

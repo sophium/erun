@@ -110,12 +110,9 @@ func orchestratorRolesChanged(wiredEnvs, configuredEnvs []configpkg.Orchestrator
 // ListOrchestratorAliasChoices returns the erun platform aliases configured on
 // this host, for the Edit orchestrator dialog's Platform alias picker.
 //
-// A picker rather than a text field, for the reason the environment candidate
-// list is one: the writer refuses an alias this host cannot resolve
-// (eruncommon.ValidateOrchestratorAlias), so offering the resolved list is what
-// keeps the dialog from letting an operator choose something the save will
-// reject. An empty list is a real answer — no erun alias is configured on this
-// machine — and the control renders it as such rather than as an empty choice.
+// A picker rather than a text field because the writer refuses an alias this
+// host cannot resolve (orchestrator.ValidateOrchestratorAlias). An empty list
+// means no erun alias is configured on this machine.
 func (a *App) ListOrchestratorAliasChoices() ([]string, error) {
 	return a.configuredERunAliases()
 }

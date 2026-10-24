@@ -24,15 +24,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// awsSDKRunner implements the eruncommon.CloudContextDependencies.RunAWS seam
+// awsSDKRunner implements the cloud.CloudContextDependencies.RunAWS seam
 // with aws-sdk-go-v2, so the API pod drives a tenant's AWS in-process and needs
 // no `aws` executable — the image ships only the Go binary.
 //
-// eruncommon.InitCloudContext stays the single owner of the bootstrap sequence
+// cloud.InitCloudContext stays the single owner of the bootstrap sequence
 // for every transport, so this stays on the far side of its existing seam and
 // interprets the bounded argv that sequence emits. It is deliberately not a
 // general aws-CLI parser: an argv it does not recognise is an error naming the
-// argv, not a silent no-op, so a change on the eruncommon side surfaces here
+// argv, not a silent no-op, so a change on the cloud side surfaces here
 // instead of half-provisioning a tenant.
 type awsSDKRunner struct {
 	creds awsCredentials
@@ -65,7 +65,7 @@ func newAWSSDKRunner(credentialsJSON, endpoint string) (*awsSDKRunner, error) {
 	return &awsSDKRunner{creds: creds, endpoint: endpoint, configs: map[string]aws.Config{}}, nil
 }
 
-// runAWS adapts the runner to the eruncommon seam, binding the DBOS step's
+// runAWS adapts the runner to the cloud seam, binding the DBOS step's
 // context so a cancelled workflow cancels the in-flight AWS call.
 func (r *awsSDKRunner) runAWS(ctx context.Context) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 	return func(_ core.Context, _ configpkg.CloudProviderConfig, region string, args []string) (string, error) {
@@ -186,7 +186,7 @@ func ec2DescribeInstances(ctx context.Context, client *ec2.Client, flags awsFlag
 	if err != nil {
 		return "", err
 	}
-	// Render only the projections eruncommon asks for; anything else would be
+	// Render only the projections cloud asks for; anything else would be
 	// parsed as a value it did not request.
 	query := flags.one("--query")
 	switch {
@@ -360,7 +360,7 @@ func iamAddRoleToInstanceProfile(ctx context.Context, client *iam.Client, flags 
 	return "", err
 }
 
-// instanceProfileField renders the two projections eruncommon takes off an
+// instanceProfileField renders the two projections cloud takes off an
 // instance profile: its ARN, and the attached role's name — the idempotency
 // check that decides whether a re-run must attach the role again.
 func instanceProfileField(profile *iamtypes.InstanceProfile, query string) (string, error) {

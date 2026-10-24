@@ -23,9 +23,8 @@ func pushRegistryAuthScenarios(t *testing.T) {
 }
 
 func testPushRealRunRefusesBeforeBuildWhenNoRegistryCredentialConfigured(t *testing.T) {
-	// #1201: a pod that has never authenticated to ghcr.io (no docker config,
-	// no gh session, no GH_TOKEN) used to discover that only at the real push,
-	// after a full multi-arch build. `docker image inspect` is stubbed only
+	// A pod that has never authenticated to ghcr.io (no docker config, no gh
+	// session, no GH_TOKEN) must be refused before any multi-arch build. `docker image inspect` is stubbed only
 	// because fingerprint resolution needs an answer before the push plan can
 	// even be built; every other docker verb (build/push/manifest/login) is
 	// deliberately left to print a loud marker and fail, so a regression that
@@ -78,7 +77,7 @@ func testPushRealRunAuthFailureRetriesAfterLoginViaAutoLoginEnv(t *testing.T) {
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-	// #1201: the registry-credential preflight refuses up front when no
+	// The registry-credential preflight refuses up front when no
 	// ghcr.io credential resolves at all; GH_TOKEN gives it one so this
 	// scenario still reaches the auth-failure-at-push it is about.
 	envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "GH_TOKEN=integration-test-token")
@@ -117,7 +116,7 @@ func testPushRealRunAuthFailurePromptsLoginAndRetries(t *testing.T) {
 		`esac`,
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
-	// #1201: give the registry-credential preflight a resolvable credential
+	// Give the registry-credential preflight a resolvable credential
 	// so this scenario still reaches the interactive login-retry it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
@@ -157,7 +156,7 @@ func testPushRealRunCreatePackageDeniedEmitsGuidance(t *testing.T) {
 	// uses LookPath directly, not the ERUN_<NAME>_BIN override).
 	envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
 	envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-	// #1201: GH_TOKEN gives the registry-credential preflight a resolvable
+	// GH_TOKEN gives the registry-credential preflight a resolvable
 	// credential without changing the failing gh stub the login-retry
 	// behavior above still depends on.
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")

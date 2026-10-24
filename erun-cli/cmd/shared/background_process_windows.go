@@ -9,9 +9,9 @@ import (
 
 // createNewProcessGroup detaches a child from the console control events the
 // caller's group receives — the closest Windows equivalent to a new session
-// (see erun-common/job_process_windows.go, which uses the same flag for the
-// same reason). Without it, closing the console that started `erun open`
-// takes its port-forwards down with it.
+// (core.DetachEnvironmentJobSupervisor uses the same flag for the same reason).
+// Without it, closing the console that started `erun open` takes its
+// port-forwards down with it.
 const createNewProcessGroup = 0x00000200
 
 func DetachBackgroundProcess(cmd *exec.Cmd) {

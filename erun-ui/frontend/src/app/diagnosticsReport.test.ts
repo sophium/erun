@@ -30,9 +30,8 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
   };
 }
 
-// The defect this report exists to fix (#1241): the panel derived its context
-// from the sidebar's env selection alone, so an orchestrator session — which
-// never touches that selection — rendered the environment-shaped report's
+// An orchestrator session never touches the sidebar's env selection, so a
+// context derived from it alone would render the environment-shaped report's
 // "nothing selected" fallback. Every orchestrator report must carry the
 // orchestrator's own identity instead, never that string.
 test('an orchestrator context never emits "environment: none selected"', () => {

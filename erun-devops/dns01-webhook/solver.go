@@ -68,7 +68,7 @@ func (s *brokerSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 // in the same namespace. Returning an error there is unrecoverable -- nothing
 // will ever recreate the Secret, so every retry fails identically, the
 // acme.cert-manager.io finalizer never clears, and the namespace sits in
-// Terminating until its 20-minute timeout (#1174).
+// Terminating until its 20-minute timeout.
 //
 // Present deliberately does not tolerate this: a missing token when presenting
 // is a real misconfiguration and must surface.

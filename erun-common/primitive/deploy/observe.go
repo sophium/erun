@@ -22,8 +22,8 @@ func RunObserveKubectl(args []string) (stdout []byte, stderr string, err error) 
 // KubectlErrorMessage folds stderr into err, sanitizing kubectl's raw output
 // through sanitizeKubectlFailureOutput first: an unreachable API server makes
 // kubectl retry and emit klog's "Unhandled Error" frame once per retry, and
-// without this every goroutine id and source location reached the operator
-// verbatim, repeated (erun#2392).
+// without this every goroutine id and source location would reach the
+// operator verbatim, repeated.
 func KubectlErrorMessage(err error, stderr string) error {
 	if stderr == "" {
 		return err

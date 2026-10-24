@@ -71,8 +71,7 @@ func NewInviteRequestService(requests InviteRequestDecisionStore, tenants Invite
 // ApproveJoin enrols request's verified subject into the tenant ctx's own
 // security.Context already names, then mints an invite for that same
 // tenant. The caller (a route) must already have verified request.TenantName
-// names the caller's own tenant — the "authority over that tenant" the issue
-// requires — before calling this; ApproveJoin itself trusts ctx's tenant.
+// names the caller's own tenant before calling this; ApproveJoin itself trusts ctx's tenant.
 func (s *InviteRequestService) ApproveJoin(ctx context.Context, request model.InviteRequest, decidedByUserID string) (model.InviteRequest, error) {
 	if request.Kind != model.InviteRequestKindJoinTenant {
 		return model.InviteRequest{}, ErrInviteRequestWrongKind
@@ -105,12 +104,12 @@ func (s *InviteRequestService) ApproveJoin(ctx context.Context, request model.In
 // being raised and being decided — someone else registers the same name
 // first, or (per the "does not remain PENDING" requirement below) an earlier
 // approve attempt on this very request created the tenant and then failed a
-// later step. Either way the tenant existing is a race, not a mistake
-// (erun#1722): enrolling the requester into it is what CREATE_TENANT actually
+// later step. Either way the tenant existing is a race, not a mistake:
+// enrolling the requester into it is what CREATE_TENANT actually
 // asks for, so Create's ErrTenantNameConflict resolves to that tenant instead
 // of failing the approval. This is also what makes the overall workflow
 // retry-safe without a spanning database transaction (see the package doc
-// comment): resolving-or-creating the tenant is now idempotent, so retrying a
+// comment): resolving-or-creating the tenant is idempotent, so retrying a
 // partially-failed approve (e.g. tenant registered, enrollment then failed)
 // converges to success instead of repeating the same fatal error.
 func (s *InviteRequestService) ApproveCreateTenant(ctx context.Context, request model.InviteRequest, decidedByUserID string) (model.InviteRequest, error) {

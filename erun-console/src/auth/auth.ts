@@ -8,7 +8,7 @@
 //
 // The issuer + client id are resolved at runtime from GET /v1/platform
 // (resolveOidcConfig below) — a single built image must be able to serve any
-// PaaS instance (#603), so nothing instance-specific can be baked in at build
+// PaaS instance, so nothing instance-specific can be baked in at build
 // time. oidcConfig()'s VITE_* env vars remain only as the local-dev override
 // (set them to skip a live backend), and as the fallback resolveOidcConfig uses
 // when the discovery endpoint is absent (an older backend) or unreachable. With
@@ -43,14 +43,13 @@ const ORG_SCOPE_RETRIED_KEY = 'erun.console.oidcOrgScopeRetried';
 // ORG_CLAIM_SCOPE asks the shipped Zitadel IdP to include the org
 // (resourceowner) claim erun's tenant resolution reads for a shared,
 // org-scoped issuer -- the same scope erun-common's CLI/desktop OIDC login
-// requests by default (see erun-common/cloud_erun_oidc.go's
+// requests by default (see erun-common/infra/cloud/cloud_erun_oidc.go's
 // erunOrgClaimScope). Without it, a console session's token carries no org
 // claim, so once an issuer is org-scoped, the console cannot resolve its
-// tenant even for an already-enrolled operator (erun#1721). A dedicated/BYO
-// issuer has never heard of this scope; beginLogin retries once without it
-// (see resolveToken's authCallbackError handling) when the issuer redirects
-// back with error=invalid_scope, so sign-in still succeeds exactly as it did
-// before this default was added.
+// tenant even for an already-enrolled operator. A dedicated/BYO issuer has
+// never heard of this scope; beginLogin retries once without it (see
+// resolveToken's authCallbackError handling) when the issuer redirects back
+// with error=invalid_scope, so sign-in still succeeds.
 const ORG_CLAIM_SCOPE = 'urn:zitadel:iam:user:resourceowner';
 
 export interface OidcConfig {
@@ -346,8 +345,8 @@ export async function endSessionSupported(config: OidcConfig | undefined): Promi
 // A callback that failed with error=invalid_scope means the issuer refused
 // ORG_CLAIM_SCOPE (a dedicated/BYO IdP that has never heard of it) — this
 // retries sign-in once without that scope, the same one-shot fallback
-// erun-common's CLI/desktop login already does, so a dedicated issuer signs
-// in exactly as it did before the org-scope default was added. The
+// erun-common's CLI/desktop login already does, so a dedicated issuer still
+// signs in. The
 // sessionStorage flag bounds the retry to once per browser session.
 export async function resolveToken(config: OidcConfig | undefined): Promise<string | undefined> {
   if (config !== undefined && isAuthCallback()) {

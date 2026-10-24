@@ -8,8 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// TestClassifyTenantCreateErrorMapsNameUniqueViolation locks the fix for
-// erun#1722: a tenant name that already exists must be distinguished from
+// TestClassifyTenantCreateErrorMapsNameUniqueViolation locks that a tenant name that already exists must be distinguished from
 // every other insert failure, not surfaced as a generic 500.
 func TestClassifyTenantCreateErrorMapsNameUniqueViolation(t *testing.T) {
 	err := classifyTenantCreateError(&pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "tenants_name_key"})

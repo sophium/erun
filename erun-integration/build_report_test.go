@@ -22,7 +22,7 @@ func buildReportScenarios(t *testing.T) {
 }
 
 func testBuildDryRunWithPlatformAliasTracesTheBuildReport(t *testing.T) {
-	// erun#1954: with an erun platform alias configured, build traces the
+	// With an erun platform alias configured, build traces the
 	// self-report it would make, never touching the network under
 	// --dry-run -- so a fixed, unresolvable API URL (no real server
 	// behind it) is fine here, the same choice review record-build's own
@@ -46,7 +46,7 @@ func testBuildDryRunWithPlatformAliasTracesTheBuildReport(t *testing.T) {
 }
 
 func testBuildRealRunWithPlatformAliasReportsASuccessfulBuild(t *testing.T) {
-	// erun#1954: a real (non-dry-run) build with a platform alias
+	// A real (non-dry-run) build with a platform alias
 	// configured self-reports its outcome after it finishes. A real git
 	// repository is seeded so the report resolves and includes a real
 	// commit; the exact hash is masked by output normalization not
@@ -84,7 +84,7 @@ func testBuildRealRunWithPlatformAliasReportsASuccessfulBuild(t *testing.T) {
 }
 
 func testBuildRealRunBuildReportFailureDoesNotFailTheBuild(t *testing.T) {
-	// erun#1954: a build must never fail -- or report itself as failed --
+	// A build must never fail -- or report itself as failed --
 	// because self-reporting to the platform is unavailable.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -116,7 +116,7 @@ func testBuildRealRunBuildReportFailureDoesNotFailTheBuild(t *testing.T) {
 
 // buildReportAPIStubServer runs a minimal erun-backend-api double covering
 // GET /v1/environments and POST /v1/builds -- the two calls ReportBuildOutcome
-// makes to self-report an ordinary `erun build` run (erun#1954). buildStatus
+// makes to self-report an ordinary `erun build` run. buildStatus
 // lets a scenario force the report itself to fail (500) while still proving
 // the build's own exit code is untouched.
 func buildReportAPIStubServer(t testing.TB, buildStatus int) *httptest.Server {

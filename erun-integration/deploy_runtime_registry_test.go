@@ -90,11 +90,9 @@ func testDeployDryRunOperatorSetRuntimeRegistryStandsOverADifferentResolution(t 
 }
 
 func testDeployRealRunRecordsTheRegistryTheRuntimeChartResolvedFrom(t *testing.T) {
-	// The regression: the deploy memoized where the chart search STARTED, so
-	// an env whose deploy registry carries no platform chart came out of a
-	// successful deploy recording that registry as the place erun's artifacts
-	// live — the one thing the search had just disproved, twice. The memo must
-	// name the rung the chart resolved at. Real-run because the persist is the
+	// The memo must name the rung the chart resolved at, not where the search
+	// started: an env whose deploy registry carries no platform chart must not
+	// record that registry as the place erun's artifacts live. Real-run because the persist is the
 	// side effect under test, and the assertion reads the config the goldens
 	// cannot see.
 	setup := env.New(t)
@@ -108,9 +106,9 @@ func testDeployRealRunRecordsTheRegistryTheRuntimeChartResolvedFrom(t *testing.T
 }
 
 func testDeployRealRunRecordsTheDeployRegistryWhenTheChartResolvesThere(t *testing.T) {
-	// The no-regression twin: a chart found where the search started is still
-	// memoized as before, so following the resolution changed nothing for the
-	// environments whose chart is published beside their own images.
+	// The twin: a chart found where the search started is memoized there,
+	// so environments whose chart is published beside their own images are
+	// unaffected.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0")
@@ -140,13 +138,12 @@ func testDeployRealRunKeepsAnOperatorSetRuntimeRegistry(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvTenantComponentVerifiesAgainstTheClusterRegistry(t *testing.T) {
-	// erun#1598: a `--cluster-registry` env with an explicit runtimeregistry
-	// (a realistic pairing -- runtimeregistry names where the shared
-	// platform chart lives, containerregistries names the in-cluster
-	// registry the tenant's own images and component charts publish to)
-	// could never confirm its own component chart, because verification
-	// probed the platform-chart registry (runtimeregistry) instead of the
-	// registry `erun push` actually publishes tenant charts to. The
+	// A `--cluster-registry` env with an explicit runtimeregistry (a
+	// realistic pairing -- runtimeregistry names where the shared platform
+	// chart lives, containerregistries names the in-cluster registry the
+	// tenant's own images and component charts publish to) must verify its
+	// component chart against the registry `erun push` actually publishes
+	// tenant charts to, not the platform-chart registry (runtimeregistry). The
 	// registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry below is
 	// published only at the concretized cluster pull address (the dry-run
 	// placeholder <cluster-ip>:5000), never at the runtimeregistry, so this
@@ -197,11 +194,10 @@ func testDeployDryRunRemoteEnvTenantComponentVerifiesAgainstTheClusterRegistry(t
 }
 
 func testDeployRealRunPersistsRuntimeVersionAndRegistryToEnvConfig(t *testing.T) {
-	// Regression: `erun deploy --version X` updates helm's release
-	// appVersion but used to leave EnvConfig.RuntimeVersion at the
-	// previously persisted value, so the desktop runtime dialog and
-	// `erun list` kept showing the stale string. Real-run deploy now
-	// writes the deployed version back to the env config.
+	// `erun deploy --version X` updates helm's release appVersion, and a
+	// real-run deploy must write the deployed version back to
+	// EnvConfig.RuntimeVersion so the desktop runtime dialog and `erun list`
+	// never show a stale string.
 	//
 	// This extends to the source registry, persisted
 	// alongside the version as RuntimeRegistry, so a subsequent

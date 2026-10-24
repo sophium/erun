@@ -182,11 +182,8 @@ func testPlatformIdentityOrgCreateDryRun(t *testing.T) {
 	golden.Equal(t, "platform/identity_org_create_dry_run", normalize.Apply(result.Combined))
 }
 
-// This is erun#2049's core defect, reproduced end to end: before the org
-// create command existed, an operator following `platform tenant create
-// --org-field-key/--org-field-value` had no reachable way to obtain an
-// org id at all, so an org-scoped tenant could only be created with an
-// empty org value -- accepted, listed, and permanently unresolvable (see
+// Without a way to obtain an org id, an org-scoped tenant could only be
+// created with an empty, permanently unresolvable org value (see
 // tenant_create_and_list_real_run's "probeco" fixture above). This proves
 // the reachable path: create the org, feed its id into tenant create, and
 // the same org-scoped issuer that refuses an empty value accepts this one.
@@ -210,7 +207,7 @@ func testPlatformIdentityOrgCreateAndTenantCreateReachablePathRealRun(t *testing
 	const orgFieldKey = "urn:zitadel:iam:user:resourceowner:id"
 
 	// Without the org id this reachable path just produced, the same
-	// issuer refuses -- proving the refusal from erun#1832 is still live
+	// issuer refuses -- proving the empty-org refusal is still live
 	// and that what follows is a genuine positive case, not a stub that
 	// always says yes.
 	refused := erun.Run(t, []string{
@@ -252,7 +249,7 @@ func testPlatformTenantRepairOrgMappingDryRun(t *testing.T) {
 }
 
 // The repair path for a tenant already stuck in probeco's state (created
-// before erun#1832's refusal existed, or left behind when its issuer was
+// before the empty-org refusal, or left behind when its issuer was
 // converted to org-scoped afterward): an operations caller repairs a
 // tenant other than its own by naming --tenant-id explicitly.
 func testPlatformTenantRepairOrgMappingRealRun(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 // of this already runs inside the desktop for orchestrators
 // (erun-ui/orchestrator_pacing.go); this command is the manual, host-side
 // fan-out over everything configured, reusing the same decide/report core
-// (eruncommon.DecideWhip/WhipReport).
+// (orchestrator.DecideWhip/WhipReport).
 
 func NewWhipCmd(store lifecycle.ListStore, resolveOpen shared.OpenResolver) *cobra.Command {
 	var tenant string
@@ -189,11 +189,10 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 		return notAlive
 	}
 	// Restate the tenant/environment this host already resolved rather than
-	// leaving the tool to infer them from the server's own bound context: it is
-	// the stronger assertion the issue this fixes asked for, and it is what lets
-	// a stale edge pointed at the wrong environment surface as a named mismatch
-	// instead of a silent act on the wrong one (resolveLocalTarget,
-	// erun-mcp/runtime.go).
+	// leaving the tool to infer them from the server's own bound context, so a
+	// stale edge pointed at the wrong environment surfaces as a named mismatch
+	// instead of a silent act on the wrong one (erun-mcp's
+	// shared.ResolveLocalTarget).
 	arguments := map[string]any{"preview": commandCtx.DryRun, "tenant": target.Tenant, "environment": target.Environment}
 	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, "whip", shared.CompactMCPArguments(arguments))
 

@@ -38,9 +38,8 @@ afterEach(() => {
   delete window.__ERUN_PLATFORM_BRAND__;
 });
 
-// The regression this guards: the pre-resolution paint used a bundled name of
-// its own, so the page showed one product name and then another once GET
-// /v1/platform answered — on every load, on the first screen anyone sees. The
+// The pre-resolution paint must not use a bundled name of its own, or the page
+// shows one product name and then another once GET /v1/platform answers. The
 // console image serves the instance's own brand in the page
 // (window.__ERUN_PLATFORM_BRAND__, from the same platform.brand the API
 // serves), so the first paint and the resolved paint are the same value.
@@ -70,14 +69,9 @@ describe('App brand', () => {
 });
 
 describe('App signed-out route', () => {
-  // The regression this guards: the old signed-out screen was a CenteredCard
-  // wrapping a CardTitle div and a paragraph — zero real <h1>-<h6> elements,
-  // per erun#1327 ("no <h1> and no <main> landmark"). This same assertion,
-  // run against origin/main's SignInScreen, fails with "expected length to be
-  // greater than 1, received 0" (CardTitle is a <div>, not a heading) — see
-  // the PR description for the recorded red run. It passes here because
-  // LandingScreen renders a real <h1> pitch and an <h2> differentiators
-  // heading inside a <main> landmark.
+  // The signed-out screen must have real headings and a <main> landmark, not a
+  // CenteredCard whose CardTitle is a <div>. LandingScreen renders a real <h1>
+  // pitch and an <h2> differentiators heading inside a <main> landmark.
   it('is a real landing page, not merely a CenteredCard sign-in prompt', async () => {
     renderWithStore(<App />);
 
@@ -198,9 +192,8 @@ describe('App tenant switch mismatch', () => {
   });
 });
 
-// erun#1680: a signed-in-but-unenrolled user was stuck on the not-enrolled
-// card with no way to sign in as a different account. Sign-out has to
-// actually return the whole app to the sign-in flow, not just fire a callback.
+// A signed-in-but-unenrolled user must be able to sign in as a different
+// account from the not-enrolled card. Sign-out has to actually return the whole app to the sign-in flow, not just fire a callback.
 describe('App not-enrolled route', () => {
   it('returns to the sign-in flow when the operator signs out from the not-enrolled card', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
@@ -233,7 +226,7 @@ describe('App not-enrolled route', () => {
   });
 });
 
-// erun#1721: a 401 coded TENANT_UNRESOLVED (an org-scoped issuer whose token
+// A 401 coded TENANT_UNRESOLVED (an org-scoped issuer whose token
 // carries no matching org claim, most commonly) must render distinctly from
 // the not-enrolled card above -- the caller may already be enrolled
 // somewhere, so "an operator has to enrol you" would be wrong advice.
@@ -271,7 +264,7 @@ describe('App tenant-unresolved route', () => {
   });
 });
 
-// erun#1752: a resolution failure caused by an internal error (already
+// A resolution failure caused by an internal error (already
 // sanitized server-side of any raw database detail into RESOLUTION_FAILED)
 // must render its own card -- neither the not-enrolled card (a link may
 // already exist for this identity, so "an operator has to enrol you" would

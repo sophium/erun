@@ -16,7 +16,7 @@ import (
 
 // RunBuildExecution runs a plain `erun build`. store/deps are the cloud
 // alias reader and dependencies ReportBuildOutcome uses to self-report this
-// run to the erun platform, best-effort, once it finishes (erun#1954) --
+// run to the erun platform, best-effort, once it finishes --
 // pass a nil store from a caller that has none (build never fails or
 // changes its own output because reporting is unavailable).
 func RunBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
@@ -110,7 +110,7 @@ func runResolvedBuildExecution(ctx core.Context, execution shared.BuildExecution
 			return err
 		}
 	} else {
-		// A release runs this via ensureReleaseReadyToPublish; a plain build has
+		// A release runs this via shared's ensureReleaseHasDiskHeadroom; a plain build has
 		// to run it here. Builds are what actually fill the node between
 		// releases, since every one of them grows the BuildKit cache.
 		if err := buildrun.EnsureBuildDiskHeadroom(ctx); err != nil {

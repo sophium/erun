@@ -3,8 +3,8 @@
 # `length(null)` aborts outright and `null != ""` is *true*, silently selecting
 # the wrong branch of a guard. A wrapper module cannot conditionally omit an
 # argument in HCL, so "use this module's default" has to be expressible as null
-# -- otherwise every wrapper must duplicate the default and can drift from it
-# (#1161). Every optional input therefore declares `default = null` and resolves
+# -- otherwise every wrapper must duplicate the default and can drift from it.
+# Every optional input therefore declares `default = null` and resolves
 # its effective value exactly once here.
 #
 # The test is `== null`, deliberately not coalesce(): coalesce skips empty
@@ -282,7 +282,7 @@ locals {
 # no-op. The whole mechanism depends on the Corefile importing
 # /etc/coredns/custom/*.server; on a distribution or a hand-edited Corefile
 # without that import, the ConfigMap applies cleanly, this module reports
-# success, and in-cluster resolution is completely unchanged (#1165). Since the
+# success, and in-cluster resolution is completely unchanged. Since the
 # failure it prevents only shows up at certificate issuance or renewal, that
 # false success can go unnoticed for weeks.
 data "kubernetes_config_map" "coredns" {
@@ -300,12 +300,9 @@ data "kubernetes_config_map" "coredns" {
 #   * this resource owns the object's EXISTENCE and nothing inside it, and
 #   * kubernetes_config_map_v1_data below owns exactly one key.
 #
-# The previous shape owned the whole object, which made the module's own
-# documented remedy destructive: it told an operator with a hand-applied
-# coredns-custom to `terraform import` it, and the very next apply then pruned
-# every key the module did not know about (#1165). ignore_changes on data is
-# what stops that -- without it this resource's (empty) data map is
-# authoritative and prunes on every apply.
+# ignore_changes on data keeps an imported, hand-applied coredns-custom intact:
+# without it this resource's (empty) data map is authoritative and prunes every
+# key the module does not own on every apply.
 #
 # Set manage_coredns_custom_configmap = false on a cluster where something else
 # owns the object's lifecycle; the module then manages only its own key and
@@ -365,8 +362,8 @@ resource "kubernetes_config_map_v1_data" "coredns_forward" {
   }
 }
 
-# The forward used to be one resource owning the whole ConfigMap. Renaming it
-# without this would destroy coredns-custom and recreate it, which on the
+# Carries state from the old coredns_forward address. Without it the rename
+# would destroy coredns-custom and recreate it, which on the
 # platform's own cluster is a DNS outage window for every name the forward
 # serves. The moved block carries the existing object into its new address
 # instead, and the v1_data resource then adopts the key it already contains.

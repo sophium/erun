@@ -2,11 +2,11 @@ import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../../../pages/index.js';
 
-// Regression for #1767: FitAddon.fit() applied whatever the container
-// proposed, even a container caught mid layout-change reporting a couple of
-// columns (the report's trigger was the sidebar going 220px -> 280px). xterm
-// rewraps scrollback at whatever width it's resized to, so that one bad fit
-// permanently mangled everything already on screen. The guard (safeFit,
+// FitAddon.fit() applies whatever the container proposes, even a container
+// caught mid layout-change reporting a couple of columns (e.g. the sidebar
+// going 220px -> 280px). xterm rewraps scrollback at whatever width it's
+// resized to, so one bad fit permanently mangles everything already on
+// screen. The guard (safeFit,
 // erun-ui/frontend/src/app/terminalFit.ts) skips a fit whose proposal is too
 // small to trust; this spec forces the pane's real FitAddon parent through
 // exactly that near-zero state and proves the skip, the later recovery once
@@ -25,7 +25,7 @@ import type { AppShell } from '../../../pages/index.js';
 // that is merely slow reds the step with the test's own clock unspent. The
 // held-emit case at the end of this file reproduces that; `withTestBudget()`
 // points the poll at the budget its test declared, where a viewport that never
-// updates still fails -- now at that deadline.
+// updates still fails.
 test.describe('terminal fit guard against a near-zero container (#1767)', () => {
   test('a near-zero container mid-resize is skipped and the buffer survives; the next real size retries it', async ({
     app,
@@ -87,9 +87,8 @@ test.describe('terminal fit guard against a near-zero container (#1767)', () => 
   // discriminates -- so the suite pays seconds here rather than the tens a
   // genuinely loaded machine would. The hold is injected at the bridge's own
   // POST rather than by loading the machine, and the anchor is staged only
-  // after the gate is armed, so the viewport provably cannot show it early:
-  // pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused, post-fix it passes at the emit's real arrival.
+  // after the gate is armed, so the viewport provably cannot show it early; a
+  // poll capped at the 10s default would red here with budget unspent.
   test('output that lands past the step cap still reaches the viewport', async ({
     app,
     page,
@@ -149,10 +148,7 @@ function parseInvoke(req: Request): InvokeCall | null {
 //
 // No timeout of its own, so the wait resolves against the budget the enclosing
 // test declared -- the clock it would otherwise get. The whole of what this
-// step waits for is the 40ms resize debounce plus one loopback ResizeSession,
-// and the 60s it used to carry sat outside the 30s test it was nested in: it
-// could never fire, and it was fifteen times the duration of the entire test
-// on a quiet box.
+// step waits for is the 40ms resize debounce plus one loopback ResizeSession.
 function waitForNextResizeSession(page: Page): Promise<Request> {
   return page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession');
 }

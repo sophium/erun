@@ -22,7 +22,7 @@ func TestBootstrapEnvironmentScriptDefaultsToInCluster(t *testing.T) {
 	}
 }
 
-// TestBootstrapEnvironmentScriptTargetsRemoteContext locks the #1112 kubeconfig
+// TestBootstrapEnvironmentScriptTargetsRemoteContext locks the kubeconfig
 // shape for a placed environment: kubectl config commands (never a hand-rolled
 // YAML heredoc interpolating the context name/server URL, which an operator-
 // authored context name could otherwise inject into) and the admin token read

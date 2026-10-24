@@ -351,7 +351,7 @@ func containsOrchestratorID(ids []string, id string) bool {
 
 // relaunchDesktopAppDetached spawns a fresh copy of this desktop binary/bundle,
 // detached so it survives this process exiting. It reuses the shared
-// eruncommon.DesktopAppCommand so the launch matches `erun app`.
+// core.DesktopAppCommand so the launch matches `erun app`.
 func relaunchDesktopAppDetached() error {
 	executable, err := os.Executable()
 	if err != nil {

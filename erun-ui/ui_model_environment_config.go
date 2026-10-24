@@ -33,7 +33,7 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
-// uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
+// uiContainerRegistryEntry mirrors config.ContainerRegistryEntry for the
 // desktop registry-list editor. Roles carry the value set build/from/to/deploy
 // but ride as plain strings because RegistryRole is a string alias at the Wails
 // boundary.
@@ -47,7 +47,7 @@ type uiContainerRegistryEntry struct {
 	Roles   []string                    `json:"roles"`
 }
 
-// uiContainerRegistryCluster mirrors eruncommon.ClusterRegistry for the desktop
+// uiContainerRegistryCluster mirrors config.ClusterRegistry for the desktop
 // registry-list editor, plus a Label the frontend shows verbatim.
 type uiContainerRegistryCluster struct {
 	Service   string `json:"service"`
@@ -94,7 +94,7 @@ type uiEnvironmentConfig struct {
 	RuntimeRegistry string `json:"runtimeRegistry,omitempty"`
 	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
 	// pod pulls its image with. Without one a private runtime image leaves the
-	// pod in ImagePullBackOff, which the app could previously cause and not fix.
+	// pod in ImagePullBackOff.
 	ImagePullSecrets []string           `json:"imagePullSecrets,omitempty"`
 	RuntimePod       uiRuntimePodConfig `json:"runtimePod"`
 	SSHD             uiSSHDConfig       `json:"sshd"`
@@ -103,7 +103,7 @@ type uiEnvironmentConfig struct {
 	ClaudeDefaults   uiClaudeDefaults   `json:"claudeDefaults"`
 	AITool           string             `json:"aiTool,omitempty"`
 	// AILaunchSignature is the command the environment's AI tab launches with
-	// for the persisted config, computed by the same eruncommon resolution the
+	// for the persisted config, computed by the same open.AISessionLaunchCommand the
 	// launch uses (gateway, model, effort, Remote Control). A save whose value
 	// changed reopens the open AI tabs; deciding that here rather than from a
 	// copy of the rules in the frontend keeps the two from disagreeing. Read
@@ -132,11 +132,11 @@ type uiEnvironmentConfig struct {
 	DeployComponents []string `json:"deployComponents,omitempty"`
 	// Hosted is the platform row this environment corresponds to, when it has
 	// one. Nil means the environment is not marked as hosted. See
-	// eruncommon.HostedEnvironment.
+	// config.HostedEnvironment.
 	Hosted *uiHostedEnvironment `json:"hosted,omitempty"`
 }
 
-// uiHostedEnvironment is the desktop's view of eruncommon.HostedEnvironment:
+// uiHostedEnvironment is the desktop's view of config.HostedEnvironment:
 // which platform row this local environment corresponds to, and how far the
 // local copy has fallen behind the definition that row holds.
 type uiHostedEnvironment struct {
@@ -161,7 +161,7 @@ type uiHostedEnvironment struct {
 	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
 }
 
-// uiHostedDefinitionLocalChange mirrors eruncommon.HostedDefinitionLocalChange:
+// uiHostedDefinitionLocalChange mirrors config.HostedDefinitionLocalChange:
 // whether this machine's portable settings have moved since the marker last
 // recorded a transfer. It is the offline half of the marker panel — no
 // platform read, no button — which is what makes a change made while the
@@ -181,7 +181,7 @@ type uiHostedDefinitionDrift struct {
 	PlatformRevision int  `json:"platformRevision"`
 	Behind           bool `json:"behind"`
 	// Describe is the operator-facing sentence, worded once in
-	// eruncommon.HostedDefinitionDrift.Describe so the CLI and the desktop
+	// config.HostedDefinitionDrift.Describe so the CLI and the desktop
 	// cannot phrase the same state two ways.
 	Describe string `json:"describe"`
 	// Error is set when the comparison could not be made; it states what could

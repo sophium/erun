@@ -52,7 +52,7 @@ func testListRuntimeVersionLineStockErunLine(t *testing.T) {
 }
 
 func testListRuntimeVersionLineReleaseNameDisagreesWithImage(t *testing.T) {
-	// erun#1746's reported trap: the tenant's own frs-devops release is
+	// The trap: the tenant's own frs-devops release is
 	// running the stock erun-devops image (a leftover explicit override,
 	// or a deploy that never needed a tenant-specific image). The line is
 	// still "erun" -- that is genuinely what is running -- but flagged

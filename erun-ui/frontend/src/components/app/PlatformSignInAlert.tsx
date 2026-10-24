@@ -8,17 +8,17 @@ import { tenantNeedsSignIn } from '@/app/platformSignIn';
 
 import { InlineAlert } from './InlineAlert';
 
-// PlatformErrorAlert is InlineAlert plus the one thing #1390 found four
-// separate dead ends missing: when the platform reports the signed-in
-// identity is no longer good, the fix is a "Log in" click away — the same
-// control the sidebar's cloud alias row already offers (#1390) — so it
+// PlatformErrorAlert is InlineAlert plus a sign-in action: when the platform
+// reports the signed-in identity is no longer good, the fix is a "Log in"
+// click away — the same control the sidebar's cloud alias row already offers
+// — so it
 // renders right beside the message instead of leaving the operator to find
-// that control on their own. Every other message stays exactly what it was:
-// InlineAlert with no action, which is correct for a remedy only a person can
+// that control on their own. Every other message stays plain InlineAlert with
+// no action, which is correct for a remedy only a person can
 // carry out (e.g. "ask an administrator").
 //
 // A successful sign-in on its own leaves this exact surface rendered from the
-// stale state that produced it (#1392) — the operator sees the identical
+// stale state that produced it — the operator would see the identical
 // error and button after the problem is already fixed. onRecovered is the
 // caller's own re-fetch or error-clear for whatever produced `message`, so a
 // successful sign-in actually resolves what's on screen instead of just
@@ -48,7 +48,7 @@ export function PlatformErrorAlert({
 // — not just the one that prompted the login. It only calls onRecovered once
 // the sign-in itself reports success; a failed sign-in says so right here
 // instead of silently leaving the same message and button on screen, which is
-// the identical trap one level down (#1392).
+// the identical trap one level down.
 // SignInAction is also reused directly by TenantPlatformState.tsx for the
 // dashboard's own not-signed-in state, which needs the exact same sign-in +
 // recover behavior beside a different (typed-state) message.

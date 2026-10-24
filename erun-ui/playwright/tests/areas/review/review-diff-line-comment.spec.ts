@@ -8,9 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// Starting a new top-level review thread from a diff line is what
-// ReviewDetailDialog.Comments.tsx used to defer for exactly this reason: only
-// the diff panel knows which line was clicked. The Go side
+// A new top-level review thread starts from a diff line because only the diff
+// panel knows which line was clicked. The Go side
 // (CreateReviewComment) is covered by erun-ui/tenant_review_write_test.go;
 // these specs cover the desktop's own precondition gating and the happy path.
 //
@@ -171,7 +170,7 @@ function routeLoadTenantDashboard(
 // spec is testing: opening an environment auto-spawns its AI tab
 // (ensureDefaultEnvTabs), which resolves either into an AI tab or -- if the
 // environment's activity lease is already held -- the occupancy prompt
-// (erun#1221). These tests care about the diff panel, not the AI tab, so race
+// These tests care about the diff panel, not the AI tab, so race
 // on whichever the spawn actually produces and clear the prompt out of the
 // way rather than letting it block a later click.
 async function dismissAIOccupancyPromptIfShown(
@@ -259,7 +258,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // Unlike the other two blocked reasons (checked below), this one names a
     // destination on a different surface -- so the popover carries a real
     // action to get there in one click, rather than leaving the reader to
-    // find the tenant dashboard on their own (#1388).
+    // find the tenant dashboard on their own.
     const openReviewsTab = app.page.getByRole('button', { name: 'Open Reviews tab' });
     await expect(openReviewsTab).toBeVisible(withTestBudget());
     await openReviewsTab.click();
@@ -309,7 +308,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
         withTestBudget(),
       );
       // This blocked reason is actionable exactly where the operator already
-      // stands (commit the change), so it stays message-only (#1388).
+      // stands (commit the change), so it stays message-only.
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
@@ -353,7 +352,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
         withTestBudget(),
       );
       // Actionable exactly where the operator stands (ask for access), so no
-      // navigation button here either (#1388).
+      // navigation button here either.
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
@@ -439,14 +438,12 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
   // the affordance the reader revealed survives the re-read -- so the case
   // performs exactly one pointer movement and never re-issues the hover after
   // the panel has re-read. Re-driving the pointer is the recovery the app is
-  // supposed to supply by itself, and asserting through it would pass on the
-  // pre-fix code for the wrong reason.
+  // supposed to supply by itself, and asserting through it would pass for the
+  // wrong reason.
   //
   // The shift is injected by this spec's own LoadDiff stub answering a grown
   // diff, rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds with the reveal
-  // stranded at "0" while the pointer rests over the hunk the panel has just
-  // rendered above the row.
+  // deterministic on a quiet host.
   test('the affordance the reader revealed survives a re-read of the diff', async ({
     app,
     page,
@@ -493,11 +490,9 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
   // panel state rather than left to the row's own `:hover`: a reveal that
   // outlived the reader's own pointer for good would be its own defect, so the
   // pointer moving is what re-derives it -- from whatever is under it now, not
-  // from where it used to be. After a re-read has moved the row that means the
-  // line under the pointer decides, which is the state the panel starts from
-  // and the one the reader can act on. The case reads `1` across the re-read
-  // before it moves at all, so it fails on the unfixed code for the reason the
-  // case above fails, and then pins what recovery from there looks like.
+  // from where it was. After a re-read has moved the row, the line under the
+  // pointer decides. The case reads `1` across the re-read before it moves at
+  // all, then pins what recovery from there looks like.
   test('the affordance is re-observed when the panel re-renders under the pointer', async ({
     app,
     page,
@@ -552,10 +547,8 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
   // revealed, so it is neither the one the held reveal lights nor the one it
   // takes anything from.
   //
-  // Measured, so the case does not overclaim: on the unfixed code the first
-  // half is deterministically red -- the revealed section is carried down by
-  // the file above it and its row loses `:hover` -- which is the strand this
-  // branch exists to fix, in the shape that puts a real added line where the
+  // The revealed section is carried down by the file above it and its row
+  // loses `:hover`, in the shape that puts a real added line where the
   // pointer is resting rather than a `meta` row.
   test('the affordance the reader revealed survives a reflow that brings another file under the pointer', async ({
     app,
@@ -608,14 +601,12 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
   // The line-comment affordance exists only once the panel has rendered the
   // diff LoadDiff answered with, and the assertions on it carry no timeout of
   // their own: `toHaveCSS` resolves to expect's 10s default rather than the
-  // budget this test declares. A read that is merely slow therefore reds the
-  // step with the test's own clock unspent.
+  // budget this test declares, so a merely slow read must not fail the step.
   //
   // The hold below is deliberately just past that 10s default: the smallest
   // delay that discriminates. It is injected at a named RPC (this spec's own
   // LoadDiff stub) rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
-  // with 20s of its own budget unused.
+  // deterministic on a quiet host.
   test('a diff read that lands past the step cap is waited out, not cut off', async ({
     app,
     page,

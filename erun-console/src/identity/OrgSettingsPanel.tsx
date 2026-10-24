@@ -211,7 +211,7 @@ function OrgSettingsBody({
 }
 
 // OrgSettingsPanel is the console's view of the platform IdP org settings an
-// operator actually changes (issue #1209): MFA requirement, password
+// operator actually changes: MFA requirement, password
 // complexity, and the org's verified domains (read-only). Only rendered for
 // an OPERATIONS tenant — see App.tsx.
 export function OrgSettingsPanel({ token }: { token: string }): React.ReactElement {

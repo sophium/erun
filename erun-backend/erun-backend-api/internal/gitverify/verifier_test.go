@@ -122,8 +122,8 @@ func TestRemoteVerifierIsAncestorForDirectAncestor(t *testing.T) {
 	}
 }
 
-// TestRemoteVerifierIsAncestorTolerantOfCommitsInBetween is the property
-// erun#2250 depends on: an ancestor commit stays an ancestor of a
+// TestRemoteVerifierIsAncestorTolerantOfCommitsInBetween pins that an
+// ancestor commit stays an ancestor of a
 // descendant even when unrelated commits (e.g. a release's own pushes) land
 // on the branch between them, unlike a strict immediate-parent comparison.
 func TestRemoteVerifierIsAncestorTolerantOfCommitsInBetween(t *testing.T) {

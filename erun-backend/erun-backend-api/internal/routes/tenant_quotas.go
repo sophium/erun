@@ -25,7 +25,7 @@ type TenantQuotaAdminSetter interface {
 // naming another tenant), defaulted when the tenant has no row yet — the same
 // read admission itself uses. Tenant-self-service by default, unlike
 // TenantQuotaAdminSetter's SetForTenant: a quota nobody can see is a support
-// ticket (#605, #1113).
+// ticket.
 type TenantQuotaReader interface {
 	Get(ctx context.Context) (model.TenantQuota, error)
 }
@@ -37,11 +37,11 @@ type TenantQuotaRoutes struct {
 
 // setTenantQuotaRequest carries every cap explicitly: a PUT always fully
 // replaces the row, never merges. maxEnvironments may be 0 (a real "no
-// environments" cap, matching its pre-existing validation); the six resource
+// environments" cap); the six resource
 // caps must be positive — 0 has no sane operational meaning for a namespace
 // ResourceQuota or a tenant-wide budget and almost always means the caller
 // omitted the field rather than intending to allow nothing. maxTotal* is the
-// aggregate tenant-wide ceiling (#1113), distinct from the per-environment
+// aggregate tenant-wide ceiling, distinct from the per-environment
 // ceiling above.
 type setTenantQuotaRequest struct {
 	MaxEnvironments       int `json:"maxEnvironments"`

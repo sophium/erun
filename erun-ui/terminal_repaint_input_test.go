@@ -8,8 +8,8 @@ import (
 // The AI repaint nudge shrinks the backend pty by a row and holds it. That is
 // invisible when the pane is the blank reattached screen the nudge exists to
 // redraw, and destructive when someone is typing into it: the TUI reflows the
-// line being edited, and the submitted prompt came out holding several
-// concatenated snapshots of it (#1330). These tests pin that a pane receiving
+// line being edited, and the submitted prompt holds several concatenated
+// snapshots of it. These tests pin that a pane receiving
 // input is left alone, and -- the control -- that a quiet pane still gets its
 // repaint, so the guard cannot pass by disabling the feature.
 
@@ -68,9 +68,9 @@ func waitForResizes(t *testing.T, session *stubTerminalSession, n int, within ti
 	return false
 }
 
-// TestRepaintSessionSkipsPaneBeingTypedInto covers the tab-switch half of
-// #1330: RepaintSession fires on EVERY switch into an AI pane, so switch-then-
-// type is the reachable sequence and it must not resize the pty underneath it.
+// TestRepaintSessionSkipsPaneBeingTypedInto covers the tab switch:
+// RepaintSession fires on EVERY switch into an AI pane, so switch-then-type
+// is the reachable sequence and it must not resize the pty underneath it.
 func TestRepaintSessionSkipsPaneBeingTypedInto(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -125,12 +125,10 @@ func newOrchestratorTerminalForRepaint(app *App, serial int) (*managedTerminal, 
 	return managed, session
 }
 
-// TestRepaintSessionNudgesOrchestratorPane pins the real chain behind #1330's
-// follow-up: an orchestrator pane runs the same main-screen TUI (claude) an AI
-// tab does, but isAITabKind only recognizes sessionKindAI/sessionKindContributeAI,
-// so RepaintSession's WINCH nudge was dead code for it -- the entire Go half of
-// #1332 never ran for an orchestrator. This must fail against that code, and
-// pass once RepaintSession gates on needsWINCHRepaint instead.
+// TestRepaintSessionNudgesOrchestratorPane: an orchestrator pane runs the same
+// main-screen TUI (claude) an AI tab does, but isAITabKind only recognizes
+// sessionKindAI/sessionKindContributeAI, so RepaintSession must gate on
+// needsWINCHRepaint for the WINCH nudge to reach it.
 func TestRepaintSessionNudgesOrchestratorPane(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})

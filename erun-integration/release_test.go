@@ -156,14 +156,12 @@ func testReleaseDryRunMainWithDevelopEmitsStablePlan(t *testing.T) {
 }
 
 func testReleaseDryRunMainWithRemoteOnlyDevelopEmitsStablePlan(t *testing.T) {
-	// Regression for erun#2013. A checkout that only ever fetched
+	// A checkout that only ever fetched
 	// origin/develop as a remote-tracking ref (no local `develop` branch)
 	// must still get the stable release's sync-develop and both-branch
 	// push stages: `git checkout develop` resolves a remote-only ref into
-	// a new local tracking branch on its own, so the stages run fine —
-	// checking refs/heads alone used to treat this the same as "no
-	// develop branch exists" and silently dropped both stages with no
-	// trace and no refusal.
+	// a new local tracking branch on its own, so checking refs/heads alone
+	// would silently drop both stages.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	remoteRoot := filepath.Join(setup.Home, "origin.git")
@@ -206,7 +204,7 @@ func testReleaseDryRunBuildReleaseExportsAndUploadsLinuxPackages(t *testing.T) {
 	// platforms inside the publish, before anything is public, and attaches
 	// the exported .deb files to the GitHub release only after the tag push.
 	// The host is pinned to darwin: packages build inside docker, so a
-	// release no longer needs a Linux host with dpkg-deb.
+	// release needs no Linux host with dpkg-deb.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	linuxDir := filepath.Join(setup.Cwd, "erun-devops", "linux")
@@ -307,8 +305,7 @@ func testReleaseDryRunMainTracesAnonymousPullabilityProbeForTerraformReferencedI
 	fixture.RunGit(t, setup.Cwd, "add", "erun-devops")
 	fixture.RunGit(t, setup.Cwd, "commit", "-m", "add terraform module image reference")
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -457,14 +454,10 @@ func testReleaseDryRunForceIncludesTagDeletionForStaleReleaseTag(t *testing.T) {
 }
 
 func testReleaseDryRunSkipsReleaseRootsInGitignoredTrees(t *testing.T) {
-	// Regression. The release-root walker used to descend
-	// into third-party trees and treat every VERSION file as a
-	// candidate. In a contribute clone where `yarn install` ran in
-	// `erun-docs/`, `erun-docs/node_modules/lunr/VERSION` was
-	// picked up alongside `erun-devops/VERSION`, and resolution
-	// failed with "multiple release roots found under project
-	// root". The walker now honors .gitignore (root + nested), so
-	// any VERSION file in an ignored tree drops out of discovery.
+	// The release-root walker honors .gitignore (root + nested), so a
+	// VERSION file in an ignored tree such as
+	// `erun-docs/node_modules/lunr/VERSION` drops out of discovery instead
+	// of yielding "multiple release roots found under project root".
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	docsDir := filepath.Join(setup.Cwd, "erun-docs")
@@ -484,12 +477,9 @@ func testReleaseDryRunSkipsReleaseRootsInGitignoredTrees(t *testing.T) {
 }
 
 func testReleaseDryRunWithUntrackedFileReportsWorktreeClean(t *testing.T) {
-	// Regression. release used to call
-	// `git status --porcelain` with no flags and treat any output as
-	// dirty, so an untracked .idea/ (or any other unignored
-	// IDE/generator droppings) blocked release in a real run.
-	// release publishes HEAD, not the worktree, so untracked files
-	// must not gate the flow. The dry-run trace now exposes the
+	// release publishes HEAD, not the worktree, so an untracked .idea/ (or
+	// other unignored IDE/generator droppings) must not gate the flow. The
+	// dry-run trace exposes the
 	// precondition outcome ("release: worktree clean = true") so
 	// the integration suite can lock the behavior.
 	setup := env.New(t)
@@ -509,8 +499,8 @@ func testReleaseDryRunWithUntrackedFileReportsWorktreeClean(t *testing.T) {
 func testReleaseDryRunInARuntimePodClaimsTheReleaseVersionLease(t *testing.T) {
 	// Inside a runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT injected by the
 	// chart), release claims an exclusive, version-scoped activity lease
-	// before doing anything else — the erun#1619 fix for two orchestrators
-	// racing the same release. No other release scenario sets these two
+	// before doing anything else, so two orchestrators cannot race the same
+	// release. No other release scenario sets these two
 	// vars, so this is the only golden that shows the claim trace; every
 	// other release scenario is exercising the off-pod, single-caller path
 	// where the claim is a no-op.
@@ -542,8 +532,7 @@ func testReleaseDryRunRefusesToReleaseAnImageItWouldNotPublish(t *testing.T) {
 
 	componentCwd := filepath.Join(setup.Cwd, "erun-devops", "docker", "api")
 	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// owns live in `build --release`, which is what this asserts.
 	result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: releaseEnv(t, setup)})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit for a release that cannot publish every image, got 0: %s", result.Combined)
@@ -551,7 +540,7 @@ func testReleaseDryRunRefusesToReleaseAnImageItWouldNotPublish(t *testing.T) {
 	golden.Equal(t, "release/dry_run_refuses_to_release_an_image_it_would_not_publish", normalize.Apply(result.Combined))
 }
 
-// releaseEnv declares the docker stub every release scenario now needs: release
+// releaseEnv declares the docker stub every release scenario needs: release
 // resolves the build execution that publishes the version, so it inspects the
 // local image store for fingerprint cache tags. The stub reports no local image
 // so the plan consistently shows a rebuild.
@@ -601,7 +590,7 @@ func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
 	stubDockerWithManifestTracking(t, stubs)
 	fixture.StubBinary(t, stubs, "helm", "")
 	envVars := fixture.StubEnv(stubs, "docker", "helm")
-	// #1201: the registry-credential preflight refuses up front when no
+	// The registry-credential preflight refuses up front when no
 	// ghcr.io credential resolves at all. A real publish toolchain always has
 	// one; GH_TOKEN is the fixture-side stand-in so these scenarios keep
 	// exercising what happens once that check passes.

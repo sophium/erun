@@ -98,8 +98,7 @@ func TestBuildDeployJobSpecWithNamespaceQuota(t *testing.T) {
 // TestBuildDeployCommandWithRuntimeImageOverride: a bootstrap deploy
 // threads --runtime-image at the in-Job `erun deploy` so the installed runtime
 // chart matches the canonical image the Job's own container runs, rather than
-// resolving the tenant's own (never-published) artifacts. Unset leaves the
-// command exactly as it was before this existed.
+// resolving the tenant's own (never-published) artifacts. Unset omits the flag.
 func TestBuildDeployCommandWithRuntimeImageOverride(t *testing.T) {
 	params := testParams()
 	params.RuntimeImageOverride = "ghcr.io/sophium/erun-devops:1.0.149"
@@ -198,7 +197,7 @@ func TestExposeChainScriptIsBestEffort(t *testing.T) {
 
 // TestExposeFailureFromOutput: the marker line is how a *successful* Job
 // (deploy landed, expose did not) hands back the reason, since the Job's own
-// outcome no longer reflects an expose failure.
+// outcome does not reflect an expose failure.
 func TestExposeFailureFromOutput(t *testing.T) {
 	output := "==> Deployed acme/prod 1.2.3 in 4s\n" +
 		"audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
@@ -433,7 +432,7 @@ func TestRunWatchesTheDeployJob(t *testing.T) {
 	}
 }
 
-// TestRunProvisionsThePlacementSecretBeforeTheJob locks #1112's ordering: a
+// TestRunProvisionsThePlacementSecretBeforeTheJob locks the ordering: a
 // deploy targeting a remote context must have its credential Secret in place
 // before the Job that reads it via secretKeyRef is created, or the Job's
 // container fails to start on a missing Secret. The pre-seeded Job here

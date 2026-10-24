@@ -7,7 +7,7 @@ import (
 )
 
 // Context is the per-tenant system of record for a managed cloud cluster,
-// mirroring eruncommon.CloudContextConfig. The k3s admin token is a server
+// mirroring erun-common's config.CloudContextConfig. The k3s admin token is a server
 // secret, deliberately excluded from this read model.
 type Context struct {
 	bun.BaseModel      `bun:"table:contexts,alias:c"`
@@ -23,7 +23,7 @@ type Context struct {
 	DiskType           string `json:"diskType,omitempty" bun:"disk_type,nullzero"`
 	DiskSizeGB         int    `json:"diskSizeGb,omitempty" bun:"disk_size_gb,nullzero"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
-	// MaxEnvironments is this context's placement capacity (#1112): how many
+	// MaxEnvironments is this context's placement capacity: how many
 	// environments its cluster may host. Part of the per-instance placement
 	// inventory (cluster + credentials + capacity) alongside PublicIP/
 	// KubernetesContext and the credential custodied in context_credentials.

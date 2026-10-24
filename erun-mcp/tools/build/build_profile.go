@@ -17,7 +17,7 @@ type BuildProfileInput struct {
 // set: a recent-builds listing (Records, Record left empty), or one build's
 // full step tree (Record, Records left empty). Folding both into one result
 // type keeps this a single tool rather than a list/show pair, matching how
-// few fields either shape has. Record is a raw eruncommon.TimingRecord
+// few fields either shape has. Record is a raw core.TimingRecord
 // captured verbatim rather than the typed struct: TimingStepJSON nests itself
 // (a step's own Steps field), and the SDK's schema reflector cannot compute
 // an output schema for a directly self-referential type -- capabilities.go's

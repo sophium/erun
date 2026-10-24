@@ -10,20 +10,19 @@ import (
 // owner/repo#number, the form jobs.issue_ref already uses.
 //
 // The two pipelines that carry work spell an issue differently. A job states
-// its issue outright, in that canonical form. A review used to state nothing
-// at all, and its link was the bare number its source branch names under the
-// documented branch convention; a declared reference is now recorded on the
-// review, but the branch-derived one still has no repository in it. A view
-// spanning both needs one key to join them on, and a bare number is not one:
-// two repositories a tenant serves can each have an issue with the same
+// its issue outright, in that canonical form. A review may record a declared
+// reference, but its branch-derived link is the bare number its source branch
+// names under the documented branch convention, with no repository in it. A
+// view spanning both needs one key to join them on, and a bare number is not
+// one: two repositories a tenant serves can each have an issue with the same
 // number, and the number alone says which of them nothing about.
 //
 // The join is therefore the review's own recorded repository identity
 // (RepositoryIdentity) reduced to the owner/repo slug an issue is addressed
-// with, plus the number the branch names. Where that slug cannot be read out
-// of the identity -- a file remote, a local path, a forge address with no
-// owner/repo path -- the view is told so rather than handed a guess: the
-// answer is "no canonical key", which renders as work that names no issue.
+// with, plus the number the branch names. Where that slug cannot be read out of
+// the identity -- a file remote, a local path, a forge address with no
+// owner/repo path -- the view is told so rather than handed a guess: the answer
+// is "no canonical key", which renders as work that names no issue.
 
 // canonicalIssueKeyPattern is the canonical spelling: two non-empty path
 // segments and a number, with no whitespace anywhere. It is the shape the
@@ -35,15 +34,15 @@ var canonicalIssueKeyPattern = regexp.MustCompile(`^[^/\s#]+/[^/\s#]+#\d+$`)
 // source branch carries, with the repository left to be supplied.
 var bareIssueNumberPattern = regexp.MustCompile(`^\d+$`)
 
-// RepositorySlug reduces a canonical repository identity
-// (eruncommon.RepositoryIdentity) to the owner/repo an issue on it is
-// addressed with, and reports false when the identity names no such pair.
+// RepositorySlug reduces a canonical repository identity (RepositoryIdentity)
+// to the owner/repo an issue on it is addressed with, and reports false when
+// the identity names no such pair.
 //
-// Only a remote that names a forge with exactly an owner and a repository
-// path gives one. A file remote, a local path, and a deeper path all answer
-// false rather than guessing which segments are the owner: an issue key built
-// from a guess sends a reader to an issue nobody named, which is the failure
-// the whole derivation is built to avoid.
+// Only a remote that names a forge with exactly an owner and a repository path
+// gives one. A file remote, a local path, and a deeper path all answer false
+// rather than guessing which segments are the owner: an issue key built from a
+// guess sends a reader to an issue nobody named, which is the failure the whole
+// derivation is built to avoid.
 func RepositorySlug(identity string) (string, bool) {
 	trimmed := strings.TrimSpace(identity)
 	if trimmed == "" {

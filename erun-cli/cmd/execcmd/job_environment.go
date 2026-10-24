@@ -87,7 +87,7 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, re
 // startedByJobIDForOffEnvironmentStart is what an off-environment start (this
 // call itself reaches the target through its MCP edge, which is a long-lived
 // process with no ERUN_JOB_ID of its own to inherit -- see
-// eruncommon.CurrentEnvironmentJobID) threads explicitly so the new job still
+// sharedpkg.CurrentEnvironmentJobID) threads explicitly so the new job still
 // records its real parent: an explicit params.StartedByJobID wins when the
 // caller already resolved one (e.g. a re-exec of this same path), otherwise
 // this process's own job id, if it is itself running as one, applies.

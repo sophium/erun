@@ -75,7 +75,7 @@ func TestIdentityServiceEnrollHappyPath(t *testing.T) {
 }
 
 // TestIdentityServiceEnrollFallsBackToATemporaryPasswordWithNoMail locks the
-// no-SMTP fallback (issue #1168): the platform's IdP cannot send the usual
+// no-SMTP fallback: the platform's IdP cannot send the usual
 // invite email, so Enroll must not create the usual passwordless account --
 // stuck in USER_STATE_INITIAL forever, waiting on a link nothing will ever
 // send -- and must instead report a temporary password the caller can hand

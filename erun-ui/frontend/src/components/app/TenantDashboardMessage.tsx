@@ -120,7 +120,7 @@ export function DataTable({
 
 // RelativeTime renders a scannable relative phrase ("2 days ago") with the
 // exact timestamp one hover away — nobody scans a column of absolute
-// timestamps, but the exact moment still matters and must not be lost (#1378).
+// timestamps, but the exact moment still matters and must not be lost.
 export function RelativeTime({
   value,
   className,
@@ -137,7 +137,7 @@ export function RelativeTime({
 
 // BranchArrow is the review object's "where it's headed" line — source →
 // target — shared by the reviews list row and the review detail dialog's
-// header (#1378) so the two read as one treatment. Each side middle-ellipses
+// header so the two read as one treatment. Each side middle-ellipses
 // on its own (keeping both the identifying prefix and suffix, unlike a
 // trailing "…") with the full value one hover away, so a long branch name
 // never pushes the arrow off-row or wraps the header into several lines.

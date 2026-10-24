@@ -7,10 +7,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestRuntimeImageLineMismatch pins the static half of erun#1754: comparing
-// the operative RuntimeImage against the observed RuntimeRunningImage needs
-// no live cluster read, because an image name always names its release line
-// even though a bare version number cannot.
+// TestRuntimeImageLineMismatch pins that comparing the operative RuntimeImage
+// against the observed RuntimeRunningImage needs no live cluster read, because
+// an image name always names its release line even though a bare version number
+// cannot.
 func TestRuntimeImageLineMismatch(t *testing.T) {
 	cases := []struct {
 		name         string

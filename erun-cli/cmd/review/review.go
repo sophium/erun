@@ -18,10 +18,7 @@ import (
 // NewReviewCmd builds `erun review`, the CLI's client for the erun platform's
 // collaboration API (erun-backend-api's reviews/comments/builds/merge-queue
 // routes), authenticating with the `erun`-type cloud alias `erun cloud init
-// erun` / `erun cloud login` set up. It is the client the collaboration
-// surface has always been missing (#1199): before this, the only way to
-// start a review, comment on one, or advance the merge queue from a terminal
-// or an agent was a hand-written HTTP request.
+// erun` / `erun cloud login` set up.
 func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := shared.NewCommandGroup(

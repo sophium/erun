@@ -10,9 +10,8 @@ import {
 } from '../../../fixtures/seedRoot.js';
 
 // request-invitation-dialog.spec.ts covers "Request an invitation" — the
-// RequestInvitationDialog opened from NotEnrolledState (#1682's other new
-// desktop surface, alongside tenant-dashboard-requests.spec.ts's operator
-// queue). Like tenant-dashboard-platform-state.spec.ts, this stubs the
+// RequestInvitationDialog opened from NotEnrolledState (the counterpart of
+// tenant-dashboard-requests.spec.ts's operator queue). Like tenant-dashboard-platform-state.spec.ts, this stubs the
 // __erun_invoke RPC boundary rather than a real erun-backend-api, which the
 // inert harness deliberately cannot reach; the Go side is covered by
 // erun-ui/tenant_platform_invite_requests_test.go.

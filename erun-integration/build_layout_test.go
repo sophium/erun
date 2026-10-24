@@ -100,7 +100,7 @@ func testBuildDryRunConfiguredDockerAndVersionPaths(t *testing.T) {
 func testBuildDryRunComponentAutoSelectsLoneEntry(t *testing.T) {
 	// A single components: entry auto-selects with no --component flag,
 	// exactly like today's implicit single-paths behavior. Each harness's
-	// docker/version root lives outside the shared paths: block (erun#1840's
+	// docker/version root lives outside the shared paths: block (the
 	// monorepo-of-independent-deployables shape), so without selection this
 	// harness's build would be unreachable at all.
 	setup := env.New(t)
@@ -203,8 +203,7 @@ func testBuildDryRunFromAnE2eSuiteDirectoryIsRefused(t *testing.T) {
 func testBuildDryRunComponentFlagSelectsEntry(t *testing.T) {
 	// Two components: entries declared (two independent harnesses in one
 	// monorepo); --component selects one by name, without editing the
-	// committed config — the "two operators, two harnesses, no local edit"
-	// requirement from erun#1840.
+	// committed config — two operators, two harnesses, no local edit.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -237,7 +236,7 @@ func testBuildDryRunComponentFlagSelectsEntry(t *testing.T) {
 func testBuildComponentSelectionAmbiguousErrors(t *testing.T) {
 	// More than one components: entry with no --component flag fails naming
 	// the choices, rather than silently building whichever one convention
-	// discovery happens to land on (erun#1840's acceptance criterion).
+	// discovery happens to land on.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -276,7 +275,7 @@ func testBuildComponentFlagUnknownNameErrors(t *testing.T) {
 }
 
 func testBuildDryRunPathsVersionKeepsPinnedBase(t *testing.T) {
-	// Regression: a project-global paths.version is the project-level default and
+	// A project-global paths.version is the project-level default and
 	// must NOT clobber a component's own in-build-dir VERSION. The pinned base
 	// keeps its 9.9.9 tag; a component without its own VERSION takes the
 	// configured project version (snapshotted, since it is not build-dir-local).

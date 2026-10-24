@@ -55,7 +55,7 @@ test('a fetched environment returns its own slot', () => {
   assert.deepEqual(alpha, { ...emptyEnvDiffState, diff: { marker: 'alpha' } });
 });
 
-// #1178: diffByEnv is sparse, so a key that was never fetched must fall back
+// diffByEnv is sparse, so a key that was never fetched must fall back
 // to the shared empty slot rather than throwing or reading undefined fields.
 test('a never-fetched environment falls back to the empty slot without throwing', () => {
   const store = storeWith({});

@@ -3,18 +3,15 @@ import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// #1087: an orchestrator's sidebar spinner used to be lit only by the
-// ai-activity Wails event, at the single false→true transition — and
-// orchestratorInfo, the list snapshot the frontend boots and re-renders from,
-// carried no busy flag at all. Anything that lost that one event (a fresh
-// mount, a window reopen, a listener that attached a beat late) left the row
-// reading idle for however long the rest of the turn ran.
+// An orchestrator's sidebar spinner must not depend only on the ai-activity
+// Wails event's single false→true transition: anything that loses that one
+// event (a fresh mount, a window reopen, a listener that attached a beat late)
+// would leave the row reading idle, so orchestratorInfo's list snapshot
+// carries the busy flag too.
 //
-// This spec drives the fix's frontend half directly: it stubs ListOrchestrators
-// over /__erun_invoke to answer busy without ever emitting the ai-activity
-// event, then reboots the app (a real fresh mount, not a simulated one) and
-// asserts the row still spins. Before the fix this would read idle, because
-// nothing but that missing event could have set it. The event path itself
+// This spec stubs ListOrchestrators over /__erun_invoke to answer busy without
+// ever emitting the ai-activity event, then reboots the app (a real fresh
+// mount, not a simulated one) and asserts the row still spins. The event path itself
 // (ai-activity flipping the spinner while the app is already running) is
 // already covered by sidebar-ai-activity.spec.ts; the backend's own re-emit
 // timing is covered by the Go tests in erun-ui/session_heartbeat_test.go
@@ -70,9 +67,9 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
     await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
   });
 
-  // Hovering the busy spinner used to reveal nothing, unlike every other
-  // spinner in the sidebar (the shell indicator three lines below it, and
-  // every environment row's own activity popover).
+  // Hovering the busy spinner reveals a tooltip, like every other spinner in
+  // the sidebar (the shell indicator three lines below it, and every
+  // environment row's own activity popover).
   test('hovering the busy spinner reveals a tooltip naming the orchestrator', async ({
     app,
     page,
@@ -93,8 +90,7 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
   //
   // The direction is what gives the assertion meaning: the spinner really is
   // animating beforehand, so this cannot pass vacuously against a spinner that
-  // never animated (chromium 153, the version this branch pins, is what made
-  // the addStyleTag that used to do this freeze stall).
+  // never animated.
   test('hovering the busy spinner freezes its spin before the hover', async ({ app, page }) => {
     await stubOrchestratorList(page, true);
     await app.reboot();

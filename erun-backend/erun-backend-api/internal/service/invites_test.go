@@ -65,7 +65,7 @@ func testConsumedInvite() repository.ConsumedInvite {
 	}
 }
 
-// TestAcceptInviteHappyPath locks the core of #1483's accept flow: a
+// TestAcceptInviteHappyPath locks the core accept flow: a
 // consumed invite's tenant and issuer drive the IdP identity and the erun
 // user mapping, bound to the invite's own target tenant rather than any
 // caller session (there is none).
@@ -116,8 +116,8 @@ func TestAcceptInviteReportsHalfLandedFailure(t *testing.T) {
 	}
 }
 
-// TestAcceptInviteRefusesEmailMismatch locks the pinned-email option (#1483
-// item 2): a request that supplies a different email than the invite was
+// TestAcceptInviteRefusesEmailMismatch locks the pinned-email option: a
+// request that supplies a different email than the invite was
 // pinned to is refused before ever reaching the identity provider.
 func TestAcceptInviteRefusesEmailMismatch(t *testing.T) {
 	pinned := testConsumedInvite()

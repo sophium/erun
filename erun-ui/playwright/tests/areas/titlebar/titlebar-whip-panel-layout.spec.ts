@@ -8,11 +8,10 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// erun#1748: with a realistic population (the field report: 7 orchestrators,
-// 9+ environments spread across the operator's real tenants), the whip
-// popover's target list fills its own 40vh scroll region, and the primary
-// action used to sit below that scroll region -- reachable only by scrolling
-// the whole panel. This spec builds that population directly (rather than
+// With a realistic population (7 orchestrators, 9+ environments across
+// several tenants), the whip popover's target list fills its own 40vh scroll
+// region, and the primary action must not sit below it, reachable only by
+// scrolling the whole panel. This spec builds that population directly (rather than
 // depending on whatever another spec in this worker happened to leave
 // behind) so the assertions hold regardless of run order, and proves: the
 // action is reachable with no scroll, it still carries the selected-target
@@ -72,8 +71,8 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // This spec's seed (9 environments plus 7 orchestrators written in one
     // batch) is far larger than any other waitForSeededRow caller's, so a
     // reload here genuinely costs more to resolve and render. No explicit
-    // budget: the helper's default is now this test's own declared 90s, and a
-    // 60s number typed here would only put a cap under it again.
+    // budget: the helper's default is this test's own declared 90s, and a
+    // smaller number typed here would only put a cap under it.
     await waitForSeededRow(app, tenant, lastEnvironment);
 
     await app.titlebar.openWhipPanel();

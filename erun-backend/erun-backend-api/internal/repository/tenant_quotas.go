@@ -16,12 +16,12 @@ const DefaultMaxEnvironments = 10
 
 // DefaultMaxCPUMillicores/MemoryMB/StorageGB are the resource caps for a
 // tenant that has no tenant_quotas row yet, derived from
-// eruncommon.MinimumRuntimeNamespaceQuota rather than restated as independent
+// config.MinimumRuntimeNamespaceQuota rather than restated as independent
 // literals: they are exactly the floor a stock runtime environment's own pod
 // needs (the erun-devops and erun-dind containers' limits summed, plus its
 // PVCs), so a tenant with no quota row set can still provision one — and if
 // the chart's pod shape changes, this default moves with it instead of
-// quietly falling back below the new floor (#1061).
+// quietly falling back below the new floor.
 var (
 	DefaultMaxCPUMillicores int
 	DefaultMaxMemoryMB      int
@@ -33,7 +33,7 @@ func init() {
 	DefaultMaxCPUMillicores = int(cpu)
 	DefaultMaxMemoryMB = int(memory)
 	DefaultMaxStorageGB = int(storage)
-	// The aggregate default (#1113) is derived from the other two defaults
+	// The aggregate default is derived from the other two defaults
 	// rather than restated as an independent literal: it is exactly the
 	// budget needed to run DefaultMaxEnvironments environments at the
 	// default per-environment size, so a tenant with no quota row set can
@@ -45,7 +45,7 @@ func init() {
 }
 
 // DefaultMaxTotalCPUMillicores/MemoryMB/StorageGB are the aggregate tenant-wide
-// caps (#1113) for a tenant that has no tenant_quotas row yet.
+// caps for a tenant that has no tenant_quotas row yet.
 var (
 	DefaultMaxTotalCPUMillicores int
 	DefaultMaxTotalMemoryMB      int

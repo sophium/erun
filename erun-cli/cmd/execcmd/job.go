@@ -66,8 +66,7 @@ func newJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 }
 
 // DeprecatedTopLevelJobCmd mounts the same verb tree at the top level for one
-// release (#1246, following #1186's `job` -> `exec job` move): `erun job
-// <verb>` keeps working, with Cobra's own deprecation notice pointing callers
+// release: `erun job <verb>` keeps working, with Cobra's own deprecation notice pointing callers
 // at `erun exec job <verb>` before this alias is removed.
 func DeprecatedTopLevelJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd := newJobCmd(resolveOpen)
@@ -333,7 +332,7 @@ func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.
 // and therefore the only thing that can observe an exit status first-hand. It
 // always runs where the work runs, so it never reaches for an environment's edge.
 // Hidden: nothing invokes it directly. It is only ever re-exec'd by
-// StartEnvironmentJob (erun-common/job_supervisor.go), which always re-execs it
+// jobspkg.StartEnvironmentJob, which always re-execs it
 // at `exec job supervise` regardless of which entry point started the job.
 func newJobSuperviseCmd() *cobra.Command {
 	var tenant string

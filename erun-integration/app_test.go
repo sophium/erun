@@ -129,7 +129,7 @@ func assertAskedExactly(t *testing.T, stub *stubDesktopControl, path, scenario s
 }
 
 // writeDesktopControlMarker stages the record erun-ui's restart control
-// server writes at startup (see erun-common/desktop_restart.go), at the same
+// server writes at startup (see erun-common/base/core/desktop_restart.go), at the same
 // path `erun app restart` resolves it from under the scenario's isolated
 // config dir.
 func writeDesktopControlMarker(t *testing.T, setup env.Setup, pid, controlPort int) {

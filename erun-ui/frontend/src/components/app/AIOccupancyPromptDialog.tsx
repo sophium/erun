@@ -29,8 +29,8 @@ function heldSince(secondsHeld: number | undefined): string {
   return `running for ${String(hours)}h${remainingMinutes ? String(remainingMinutes) + 'm' : ''}`;
 }
 
-// AIOccupancyPromptDialog is erun#1221's "confirm, don't silently start a
-// second agent": opening the AI tab found the environment already held by
+// AIOccupancyPromptDialog is "confirm, don't silently start a second agent":
+// opening the AI tab found the environment already held by
 // another job's activity lease. Starting anyway is a deliberate choice, not a
 // blocked one — there are legitimate reasons to run two (a long build in one,
 // a quick question in the other) — so this names the occupant and lets the

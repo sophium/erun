@@ -64,11 +64,10 @@ test('focus is restored when the window is already active', () => {
   assert.equal(h.count(), 3, 'all three attempts should focus an active window');
 });
 
-// #1338: a tab respawn fires whenever a session drops -- on every env stop,
+// A tab respawn fires whenever a session drops -- on every env stop,
 // idle-stop and pod replacement -- and it calls this. Focusing a DOM element in
-// a Wails webview raises the native window, so an unguarded restore pulled the
-// desktop in front of whatever the operator was actually using. This must fail
-// against the unguarded `this.terminal?.focus()` it replaces.
+// a Wails webview raises the native window, so an unguarded restore would pull
+// the desktop in front of whatever the operator was actually using.
 test('focus is never taken while another application is frontmost', () => {
   const h = harness(() => false);
   vi.advanceTimersByTime(0);
@@ -90,7 +89,7 @@ test('the guard is re-checked, so focus leaving the window mid-sequence stops it
   assert.equal(h.count(), 1, 'attempts after focus left the window must stand down');
 });
 
-// The other half of #1338, and the one document.hasFocus() cannot see: the
+// The other half, and the one document.hasFocus() cannot see: the
 // window IS active, so nothing crosses an application boundary, but the user
 // has deliberately clicked into another control. A restore exists to undo focus
 // an action destroyed, not to overrule a live choice -- yanking the caret back

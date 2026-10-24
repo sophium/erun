@@ -18,9 +18,8 @@ func newTestAppForWindowClose(t *testing.T) *App {
 	return app
 }
 
-// TestBeforeCloseBlocksWithRunningWork pins the actual "Fix" erun#1214 asks
-// for: a running deploy must block the window from closing and name itself
-// to the operator, instead of the previous unconditional `return false`.
+// TestBeforeCloseBlocksWithRunningWork pins that a running deploy blocks the
+// window from closing and names itself to the operator.
 func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()

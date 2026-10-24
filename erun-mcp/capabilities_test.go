@@ -81,7 +81,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	// diff/exec_diff and the job_*/exec_job_* pairs both appear during their
-	// rename's one-release alias window (#1186, #1246); the retired name
+	// rename's one-release alias window; the retired name
 	// authorizes as its replacement, so a read-only caller keeps it.
 	want := []string{
 		"activity_lease_list", "ai_sessions", "cloud_list", "context_list", "diff", "environment", "exec_diff",
@@ -126,7 +126,7 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 	}
 }
 
-// Operate is erun#1107's Phase 3 tier: a caller that only drives the
+// Operate is the lifecycle tier: a caller that only drives the
 // lifecycle of an environment that already exists must see exactly those
 // tools, and no more -- neither observation (it is not a wider read) nor
 // anything that decides what environments exist or runs arbitrary code.
@@ -199,8 +199,8 @@ func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
 	}
 }
 
-// environment and ai_sessions are the authenticated-edge read model erun#1105
-// needs a scoped mobile caller to reach; both must actually be reachable, not
+// environment and ai_sessions are the authenticated-edge read model a scoped
+// mobile caller needs to reach; both must actually be reachable, not
 // just listed. Calling either with no tenant/environment context resolves to
 // a business error naming the missing target, not an authorization refusal --
 // proof the call reached the handler rather than being turned away at
@@ -355,7 +355,7 @@ func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T)
 }
 
 // bearerRoundTripper injects a fixed bearer token on every request -- the
-// transport-level equivalent of what a real MCP client (console, or erun#1107's
+// transport-level equivalent of what a real MCP client (console, or a
 // mobile client) sets on its own HTTP client.
 type bearerRoundTripper struct {
 	token string
@@ -375,7 +375,7 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // scoped correctly by the production wiring (newHTTPHandler's
 // authHTTPMiddleware -> per-request capability resolution -> guardTool) a
 // deployed edge runs. identityWithScopedToken signs with the same
-// eruncommon.SignMCPToken call mcptoken.Signer.Sign wraps (same EdDSA JWT
+// mcpauth.SignMCPToken call mcptoken.Signer.Sign wraps (same EdDSA JWT
 // shape, same file:// issuer scheme, just a test-scoped key and path rather
 // than the fixed in-pod one) -- erun-mcp cannot import erun-backend-api to
 // call its mint route directly (module boundary, root AGENTS.md), so this is

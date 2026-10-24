@@ -109,7 +109,7 @@ func testDoctorRealRunReportsFetchAlsoFails(t *testing.T) {
 }
 
 func testDoctorRealRunReportsExpiredHostCredentials(t *testing.T) {
-	// The failure #903 was filed for: the profile is present and well-formed
+	// The profile is present and well-formed
 	// but its credentials lapsed overnight, which otherwise first surfaces as
 	// a registry pull error inside whatever tool reached AWS first. The
 	// kubectl stub answers the read script with a past expiry — the decision
@@ -179,11 +179,10 @@ func testDoctorRealRunReportsUnrecordedExpiryAndUnresolvedRegion(t *testing.T) {
 }
 
 func testDoctorRealRunPodDownDegradesHostCredentialsInsteadOfAborting(t *testing.T) {
-	// #1325: the runtime pod is up but its erun-devops container has
-	// terminated (phase Running, reason Error) — exactly the situation
-	// doctor exists to diagnose, and the one case where its first check
-	// used to exec into that same down container and abort before
-	// reporting anything else. The helm/pod diagnosis must print first
+	// The runtime pod is up but its erun-devops container has terminated
+	// (phase Running, reason Error) — exactly the situation doctor exists to
+	// diagnose, so no check may abort by exec'ing into that down container
+	// before reporting anything else. The helm/pod diagnosis must print first
 	// (it needs no exec and is safe on a down pod), then the
 	// host-credentials read must degrade to a "could not read" report
 	// instead of failing the whole command, and every check after it
@@ -202,7 +201,7 @@ func testDoctorRealRunPodDownDegradesHostCredentialsInsteadOfAborting(t *testing
 	golden.Equal(t, "doctor/real_run_pod_down_degrades_host_credentials_instead_of_aborting", normalize.Apply(result.Combined))
 }
 
-// stubDoctorKubectlHostCredentialsExecFails reproduces #1325: the runtime pod
+// stubDoctorKubectlHostCredentialsExecFails stubs a pod-down state: the runtime pod
 // is up but its erun-devops container is down, so the host-credentials exec
 // fails with the same "container not found" shape kubectl reports for a
 // missing container, while every other kubectl surface (the pod listing for

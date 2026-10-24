@@ -9,9 +9,8 @@ import (
 
 // The tools converted here call shared erun-common logic directly in this
 // process rather than shelling out, so job-ifying them means running that
-// same call asynchronously in a background task job (eruncommon.
-// StartTaskEnvironmentJob) instead of detaching a subprocess the way job_start
-// always did. wait is the one-release compatibility switch: unset or true
+// same call asynchronously in a background task job
+// (jobs.StartTaskEnvironmentJob) instead of detaching a subprocess. wait is the one-release compatibility switch: unset or true
 // keeps today's behaviour, a full synchronous CommandOutput; false starts the
 // work as a background job and returns its handle immediately, with the
 // caller reading the typed result back from exec_job_status/exec_job_output
@@ -21,7 +20,7 @@ import (
 // to flip it to false (async becomes the default) in the release after this
 // one, keeping wait:true available for one more release as the explicit
 // compatibility switch before it is removed — the same one-release window
-// used for the exec_* rename aliases (#1186).
+// used for the exec_* rename aliases.
 const jobEnvelopeDefaultWaitsSynchronously = true
 
 // JobEnvelopeInput is the async-start half of every job-ified tool's input,

@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-// TestGitResolveRefIncludesGitStderr is erun#1768's pattern applied to the
-// merge-gate's own ref resolution: git's stderr is already captured onto
-// exec.ExitError.Stderr by Output(), and the caller wraps only "%w" (which
-// renders as the content-free "exit status N") around the bare error this
-// used to return.
+// TestGitResolveRefIncludesGitStderr covers the merge-gate's own ref
+// resolution: git's stderr is already captured onto exec.ExitError.Stderr by
+// Output(), and must surface rather than the content-free "exit status N"
+// that "%w" alone renders.
 func TestGitResolveRefIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: ambiguous argument 'nonexistent-ref': unknown revision or path not in the working tree.", 128)
 	_, err := gitResolveRef(testTraceContext(false), t.TempDir(), "nonexistent-ref")

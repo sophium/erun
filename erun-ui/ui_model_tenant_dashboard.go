@@ -155,7 +155,7 @@ type uiTenantDashboard struct {
 	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds,omitempty"`
 }
 
-// uiPlatformContext mirrors eruncommon.PlatformContext's JSON-safe subset the
+// uiPlatformContext mirrors platformclient.PlatformContext's JSON-safe subset the
 // dashboard's Registration tab renders.
 type uiPlatformContext struct {
 	ContextID          string `json:"contextId"`
@@ -169,7 +169,7 @@ type uiPlatformContext struct {
 	ProvisionError     string `json:"provisionError,omitempty"`
 }
 
-// uiPlatformEnvironment mirrors eruncommon.PlatformEnvironment's JSON-safe
+// uiPlatformEnvironment mirrors platformclient.PlatformEnvironment's JSON-safe
 // subset the dashboard's Registration tab renders.
 type uiPlatformEnvironment struct {
 	EnvironmentID     string `json:"environmentId"`
@@ -210,7 +210,7 @@ type uiPlatformContextOutcome struct {
 	Message string             `json:"message,omitempty"`
 }
 
-// uiPlatformProvisionResult mirrors eruncommon.PlatformProvisionResult:
+// uiPlatformProvisionResult mirrors platformclient.PlatformProvisionResult:
 // always a successful preview, QuotaOk names whether the plan can actually
 // register without hitting the tenant's quota cap.
 type uiPlatformProvisionResult struct {
@@ -224,7 +224,7 @@ type uiPlatformProvisionResult struct {
 // creating anything: one field set backs both actions, so the plan an
 // operator previews can never diverge from what register then does. Adopt
 // records an environment that already exists — see
-// eruncommon.PlatformCreateEnvironmentParams.Adopt — instead of asking the
+// platformclient.PlatformCreateEnvironmentParams.Adopt — instead of asking the
 // platform to provision one.
 type uiRegisterPlatformEnvironmentInput struct {
 	Tenant            string `json:"tenant"`
@@ -295,7 +295,7 @@ type uiTenantDashboardReview struct {
 	// AuthorUsername is the tenant user directory's display name for
 	// AuthorUserID, resolved best-effort (see tenant_dashboard.go's
 	// tenantDashboardUsernames). Empty when it could not be resolved, so the
-	// frontend falls back to the raw id rather than showing nothing (#1378).
+	// frontend falls back to the raw id rather than showing nothing.
 	AuthorUsername string `json:"authorUsername,omitempty"`
 	Name           string `json:"name"`
 	// Repository is the repository the review's branches belong to, as the
@@ -328,7 +328,7 @@ type uiTenantDashboardReview struct {
 type uiTenantDashboardBuild struct {
 	BuildID  string `json:"buildId"`
 	TenantID string `json:"tenantId"`
-	// ReviewID is empty for a build with no review attached (erun#1954) --
+	// ReviewID is empty for a build with no review attached --
 	// identified by EnvironmentID instead.
 	ReviewID        string `json:"reviewId,omitempty"`
 	ReviewName      string `json:"reviewName,omitempty"`

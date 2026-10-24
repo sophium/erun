@@ -28,14 +28,12 @@ import {
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // OrchestratorHoverCard gives an orchestrator row the same hover treatment the
-// environment row has had since EnvHoverCard: a Popover, not a tooltip, because
+// environment row has (EnvHoverCard): a Popover, not a tooltip, because
 // a multi-field card does not belong in a tooltip (erun-ui/AGENTS.md).
 //
-// Before this, an orchestrator row explained nothing on hover. The only hover
-// surface in the section was an IconTooltip on the spinner icon, which exists
-// only WHILE the orchestrator is spinning -- so an idle orchestrator, the common
-// case, had no hover target at all, and a working one offered a tooltip on a
-// 12px icon rather than on the row the operator is pointing at (#1343).
+// The spinner icon's IconTooltip exists only WHILE the orchestrator is
+// spinning, so the row itself is the hover target: an idle orchestrator, the
+// common case, needs one too.
 //
 // Deliberately mirrors EnvHoverCard rather than inventing a second hover
 // pattern: same Popover, same open-now / close-soon grace so moving the pointer
@@ -202,9 +200,8 @@ function OrchestratorDoing({
 
 // Each linked environment renders what it is doing, joined from the
 // environment-activity poller rather than collected here (see
-// orchestratorEnvironmentActivity.ts) -- this is the fix for the defect that
-// motivated the whole card: it used to name two environments and say nothing
-// about either. min-w-0 on both the row and its text column is required for
+// orchestratorEnvironmentActivity.ts), so the card says what each linked
+// environment is doing rather than merely naming it. min-w-0 on both the row and its text column is required for
 // truncate to engage on a grid/flex child (a long environment name or a long
 // busy detail elides instead of blowing out the card's fixed w-90).
 function OrchestratorEnvironments({

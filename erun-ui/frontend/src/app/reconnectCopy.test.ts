@@ -4,7 +4,7 @@ import { test } from 'vitest';
 
 import { mcpUnreachableKind, reachabilityCopy, stripMcpUnreachableMarker } from './reconnectCopy';
 
-// #1230: the backend now names which of the two locally-observable
+// The backend names which of the two locally-observable
 // reachability failures it hit, carried as one of two opaque marker prefixes.
 // mcpUnreachableKind is the one place that decodes them; every other call site
 // works from the returned kind, not the marker text.
@@ -52,12 +52,10 @@ test('the two reachability kinds carry distinct action labels and titles', () =>
 // The stale-forward confirmation is reached *from* the unreachable state, so
 // it is shown exactly when the environment may be unreachable for a reason the
 // action cannot address -- and it is the moment an operator is most likely to
-// press it repeatedly. Its body used to promise that a runtime which is not
-// currently running "will be redeployed". That promise is not merely
-// unchecked: the action behind the button is `erun open --reconnect`, which
-// verifies the runtime is already deployed, refuses outright when it is
-// stopped, and never deploys anything -- so an operator pressing it again
-// because the copy said a redeploy was coming had nothing to wait for.
+// press it repeatedly. The action behind the button is `erun open
+// --reconnect`, which verifies the runtime is already deployed, refuses
+// outright when it is stopped, and never deploys anything, so the copy must
+// not promise a redeploy.
 test('the stale-forward dialog does not promise a redeployment the reconnect cannot perform', () => {
   const body = reachabilityCopy['stale-forward'].dialogBody;
 

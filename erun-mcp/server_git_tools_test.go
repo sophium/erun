@@ -256,8 +256,8 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 
 // TestCommitToolRejectsBlankPathEntries proves a Paths list of only blank
 // strings is refused rather than silently degrading to the unscoped
-// "commit everything" behavior — the exact failure path scoping (#1155)
-// exists to prevent, reintroduced through a caller passing blanks instead of
+// "commit everything" behavior — the exact failure path scoping exists to
+// prevent, reintroduced through a caller passing blanks instead of
 // omitting Paths entirely.
 func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)

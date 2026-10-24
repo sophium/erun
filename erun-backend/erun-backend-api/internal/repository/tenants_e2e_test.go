@@ -174,8 +174,7 @@ func TestReachableReturnsSingleTenantForSingleTenantCaller(t *testing.T) {
 	}
 }
 
-// TestCreateReportsTenantNameConflictAndGetByNameResolvesIt is erun#1722's
-// reproduction: a tenant with the requested name was registered out-of-band
+// TestCreateReportsTenantNameConflictAndGetByNameResolvesIt: a tenant with the requested name was registered out-of-band
 // (a different issuer, standing in for "someone else got there first"), so
 // Create's own name-taken write must come back as the specific,
 // resolvable ErrTenantNameConflict rather than a generic 500, and GetByName
@@ -214,7 +213,7 @@ func TestCreateReportsTenantNameConflictAndGetByNameResolvesIt(t *testing.T) {
 // per-tenant read, not a value that defaults to zero when nothing was
 // counted: a tenant seeded with a user reports 1, and a tenant registered
 // with none reports an explicit 0 (a non-nil pointer), the distinction the
-// console's inert-tenant flag (erun#1744) depends on to tell "genuinely
+// console's inert-tenant flag depends on to tell "genuinely
 // empty" apart from "not computed".
 func TestListReportsUserCountPerTenant(t *testing.T) {
 	db := tenantsDatabase(t)

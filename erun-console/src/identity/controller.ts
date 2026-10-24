@@ -284,7 +284,7 @@ export interface InvitesController {
   dismissCreated: () => void;
 }
 
-// useInvitesController lists, creates, and revokes invites (#1483). Creating
+// useInvitesController lists, creates, and revokes invites. Creating
 // or revoking invalidates the list query's tag, the same pattern
 // useUsersController uses for enroll/deactivate.
 export function useInvitesController(token: string): InvitesController {

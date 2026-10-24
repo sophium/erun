@@ -57,7 +57,7 @@ func submitInviteRequestHTTPRequest(body string, bearer string) *http.Request {
 	return req
 }
 
-// TestSubmitInviteRequestRecordsVerifiedIdentityNotBody locks the issue's
+// TestSubmitInviteRequestRecordsVerifiedIdentityNotBody locks the
 // load-bearing invariant: the issuer/subject a request records come from the
 // verified bearer token, never anything the caller's body claims. The body
 // here deliberately cannot even carry issuer/subject fields
@@ -143,7 +143,7 @@ func (s *stubInviteRequestApprover) Decline(_ context.Context, _ model.InviteReq
 	return s.decided, s.decideErr
 }
 
-// TestDeclineInviteRequestRequiresReason locks the issue's "a decline with no
+// TestDeclineInviteRequestRequiresReason locks the "a decline with no
 // reason is a dead end" rule at the API boundary: an empty reason is
 // refused before the service (and the schema's own CHECK constraint behind
 // it) is ever reached.
@@ -182,8 +182,8 @@ func TestDeclineInviteRequestRequiresReason(t *testing.T) {
 	}
 }
 
-// TestApproveCreateTenantRequiresOperationsTenant locks the issue's
-// authority split: approving a CREATE_TENANT request needs an operations
+// TestApproveCreateTenantRequiresOperationsTenant locks the authority
+// split: approving a CREATE_TENANT request needs an operations
 // tenant even though the same route serves JOIN_TENANT approvals for an
 // ordinary tenant admin.
 func TestApproveCreateTenantRequiresOperationsTenant(t *testing.T) {
@@ -223,7 +223,7 @@ func TestApproveCreateTenantRequiresOperationsTenant(t *testing.T) {
 
 // fakeApproveCreateTenantRepositories wires the real service.InviteRequestService
 // used below, rather than the stubInviteRequestApprover the tests above use,
-// so this test exercises the actual erun#1722 fix end to end through the
+// so this test exercises tenant-name conflict handling end to end through the
 // HTTP route: routes.approve -> service.ApproveCreateTenant -> the tenant
 // repository's own name-conflict resolution.
 type fakeApproveCreateTenantTenants struct {

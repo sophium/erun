@@ -57,7 +57,7 @@ func TestActivityLeaseToolsRoundTripAgainstTheServerContext(t *testing.T) {
 	}
 }
 
-// erun#1245: a second orchestrator or agent job must be refused, named, and
+// A second orchestrator or agent job must be refused, named, and
 // pointed at who holds the worktree - not silently allowed to collide.
 
 func TestExclusiveLeaseToolRefusesASecondHolderAndNamesIt(t *testing.T) {

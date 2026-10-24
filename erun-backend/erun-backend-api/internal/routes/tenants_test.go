@@ -116,7 +116,7 @@ func patchReconcileBootstrapName(t *testing.T, tenants *stubTenantRepository, re
 	return rec
 }
 
-// TestReconcileBootstrapNameForbidsNonOperationsCaller locks erun#1480's
+// TestReconcileBootstrapNameForbidsNonOperationsCaller locks the
 // authorization boundary: reconciling the platform's own tenant name is
 // restricted to an operations tenant the same way createTenant is, and a
 // non-operations caller must never reach the reconciler at all.
@@ -212,13 +212,12 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	}
 }
 
-// TestCreateTenantDuplicateIssuerReturnsConflict proves the erun#1605 fix for
-// the 409's remedy text: retrying this same create call with
-// --org-field-key/--org-field-value can never work (ON CONFLICT DO NOTHING
-// leaves the existing issuer row's org_field_key untouched), so the message
-// must instead point at the operations-only PATCH /v1/tenant-issuers
-// conversion that actually rewrites it and backfills the existing mapping —
-// not repeat the advice the issue reported as a dead end.
+// TestCreateTenantDuplicateIssuerReturnsConflict locks the 409's remedy text:
+// retrying this same create call with --org-field-key/--org-field-value can
+// never work (ON CONFLICT DO NOTHING leaves the existing issuer row's
+// org_field_key untouched), so the message must point at the operations-only
+// PATCH /v1/tenant-issuers conversion that actually rewrites it and backfills
+// the existing mapping.
 func TestCreateTenantDuplicateIssuerReturnsConflict(t *testing.T) {
 	tenants := &stubTenantRepository{err: repository.ErrConflict}
 	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations), `{

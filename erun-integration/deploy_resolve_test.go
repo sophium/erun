@@ -14,12 +14,10 @@ import (
 )
 
 func testDeployHelpOutsideDevopsCwd(t *testing.T) {
-	// Regression: when cwd has no devops context, the
-	// deploy command must still be registered so the desktop UI's
-	// `erun deploy <tenant> <env> --version X` invocation can land its
-	// flags. Pre-fix, this returned the root help and "unknown flag:
-	// --version". Lives unskipped so the integration suite fails until
-	// erun-cli/cmd/root.go always registers deployCommand().
+	// When cwd has no devops context, the deploy command must still be
+	// registered so the desktop UI's `erun deploy <tenant> <env> --version X`
+	// invocation can land its flags rather than hit "unknown flag:
+	// --version".
 	setup := env.New(t)
 	result := erun.Run(t, []string{"deploy", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
@@ -29,11 +27,9 @@ func testDeployHelpOutsideDevopsCwd(t *testing.T) {
 }
 
 func testDeployVersionFlagRecognizedOutsideDevopsCwd(t *testing.T) {
-	// A second regression check: even when the flag is set on a real
-	// deploy attempt, "unknown flag: --version" must not appear. The
-	// command will still fail (no env or no chart) but for a sensible
-	// reason rather than flag parsing. Lives unskipped so the suite
-	// fails until the deploy registration fix lands.
+	// Even when the flag is set on a real deploy attempt, "unknown flag:
+	// --version" must not appear. The command still fails (no env or no
+	// chart) but for a sensible reason rather than flag parsing.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"deploy", "missing", "missing", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	golden.Equal(t, "deploy/version_flag_recognized_outside_devops_cwd", normalize.Apply(result.Combined))
@@ -230,11 +226,10 @@ func testDeployDryRunMultipleDevopsModulesErrors(t *testing.T) {
 }
 
 func testDeployDryRunScopeDefaultedEarlyFailureNamesResolvedEnv(t *testing.T) {
-	// Regression: a deploy that takes its target from the current scope
-	// rather than explicit args carried an empty tenant/environment through
-	// the whole command, so every early failure rendered the header as
-	// "==> Deploy failed /:" — a bare separator the desktop cannot attribute
-	// to an env — and the per-env trace log was never opened. Same ambiguous
+	// A deploy that takes its target from the current scope rather than
+	// explicit args must resolve tenant/environment before any early
+	// failure, so the header never renders as "==> Deploy failed /:" — a
+	// bare separator the desktop cannot attribute to an env. Same ambiguous
 	// -devops-modules failure as the scenario above, with the target left to
 	// the default scope: the header must name team/dev.
 	setup := env.New(t)
@@ -392,10 +387,9 @@ func testDeployDryRunTenantAliasesResolveOIDCIssuers(t *testing.T) {
 }
 
 func testDeployDryRunAWSAliasWithoutCloudContextResolvesRegionFromAlias(t *testing.T) {
-	// An env with a provider alias but no cloud context used to thread
-	// `cloudContext.region=` — an empty AWS_REGION that overrides the pod
-	// profile's own region instead of falling back to it, breaking every AWS
-	// call in the pod. The alias' Identity Center region is the fallback, and
+	// An env with a provider alias but no cloud context must not thread an
+	// empty `cloudContext.region=` — an empty AWS_REGION overrides the pod
+	// profile's own region and breaks every AWS call in the pod. The alias' Identity Center region is the fallback, and
 	// the helm command must carry it.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
@@ -422,13 +416,10 @@ func testDeployDryRunAWSAliasResolvesRegionFromECRRegistryHost(t *testing.T) {
 }
 
 func testDeployDryRunOutsideDevopsWithTenantEnv(t *testing.T) {
-	// Regression: when erun deploy <tenant> <env> is
-	// invoked from a cwd outside the devops module (e.g. the desktop
-	// UI launching the binary from $HOME for a remote environment),
-	// the resolved tenant project root must drive chart discovery
-	// instead of cwd. Pre-fix this hit "helm chart not found in
-	// current directory" because resolveCurrentDevopsK8sDir gated
-	// chart resolution on cwd == projectRoot.
+	// When erun deploy <tenant> <env> is invoked from a cwd outside the
+	// devops module (e.g. the desktop UI launching the binary from $HOME
+	// for a remote environment), the resolved tenant project root must
+	// drive chart discovery instead of cwd.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -475,7 +466,7 @@ func testDeployDryRunRuntimeChartOverrideOffATenantUmbrellaDropsTheSubchartScope
 }
 
 func testDeployComponentsConfigScopesComponentChartLookup(t *testing.T) {
-	// A declared .erun/config.yaml components.<name>.k8s (erun#1840's
+	// A declared .erun/config.yaml components.<name>.k8s (the
 	// monorepo-of-independent-deployables shape) scopes --components' chart
 	// lookup to that harness's own k8s root instead of walking the whole
 	// project, so a same-named chart elsewhere (here, a decoy under an

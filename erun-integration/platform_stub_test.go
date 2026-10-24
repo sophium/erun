@@ -55,7 +55,7 @@ func requireBearer(w http.ResponseWriter, r *http.Request) bool {
 
 // platformAPIStubServer runs a minimal erun-backend-api double covering every
 // route `erun platform` drives, so real-run scenarios exercise
-// erun-common/platform_client.go's request/response handling end to end
+// platformclient's request/response handling end to end
 // rather than only its --dry-run trace branch.
 func platformAPIStubServer(t testing.TB) *httptest.Server {
 	t.Helper()

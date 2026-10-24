@@ -2,18 +2,10 @@ import { formatElapsed } from './activityQueueState';
 
 // orchestratorBusyLabel names a working orchestrator and, when the report
 // carries a timestamp, how long it has been working.
-//
-// #1228 set out to make a spinning orchestrator row say "what it is working on
-// and for how long", and shipped a label of `${name} is working` -- which
-// restates what the spinner already conveys visually and answers neither half.
-// Its own premise check recorded why: `OrchestratorInfo.busy` was a plain
-// boolean, so the elapsed figure needed the timestamp carried through, and it
-// was not. #1343 carries it (`busyAtUnix`, from the same activity report the
-// spinner reads), and this is the label that spends it.
-//
-// The sibling one function below in Sidebar.ErunSection already does exactly
-// this for a background shell via orchestratorShellLabel; a working turn is the
-// more important of the two to explain, and was the less informative.
+// `${name} is working` alone restates the spinner; the elapsed time comes from
+// `busyAtUnix`, carried from the same activity report the spinner reads.
+// Sidebar.ErunSection's orchestratorShellLabel does the same for a background
+// shell.
 //
 // A missing or zero timestamp degrades to the bare statement rather than
 // inventing an elapsed time: an orchestrator that reported busy before this

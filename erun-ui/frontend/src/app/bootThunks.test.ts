@@ -62,16 +62,11 @@ function resolveCall(calls: Deferred[], index: number, state: UIState): void {
   call.resolve(state);
 }
 
-// erun#1953: an 'environments-changed' event that arrived while a
-// getInitialState fetch was already in flight got silently dropped —
 // RTK Query's condition() check bails a forced refetch out from under a
-// pending request for the same query before ever looking at forceRefetch,
-// so the caller's own fresh load, not the invalidation's, decided what
-// landed. reloadStateAfterEnvironmentChange now waits for the in-flight
-// request via getRunningQueryThunk before issuing its own forced refetch.
-// This proves the fix behaviourally: an invalidation arriving mid-flight
-// must still end up with a second, real fetch and fresh data, not the
-// first fetch's stale result.
+// pending request for the same query, so reloadStateAfterEnvironmentChange
+// waits for the in-flight request via getRunningQueryThunk first. An
+// invalidation arriving mid-flight must still end up with a second, real
+// fetch and fresh data, not the first fetch's stale result.
 test('an invalidation arriving during an in-flight getInitialState still produces a fresh refetch', async () => {
   const pendingCalls: Deferred[] = [];
   stubWailsBridge({

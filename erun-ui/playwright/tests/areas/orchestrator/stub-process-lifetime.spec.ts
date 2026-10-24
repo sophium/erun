@@ -6,9 +6,8 @@ import { isProcessAlive, liveStubProcesses } from '../../../fixtures/stubProcess
 // for — an orchestrator row reads "running" only while its process is up, so a
 // stub that exits is a spec that times out. The desktop spawns them, though, and
 // not this process, so nothing here collects one: a spec that opened a session
-// and never closed it left a live `sleep` behind for the rest of the run, and a
-// full ALL run accumulated 117 of them, all competing with the suite for the
-// gate's CPUs (#2512).
+// and never closed it would leave a live `sleep` behind for the rest of the
+// run, competing with the suite for the gate's CPUs.
 //
 // So the harness reaps the stubs a spec opened on that spec's teardown
 // (fixtures/stubProcesses.ts, wired as an automatic fixture). These cases assert

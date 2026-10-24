@@ -68,7 +68,7 @@ func RunDockerPush(ctx core.Context, pushInput shared.DockerPushSpec, push share
 // Three checks run here, cheapest and most certain first: VerifyGHCRCredentialConfigured
 // answers whether any credential resolves at all -- an environment that has
 // never authenticated to ghcr.io is certain to fail at push, never merely
-// inconclusive (#1201). VerifyGHCRPushScope is a per-registry check of a
+// inconclusive. VerifyGHCRPushScope is a per-registry check of a
 // resolved credential's own write:packages scope (cheap, one request per
 // registry). VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a per-artifact
 // check of whether the registry would actually grant push for that specific

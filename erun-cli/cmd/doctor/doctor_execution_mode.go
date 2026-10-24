@@ -8,7 +8,7 @@ import (
 )
 
 // reportExecutionModes answers "it behaves differently on my machine" for the
-// subprocess/library execution switch (see erun-common/execution_mode.go):
+// subprocess/library execution switch (see configpkg.ExecutionModeFor):
 // without this, an operator who flipped execution.modes.<operation> to
 // "library" in config.yaml has no way to confirm it actually took effect
 // short of reading the config file by hand. Root config, not

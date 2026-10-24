@@ -104,11 +104,10 @@ func assertConfirmedMissing(t *testing.T, checker *GHCRImageChecker, want bool, 
 	}
 }
 
-// TestGHCRImageCheckerPrivateNamespace is the regression this checker exists
-// for: a tenant's own image is absent from a *private* registry namespace,
-// where an anonymous probe cannot tell "absent" from "not yours to see" and so
-// left every projectless tenant deploying an image nobody ever published. With
-// the deploy Job's own pull credential the two separate, and only then.
+// TestGHCRImageCheckerPrivateNamespace is the case this checker exists for: a
+// tenant's own image is absent from a *private* registry namespace, where an
+// anonymous probe cannot tell "absent" from "not yours to see". Only with the
+// deploy Job's own pull credential do the two separate.
 func TestGHCRImageCheckerPrivateNamespace(t *testing.T) {
 	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
 	newStub := func() *ghcrStub {
@@ -253,7 +252,7 @@ func assertConfirmedPresent(t *testing.T, checker *GHCRImageChecker, want bool, 
 }
 
 // TestGHCRImageCheckerConfirmedPresent locks ConfirmedPresent, the positive
-// counterpart to ConfirmedMissing added for erun#1480: it is what lets the
+// counterpart to ConfirmedMissing: it is what lets the
 // runtime-image fallback report a real substitution instead of guessing one
 // — a confirmed 200 is the only outcome that reports true, so an absent,
 // forbidden, or inconclusive probe never asserts a substitution that was

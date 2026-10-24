@@ -336,8 +336,8 @@ func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
 	}
 }
 
-// TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness is the
-// #1274 regression: an orchestrator id is reused across restarts, so
+// TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness: an
+// orchestrator id is reused across restarts, so
 // sessionAlive alone (computed per id, from whichever session is live for
 // that id right now) is not enough to trust a "running" report — the report
 // itself has to name the session that wrote it, and that name has to match

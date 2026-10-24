@@ -5,7 +5,7 @@ import { useAcceptInviteMutation } from '../app/api/identityApi';
 import { describeQueryError } from '../app/queryError';
 
 // describeAcceptError turns the invite-accept endpoint's status code into
-// the exact, distinct message #1483 asks for: an expired or consumed link
+// an exact, distinct message: an expired or consumed link
 // says so plainly rather than a generic failure, since "try again" is not
 // the right recovery for any of these three states.
 function describeAcceptError(error: unknown): string {
@@ -203,8 +203,8 @@ function AcceptInviteResultMessage({ state }: { state: AcceptState }): React.Rea
   return null;
 }
 
-// AcceptInvitePage is the unauthenticated landing page for an invite link
-// (#1483): the invitee has no bearer token yet, so this renders standalone
+// AcceptInvitePage is the unauthenticated landing page for an invite link:
+// the invitee has no bearer token yet, so this renders standalone
 // before App.tsx's normal OIDC-gated flow ever starts. See App.tsx for the
 // path check that routes here instead of dispatching resolveAuth().
 export function AcceptInvitePage({ token }: { token: string }): React.ReactElement {

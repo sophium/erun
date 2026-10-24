@@ -167,12 +167,9 @@ func TestReconcileOrchestratorPacingSkipsFreshAndTransient(t *testing.T) {
 	}
 }
 
-// TestReconcileOrchestratorPacingNudgesThroughABackgroundShell is the
-// regression test for erun#1376: a stale orchestrator with a background shell
-// recorded running must still be nudged. Before the fix, `shellRunning` on the
-// candidate suppressed the nudge outright — exactly the case a long-running
-// build left going while its own turn had died mid-response, the scenario the
-// issue traced from a 20-minute silent pane.
+// TestReconcileOrchestratorPacingNudgesThroughABackgroundShell: a stale
+// orchestrator with a background shell recorded running must still be nudged,
+// since a long build is the likely thing in flight when a turn dies.
 func TestReconcileOrchestratorPacingNudgesThroughABackgroundShell(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -379,13 +376,10 @@ func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 	}
 }
 
-// TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto pins the third
-// place #1330's hazard applies: the pacing nudge writes its text, then a bare
-// carriage return 150ms later, the same shape as the AI repaint resize that
-// corrupted a submitted prompt. Firing it into a pane mid-sentence would glue
-// the pacing text onto whatever the operator is typing. The skip must not
-// cost against the nudge cap: it is deferred, not counted, so the reconciler
-// can retry once the operator pauses.
+// TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto: firing the
+// nudge (text, then a bare carriage return) into a pane mid-sentence would glue
+// it onto whatever the operator is typing. The skip is deferred, not counted
+// against the cap, so the reconciler retries once the operator pauses.
 func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

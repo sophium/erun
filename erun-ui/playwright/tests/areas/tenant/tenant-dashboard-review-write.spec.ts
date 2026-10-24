@@ -225,15 +225,13 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
     }
   });
 
-  // #1390: operatorPlatformError's "sign-in expired" sentence used to be a
-  // dead end wherever a review write surfaced it. The alert must now offer
-  // the same "Log in" the sidebar's cloud alias row already uses, and
-  // clicking it must actually dispatch LoginCloudProvider for the tenant's
-  // primary alias — not just render inert text. #1392: a successful sign-in
-  // used to leave this exact error and button in place next to a
-  // now-valid session, since nothing cleared the stale write error — this
-  // also asserts the error actually clears, so the operator sees the dialog
-  // ready to retry Create rather than the identical failure.
+  // operatorPlatformError's "sign-in expired" sentence must not be a dead end
+  // wherever a review write surfaces it. The alert offers the same "Log in"
+  // the sidebar's cloud alias row already uses, and clicking it must actually
+  // dispatch LoginCloudProvider for the tenant's primary alias — not just
+  // render inert text. A successful sign-in must also clear the stale write
+  // error, so the operator sees the dialog ready to retry Create rather than
+  // the identical failure.
   test('a stale-identity error on create offers to sign in, and a successful sign-in clears it', async ({
     app,
     page,
@@ -317,9 +315,8 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
     }
   });
 
-  // The regression this action must not create: an unrelated create failure
-  // (not the stale-identity sentence) must render as before — message only,
-  // no manufactured button.
+  // An unrelated create failure (not the stale-identity sentence) renders the
+  // message only, with no manufactured button.
   test('an unrelated create failure offers no sign-in action', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('review-create-other-error');
     try {

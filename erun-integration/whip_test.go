@@ -57,8 +57,8 @@ func testWhipDryRunOneNamedEnvironmentNotOpenReportsCallFailed(t *testing.T) {
 	//
 	// This harness has no desktop identity to mint a bearer with, so the
 	// whip tool call itself fails before it ever reaches a pod -- reported
-	// as a call failure (erun-common's WhipReasonCallFailed), never folded
-	// into "not alive" the way it used to be (erun#1709): the tool call
+	// as a call failure (orchestrator.WhipReasonCallFailed), never folded
+	// into "not alive": the tool call
 	// erroring out is never the same claim as the tool reporting a dead
 	// session, which comes back as a *successful* result.
 	skipIfPortsBusy(t, 26100)
@@ -121,9 +121,8 @@ func testWhipDryRunJsonOutput(t *testing.T) {
 }
 
 func testWhipRealRunForwardsTheResolvedTarget(t *testing.T) {
-	// erun#1709: `erun whip` used to call the "whip" MCP tool with only
-	// {"preview": ...}, relying entirely on the pod defaulting to its own
-	// bound context. This proves the call now restates the tenant/
+	// The "whip" MCP tool call must not rely on the pod defaulting to its
+	// own bound context. This proves the call restates the tenant/
 	// environment this host already resolved to reach the edge, through a
 	// real (fake) edge rather than the dry-run path above, which never
 	// reaches a live tool result to decode.
@@ -222,7 +221,7 @@ func testWhipDryRunOnlyTenantGivenRefuses(t *testing.T) {
 
 // seedOrchestrator appends a persisted orchestrator definition to the isolated
 // root config, mirroring what the desktop writes to ~/.erun/config.yaml (see
-// erun-common/config.go's OrchestratorConfig) without exercising the desktop
+// config.OrchestratorConfig) without exercising the desktop
 // UI that normally creates one.
 func seedOrchestrator(t testing.TB, setup env.Setup, id, name string) {
 	t.Helper()

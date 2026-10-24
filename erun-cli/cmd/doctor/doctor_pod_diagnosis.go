@@ -56,8 +56,8 @@ func reportRuntimeImageRegistryMismatch(ctx core.Context, result config.OpenResu
 // reportRuntimeImageLineMismatch names a runtimeimage stuck on a different
 // release line than the environment's last confirmed deploy actually ran —
 // config alone is enough to tell (see EnvConfig.RuntimeImageLineMismatch), so
-// this never execs and runs the same in --dry-run as for real. It is the
-// static half of erun#1754: a future deploy that re-resolves runtimeimage
+// this never execs and runs the same in --dry-run as for real. It matters
+// because a future deploy that re-resolves runtimeimage
 // without an explicit --runtime-image/--runtime-chart can silently move the
 // pod back onto the wrong line, and the runtime chart's Recreate strategy
 // tears the running pod down before that mistake is visible.

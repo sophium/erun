@@ -215,8 +215,7 @@ function OrchestratorRow({
       state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
   );
   // A background shell is independent of the turn's own busy state —
-  // it can keep running after the turn that started it goes idle, which is
-  // exactly the case that had no affordance at all before this. Shown only
+  // it can keep running after the turn that started it goes idle. Shown only
   // when the turn itself is not already spinning, so the row never carries
   // two motion cues fighting for the same attention.
   const shellActivity = useAppSelector((state) =>
@@ -328,7 +327,7 @@ function OrchestratorRowActions({
   running: boolean;
   active: boolean;
 }): React.ReactElement {
-  // A live session's toolset is fixed at launch (see erun#1319): re-scoping it
+  // A live session's toolset is fixed at launch: re-scoping it
   // while it runs cannot take effect until it restarts, so "running" alone
   // would say the save already applied when it has not. The dot borrows the
   // same shape 'failed' already uses (WCAG non-colour-only status) rather

@@ -33,7 +33,7 @@ function parseEnvironmentResponse(raw: unknown): Environment {
 
 export const environmentsApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // listEnvironments backs the scope selector (erun#1816): the caller's own
+    // listEnvironments backs the scope selector: the caller's own
     // tenant by default, or -- operations-only, honored server-side -- a
     // named target tenant's environments via `?tenantId=`. A non-OPERATIONS
     // caller naming another tenant gets the same 403 the API always returns;

@@ -148,7 +148,7 @@ export const setReviewReplyDraft =
   };
 
 // clearReviewReplyError mirrors clearCloseReviewError for the reply
-// composer's own write error (#1392).
+// composer's own write error.
 export const clearReviewReplyError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ submitError: '' }));
 };
@@ -203,7 +203,7 @@ export const cancelCloseReview = (): AppThunk => (dispatch) => {
 
 // clearCloseReviewError drops a stale close-review write error once a
 // sign-in it prompted has succeeded, so the operator sees the panel recover
-// rather than the identical error and button (#1392) — they retry Close
+// rather than the identical error and button — they retry Close
 // themselves from there.
 export const clearCloseReviewError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ closeError: '' }));
@@ -241,7 +241,7 @@ export const submitUnresolveComment = (commentId: string): AppThunk<Promise<void
   submitCommentStatus(commentId, 'unresolveReviewComment');
 
 // clearResolveCommentError mirrors clearCloseReviewError for a thread's own
-// resolve/unresolve write error (#1392).
+// resolve/unresolve write error.
 export const clearResolveCommentError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ resolveError: '', resolveErrorCommentId: '' }));
 };
@@ -422,8 +422,7 @@ export const submitRemoveReviewer =
 
 // startReviewComment/cancelReviewComment/setReviewCommentDraft/
 // submitReviewComment mirror the reply flow above, but for opening a brand
-// new top-level thread anchored to a diff line the operator clicked — the
-// gap ReviewDetailDialog.Comments.tsx used to call out as deferred.
+// new top-level thread anchored to a diff line the operator clicked.
 export const startReviewComment =
   (anchor: { commitId: string; filePath: string; line: number }): AppThunk =>
   (dispatch) => {
@@ -449,7 +448,7 @@ export const setReviewCommentDraft =
   };
 
 // clearReviewCommentError mirrors clearCloseReviewError for the new-thread
-// composer's own write error (#1392).
+// composer's own write error.
 export const clearReviewCommentError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ newCommentSubmitError: '' }));
 };

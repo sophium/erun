@@ -8,9 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// erun#1954: a build no longer has to belong to a review -- an ordinary
-// `erun build` self-reports itself against the environment it ran in
-// instead. This exercises the Builds tab's rendering of that unattached
+// A build need not belong to a review -- an ordinary `erun build`
+// self-reports itself against the environment it ran in instead. This exercises the Builds tab's rendering of that unattached
 // shape over a stubbed RPC, the same pattern tenant-dashboard-refresh.spec.ts
 // uses for the review-linked shape; the Go side that merges GET /v1/builds
 // into the panel is covered by erun-ui/tenant_dashboard_test.go.

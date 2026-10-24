@@ -146,12 +146,9 @@ func testOpenNoShellStdoutCarriesOnlyTheEvalAbleShell(t *testing.T) {
 	// The documented alias is
 	// `alias team-dev='eval "$(erun open team dev --no-shell)"'`, so stdout
 	// IS the script: command substitution hands the child a pipe, never a
-	// terminal. An sshd-enabled env used to prepend the human-readable SSH
-	// block ("SSH:", "  host: ...", ...) to stdout, and eval ran those
-	// prose lines as commands — seven `command not found` errors per alias
-	// invocation. Moving the block to stderr is not the fix (#394 silenced
-	// stderr on purpose, and the alias does not capture it), so the block
-	// must simply be terminal-only.
+	// terminal. An sshd-enabled env's human-readable SSH block on stdout
+	// would be eval'd as commands, and stderr is silenced on purpose and not
+	// captured by the alias, so the block must be terminal-only.
 	//
 	// `bash -n` accepts the tainted stdout — the block is syntactically
 	// valid shell and only fails at run time — so assert the exact script
@@ -309,7 +306,7 @@ func testOpenNoShellRealRunDeploysPublishedChartAndPersistsVersion(t *testing.T)
 func testOpenNoShellRealRunNotDeployedErrors(t *testing.T) {
 	t.Parallel()
 	// open is a pure primitive and does not deploy. A port-forward that
-	// can't bind is no longer fatal, so a genuinely undeployed runtime is
+	// can't bind is not fatal, so a genuinely undeployed runtime is
 	// caught up front by deployment presence — the run fails fast with an
 	// actionable "run `erun deploy`" error before any forward starts, rather
 	// than being inferred from a downstream port-forward timeout. The kubectl
@@ -351,14 +348,11 @@ func testOpenNoShellRealRunCheckUnreachableErrorsWithoutClaimingAbsence(t *testi
 
 func testOpenNoShellRealRunCheckUnreachableSanitizesKlogFramedError(t *testing.T) {
 	t.Parallel()
-	// erun#1766: the same unreachable-cluster path above, but with the
-	// exact klog "Unhandled Error" shape client-go actually emits
-	// (severity, timestamp, goroutine id, Go source location wrapping
-	// the real cause). Before the fix, checkKubernetesDeploymentWithContext
-	// pasted this verbatim, so the operator-facing error carried
-	// kubectl-internal noise around the one sentence that named the
-	// unreachable address. It must instead read as the cause alone,
-	// with the kube context named from erun's own config.
+	// The same unreachable-cluster path above, but with the exact klog
+	// "Unhandled Error" shape client-go emits (severity, timestamp,
+	// goroutine id, source location wrapping the real cause). The error must
+	// read as the cause alone, with the kube context named from erun's own
+	// config.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlKlogFramedError(t, setup)
@@ -454,9 +448,8 @@ func seedIntelliJOpenEnv(t *testing.T, setup env.Setup, stubsDir, hostKey, optio
 	// Pre-create the IntelliJ *options* dir: production globs for
 	// JetBrains/IntelliJIdea*/options (open_ide.go::intelliJOptionsCandidates)
 	// and silently skips the jetbrainsconfig writers when no candidate
-	// matches. Seeding only the version dir (without options/) is the
-	// bug that kept internal/jetbrainsconfig at 0% while this scenario
-	// stayed green.
+	// matches, so seeding only the version dir (without options/) would leave
+	// internal/jetbrainsconfig unexercised while this scenario stays green.
 	if err := os.MkdirAll(optionsDir, 0o755); err != nil {
 		t.Fatalf("mkdir IntelliJ options: %v", err)
 	}
@@ -604,7 +597,7 @@ func testOpenIntellijGatewayAdoptsForwardsAndLaunchesGateway(t *testing.T) {
 	}
 	golden.Equal(t, "open/intellij_gateway_dry_run_previews_adoption_and_launch", normalize.Apply(run2.Combined))
 	// The dry-run must not have created the Gateway launch scaffolding
-	// (regression guard for the write-before-gate bug). The config dir
+	// (no writes before the dry-run gate). The config dir
 	// itself already exists — run 1's registerIntelliJProject writes
 	// JetBrains options there for real — so assert on the two artifacts
 	// only the launch path creates: config/info.xml and system/.

@@ -3,14 +3,12 @@ import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// erun#1759: HoverCardRow (Sidebar.HoverCardRow.tsx) renders a 12px `dt` and
-// a 14px `dd` as siblings in a grid row, and neither sidebar hover card's
-// `dl` set `items-baseline` -- CSS grid's default `align-items: stretch`
-// let each cell fill the row, so each line sat at the top of its own cell
-// and the two font sizes' text baselines landed a couple of pixels apart in
-// every row of both cards.
+// HoverCardRow (Sidebar.HoverCardRow.tsx) renders a 12px `dt` and a 14px
+// `dd` as siblings in a grid row; without `items-baseline`, CSS grid's
+// default `align-items: stretch` lands the two baselines a couple of pixels
+// apart.
 //
-// This asserts the fix geometrically -- measured text baselines actually
+// This asserts the alignment geometrically -- measured text baselines actually
 // coincide -- rather than checking the `items-baseline` class string is
 // present anywhere, mirroring titlebar-whip-panel-layout.spec.ts's own
 // boundingBox()-based layout assertion for the same reason: a class on the
@@ -156,11 +154,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
       // reboot() auto-opens this default-landing env, so Activity renders the
-      // inert muted single line "Idle" -- still a narrow, shared-row
-      // label/value like Version was when this spec was written. Version
-      // itself moved to the `wide` (stacked) variant in erun#1860 so its
-      // longest identifier never wraps mid-token; see the "keeps the wide
-      // Version row stacked" test below for that row's own invariant.
+      // inert muted single line "Idle" -- a narrow, shared-row label/value.
       await expect(card).toContainText('Idle', { timeout: 1_000 });
       const geometry = await rowGeometry(card, 'Activity');
       expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
@@ -184,8 +178,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     //
     // The toPass below is bare, deliberately: `toPass({ timeout: N })` takes
     // min(the test's own deadline, now + N), so an N here would be a second
-    // fixed cap inside the 60s this test declares — the same defect the poll
-    // fix in fixtures/erunApp.ts closes. Bare, the block converges for as long
+    // fixed cap inside the 60s this test declares. Bare, the block converges for as long
     // as the test itself says it may.
     await expect(async () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
@@ -194,13 +187,9 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
       // Version row always renders the version, never the "Not set" empty case.
       await expect(card).toContainText('1.0.0', { timeout: 1_000 });
 
-      // Version used to render through the `wide` variant (erun#1860) so its
-      // longest identifier got the card's full content width instead of
-      // breaking mid-token in the narrow shared-row column. #1901 removed
-      // `font-mono` (freeing width) and truncates identifiers instead, so
-      // `wide` was retired from this card -- Version now shares the same
-      // fixed label column and single-row layout every other row uses, and
-      // still baseline-aligns its label and value like an ordinary row.
+      // Version shares the same fixed label column and single-row layout
+      // every other row uses (identifiers truncate rather than wrap), and
+      // baseline-aligns its label and value like an ordinary row.
       const geometry = await rowGeometry(card, 'Version');
       expect(geometry.dtBottom).toBeGreaterThan(geometry.ddTop - 1);
       expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);

@@ -74,7 +74,7 @@ export function TerminalTabStrip(): React.ReactElement {
   // the active session back to an env tab and the strip returns to env mode.
   //
   // Shared with the titlebar rather than re-derived: one definition of "the
-  // active session is an orchestrator" (#1178).
+  // active session is an orchestrator".
   const orchestratorMode = useAppSelector(selectIsOrchestratorSession);
 
   let tabs: StripTab[];

@@ -33,12 +33,11 @@ func enrollAuthEnvelope(code string) string {
 	return string(encoded)
 }
 
-// TestEnrollERunPlatformUserRendersTheAdministratorHandoff is the regression
-// for erun#1820: a not-yet-enrolled caller's self-enroll attempt is refused
-// by the platform's own auth middleware -- documented on
-// EnrollERunPlatformUser as the expected outcome -- and used to surface as
-// the raw wire error (a JSON envelope inside "http 401: ..."). It must
-// instead read as the hand-off the not-enrolled card already offers
+// TestEnrollERunPlatformUserRendersTheAdministratorHandoff: a not-yet-enrolled
+// caller's self-enroll attempt is refused by the platform's own auth
+// middleware -- documented on EnrollERunPlatformUser as the expected outcome.
+// It must not surface as the raw wire error (a JSON envelope inside
+// "http 401: ...") but read as the hand-off the not-enrolled card already offers
 // (request an invitation, or hand the printed command to an administrator).
 func TestEnrollERunPlatformUserRendersTheAdministratorHandoff(t *testing.T) {
 	for _, tc := range []struct {

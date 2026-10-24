@@ -167,9 +167,9 @@ func TestRunLocalEnvironmentWhipNotAliveWhenNoMaster(t *testing.T) {
 }
 
 // TestWhipEnvironmentStatePathDoesNotCreateDirectory pins the same dry-run
-// purity contract erun#1907 fixed for the config tree: resolving where the
-// whip nudge bookkeeping lives is a pure read (loadWhipEnvironmentState calls
-// it before RunLocalEnvironmentWhip's own dry-run check) and must not create
+// purity contract the config tree follows: resolving where the whip nudge
+// bookkeeping lives is a pure read (loadWhipEnvironmentState calls it before
+// RunLocalEnvironmentWhip's own dry-run check) and must not create
 // ~/.cache/erun/whip/<tenant>/<environment>/ as a side effect.
 func TestWhipEnvironmentStatePathDoesNotCreateDirectory(t *testing.T) {
 	isolateActivityCache(t)

@@ -19,9 +19,8 @@ test.describe('sidebar', () => {
     await expect.poll(() => app.sidebar.isTenantExpanded(SEED_TENANT)).toBe(before);
   });
 
-  // The tenant row's only prior affordance was the folder-group header
-  // (#1218): nothing indicated the name itself opens a dashboard. It now
-  // carries a visible icon alongside the name.
+  // The tenant row carries a visible icon alongside the name, so the name
+  // itself reads as opening a dashboard, not only as the folder-group header.
   test('tenant row carries a visible affordance for opening the dashboard', async ({ app }) => {
     const icon = app.sidebar.tenantDashboardButton(SEED_TENANT).locator('svg');
     await expect(icon).toBeVisible();
@@ -37,12 +36,9 @@ test.describe('sidebar', () => {
     // wording varies ("Opening …" before the open action starts running,
     // "Working on …" once it is).
     //
-    // Asserting it with a locator races that window and loses on a fast open:
-    // measured on one commit, green under contention and "element(s) not found"
-    // after the full timeout when run alone (#2577). Recording it from inside
-    // the page — with the observer installed BEFORE the click — closes the
-    // window. No wall-clock wait is added; what changes is only that a
-    // short-lived render can no longer fall between two polls.
+    // Asserting it with a locator races that window and loses on a fast open.
+    // Recording it from inside the page — with the observer installed BEFORE
+    // the click — closes the window without adding a wall-clock wait.
     const target = `${SEED_TENANT} / ${SEED_ENV_ALPHA}`;
     const openingStatus = await recordOpeningStatus(page, target);
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
@@ -57,11 +53,11 @@ test.describe('sidebar', () => {
 // recordOpeningStatus installs an in-page recorder for the transient status an
 // environment shows while it opens, and returns a reader for whatever it saw.
 //
-// It exists because that status is short-lived by design (#2577): a locator
+// It exists because that status is short-lived by design: a locator
 // assertion has to catch it inside its own render window, and on a fast open
 // that window can close between two polls. A MutationObserver installed before
-// the click cannot miss it, so the assertion still reads real rendered DOM —
-// it just can no longer be raced out of observing it.
+// the click cannot miss it, so the assertion still reads real rendered DOM
+// without racing it.
 async function recordOpeningStatus(
   page: Page,
   target: string,

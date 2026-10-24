@@ -1,4 +1,4 @@
-// RTK Query endpoints for /v1/identity/* (issue #1209): the console's
+// RTK Query endpoints for /v1/identity/*: the console's
 // IdP-identity administration surface. The backend drives Zitadel's
 // Management API with an org-owner PAT that never reaches the browser — the
 // console only ever talks to erun-backend-api, same as every other write in
@@ -219,7 +219,7 @@ export interface UpdateSmtpSettingsInput {
   tls: boolean;
 }
 
-// An invite is a server-side record (#1483), not a self-contained signed
+// An invite is a server-side record, not a self-contained signed
 // token — revocable and listable up until it is accepted. token is the
 // invite link's credential: the console builds the actual accept URL from
 // it locally, since the backend has no reliable notion of its own public

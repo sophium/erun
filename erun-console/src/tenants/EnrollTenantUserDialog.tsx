@@ -19,7 +19,7 @@ import {
 } from '../identity/PlatformEnrollFields';
 
 // EnrollTenantUserDialog is the Tenants view's own way to put a user into a
-// tenant (erun#1744) — offered where the empty tenant is actually visible,
+// tenant — offered where the empty tenant is actually visible,
 // rather than only from the Users view with a tenant picker. The target
 // tenant is fixed to the row it was opened from, so there is no selector
 // here at all, only the same username/issuer/subject fields and first-user

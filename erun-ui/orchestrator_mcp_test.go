@@ -94,7 +94,7 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 
 // The written file is what a launched orchestrator reads, and it must never be a
 // place a bearer can leak from: an MCP client cannot refresh a header it was
-// configured with, so the fix for the expiry was to stop writing one at all.
+// configured with, so none is written at all.
 func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestNoHostEnvType, orchestratorTestAlwaysReachable)
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -323,10 +323,9 @@ func TestOrchestratorMCPUnwiredNoticeNamesTheCause(t *testing.T) {
 	}
 }
 
-// TestOrchestratorMCPUnwiredActionNamesTheControl is the red-then-green
-// regression for the "Install the erun command line tool, then restart the
-// orchestrator" dead end: neither half was ever something the desktop could
-// perform, so the action a caller attaches to the notice must let the
+// TestOrchestratorMCPUnwiredActionNamesTheControl: "Install the erun command
+// line tool, then restart the orchestrator" names nothing the desktop can
+// perform by itself, so the action a caller attaches to the notice must let the
 // frontend link the install docs and drive the restart directly.
 func TestOrchestratorMCPUnwiredActionNamesTheControl(t *testing.T) {
 	if got := orchestratorMCPUnwiredAction(errors.Join(errOrchestratorMCPExecutable, errors.New("not on PATH"))); got != notificationActionInstallAndRestartOrchestrator {
@@ -351,10 +350,8 @@ func TestSanitizeOrchestratorFileID(t *testing.T) {
 	}
 }
 
-// TestBuildOrchestratorMCPConfigReportsEverySkip is the regression test for
-// #1185. The builder skipped an environment whose MCP port did not resolve and
-// dropped the fact on the floor, so a PARTIAL skip was silent on every channel:
-// no notification, no log line, and nothing the session itself could see. An
+// TestBuildOrchestratorMCPConfigReportsEverySkip: an environment whose MCP port
+// does not resolve is skipped, and even a PARTIAL skip must be reported. An
 // orchestrator is told by its own contract to know which environments are its
 // own, and an absent tool reads as "not linked" rather than "failed to wire" --
 // so it cannot detect this from the inside.
@@ -392,12 +389,8 @@ func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
 	}
 }
 
-// TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge is the regression
-// test for the corrected scope of a retracted design. The originally filed issue would have
-// counted a dead port-forward as unwired and dropped the environment for the
-// whole session -- retracted after reading erun-common/mcp_proxy.go, which
-// already recovers a transient edge outage per call. The corrected behaviour:
-// an env whose edge does not answer a probe at launch is wired anyway, and
+// TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge: infra/mcp's proxy
+// already recovers a transient edge outage per call, so an env whose edge does not answer a probe at launch is wired anyway, and
 // reported as unreachable, never as skipped.
 func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
 	unreachableAlways := func(int) bool { return false }
@@ -452,12 +445,10 @@ func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
 	}
 }
 
-// TestOrchestratorMCPPartialNoticeCountsHostEnvsInItsDenominator covers the
-// three-env case the exclusion used to get wrong. A host env has no MCP edge to
-// wire, so it must not appear among the problems -- but it IS one of the linked
-// environments, so a denominator that omitted it described a smaller
-// orchestrator than the one the operator linked, and an operator counting their
-// own entries read the notice as arithmetic that did not add up.
+// TestOrchestratorMCPPartialNoticeCountsHostEnvsInItsDenominator: a host env
+// has no MCP edge to wire, so it must not appear among the problems -- but it
+// IS one of the linked environments, so the denominator must count it or the
+// notice's arithmetic will not add up for an operator counting their entries.
 func TestOrchestratorMCPPartialNoticeCountsHostEnvsInItsDenominator(t *testing.T) {
 	notice := orchestratorMCPPartialNotice("erun-issues", 1, 3,
 		[]orchestratorMCPSkip{{Label: "frs/host", Reason: "it is a host environment, which has no pod and so no MCP edge to reach", HostEnv: true}},

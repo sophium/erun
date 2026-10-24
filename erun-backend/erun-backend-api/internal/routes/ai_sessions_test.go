@@ -119,10 +119,10 @@ func TestReportAISessionEventCarriesForwardTheEnvironmentID(t *testing.T) {
 }
 
 // TestReportAISessionEventResolvesTheSameStatesLocalCallersSee proves the
-// response uses eruncommon's own resolution (never a second, drifting
+// response uses erun-common's own resolution (never a second, drifting
 // implementation of busy/idle/awaiting-input): a turn-end event resolves to
 // awaiting-input, and an exit event resolves to exited, exactly as
-// eruncommon.ResolveAISessionStatus documents.
+// erun-common's model.ResolveAISessionStatus documents.
 func TestReportAISessionEventResolvesTheSameStatesLocalCallersSee(t *testing.T) {
 	cases := map[string]struct {
 		body  string

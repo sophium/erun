@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The orchestrator cross-env diff panel (#1178) is the orchestrator's primary
+// The orchestrator cross-env diff panel is the orchestrator's primary
 // code-review instrument: with a cross-env session focused, the panel shows
 // one section per LINKED environment instead of one merged diff, and each
 // section owns its own loading/error/scope state so one stopped environment
@@ -245,7 +245,7 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     // the panel never opened -- so converge on it having opened first.
     await app.reviewPanel.waitForOpen();
 
-    // Single-env sessions must not gain the multi-env label (#1314) — the
+    // Single-env sessions must not gain the multi-env label — the
     // review panel here has exactly one target, so no surface names it.
     await expect(app.reviewPanel.envLabels(ALPHA_ENV_KEY)).toHaveCount(0);
   });

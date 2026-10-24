@@ -90,7 +90,7 @@ func TestReconcileBootstrapNameAppliesWhenNoEnvironments(t *testing.T) {
 }
 
 // TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments locks the
-// refusal path (erun#1480's central safety property): any existing environment
+// refusal path (the central safety property): any existing environment
 // refuses the rename outright, and no UpdateName call is even attempted.
 func TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments(t *testing.T) {
 	updater := &fakeTenantNameUpdater{}

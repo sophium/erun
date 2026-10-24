@@ -23,9 +23,9 @@ const (
 // cap: that only bounds an unsized container and costs nothing at scheduling
 // time. `defaultRequest` must not follow the cap the same way — a request is a
 // reservation, and a defaultRequest equal to the cap turns the quota into a
-// minimum node size for the whole namespace (#1076), so it is instead the
-// small fixed value in DefaultLimitRangeDefaultRequestCPU/Memory, independent
-// of how large the cap is configured.
+// minimum node size for the whole namespace, so it is instead the small fixed
+// value in DefaultLimitRangeDefaultRequestCPU/Memory, independent of how large
+// the cap is configured.
 func namespaceResourceQuotaManifest(namespace string, quota config.NamespaceResourceQuota) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
@@ -77,9 +77,7 @@ func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace 
 }
 
 // EnsureKubernetesResourceQuota applies (creates or updates) the namespace's
-// ResourceQuota + LimitRange from quota. A zero quota is a no-op, so an
-// environment with no cap configured deploys exactly as it did before this
-// existed.
+// ResourceQuota + LimitRange from quota. A zero quota is a no-op.
 func EnsureKubernetesResourceQuota(contextName, namespace string, quota config.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil

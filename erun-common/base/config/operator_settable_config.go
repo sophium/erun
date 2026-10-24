@@ -6,18 +6,12 @@ package config
 // gate enumerates this registry alongside CLI commands, MCP tools, and API
 // routes, and fails any non-exempt entry with no reference in the operator
 // surface: the same dead end as a route nothing can call (root AGENTS.md §
-// "Smooth, Seamless, No Dead Ends", failure mode 3). erun#1745 is the field
-// that motivated this: OrchestratorEnvConfig.Role shipped with a reader
-// (erun list) and no writer, and none of the gate's three existing
-// enumerations (routes, MCP tools, CLI commands) could see the gap, because a
-// bare config field is none of those three things.
+// "Smooth, Seamless, No Dead Ends", failure mode 3), which none of the route,
+// MCP tool, or CLI command enumerations can see.
 //
-// This registry is hand-maintained, the same discipline as
-// erun-cli/cmd/command_tree.go's cliOnlyAgentFacingCommands: there is no
-// language-level "this field is meant to be operator-set" marker to walk the
-// way the Cobra command tree or the MCP tool table can be walked, so a config
-// field an operator is meant to set is added here explicitly when it is
-// introduced.
+// This registry is hand-maintained: there is no language-level "operator-set"
+// marker to walk, so a config field an operator is meant to set is added here
+// explicitly when it is introduced.
 type OperatorSettableConfigField struct {
 	// Name identifies the field for reporting, e.g. "OrchestratorEnvConfig.Role".
 	Name string

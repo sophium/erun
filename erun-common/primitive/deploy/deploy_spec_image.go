@@ -206,8 +206,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.
 		// explicit choice of which image this env runs -- record it the same
 		// self-maintaining, bare-name way an operator's own --runtime-image
 		// override does, so a later plain `erun deploy`/`erun open` reads back
-		// the line this build just moved the env onto instead of the stale
-		// value erun#1754 found left behind by this exact orchestration.
+		// the line this build just moved the env onto instead of a stale value.
 		if name := configpkg.RuntimeImageComponentName(build.Image.Tag); name != "" {
 			deployInput.PersistRuntimeImage = name
 		}

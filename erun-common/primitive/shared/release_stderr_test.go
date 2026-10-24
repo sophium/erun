@@ -7,11 +7,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// These are erun#1768's pattern applied to release.go's git-backed helpers:
-// git's stderr is already captured (onto exec.ExitError.Stderr for Output(),
-// or directly in CombinedOutput()'s own return value), and each caller used
-// to discard it in favor of the content-free "exit status N" a bare "%w"
-// wrap renders.
+// release.go's git-backed helpers: git's stderr is already captured (onto
+// exec.ExitError.Stderr for Output(), or directly in CombinedOutput()'s own
+// return value), and each caller must surface it rather than the
+// content-free "exit status N" a bare "%w" wrap renders.
 func TestGitRemoteTagExistsIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: 'not-a-remote' does not appear to be a git repository", 128)
 	_, err := GitRemoteTagExists(testTraceContext(false), t.TempDir(), "not-a-remote", "v1.0.0")

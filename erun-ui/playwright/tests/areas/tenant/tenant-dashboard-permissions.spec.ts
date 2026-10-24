@@ -140,10 +140,9 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       // hidden the way a missing permission is.
       await app.tenantDashboard.selectTab('Builds');
       await expect(app.tenantDashboard.activePanel()).toContainText('http 500');
-      // PanelBody's error branch used to render through a bespoke
-      // DashboardMessage <div> with no ARIA role at all, so a screen reader
-      // never announced it. It now renders through InlineAlert (role="alert"),
-      // queried here via the accessibility tree rather than an attribute match.
+      // PanelBody's error branch renders through InlineAlert (role="alert") so
+      // a screen reader announces it, queried here via the accessibility tree
+      // rather than an attribute match.
       await expect(app.tenantDashboard.activePanel().getByRole('alert')).toContainText('http 500');
       await page.screenshot({
         path: artifactPath('test-results/dashboard-panel-error-alert-light.png'),
@@ -224,17 +223,15 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
   });
 });
 
-// #1390: a stale signed-in identity fails the dashboard's own precondition
+// A stale signed-in identity fails the dashboard's own precondition
 // read (whoami) before any panel is even attempted, so it blocks the whole
 // dashboard — apiError, not a per-panel error. That message names "sign in"
 // as its fix, and the app already has a control for it (the same cloud-alias
 // login the sidebar offers), so it must render with that control rather than
 // as inert text in an empty panel.
 test.describe('tenant dashboard — a stale identity blocks the whole dashboard (#1390)', () => {
-  // #1392: a successful sign-in used to leave this exact alert and button on
-  // screen — the login dispatched and the sidebar's alias updated, but
-  // nothing re-fetched the dashboard, so the operator saw the identical
-  // stale-identity error next to a session that had just been fixed. The
+  // A successful sign-in must re-fetch the dashboard, not leave this exact
+  // alert and button on screen next to a session that was just fixed. The
   // route stub answers LoadTenantDashboard differently on the re-fetch
   // triggered by a successful login than it did on the initial load, so this
   // proves the panel actually recovers rather than merely dispatching a
@@ -317,8 +314,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
   });
 
   // The mirror case: a sign-in that does not succeed must say so rather than
-  // silently re-rendering the identical message, which is the same trap one
-  // level down (#1392).
+  // silently re-rendering the identical message.
   test('a failed sign-in reports the failure and leaves the error in place', async ({
     app,
     page,

@@ -60,13 +60,9 @@
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
 {{- /* Opt-in public HTTPS edge for the API itself, mirroring erun-console's
-       and erun-zitadel's own Ingresses in shape and value naming (#1141). Every
-       other externally-reachable component of a platform declares its own
-       endpoint; the API could not, so the one component a tenant must reach in
-       order to use the platform at all was the only one the platform could not
-       publish. The result was an Ingress nothing declared, which cannot be
-       reviewed, reproduced on a second instance, or recovered if deleted --
-       while CLI login records are keyed to that hostname.
+       and erun-zitadel's own Ingresses in shape and value naming, so the
+       endpoint CLI login records are keyed to is declared, reviewable, and
+       reproducible rather than hand-created.
 
        Off unless api.externalDomain is set, so no existing deployment gains a
        public endpoint on upgrade. Unlike erun-console's, this one has no
@@ -105,7 +101,7 @@
 {{- $mcpSigningSecretName := default "" $mcpSigning.secretName -}}
 {{- $mcpSigningSecretKey := default "signing.key" $mcpSigning.secretKey -}}
 {{- $mcpSigningMountDir := "/etc/erun/mcp-signing" -}}
-{{- /* Identity administration (issue #1209): the org-owner Zitadel
+{{- /* Identity administration: the org-owner Zitadel
        Management API PAT the erun-zitadel chart already provisions and
        persists to <tenant>-zitadel-pats. Defaults follow that chart's own
        naming so a platform deploying both components needs no extra
@@ -233,7 +229,7 @@ rules:
       {{- end }}
     verbs: ["get"]
   {{- end }}
-  {{- /* Placement credential secrets (#1112): deployexec.ensurePlacementSecret,
+  {{- /* Placement credential secrets: deployexec.ensurePlacementSecret,
          called by this SA's own process (the launcher that creates the deploy/
          stop/delete Jobs above, not the Job itself) upserts one erun-ctx-cred-<id>
          Secret per remote-context deploy so the Job can read its target
@@ -260,8 +256,7 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-api-env-deployer
 ---
-{{/* The env-deployer used to run as cluster-admin; this is the curated,
-     isolated, audited provisioner role carrying exactly the
+{{/* The env-deployer's curated, isolated, audited provisioner role, carrying exactly the
      verbs provisioning needs. Its Job runs one thing — erun deploy/stop/
      delete for one tenant's runtime chart — never a component chart, so the
      verb list is scoped to what that install actually touches: namespace
@@ -344,7 +339,7 @@ rules:
     resources: ["issuers", "certificates"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   {{- /* list + delete on certificates, and read on the ACME chain, are what the
-         delete Job's pre-teardown challenge retraction needs (#1174/#1183).
+         delete Job's pre-teardown challenge retraction needs.
          Namespace teardown removes the env's DNS-01 token Secret as ordinary
          content, but a still-pending Challenge's cleanup authenticates to the
          broker with exactly that Secret -- so if the Certificate is not deleted
@@ -352,9 +347,8 @@ rules:
          the namespace sits in Terminating for its full timeout.
 
          Without these verbs the retraction's own reads are Forbidden and it
-         does nothing at all, which is how #1174 shipped inert: `kubectl get
-         challenges` returned Forbidden, that was read as "no challenges here",
-         and the whole step was skipped. Orders and Challenges are read-only --
+         does nothing at all: a Forbidden `kubectl get challenges` reads as "no
+         challenges here" and the whole step is skipped. Orders and Challenges are read-only --
          deleting the Certificate is what cascades to them; the reads only exist
          to wait for the cascade to finish. */}}
   - apiGroups: ["acme.cert-manager.io"]

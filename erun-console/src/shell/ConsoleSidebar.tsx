@@ -61,9 +61,8 @@ function NavItem({
 }
 
 // ConsoleSidebar is the persistent navigation: a single `active` section drives
-// which item is marked current, so exactly one is ever selected at once — the
-// desktop's #1204 selection defect (state derived from more than one field)
-// has no equivalent here because there is only one field to derive it from.
+// which item is marked current, so exactly one is ever selected at once:
+// selection is never derived from more than one field.
 export function ConsoleSidebar({
   brand,
   token,

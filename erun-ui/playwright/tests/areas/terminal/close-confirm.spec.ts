@@ -3,9 +3,9 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { holdTabSetup } from '../../../fixtures/seedRoot.js';
 
-// erun#1214: closing the window used to SIGKILL every in-flight build/
-// deploy/release with no warning and no record. `beforeClose` now blocks the
-// close and asks first when the activity queue holds running work.
+// Closing the window would SIGKILL every in-flight build/deploy/release, so
+// `beforeClose` blocks the close and asks first when the activity queue holds
+// running work.
 //
 // The default suite's kubectl/helm/docker stubs mean nothing here ever
 // reaches a genuinely long-running, backend-tracked activity entry (see

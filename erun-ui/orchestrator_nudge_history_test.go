@@ -142,12 +142,10 @@ func TestDeleteOrchestratorClearsNudgeHistory(t *testing.T) {
 	}
 }
 
-// TestListOrchestratorsReportsHistoryForStoppedOrchestrator pins the
-// complementary gap: ListOrchestrators' "stopped" branch used to report an
-// unconditional zero pacing snapshot for any orchestrator with no live
-// session, which would have re-created the exact "Not nudged" defect this
-// issue closes every time the operator merely stopped (not restarted) a
-// nudged orchestrator.
+// TestListOrchestratorsReportsHistoryForStoppedOrchestrator: ListOrchestrators'
+// "stopped" branch must report the persisted pacing history, not a zero
+// snapshot, so a merely stopped (not restarted) nudged orchestrator does not
+// read "Not nudged".
 func TestListOrchestratorsReportsHistoryForStoppedOrchestrator(t *testing.T) {
 	orchestratorPacingNudgeSettle = 0
 	app := orchestratorTestApp(t)
@@ -248,7 +246,7 @@ func TestWriteOrchestratorNudgeHistoryEntryRefusesToClobberAnUnreadableFile(t *t
 
 // TestOrchestratorNudgeHistoryEntryPersistsAtomically is a light integration
 // check that writeOrchestratorNudgeHistoryEntry actually round-trips through
-// eruncommon.WriteFileAtomic (temp file + rename) rather than a plain
+// config.WriteFileAtomic (temp file + rename) rather than a plain
 // truncating write: the file exists, parses, and reads back exactly what was
 // written.
 func TestOrchestratorNudgeHistoryEntryPersistsAtomically(t *testing.T) {

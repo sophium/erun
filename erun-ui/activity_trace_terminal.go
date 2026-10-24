@@ -31,7 +31,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 		// The CLI's taken-over notice is a public contract line (see
-		// eruncommon.ShellSessionTakenOverNotice): another ERun window
+		// open.ShellSessionTakenOverNotice): another ERun window
 		// re-attached this persistent session, so the upcoming PTY exit
 		// must not trigger a reconnect that would steal it back.
 		if strings.TrimSpace(line) == open.ShellSessionTakenOverNotice {

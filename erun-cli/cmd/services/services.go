@@ -14,13 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewServicesCmd builds `erun services`: the CLI's own surface for the read
-// model the desktop's Ports tab renders as its Service picker
-// (eruncommon.ListEnvironmentServices). It exists because that call shipped on
-// the desktop alone, which left `erun expose`'s SERVICE argument -- a derived
-// label that resolves to the in-namespace Service <tenant>-<service> -- a name
-// the caller had to know in advance, with nothing on this surface able to
-// report it and no way to name the real backend when the derivation is wrong.
+// NewServicesCmd builds `erun services`: the CLI surface for the read model the
+// desktop's Ports tab renders as its Service picker
+// (expose.ListEnvironmentServices), so a caller can discover the names `erun
+// expose`'s SERVICE argument accepts instead of knowing them in advance.
 func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{

@@ -3,15 +3,12 @@ import type { Request, Route } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// erun#1591: the toolbar's error pill had a named remedy for a handful of
-// causes ('wait-longer', 'deploy', restart-orchestrator) and nothing at all
-// for every other error — the operator read the message and was on their
-// own. This locks the fix: "Report a bug" is now a standing action on every
+// Only a handful of errors have a named remedy ('wait-longer', 'deploy',
+// restart-orchestrator), so "Report a bug" is a standing action on every
 // error message centre row, ordered after a known remedy (never ahead of
 // it), and clicking it hands the failure to an agent rather than opening a
-// form. The message centre moved every notification's actions from the old
-// inline pill into the dialog a class icon opens; the assertions
-// below target that dialog now, not the pill.
+// form. Notification actions live in the dialog a class icon opens, so the
+// assertions below target that dialog.
 //
 // The agent-drafting path itself (ReportBugFailure admitting and spawning a
 // real orchestrator) is not driven here for the same reason
@@ -54,10 +51,8 @@ async function mockReportBugFailure(
 }
 
 test.describe('titlebar "Report a bug" action', () => {
-  // This is the case that was broken before #1591: an error with no known
-  // remedy rendered no action at all, so the operator had nothing to do about
-  // it. A test that only checked an error *with* a remedy would still pass
-  // while that dead end shipped.
+  // An error with no known remedy must still offer an action. A test that
+  // only checked an error *with* a remedy would pass with that dead end.
   test('an error with no known remedy still offers a reporting action', async ({ app, page }) => {
     const message = 'Could not reach the runtime.';
     await emitErrorNotification(page, { message });

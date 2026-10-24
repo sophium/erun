@@ -36,9 +36,8 @@ func postRestartControl(t *testing.T, port int, orchestratorID string) core.Desk
 	return decoded
 }
 
-// TestRestartControlServer_InvokesRestartAppExactlyOnce is the red-then-green
-// case root AGENTS.md's "no dead ends" and #1341's "run exactly once" both
-// require: one trigger call must produce exactly one relaunch and one quit,
+// TestRestartControlServer_InvokesRestartAppExactlyOnce pins that one trigger
+// call produces exactly one relaunch and one quit,
 // nothing left listening or armed to fire again once the server is closed.
 func TestRestartControlServer_InvokesRestartAppExactlyOnce(t *testing.T) {
 	app, _ := restartTestApp(t)
@@ -389,18 +388,14 @@ func TestAdoptRestartControl_ReportsAHolderThatOutlivesTheWait(t *testing.T) {
 }
 
 // TestAdoptRestartControlSteadily_TakesOverAHolderThatOutlivesTheHandoffWindow
-// is the reported stranding at its cause. The hand-off window is bounded, so a
-// predecessor that outlives it leaves the successor refused — and the successor
-// used to stop there for good. The record then stayed pinned to a pid that had
-// since exited, and nothing revisited it: the desktop actually running owned no
-// endpoint, so `erun app restart` read the record as stale and refused, and the
-// operator had no supported path back to a rebuild at all. Re-checking past the
-// window, until the holder's exit finally frees the record, is what closes that.
+// pins that a successor refused past the bounded hand-off window keeps
+// re-checking until the holder's exit frees the record. Giving up would leave
+// the record pinned to an exited pid and the running desktop with no endpoint,
+// so `erun app restart` would refuse with no path back to a rebuild.
 func TestAdoptRestartControlSteadily_TakesOverAHolderThatOutlivesTheHandoffWindow(t *testing.T) {
 	stage := stageStrandedRestartControl(t)
 
-	// The hand-off window ends with the predecessor still alive: this is the
-	// point the successor used to give up at, permanently.
+	// The hand-off window ends with the predecessor still alive.
 	remaining, err := adoptRestartControl(stage.claim, func(time.Duration) {})
 	if err != nil {
 		t.Fatalf("adoptRestartControl: %v", err)

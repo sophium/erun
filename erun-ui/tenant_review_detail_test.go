@@ -195,8 +195,7 @@ func usernameResolutionAPI(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames is the review
-// detail dialog's half of the #1378 "u2 in the UI" fix: the review's author
+// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames: the review's author
 // and each comment's creator resolve to the tenant user directory's display
 // name when the caller can read /v1/users.
 func TestLoadReviewDetailResolvesAuthorAndCommenterUsernames(t *testing.T) {

@@ -152,9 +152,9 @@ func (a *App) RepaintSession(sessionID int) error {
 		return nil
 	}
 	if typedRecently {
-		// Switching into a pane fires this on every switch, so it is the other
-		// half of #1330: a switch-and-type sequence would resize the pty under
-		// a line being entered. Someone typing needs no synthetic repaint.
+		// Switching into a pane fires this on every switch, so a
+		// switch-and-type sequence would resize the pty under a line being
+		// entered. Someone typing needs no synthetic repaint.
 		return nil
 	}
 	// Only main-screen TUIs (claude/codex, whether in an AI tab or an
@@ -212,7 +212,7 @@ var (
 // aiRepaintInputQuiet is how recently input must have arrived for the repaint
 // nudge to stand down. The nudge exists to repaint a BLANK reattached screen; a
 // pane receiving keystrokes is by definition not that, and resizing it mid-line
-// is what corrupted submitted prompts (#1330). Generous on purpose: skipping a
+// corrupts submitted prompts. Generous on purpose: skipping a
 // repaint costs one keypress to fix, while a bad reflow costs the message.
 const aiRepaintInputQuiet = 1500 * time.Millisecond
 

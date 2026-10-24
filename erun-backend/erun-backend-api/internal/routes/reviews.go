@@ -144,18 +144,11 @@ type createReviewRequest struct {
 // the two queue advances -- into the identity the rows it is matched against
 // were recorded under.
 //
-// It is the same canonicalization `PrepareCreate` applies to a new review's
-// repository, and the same function: a review records its repository through
-// eruncommon.RepositoryIdentity, so a filter compared verbatim against that
-// column only ever finds the rows a caller happened to spell exactly as this
-// one did. An SSH remote and its HTTPS form name one repository, so a filter
-// holding either has to reach both -- otherwise the caller is handed a silent
-// subset of the repository they named, which is what `--repository owner/repo`
-// and `--repository git@host:owner/repo` each did. A value that names no
-// repository is refused here rather than passed through, for the same reason
-// an unrecognised `?status=` is: an unusable filter must not answer as an
-// empty one. An absent or blank one still narrows nothing, which is what a
-// target branch alone has always meant.
+// It is the same canonicalization `PrepareCreate` applies (model.RepositoryIdentity),
+// so an SSH remote and its HTTPS form reach the same rows instead of a silent
+// subset. A value that names no repository is refused, like an unrecognised
+// `?status=`: an unusable filter must not answer as an empty one. An absent
+// or blank one narrows nothing.
 func canonicalRepositoryParam(repository string) (string, error) {
 	if strings.TrimSpace(repository) == "" {
 		return "", nil
@@ -169,12 +162,9 @@ func canonicalRepositoryParam(repository string) (string, error) {
 
 // listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
 // then validated before it reaches the repository: an unrecognised value
-// matches no row, so passing one through answered `200` with an empty list a
-// caller reads as "no reviews" -- the conclusion an operator acts on when they
-// check whether anything is waiting on them. The membership check is the shared
-// eruncommon.NormalizeReviewStatus, the same refusal `erun review list` makes
-// before it ever calls the platform, so both surfaces accept the same
-// spellings and name the same accepted values.
+// matches no row and would answer `200` with an empty list a caller reads as
+// "no reviews". The check is the shared model.NormalizeReviewStatus, so this
+// and `erun review list` accept the same spellings.
 func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	status := model.ReviewStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))

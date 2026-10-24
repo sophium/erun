@@ -19,7 +19,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// PATCH /v1/tenants/reconcile-bootstrap-name (erun#1480) against a real migrated
+// PATCH /v1/tenants/reconcile-bootstrap-name against a real migrated
 // PostgreSQL: the rename must be provable on persisted rows, not on a trace,
 // which is why this is an HTTP-level gate rather than a fake-backed unit
 // test — it drives the real repository/service wiring and then reads the

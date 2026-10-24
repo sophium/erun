@@ -96,8 +96,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 	}
 }
 
-// TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation is the
-// regression for erun#1216 bug 2: a Redux reset that does not restart the Go
+// TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation: a Redux reset that does not restart the Go
 // process (the ErrorBoundary "Reload app" button) must not lose a busy
 // environment's activity — the initial-state read model has to carry the
 // poller's own memory forward, since emitEnvActivityIfChanged only re-emits

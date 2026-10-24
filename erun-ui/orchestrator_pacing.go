@@ -14,29 +14,17 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// A turn boundary is not the only place an orchestrator needs the pacing
-// contract in front of it. The skill text (erun-orchestrate/SKILL.md) already
-// asks it to come back roughly every five minutes and never exit its loop, but
-// that is guidance the model has to keep remembering across however much
-// context sits between it and the reasoning that set it — a compaction, a long
-// tool call, a connection error the harness swallowed. Nothing re-states it
-// between boundaries, so a session that stalls mid-turn (a dropped connection
-// it never retried, a turn that quietly ended early) can sit idle until the
-// operator happens to notice.
-//
-// This file re-states the contract into a session whose own activity report
-// (orchestrator_activity.go) has gone quiet, on the same 15s tick that already
-// polls everything else session-shaped. It reuses that report rather than a
-// report of its own: a turn boundary that renews it is exactly the evidence
-// that the session is not stalled, whether the last write said busy or idle.
+// The skill text asks an orchestrator to keep pacing itself, but nothing
+// re-states that between turn boundaries, so a session that stalls mid-turn can
+// sit idle until the operator notices. This file re-states the contract into a
+// session whose activity report (orchestrator_activity.go) has gone quiet, on
+// the shared 15s tick. A turn boundary that renews that report is the evidence
+// the session is not stalled, whether the last write said busy or idle.
 
 // orchestratorPacingStaleAfter and orchestratorPacingMaxNudges are the
-// unconfigured defaults, kept as their own named values (rather than reading
-// eruncommon's constants inline) because orchestrator_pacing_test.go stages
-// candidate timestamps and counts directly off them. They are defined equal to
-// eruncommon.DefaultWhipStaleAfter/DefaultWhipMaxNudges, so an unconfigured
-// install's actual runtime bound (orchestratorWhipConfig, below) always agrees
-// with what these tests stage against.
+// unconfigured defaults, named here because tests stage candidates off them;
+// they equal orchestrator.DefaultWhipStaleAfter/DefaultWhipMaxNudges so an
+// unconfigured install's runtime bound agrees with what tests stage against.
 const (
 	orchestratorPacingStaleAfter = orchestrator.DefaultWhipStaleAfter
 	orchestratorPacingMaxNudges  = orchestrator.DefaultWhipMaxNudges
@@ -48,9 +36,8 @@ const (
 // variable so tests can drop it to zero.
 var orchestratorPacingNudgeSettle = 150 * time.Millisecond
 
-// orchestratorPacingNudgeText is the unconfigured default nudge text. The
-// message is now editable via ~/.erun/config.yaml's `whip.message`; this
-// constant is what an install that configures nothing keeps getting, verbatim.
+// orchestratorPacingNudgeText is the unconfigured default nudge text;
+// ~/.erun/config.yaml's `whip.message` overrides it.
 const orchestratorPacingNudgeText = orchestrator.DefaultWhipMessage
 
 // orchestratorPacingActivity is the parsed report, independent of the TTL
@@ -85,26 +72,18 @@ func readOrchestratorPacingActivity(id string) (orchestratorPacingActivity, bool
 // it — gathered so the decision itself is a pure function, testable without
 // touching a file or a lock.
 //
-// This deliberately carries no background-shell fact. It used to gate the
-// nudge on one (orchestrator-shell-activity), reasoning that a shell left
-// running was evidence the orchestrator meant to be quiet — but a background
-// shell is a fact about a *shell*, not about the turn behind it, and a
-// long-running build is the single most likely thing to be in flight when a
-// turn dies mid-response. Gating on it suppressed the nudge exactly when it
-// was needed most (erun#1376). The shell-activity report stays exactly as it
-// is for the shell indicator; pacing just stops reading it.
+// This deliberately carries no background-shell fact: a running shell says
+// nothing about the turn behind it, and a long build is the most likely thing
+// in flight when a turn dies mid-response, so gating on it would suppress the
+// nudge exactly when it is needed most.
 type orchestratorPacingCandidate struct {
 	alive        bool
 	lastActiveAt time.Time
 	nudgeCount   int
 	capped       bool
-	// unmanaged marks a candidate this desktop holds no session for at all: a
-	// configured orchestrator whose session was started outside it (a terminal,
-	// or a previous desktop instance). It is the transport fact Reachable
-	// carries — not a statement about the session, which may be perfectly alive
-	// and is exactly the case that must not be reported as dead. Zero value is
-	// the ordinary, reachable case, so a candidate built without it keeps
-	// today's meaning.
+	// unmanaged marks a candidate this desktop holds no session for (started in
+	// a terminal or by a previous desktop instance). It is a transport fact, not
+	// a claim the session is dead; it may well be alive.
 	unmanaged bool
 }
 
@@ -130,13 +109,8 @@ const (
 	orchestratorPacingReasonCapCrossed    orchestratorPacingReason = "cap-crossed"
 	orchestratorPacingReasonNudge         orchestratorPacingReason = "nudge"
 	// orchestratorPacingReasonUnreachable is a configured orchestrator this
-	// desktop holds no session for, so no nudge can be written into it from
-	// here whatever its own session is doing. It is deliberately not
-	// orchestratorPacingReasonNotAlive: that is a claim about the session, and
-	// the sessions this covers are usually alive and reporting — reporting to a
-	// desktop that cannot answer them. Naming the transport rather than the
-	// session is the difference between "nothing is running" and "nothing here
-	// can reach what is running", and only the second one is true.
+	// desktop holds no session for. It is deliberately not NotAlive: such
+	// sessions are usually alive, just unreachable from here.
 	orchestratorPacingReasonUnreachable orchestratorPacingReason = "unreachable-from-transport"
 )
 
@@ -144,11 +118,8 @@ const (
 // session the desktop cannot see, or one already past the cap, gets no nudge.
 // A candidate that is stale and not yet capped gets nudged; one that just
 // crossed the cap gets the one-time notice instead. It delegates to
-// eruncommon.DecideWhip (the population-agnostic core, shared with the
-// environment-agent pusher and the CLI/MCP transports) against the live
-// orchestratorWhipConfig, so a configured message/threshold/cap changes this
-// decision without a rebuild while every existing caller and test here keeps
-// its original two-argument shape.
+// orchestrator.DecideWhip against the live orchestratorWhipConfig, so a
+// configured threshold/cap applies without a rebuild.
 func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orchestratorPacingDecision, orchestratorPacingReason) {
 	return decideOrchestratorWhip(c, now, false)
 }
@@ -166,16 +137,12 @@ type orchestratorPacingRow struct {
 	capped           bool
 	lastNudgeAtUnix  int64
 	lastLoggedReason orchestratorPacingReason
-	// envs is this orchestrator's configured link scope (orchestrator.go's
-	// session.envs), carried through so the env-aware gate only ever consults
-	// environments this orchestrator actually linked, never whatever else
-	// happens to be running (erun#1699).
+	// envs is this orchestrator's configured link scope, so the env-aware gate
+	// only consults environments it actually linked.
 	envs []configpkg.OrchestratorEnvConfig
 	// unmanaged marks a configured orchestrator this desktop holds no session
-	// for, so it has no PTY to write into, no nudge budget to keep, and no
-	// wires that scope could have been read from. Everything that acts on a
-	// row is skipped for it; the reconciler still decides and logs for it,
-	// which is the whole point (see orchestratorPacingUnmanagedRows).
+	// for: nothing acts on its row, but the reconciler still decides and logs
+	// for it (see orchestratorPacingUnmanagedRows).
 	unmanaged bool
 }
 
@@ -216,15 +183,11 @@ func (a *App) reconcileOrchestratorPacing() {
 // while its own hooks are reporting one recently enough that the pacer would
 // have been deciding for it. It is what lets the hover card tell "no nudge was
 // needed" apart from "no nudge was possible from this desktop" — the two states
-// a nudge count frozen at zero cannot distinguish, and the reason an
-// orchestrator started in a terminal used to read exactly like a freshly
-// checked one.
+// a nudge count frozen at zero cannot distinguish.
 //
-// It is the read-model's own question, answered against the pacer's own stale
-// bound, so "there is a session out there" means here what it means to the
-// reconciler. An orchestrator with no session anywhere (an ordinary stopped
-// one) reports false: nothing is running outside this desktop, so there is
-// nothing to say beyond the "Stopped" the card already shows.
+// It uses the pacer's own stale bound so it agrees with the reconciler. An
+// orchestrator with no session anywhere reports false; the card already shows
+// "Stopped".
 func orchestratorPacingUnreachable(id string, now time.Time) bool {
 	report, ok := readOrchestratorPacingActivity(id)
 	return ok && now.Sub(report.at) <= getOrchestratorWhipConfig().StaleAfter
@@ -235,15 +198,9 @@ func orchestratorPacingUnreachable(id string, now time.Time) bool {
 // for it so its line obeys the same once-per-transition rule a session-backed
 // row's does.
 //
-// It is what keeps the pacing log's coverage equal to the configured
-// population. A session started outside this desktop (in a terminal, or by a
-// previous desktop instance) writes the same activity and live-conversation
-// records a launched one does — so the desktop reads and shows it — but it has
-// no session object here, so it had no row, was never reconciled, and never
-// appeared in a log whose whole purpose is to make a quiet pane and a
-// suppressed one tell each other apart. An orchestrator that is never
-// evaluated is less legible than one that is suppressed, which is the inverse
-// of what that log exists for.
+// It keeps the pacing log's coverage equal to the configured population: a
+// session started outside this desktop has no session object here, and an
+// orchestrator that is never evaluated is less legible than a suppressed one.
 func (a *App) orchestratorPacingUnmanagedRows(managed map[string]struct{}) []orchestratorPacingRow {
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
@@ -320,7 +277,7 @@ func (a *App) orchestratorPacingRows() []orchestratorPacingRow {
 // orchestratorPacingActivitySignal is what the reconciler could tell about the
 // orchestrator's last report, carried through to the marker so a session that
 // died mid-turn reads differently from one that simply went quiet after
-// finishing (erun#1376): a report has to exist and say "busy" for the marker
+// finishing: a report has to exist and say "busy" for the marker
 // to call it a died turn, since idle-then-quiet is the ordinary, unremarkable
 // case the pacing contract expects.
 type orchestratorPacingActivitySignal int
@@ -355,11 +312,8 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 		lastActiveAt = report.at
 	}
 	// A report written after the last nudge is the turn boundary itself,
-	// whether that turn ended busy or idle: the session did something in
-	// response to being asked. Requiring Busy here missed exactly the
-	// compliant case — a short reply that returns to idle before the next
-	// tick samples it — so a session answering every nudge still climbed
-	// toward the cap.
+	// whether that turn ended busy or idle. Requiring Busy would miss a short
+	// reply that returns to idle before the next tick samples it.
 	if ok && report.at.Unix() > row.lastNudgeAtUnix {
 		a.rearmOrchestratorPacing(row.id)
 		row.nudgeCount = 0
@@ -394,19 +348,13 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	return decision, reason
 }
 
-// logOrchestratorPacingTransition is the fix for the silent-suppression half of
-// erun#1376: every decision decideOrchestratorPacing can reach — not just
-// "nudge" — gets a durable, one-line record naming the orchestrator, the
-// measured quiet period, and which reason applied, so a quiet pane and a
-// suppressed one are told apart from the log rather than being indistinguishable.
-// It logs only on a transition (this orchestrator's reason changed since the
-// last tick), not on every 15s tick, since most orchestrators spend most of
-// their life in "fresh" and a per-tick line would drown the signal.
+// logOrchestratorPacingTransition records every decision, not just "nudge",
+// with the orchestrator, measured quiet period, and reason, so a quiet pane and
+// a suppressed one are distinguishable from the log. It logs only when the
+// reason changes, since a per-tick line would drown the signal.
 //
-// quietKnown is whether the elapsed period means anything: a row the desktop
-// holds no session for and that has never reported has no reference point at
-// all, and reporting a duration measured from the zero time would invent an
-// outage of fifty-odd years rather than admit nothing is known.
+// quietKnown is false when the row has no reference point, so the log says
+// "unknown" instead of a duration measured from the zero time.
 func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason orchestratorPacingReason, elapsed time.Duration, quietKnown bool) {
 	if reason == row.lastLoggedReason {
 		return
@@ -421,12 +369,8 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 		a.unmanagedPacingReason[row.id] = reason
 	}
 	a.mu.Unlock()
-	// The id leads because it is the stable key every other surface uses — the
-	// nudge history state file, ERUN_ORCHESTRATOR_ID, and review-directory
-	// lookups. The display name is allowed to differ from it, so naming only the
-	// name left a log line and its state record uncorrelatable without reading
-	// config.yaml. The name follows parenthetically, but only when it adds
-	// information; the common id == name case stays exactly as it read before.
+	// The id leads because it is the stable key every other surface uses; the
+	// display name follows only when it differs.
 	subject := strings.TrimSpace(row.id)
 	if name := strings.TrimSpace(row.name); name != "" && name != subject {
 		subject += " (" + name + ")"
@@ -444,10 +388,8 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 // real operator input into the pane (SendSessionInput) — the two rearm
 // paths the cap bound names.
 //
-// It deliberately does not touch pacingAutoNudgeCount/pacingWhipCount or
-// their timestamps: those are the cumulative history a hover card reports,
-// not the cap's budget, and a session that answers must still be reportable
-// as having been nudged.
+// It deliberately leaves pacingAutoNudgeCount/pacingWhipCount alone: those are
+// cumulative history for the hover card, not the cap's budget.
 func (a *App) rearmOrchestratorPacing(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -460,15 +402,12 @@ func (a *App) rearmOrchestratorPacing(id string) {
 // sendOrchestratorPacingNudge records the attempt before writing, so a nudge
 // that fails to write still counts against the cap rather than looping forever
 // against a pty that cannot accept input. envStuckDetail is non-empty only
-// when a linked environment's own busy lease was still active but the
-// suppression bound was crossed anyway (erun#1699) — the ordinary case leaves
-// it empty and the marker reads exactly as it did before.
+// when a linked environment's busy lease was still active but the suppression
+// bound was crossed anyway.
 //
-// explicit distinguishes an operator-triggered whip from the automatic
-// pacer, both of which land here: it decides which cumulative history
-// counter this delivery adds to (pacingAutoNudgeCount vs pacingWhipCount) so
-// the two can be reported separately, without changing pacingNudgeCount's own
-// cap bookkeeping, which both paths share exactly as before.
+// explicit distinguishes an operator-triggered whip from the automatic pacer:
+// it picks which cumulative history counter to bump, while pacingNudgeCount's
+// cap bookkeeping is shared by both.
 func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string, explicit bool) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
@@ -480,8 +419,8 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, 
 	if typedRecentlyLocked(managed) {
 		// The operator is mid-sentence in this pane. Writing the nudge text
 		// plus its submitting "\r" now would glue onto whatever they are
-		// typing, the same hazard the AI repaint nudge stands down for
-		// (#1330). Skip without touching the nudge count or timestamp so
+		// typing, the same hazard the AI repaint nudge stands down for.
+		// Skip without touching the nudge count or timestamp so
 		// this does not cost against orchestratorPacingMaxNudges; the
 		// reconciler retries on its next 15s tick once they pause.
 		a.mu.Unlock()
@@ -547,10 +486,8 @@ func (a *App) liveSessionOf(managed *managedTerminal) (terminalSession, bool) {
 // reconciler runs every 15s; the cap condition holds until rearmed) posts the
 // notice once rather than every tick until the operator answers.
 //
-// It also stamps pacingLastCappedAtUnix, the cumulative record of when this
-// session last hit the cap: unlike pacingCapped itself, rearmOrchestratorPacing
-// never clears it, so a session that later resumes still reports having been
-// capped rather than reading as if it never happened.
+// It also stamps pacingLastCappedAtUnix, which rearmOrchestratorPacing never
+// clears, so a resumed session still reports having been capped.
 func (a *App) capOrchestratorPacing(id string, serial int, name string, now time.Time) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
@@ -575,7 +512,7 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string, now time
 // elapsed is the reconciler's own measured now.Sub(lastActiveAt), never the
 // orchestratorPacingStaleAfter constant: a session quiet for 20 minutes must
 // read as 20 minutes, not as the ten-minute contract restated back at the
-// operator as if it had been honoured (erun#1376).
+// operator as if it had been honoured.
 func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
 	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
 		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal, envStuckDetail))
@@ -591,13 +528,11 @@ func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Du
 // died rather than simply gone quiet: a report stuck on "busy" for a full
 // staleness period is the harness never reaching its own turn boundary (a
 // dropped connection, a crash), not an orchestrator that finished and stopped
-// reporting. Without this, both look identical in the pane and the operator
-// has to go read a transcript to tell them apart (erun#1376).
+// reporting.
 //
 // envStuckDetail, when non-empty, means a linked environment was still busy on
-// this orchestrator's own dispatched work when the suppression bound ran out
-// (erun#1699): the nudge fires anyway, but the description names the lane that
-// has not moved rather than reading as an ordinary silent pane.
+// this orchestrator's dispatched work when the suppression bound ran out: the
+// nudge fires anyway, naming the lane that has not moved.
 func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) string {
 	quiet := elapsed.Round(time.Second)
 	if envStuckDetail != "" {

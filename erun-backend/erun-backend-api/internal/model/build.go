@@ -27,7 +27,7 @@ type Build struct {
 	BuildID       string `json:"buildId" bun:"build_id,pk,scanonly"`
 	TenantID      string `json:"tenantId" bun:"tenant_id,scanonly"`
 	// ReviewID is empty for an ordinary `erun build` that reports itself with
-	// no review attached (erun#1954) -- a review association is one reason a
+	// no review attached -- a review association is one reason a
 	// build happened, not its identity.
 	ReviewID string `json:"reviewId,omitempty" bun:"review_id,nullzero"`
 	// ReviewName is read-only display data populated by build read queries.

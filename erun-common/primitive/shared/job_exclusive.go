@@ -13,13 +13,9 @@ import (
 
 // A plain activity lease is presence: many holders coexist, and taking one says
 // nothing about whether anyone else should. That is the right default for
-// observability and the wrong one for a gate. Nothing in the job surface could
-// express "this work needs the environment to itself", so scheduling a second
-// gate batch and a handful of probe jobs into a pod already running one was
-// allowed, silently — and cost a 2.4x slowdown, two red runs on tests that pass
-// standalone, and a false attribution before a baseline was re-measured alone.
-// Worse, two concurrent gate batches sharing one worktree corrupted merge
-// accounting: one reported pushing a commit that belonged to the other.
+// observability and the wrong one for a gate: other jobs scheduled into a pod
+// already running one slow it down and skew its results, and two concurrent
+// gate batches sharing one worktree corrupt merge accounting.
 //
 // Exclusivity here is one claim on one scope, EnvironmentActivityLeaseScopeEnvironment,
 // held for the job's lifetime. Two rules follow from it, and the second is what
@@ -27,9 +23,7 @@ import (
 //
 //   - A second job that declares exclusivity is refused.
 //   - *Any* job started while an exclusive claim is held is refused too. A gate
-//     does not need protection only from another gate; it needs the pod, and a
-//     probe job scheduled beside it is exactly what the measurement above
-//     recorded.
+//     does not need protection only from another gate; it needs the pod.
 //
 // A refusal names the holder and what to do about it, because a lock whose
 // failure mode is "something is wrong somewhere" is one nobody keeps. And the
@@ -243,9 +237,8 @@ func EnsureEnvironmentNotExclusivelyHeld(ctx core.Context, what, underLeaseID st
 
 // environmentExclusivityClaimedByCaller compares a caller's declared claim id
 // against the held one, through the store's own id normalisation on both sides.
-// Comparing raw against sanitized is how erun#1652 happened: an id needing
-// sanitisation never matched its stored form, so every renewal misread as a
-// fresh claim — here the same mistake would refuse a caller its own claim.
+// Comparing raw against sanitized would never match an id that needs
+// sanitisation, refusing a caller its own claim.
 func environmentExclusivityClaimedByCaller(holder activity.EnvironmentActivityLease, underLeaseID string) bool {
 	if strings.TrimSpace(underLeaseID) == "" {
 		return false

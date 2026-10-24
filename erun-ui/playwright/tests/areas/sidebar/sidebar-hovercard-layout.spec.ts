@@ -17,8 +17,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// #1901 unified the env hover card to one row layout with a spacing
-// hierarchy (Sidebar.HoverCardRow.tsx): a fixed label column shared by every
+// The env hover card uses one row layout with a spacing hierarchy
+// (Sidebar.HoverCardRow.tsx): a fixed label column shared by every
 // row regardless of which conditional rows are present, and two zones
 // (stable identity vs live state) separated by a hairline so a conditional
 // row changes only its own zone's height. This spec locks the layout
@@ -131,8 +131,8 @@ async function emitStaleEnvUsage(page: Page, tenant: string, environment: string
 // emitFreshEnvUsage reports a reading that has not outlived its own sweep
 // interval, so UsageState's caption always renders "As of ... ago" rather
 // than the stale branch -- the fresh-branch counterpart of emitStaleEnvUsage,
-// used to check the #1979 "excludes builds" caveat on the branch it renders
-// most often.
+// used to check the "excludes builds" caveat on the branch it renders most
+// often.
 async function emitFreshEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
   await emitEnvUsage(page, tenant, environment, 5, 90);
 }
@@ -294,17 +294,15 @@ test.describe('sidebar env hover card layout (#1901)', () => {
 
   // A stale usage reading is degraded (muted, reduced opacity), never amber:
   // nothing the operator did caused it and no action follows from it, so it
-  // must not look more alarming than an unmeasured number actually is (also
-  // relevant to #1805 -- the percentage itself is not authoritative for a
-  // build-capable environment).
+  // must not look more alarming than an unmeasured number actually is (the
+  // percentage itself is not authoritative for a build-capable environment).
   test('a stale usage reading renders degraded, not as an amber warning', async ({ app, page }) => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // The CPU row, not the single `Usage` row: a cached reading renders CPU and
     // Memory as separate rows, and a stale reading is still a reading.
     const usageValue = card.locator('dt:text-is("CPU") + dd');
     let color = '';
-    // Every read -- including the two that used to run after this block --
-    // lives inside the one retryable attempt: the ongoing usage sweep can
+    // Every read lives inside the one retryable attempt: the ongoing usage sweep can
     // re-emit and re-render the row between the card converging and a
     // subsequent un-retried read, dropping the card the same way a bare
     // sequence of asserts after a single hover would.
@@ -337,8 +335,8 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   });
 });
 
-// #1958 narrowed HOVER_CARD_GRID_CLASS's shared label column from 13ch to
-// 10ch. Both cards render through the one shared constant (Sidebar.HoverCardRow.tsx),
+// HOVER_CARD_GRID_CLASS's shared label column is 10ch. Both cards render
+// through the one shared constant (Sidebar.HoverCardRow.tsx),
 // so both are asserted here rather than just the env card.
 test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => {
   test('the env card label column resolves to 10ch, not the old 13ch', async ({ app, page }) => {
@@ -365,7 +363,7 @@ test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => 
 // The Usage figures are read from the runtime container's own cgroup, which
 // is never where a build runs -- every build executes in the erun-dind
 // sidecar instead, so the reading can look idle while that sidecar saturates
-// the node (#1979). A build-capable environment's caption says so on every
+// the node. A build-capable environment's caption says so on every
 // reading, not only while a build happens to be running -- there is no
 // reliable "a build is running" signal that covers every way one can start
 // (desktop, CLI, an MCP-driven orchestrator). A runtime-type environment has
@@ -491,13 +489,11 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
     }).toPass();
   });
 
-  // The reported defect. An absent sidecar reading is a real state — an older
-  // runtime image, a sidecar mid-restart — and not the same as an environment
-  // that carries no sidecar. Both used to render as nothing, which left the
-  // card showing the runtime container's near-idle CPU and memory qualified
-  // only by the "excludes builds" caveat: a figure that reads as idle beside an
-  // Activity line saying a build is running. The not-read state gets the row,
-  // naming the container it could not reach.
+  // An absent sidecar reading is a real state — an older runtime image, a
+  // sidecar mid-restart — and not the same as an environment that carries no
+  // sidecar. Rendering it as nothing would leave only the runtime container's
+  // near-idle figures beside an Activity line saying a build is running, so
+  // the not-read state gets the row, naming the container it could not reach.
   test('a build-capable environment whose sidecar could not be read says so instead of showing no Builds row', async ({
     app,
     page,

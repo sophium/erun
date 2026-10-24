@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestToolNameEqualsItsCLIPath is the invariant #1186 exists to restore. Before
-// it, five tools broke the rule silently -- `erun exec raw` surfaced as `raw`,
-// `erun sshd sync` as `workspace_sync` -- and nothing would have caught a sixth.
+// TestToolNameEqualsItsCLIPath pins that every MCP tool is named after its CLI
+// path, so a tool like `erun exec raw` can never silently surface as `raw`.
 func TestToolNameEqualsItsCLIPath(t *testing.T) {
 	for _, name := range MCPToolNames() {
 		descriptor, ok := MCPToolDescriptorFor(name)

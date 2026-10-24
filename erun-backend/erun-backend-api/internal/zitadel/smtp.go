@@ -23,9 +23,9 @@ type SMTPConfig struct {
 }
 
 // SMTPStatus is the platform's honest answer to "can this instance send mail
-// at all" (issue #1168). Every flow that reaches a user out of band --
-// signup verification, password reset, invitation -- depends on it, and
-// today the only signal is a 404 nobody checks. Configured reports whether
+// at all". Every flow that reaches a user out of band -- signup
+// verification, password reset, invitation -- depends on it, and Zitadel's
+// own signal is only a 404. Configured reports whether
 // an ACTIVE Zitadel SMTP config exists; Config is the zero value otherwise.
 type SMTPStatus struct {
 	Configured bool       `json:"configured"`
@@ -72,7 +72,7 @@ func (c *Client) GetSMTPStatus(ctx context.Context) (SMTPStatus, error) {
 }
 
 // SetSMTPConfigParams is the declarative desired state for the platform's
-// outbound mail (issue #1168): provider-agnostic host (including port,
+// outbound mail: provider-agnostic host (including port,
 // e.g. "smtp.example.com:587"), username, sender identity, and TLS, plus
 // Password -- sourced by the caller from wherever it holds the credential
 // out of band, never generated or invented here. Password empty on an

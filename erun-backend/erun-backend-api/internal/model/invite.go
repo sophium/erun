@@ -6,7 +6,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Invite is a revocable, single-use invitation into a tenant (issue #1483):
+// Invite is a revocable, single-use invitation into a tenant:
 // a server-side record rather than a self-contained signed token, so it can
 // be listed and revoked before it is ever used.
 type Invite struct {

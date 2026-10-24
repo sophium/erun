@@ -9,11 +9,11 @@ import (
 )
 
 // These tests drive syncOutputsArtifacts against a stub `ssh` so the outputs
-// listing and the prune it feeds are exercised together — erun#1657: an
-// inconclusive listing (a dropped ssh connection, a `find` failure) must never
-// be read as "no deliverables" and must never reach the prune, while a
-// genuinely absent outputs dir and a genuinely empty one must still be
-// no-ops, and a listing that succeeds must still prune what the pod removed.
+// listing and the prune it feeds are exercised together: an inconclusive
+// listing (a dropped ssh connection, a `find` failure) must never be read as
+// "no deliverables" and must never reach the prune, while a genuinely absent
+// outputs dir and a genuinely empty one must still be no-ops, and a listing
+// that succeeds must still prune what the pod removed.
 
 // stubWorkspaceSyncSSHForOutputs points `ssh` at the TestMain stub with no
 // source-lane listings configured, since these tests only exercise the
@@ -78,10 +78,10 @@ func TestSyncOutputsArtifactsStillPrunesRemovedArtifactOnSuccessfulListing(t *te
 	}
 }
 
-// TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus is erun#1768:
-// cmd.Output() already captures ssh's own diagnostic onto exitErr.Stderr, so a
-// failure must surface it rather than the content-free "exit status 255" that
-// %w alone renders.
+// TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus: cmd.Output()
+// already captures ssh's own diagnostic onto exitErr.Stderr, so a failure must
+// surface it rather than the content-free "exit status 255" that %w alone
+// renders.
 func TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	t.Setenv(workspaceSyncStubOutputsExitEnv, "255")
@@ -112,23 +112,12 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 	}
 }
 
-// TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode is a regression
-// test: delivery used to run the writable->extract->sign->read-only cycle
-// unconditionally for every remote
-// artifact on every pass, so an artifact whose content had not changed at all
-// still passed through the 0644 window `makeArtifactsWritable` applies before
-// re-extraction restores it -- on the majority of passes, per the issue's own
-// sampling, since delivery ran every couple of seconds. An operator invoking
-// the artifact directly from a shell during that window saw "permission
-// denied" on an otherwise-correct binary.
-//
-// This locks the fix: when the pod's copy hashes identically to what is already
-// in the mirror, the artifact is never made writable, never re-extracted, and
-// never re-marked read-only -- its mode is untouched start to finish. The tar
-// archive stub below is only ever consulted if the pass decides to transfer,
-// so on the old, unconditional code this test fails: the pass re-fetches the
-// "unchanged" artifact, which lands it back at a writable mode before the
-// read-only re-application.
+// TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode: when the pod's
+// copy hashes identically to what is already in the mirror, the artifact is
+// never made writable, never re-extracted, and never re-marked read-only, so
+// an operator invoking it from a shell never hits the 0644 window
+// `makeArtifactsWritable` opens. The tar archive stub below is only consulted
+// if the pass decides to transfer.
 func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 
@@ -165,13 +154,12 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 	}
 }
 
-// TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass is erun#2387: the
-// outputs lane re-staged its whole set on every pass, byte for byte, even when
-// nothing had changed. workspaceSyncStubFetchMarkerEnv marks the moment the
-// pod's archive is actually streamed (the real ssh/tar transfer), so this test
-// proves the transfer itself is skipped for unchanged content -- not just that
-// the reported count looks right -- and that a genuine content change still
-// triggers a real transfer.
+// TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass: the outputs lane
+// must not re-stage unchanged content. workspaceSyncStubFetchMarkerEnv marks
+// the moment the pod's archive is actually streamed (the real ssh/tar
+// transfer), so this test proves the transfer itself is skipped for unchanged
+// content -- not just that the reported count looks right -- and that a genuine
+// content change still triggers a real transfer.
 func TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	t.Setenv(workspaceSyncStubOutputsEnv, "bin/tool")

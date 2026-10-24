@@ -101,12 +101,8 @@ func counterValue(t *testing.T, families map[string]*dto.MetricFamily, name stri
 	return 0
 }
 
-// TestMetricsEndpointServesAllFiveDocumentedSeries is the red-then-green case
-// erun#1323 exists to fix: metrics-spec.md documents five series and none of
-// them existed anywhere in the code. On origin/main this test fails to even
-// compile — metrics.go, newMetricsRecorder, and everything else this file
-// exercises do not exist there. Against this branch it passes, proving the
-// endpoint now serves exactly the names the spec promises, each carrying the
+// TestMetricsEndpointServesAllFiveDocumentedSeries proves the endpoint serves
+// exactly the five series metrics-spec.md documents, each carrying the
 // tenant+environment labels the spec requires on every series.
 func TestMetricsEndpointServesAllFiveDocumentedSeries(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")

@@ -115,12 +115,9 @@ func TestOrchestratorShellActivityTreatsUnreadableInputAsNotRunning(t *testing.T
 	}
 }
 
-// The defect in #1274: an orchestrator id is reused across restarts, and a
-// report a since-replaced session left behind must not borrow the id's
-// current liveness. Requiring the report's own session id to match the one
-// the desktop currently has recorded as live is what stops that borrowing —
-// independent of, and in addition to, the SessionStart reset that clears the
-// report at the boundary itself.
+// An orchestrator id is reused across restarts, so a report a since-replaced
+// session left behind must not borrow the id's current liveness, independent
+// of the SessionStart reset that clears the report at the boundary.
 func TestOrchestratorShellActivityRejectsAReportFromAReplacedSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

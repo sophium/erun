@@ -6,7 +6,7 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// The Ports tab's public-exposure surface (issue #1351). The headless harness
+// The Ports tab's public-exposure surface. The headless harness
 // has no real cluster and no project with a platform block (see
 // fixtures/seedRoot.ts's kubectl stub and AGENTS.md's "Isolated config root"
 // section), so:
@@ -66,17 +66,13 @@ const PENDING_CERTIFICATE = {
   },
 };
 
-// ListEnvironmentServices powers the picker rendered inside the same form
-// (#1911) -- it shares UIExposureList's {configured, restricted, services}
-// shape by design, so NO_SERVICES doubles as its "nothing running" stub.
-// Every test below stubs it explicitly rather than falling through to the
-// real backend call: that fallthrough is exactly what let #1911 ship the
-// picker with these specs never actually exercising the paired read.
-// A round-trip failure, not a computed one. refreshManageExposures only ever
-// saw a pair rejection from a read whose RPC itself failed, so this stages the
-// bridge's { error } envelope rather than LOAD_FAILURE's computed
-// { configured, error } result: a computed failure resolves the promise, never
-// reaches the catch that blanked both panels, and so cannot reproduce #1934.
+// ListEnvironmentServices powers the picker rendered inside the same form --
+// it shares UIExposureList's {configured, restricted, services} shape by
+// design, so NO_SERVICES doubles as its "nothing running" stub. Every test
+// below stubs it explicitly so the paired read is always exercised.
+// A round-trip failure, not a computed one: a computed { configured, error }
+// result resolves the promise and never reaches refreshManageExposures'
+// catch, so this stages the bridge's { error } envelope instead.
 const SERVICES_READ_FAILURE = { error: 'SERVICES_READ_FAILURE_MARKER' };
 
 const NO_SERVICES = { data: { configured: true, restricted: false, services: [] } };
@@ -235,14 +231,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // #1934's defect, in the only direction the DOM can show it. The two reads
-  // are paired, so a rejection from either used to land in
-  // refreshManageExposures' one catch and overwrite *both* panels with that
-  // error -- the exposure list included, discarding a listing that had already
-  // resolved. Every other case here stubs both reads to the same class of
-  // outcome (both succeed, or the failed one is the exposures read), so a list
-  // blanked by the picker's failure was indistinguishable from one that simply
-  // had nothing to show.
+  // The two reads are paired, so a rejection from the picker's read must not
+  // overwrite the exposure list that had already resolved. Every other case
+  // stubs both reads to the same class of outcome, so only this one can tell a
+  // list blanked by the picker's failure from one with nothing to show.
   //
   // The failure has to come from the services read specifically: when the
   // *exposures* read fails, ExposuresBody returns its error state before
@@ -447,7 +439,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // The picker (#1911) turns "type a Service name you already know" into
+  // The picker turns "type a Service name you already know" into
   // "pick one of what's actually running", filling in the label (tenant
   // prefix stripped) and the sole port, and threading the real Service name
   // through as the Ingress backend rather than the <tenant>-<label>

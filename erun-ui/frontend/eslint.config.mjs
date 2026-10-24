@@ -10,15 +10,14 @@ import tseslint from 'typescript-eslint';
 // further: cyclop:10 + funlen:100/50 on the Go side ⇒ complexity:10 +
 // max-lines-per-function:100 here; staticcheck + govet + errcheck ⇒
 // strictTypeChecked + stylisticTypeChecked. Every rule here is `error`;
-// inline disables and rule downgrades are not allowed (see
-// ~/.claude/projects/<this-repo>/memory/feedback_lint_no_disable.md).
+// inline disables and rule downgrades are not allowed.
 //
 // approaching-max-lines aliases the builtin max-lines implementation under a
 // second rule id so it can run at 'warn' with its own, lower threshold
 // alongside the 'error'-level max-lines below — the same counting rule ESLint
 // itself uses, just fired earlier, so a change that crosses 450 lines says so
 // in its own lint output instead of the next unrelated PR hitting the 500 cap
-// blind (#1302).
+// blind.
 const approachingMaxLines = builtinRules.get('max-lines');
 
 export default tseslint.config(

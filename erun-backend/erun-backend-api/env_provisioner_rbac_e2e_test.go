@@ -1,45 +1,30 @@
 package backendapi
 
 // This file proves the provisioner's grants against a real Kubernetes RBAC
-// engine rather than pinning a rule list: a rule-pinning render test of the
-// chart once passed while provisioning stayed completely broken, because a
-// test that only checks "does the rendered YAML contain resource X" can never
-// catch a grant nobody thought to add. helm's own readiness wait for a Deployment walks
-// Deployment -> its current ReplicaSet -> that ReplicaSet's ready count, and
-// that object graph is not knowable from erun's own call sites -- it has to
-// be observed against a real apiserver's authorizer.
+// engine rather than pinning a rule list: a render test that only checks
+// "does the rendered YAML contain resource X" can never catch a grant nobody
+// thought to add. helm's readiness wait walks Deployment -> its current
+// ReplicaSet -> that ReplicaSet's ready count, an object graph only observable
+// against a real apiserver's authorizer.
 //
-// This test renders the actual provisioner ClusterRole from the actual
-// chart (never a hand-copied rule list, so it cannot drift from what ships),
-// binds it to a throwaway ServiceAccount via a namespaced Role/RoleBinding,
-// stands up a real Deployment, and impersonates that ServiceAccount to
-// perform the exact call helm's readiness wait makes: list the Deployment's
-// ReplicaSets and read the owned one's ready count. It asserts that call
-// succeeds under the current (fixed) rule set and is Forbidden under the
-// rule set with the apps/replicasets grant removed -- i.e. the exact
-// broken state -- reproducing the original live failure
-// (`kubectl get replicasets --as=<deployer-sa>` => Forbidden) against a real
-// cluster instead of asserting it once by hand.
+// The test renders the provisioner ClusterRole from the actual chart, binds it
+// to a throwaway ServiceAccount, stands up a real Deployment, and impersonates
+// that ServiceAccount to make the call helm's readiness wait makes. It asserts
+// that call succeeds under the current rule set and is Forbidden with the
+// apps/replicasets grant removed.
 //
-// What this does NOT cover: it does not invoke the real `helm` binary or
-// `erun deploy`, so a change to helm's own internal readiness algorithm (a
-// different object graph) would not be caught here -- only a regression in
-// the ClusterRole's grants for the Deployment -> ReplicaSet walk this test
-// encodes. It also needs a live cluster where this identity may create
-// Roles/ServiceAccounts/RoleBindings and impersonate another ServiceAccount,
-// which is true of any erun-devops runtime pod (namespaced admin, see
-// erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default") but not
-// of a bare `go test ./...` on a laptop, so it is opt-in and skipped by
-// default.
+// It does not invoke the real `helm` binary or `erun deploy`, so a change to
+// helm's own readiness algorithm would not be caught here. It needs a live
+// cluster where this identity may create Roles/ServiceAccounts/RoleBindings
+// and impersonate another ServiceAccount (true of any erun-devops runtime pod,
+// see erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default"), so it
+// is opt-in and skipped by default.
 //
-// The same file also covers the two grants the deploy Job's post-deploy
-// `erun expose` needs and the provisioner role initially lacked: applying
-// the Host-routing Ingress into the env namespace (the cluster-wide
-// ClusterRole, like everything above), and the `kubectl exec` DNS write
-// against the platform's PowerDNS singleton (a namespaced Role scoped to
-// this chart's own release namespace, never the tenant env namespace). Both
-// follow the same real-object-graph pattern as the readiness test above
-// rather than pinning a rule list.
+// The file also covers the two grants the deploy Job's post-deploy
+// `erun expose` needs: applying the Host-routing Ingress into the env
+// namespace (the cluster-wide ClusterRole), and the `kubectl exec` DNS write
+// against the platform's PowerDNS singleton (a namespaced Role scoped to this
+// chart's own release namespace, never the tenant env namespace).
 
 import (
 	"bytes"
@@ -72,10 +57,9 @@ import (
 // from -- the real source of truth, not a hand-copied rule list.
 const provisionerRBACChartDir = "../../erun-devops/k8s/erun-backend-api"
 
-// TestProvisionerClusterRoleGrantsHelmReadinessRead is the happy-path gate
-// #1083 asks for: a healthy Deployment's readiness must actually be
-// observable under the provisioner ClusterRole's real, current rules, and
-// must NOT have been observable under the pre-#1083 rules.
+// TestProvisionerClusterRoleGrantsHelmReadinessRead checks that a healthy
+// Deployment's readiness is observable under the provisioner ClusterRole's
+// real rules, and is not observable without the replicasets grant.
 func TestProvisionerClusterRoleGrantsHelmReadinessRead(t *testing.T) {
 	if os.Getenv("ERUN_E2E_PROVISIONER_RBAC") != "1" {
 		t.Skip("opt-in: set ERUN_E2E_PROVISIONER_RBAC=1 on a live cluster where this identity may create Roles/ServiceAccounts/RoleBindings and impersonate, to prove the provisioner ClusterRole's replicasets grant against a real RBAC engine (#1083)")
@@ -111,8 +95,8 @@ func TestProvisionerClusterRoleGrantsHelmReadinessRead(t *testing.T) {
 	assertReplicaSetsObservableUnderFixedRules(t, fixed, namespace, deployment)
 }
 
-// assertReplicaSetsForbiddenUnderPreFixRules reproduces the issue's own live
-// reproduction: `kubectl get replicasets --as=<deployer-sa>` => Forbidden.
+// assertReplicaSetsForbiddenUnderPreFixRules asserts the broken state:
+// `kubectl get replicasets --as=<deployer-sa>` => Forbidden.
 func assertReplicaSetsForbiddenUnderPreFixRules(t *testing.T, preFix kubernetes.Interface, namespace string) {
 	t.Helper()
 	_, err := preFix.AppsV1().ReplicaSets(namespace).List(context.Background(), metav1.ListOptions{})
@@ -235,7 +219,7 @@ func decodeRulesByKind(t *testing.T, rendered []byte, kind, roleName string) []r
 
 // readinessRelevantResources is the object graph a Deployment readiness wait
 // actually reads: the Deployment itself, its ReplicaSets, and the pods/events
-// used for failure diagnostics elsewhere in this same ClusterRole (#1080).
+// used for failure diagnostics elsewhere in this same ClusterRole.
 var readinessRelevantResources = map[string]bool{
 	"deployments":       true,
 	"deployments/scale": true,
@@ -281,9 +265,9 @@ func ingressRelevantRules(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	return filterRulesByResource(rules, ingressRelevantResources)
 }
 
-// withoutReplicasetsGrant reproduces the pre-#1083 rule set by removing
-// exactly the rule this fix adds, rather than a second hand-typed copy of
-// the old rules that could itself drift from what #1083 actually changed.
+// withoutReplicasetsGrant derives the rule set lacking the replicasets grant
+// by removing exactly that rule, rather than from a hand-typed copy that
+// could drift.
 func withoutReplicasetsGrant(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	without := make([]rbacv1.PolicyRule, 0, len(rules))
 	for _, rule := range rules {
@@ -295,7 +279,7 @@ func withoutReplicasetsGrant(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	return without
 }
 
-// withoutIngressGrant reproduces the pre-fix rule set by removing exactly
+// withoutIngressGrant derives the rule set lacking the grant by removing exactly
 // the networking.k8s.io/ingresses rule.
 func withoutIngressGrant(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	without := make([]rbacv1.PolicyRule, 0, len(rules))
@@ -308,7 +292,7 @@ func withoutIngressGrant(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	return without
 }
 
-// withoutPodsExecGrant reproduces the pre-fix rule set by removing exactly
+// withoutPodsExecGrant derives the rule set lacking the grant by removing exactly
 // the pods/exec rule.
 func withoutPodsExecGrant(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
 	without := make([]rbacv1.PolicyRule, 0, len(rules))
@@ -451,8 +435,8 @@ func ownedReplicaSet(t *testing.T, items []appsv1.ReplicaSet, deploymentUID type
 
 // provisionerRBACIdentity creates a throwaway ServiceAccount bound to rules
 // via a namespaced Role/RoleBinding, then returns a client impersonating it
-// -- the same `--as=system:serviceaccount:<ns>:<name>` mechanism the issue's
-// own live reproduction used.
+// -- the same `--as=system:serviceaccount:<ns>:<name>` mechanism kubectl
+// impersonation uses.
 func provisionerRBACIdentity(t *testing.T, admin kubernetes.Interface, adminConfig *rest.Config, namespace, name string, rules []rbacv1.PolicyRule) kubernetes.Interface {
 	t.Helper()
 	client, _ := provisionerRBACIdentityWithConfig(t, admin, adminConfig, namespace, name, rules)
@@ -463,7 +447,7 @@ func provisionerRBACIdentity(t *testing.T, admin kubernetes.Interface, adminConf
 // also returns the impersonated rest.Config, needed by callers that must
 // negotiate a raw HTTP protocol upgrade (pods/exec) rather than a typed
 // clientset call. An empty rules set creates the ServiceAccount with no
-// Role/RoleBinding at all, reproducing a pre-fix identity that holds zero
+// Role/RoleBinding at all: an identity that holds zero
 // permissions in this namespace.
 func provisionerRBACIdentityWithConfig(t *testing.T, admin kubernetes.Interface, adminConfig *rest.Config, namespace, name string, rules []rbacv1.PolicyRule) (kubernetes.Interface, *rest.Config) {
 	t.Helper()
@@ -538,8 +522,8 @@ func TestProvisionerClusterRoleGrantsIngressWrite(t *testing.T) {
 	assertIngressWriteSucceedsUnderFixedRules(t, admin, fixed, namespace, ingressName)
 }
 
-// assertIngressCreateForbiddenUnderPreFixRules reproduces the issue's own
-// live reproduction: an Ingress apply forbidden for lack of the grant.
+// assertIngressCreateForbiddenUnderPreFixRules asserts the broken state: an
+// Ingress apply forbidden for lack of the grant.
 func assertIngressCreateForbiddenUnderPreFixRules(t *testing.T, preFix kubernetes.Interface, namespace, name string) {
 	t.Helper()
 	_, err := preFix.NetworkingV1().Ingresses(namespace).Create(context.Background(), probeIngress(name, namespace), metav1.CreateOptions{})
@@ -570,7 +554,7 @@ func assertIngressWriteSucceedsUnderFixedRules(t *testing.T, admin, fixed kubern
 }
 
 // probeIngress is a minimal Ingress in the shape RunExposeService renders
-// (erun-common/expose_exec.go's renderHostRoutingIngress), enough to prove
+// (command/expose's renderHostRoutingIngress), enough to prove
 // the RBAC write without depending on a real backend Service existing.
 func probeIngress(name, namespace string) *networkingv1.Ingress {
 	pathType := networkingv1.PathTypePrefix

@@ -3,14 +3,12 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR, SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// erun#1319: re-scoping a running orchestrator changes what it is allowed to
-// touch, but its live session keeps whatever MCP toolset it was spawned with —
-// a Claude Code session resolves --mcp-config once at launch and cannot be
-// rewired in place. Before the fix, the desktop listed the orchestrator as
-// "running" with its new environment set and said nothing about the mismatch,
-// so the operator had no way to learn their edit had not taken effect. The Go
-// side of the fix (which environments a session was actually wired for vs
-// what it is configured with now) is covered by
+// Re-scoping a running orchestrator changes what it is allowed to touch, but
+// its live session keeps whatever MCP toolset it was spawned with — a Claude
+// Code session resolves --mcp-config once at launch and cannot be rewired in
+// place — so the desktop must surface the mismatch. The Go side (which
+// environments a session was actually wired for vs what it is configured with
+// now) is covered by
 // TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale in
 // erun-ui/orchestrator_test.go, down to the on-disk MCP config; this spec
 // covers the rendering and the control the operator gets to resolve it.
@@ -57,25 +55,14 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
   // fact already read off the card can be read against a card that is no
   // longer there, which is what this case arranges.
   //
-  // The drop used to be staged by the boot's own default-landing open, which
-  // handed the environment's terminal focus and took the card down with it, and
-  // the case gated the boot's first read to time that. It no longer can: focus
-  // moving off a row whose pointer still rests on it is refused while that
-  // holder holds it (useHoverCardOpenState's refuseDismissWhileHeld), so the
-  // landing leaves the card up. The gating went with it -- a route handler that
-  // holds a response back is itself a request still in flight when a short case
-  // ends, which fails the run from outside the case -- and the drop is now
-  // staged by the dismissal that still closes a card: Escape, pressed with the
-  // pointer parked on the row. That also pins the bound on the refusal: an
-  // explicit dismissal is not a holder release, and must still close the card.
-  //
-  // (root AGENTS.md, "A Defect Fix Names Its Reproduction": a probabilistic
-  // failure needs a deterministic reproduction constructed on purpose.) Against
-  // the pre-fix shape -- one hover, then two independent reads -- this case reds
-  // on the second read at expect's 10s default with "element(s) not found" for
-  // the card that answered the first; re-hovering the row recovers, which is
-  // what readOrchestratorHoverCard wraps into one retryable hover-then-read
-  // unit.
+  // Focus moving off a row whose pointer still rests on it is refused while
+  // that holder holds it (useHoverCardOpenState's refuseDismissWhileHeld), so
+  // the drop is staged by Escape, pressed with the pointer parked on the row.
+  // That also pins the bound on the refusal: an explicit dismissal is not a
+  // holder release, and must still close the card. One hover then two
+  // independent reads would fail on the second read; re-hovering the row
+  // recovers, which is what readOrchestratorHoverCard wraps into one retryable
+  // hover-then-read unit.
   //
   // The reads carry a short bound of their own because they are the probe
   // inside that unit: an attempt that finds no card has to fail quickly for
@@ -117,7 +104,7 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
     await stubOrchestratorList(page, runningStaleSnapshot());
     await app.reboot();
 
-    // RED against the pre-fix shape: a plain running dot would also match
+    // A plain running dot would also match
     // `Orchestrator ${name} is running`, so asserting the more specific label
     // is what tells the two states apart.
     await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeVisible();

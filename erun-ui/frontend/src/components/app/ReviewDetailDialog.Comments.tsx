@@ -23,7 +23,7 @@ import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { RelativeTime } from './TenantDashboardMessage';
 
 // commentAuthorDisplay prefers the resolved tenant-user-directory username
-// over the raw creator id (#1378) — the same fallback order
+// over the raw creator id — the same fallback order
 // displayReviewAuthor uses in the reviews list, minus the "You" special case:
 // the dialog has no signed-in user id threaded down to it, and the raw id is
 // still a meaningful fallback rather than nothing.
@@ -37,9 +37,7 @@ function commentAuthorDisplay(comment: UIReviewComment): string {
 
 // COMMENT_PREVIEW_LENGTH bounds a comment body before it needs an explicit
 // "Show more" — long enough that ordinary comments never see it, short
-// enough that a very long one doesn't push Reply/Resolve off without warning
-// (#1378: a review tool that cannot display a long comment has failed at its
-// core job).
+// enough that a very long one doesn't push Reply/Resolve off without warning.
 const COMMENT_PREVIEW_LENGTH = 400;
 
 // ReviewDetailComments renders the review's threads (root comments with their
@@ -372,7 +370,7 @@ function ResolveThreadAction({
   // Resolving is the action that moves the review forward, so it carries the
   // primary button weight — Reply stays outline (secondary) beside it,
   // matching how the repo already distinguishes primary from secondary
-  // actions elsewhere (#1378). Reopening a thread is a correction, not the
+  // actions elsewhere. Reopening a thread is a correction, not the
   // forward action, so it keeps the outline treatment.
   return (
     <Button
@@ -439,9 +437,9 @@ function CommentLine({ comment }: { comment: UIReviewComment }): React.ReactElem
 }
 
 // CommentBody gives a long comment a visible way to read the rest instead of
-// relying on an invisible scroll region (#1378): a native scrollbar inside a
-// max-height box gave no affordance that more text existed, so a long
-// comment read as silently clipped. Collapsed text still shows a preview
+// relying on an invisible scroll region: a native scrollbar inside a
+// max-height box gives no affordance that more text exists, so a long
+// comment reads as silently clipped. Collapsed text still shows a preview
 // (not just "click to reveal a blank box"), and the toggle is a real control
 // rather than a hover-only scrollbar a keyboard user cannot discover.
 function CommentBody({ body }: { body: string }): React.ReactElement {

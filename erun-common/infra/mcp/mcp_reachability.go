@@ -136,7 +136,7 @@ func LocalPortIsBound(port int) bool {
 // LocalMCPUnreachableKind names which of the two locally observable failure
 // shapes explains why an environment's MCP edge cannot be reached, so a caller
 // can act on the distinction directly instead of re-deriving it by
-// pattern-matching DescribeLocalMCPUnreachable's prose (#1230).
+// pattern-matching DescribeLocalMCPUnreachable's prose.
 type LocalMCPUnreachableKind string
 
 const (
@@ -174,9 +174,8 @@ func ClassifyLocalMCPUnreachable(port int) LocalMCPUnreachableKind {
 // DescribeLocalMCPUnreachable names which failure happened, so the reader is
 // not left weighing a busy pod against a dead tunnel. Both held-port shapes
 // present as a failed request with a live listener, which reads exactly like an
-// overloaded environment and has cost real debugging time; what separates them
-// is whether the forward answered at all, and the two want opposite first
-// moves.
+// overloaded environment; what separates them is whether the forward answered
+// at all, and the two want opposite first moves.
 func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
 	switch ClassifyLocalMCPUnreachable(port) {
 	case LocalMCPStaleForward:

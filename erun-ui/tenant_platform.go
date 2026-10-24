@@ -62,18 +62,15 @@ type tenantPlatformResolution struct {
 // erun-type alias within that tenant's own selection may back its platform
 // identity (resolveTenantERunPlatformAlias) — never a global alias the
 // tenant itself did not attach, even when it is the only erun alias
-// configured on the machine. Before this (erun#1955), a tenant whose
-// selection was AWS-only still authenticated its platform reads with a
-// different tenant's erun credential, because the resolution never looked at
-// the tenant's own selection at all.
+// configured on the machine, so an AWS-only tenant never authenticates with
+// another tenant's erun credential.
 //
 // The erun platform's own API URL always comes from the resolved alias
 // (provider.ERun.APIURL), never from TenantConfig.APIURL: that field is
 // documented only as `erun open`'s own port-forward address
 // (erun-docs/docs/reference/configuration.md), and letting it redirect an
-// unrelated alias's bearer token to an arbitrary address is exactly the
-// credential-disclosure shape erun#1955 also flagged — filling in that field
-// used to send one platform's bearer to whatever address the field named.
+// unrelated alias's bearer token to an arbitrary address would disclose that
+// credential.
 func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatformResolution, error) {
 	tenantConfig, _, err := a.deps.store.LoadTenantConfig(tenant)
 	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
@@ -162,8 +159,8 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig
 	return provider, nil, nil
 }
 
-// resolveGlobalERunPlatformAlias is the pre-erun#1955 resolution, unchanged:
-// the explicit override when given, else the machine's sole configured erun
+// resolveGlobalERunPlatformAlias is the machine-wide resolution: the explicit
+// override when given, else the machine's sole configured erun
 // alias. Used both for an explicit aliasOverride (always honored verbatim)
 // and for a tenant that has never attached any cloud alias at all.
 func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (configpkg.CloudProviderConfig, *tenantPlatformResolution, error) {

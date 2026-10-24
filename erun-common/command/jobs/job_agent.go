@@ -67,13 +67,11 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 		//
 		// --disallowedTools ScheduleWakeup: this run is a one-shot supervised
 		// process with no later invocation to wake into, unlike the orchestrator's
-		// own persistent session (ai_launch.go), which keeps the tool. Offering it
-		// here let the agent "successfully" schedule a wakeup that will never
-		// fire and end its turn, while the supervisor still recorded a clean exit
-		// -- the run looked done and the work it was waiting on was still in
-		// flight (erun#1731). Denying the tool removes it from what the model is
-		// even offered, verified against a real `claude -p` run, rather than
-		// merely rejecting the call after the model has already committed to it.
+		// own persistent session (command/ai), which keeps the tool. Offered here,
+		// the agent could schedule a wakeup that never fires and end its turn
+		// while the supervisor records a clean exit. Denying the tool removes it
+		// from what the model is even offered, rather than rejecting the call
+		// after the model has committed to it.
 		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
 	case agentToolCodex:
 		return []string{agentToolCodex, "exec", "--json", text}, nil
@@ -113,17 +111,11 @@ func AgentJobCommandPrompt(tool string, command []string) string {
 }
 
 // AgentJobResumeCommand builds the argv for a bounded follow-up turn of a run
-// AgentJobCommand already started, resumed via the session/thread id that turn's
-// own stream reported (AgentJobProgress.SessionID) rather than restated from
-// scratch. Verified live against the installed claude (2.1.222): a fact told to
-// one `claude -p --session-id <id>` process was correctly recalled by a wholly
-// separate `claude -p --resume <id>` process afterwards, so this is genuine
-// conversational continuation, not a self-contained restatement of task facts.
-// codex's non-interactive twin (`codex exec resume <id> <prompt>`) is built the
-// same way but its own context-survival was not verified the same way: the
-// sandbox this was designed in had no authenticated codex, only an unauthenticated
-// CLI whose requests 401 before any content reaches the model. See
-// erun-common/AGENTS.md's note on this for the full evidence trail.
+// AgentJobCommand already started, resumed via the session/thread id that
+// turn's own stream reported (AgentJobProgress.SessionID) rather than restated
+// from scratch, so `claude -p --resume <id>` is genuine conversational
+// continuation. codex's non-interactive twin (`codex exec resume <id>
+// <prompt>`) is built the same way, but its context survival is unverified.
 func AgentJobResumeCommand(tool, sessionID, prompt string) ([]string, error) {
 	name := strings.ToLower(strings.TrimSpace(tool))
 	id := strings.TrimSpace(sessionID)

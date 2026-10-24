@@ -8,8 +8,8 @@ import type { AppShell } from '../../../pages/index.js';
 import { captureInvokes, type InvokeCall, parseInvoke } from '../../../pages/index.js';
 import type { Page } from '@playwright/test';
 
-// #1354: nothing in the terminal was clickable. These specs drive real xterm
-// output through the link providers TerminalController now registers and
+// These specs drive real xterm output through the link providers
+// TerminalController registers and
 // assert the observable outcome -- a real browser popup for a URL, or the
 // exact Wails call the desktop makes to open a host file -- rather than that
 // a handler is merely registered.
@@ -162,7 +162,7 @@ test.describe('clickable terminal links (#1354)', () => {
     }
   });
 
-  // The regression #1354 exists to prevent, quoted both ways: a path printed
+  // A path printed
   // by the environment's OWN pod-side tab must resolve through
   // ResolveEnvironmentHostPath, never open the host's own file directly --
   // even though /etc/hosts genuinely exists on this machine and a naive
@@ -180,7 +180,7 @@ test.describe('clickable terminal links (#1354)', () => {
     await hoverAndClickAfterBackendResolve(app, page);
 
     expect(resolveEnvironmentHostPathCalls(invokes).length).toBeGreaterThan(0);
-    // The regression itself: never opened directly against the host.
+    // Never opened directly against the host.
     expect(openHostPathCalls(invokes)).not.toContain('/etc/hosts');
   });
 

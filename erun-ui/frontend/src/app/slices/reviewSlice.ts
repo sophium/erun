@@ -9,12 +9,11 @@ export type ReviewScope = 'current' | 'commit' | 'all';
 
 // EnvDiffState is one environment's diff and everything scoped to it. An
 // orchestrator session is cross-env, so the panel holds one of these per linked
-// environment rather than one globally (#1178).
+// environment rather than one globally.
 //
-// Each carries its OWN error, which is the load-bearing part. The single-slot
-// shape cleared the one diff on any failure, so one stopped environment blanked
-// the diffs of every other linked env -- and an orchestrator's environments are
-// rarely all running at once, so that was the everyday state, not an edge case.
+// Each carries its OWN error, which is the load-bearing part: one stopped
+// environment must not blank the diffs of every other linked env, and an
+// orchestrator's environments are rarely all running at once.
 //
 // scope and commit are per-env too: ReviewBase, ReviewCommits, Scope and
 // SelectedCommit are per-repository, so a commit list means nothing shared
@@ -26,9 +25,8 @@ export interface EnvDiffState {
   errorReconnectable: boolean;
   // Only meaningful while errorReconnectable is true: which of the two
   // reachability shapes this is, so the panel can render a stopped
-  // environment as informational rather than a fault (#1230). Defaults to
-  // 'stale-forward', the always-a-fault behavior every caller had before the
-  // kind existed.
+  // environment as informational rather than a fault. Defaults to
+  // 'stale-forward', the always-a-fault reading.
   errorKind: ReachabilityKind;
   scope: ReviewScope;
   commit: string;
@@ -179,7 +177,7 @@ export const {
 // diffPathKey namespaces a file path by its environment. Two linked
 // environments can both have AGENTS.md, and selectedDiffPath / collapsedDiffDirs
 // are both path-keyed, so an unkeyed path silently aliases one env's file onto
-// another's (#1178).
+// another's.
 export function diffPathKey(envKey: string, path: string): string {
   return envKey + ':' + path;
 }

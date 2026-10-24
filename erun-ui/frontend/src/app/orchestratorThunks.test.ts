@@ -40,10 +40,9 @@ function collectDispatched(thunk: AppThunk): RecordedAction[] {
   return actions;
 }
 
-// #1204: clicking a running orchestrator while the tenant dashboard was open
-// attached its session but never showed it, because openOrchestrator only
-// ever dispatched setSessionId — the pane stayed hidden behind
-// state.tenantDashboard.tenant, which nothing on this path cleared.
+// Clicking a running orchestrator while the tenant dashboard is open must show
+// its session: setSessionId alone leaves the pane hidden behind
+// state.tenantDashboard.tenant.
 test('opening a running orchestrator clears the tenant dashboard, not just the session id', () => {
   const actions = collectDispatched(openOrchestrator(42));
   const types = actions.map((action) => action.type);

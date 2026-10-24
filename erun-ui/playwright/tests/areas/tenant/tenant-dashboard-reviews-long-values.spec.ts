@@ -9,9 +9,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// #1378 (#1350 precedent): a fixture that never resembles real data hides
-// real overflow bugs — #1350's own fixtures shipped a green gate twice while
-// a 5.3KB job command flooded the row. These specs stage genuinely long
+// A fixture that never resembles real data hides real overflow bugs. These
+// specs stage genuinely long
 // values (long titles, long branch names, many threads, a long comment body)
 // and assert the CSS that is supposed to bound them actually engages
 // (scrollWidth > clientWidth, not just "the element exists").
@@ -94,7 +93,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       const rowBox = await boundingBoxOf(row, 'review row');
 
       // The title carries a `title` attribute with the untruncated text
-      // (#1378) — getByTitle finds it whether or not it is visually clipped,
+      // — getByTitle finds it whether or not it is visually clipped,
       // and the element's own scrollWidth > clientWidth proves it actually is.
       const titleElement = row.getByTitle(LONG_TITLE);
       await expect(titleElement).toBeVisible();
@@ -177,7 +176,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       expect(scrollHeight).toBeGreaterThan(clientHeight);
 
       // The long comment body on the first thread is bounded by a preview
-      // plus an explicit "Show more" control (#1378) — never an invisible
+      // plus an explicit "Show more" control — never an invisible
       // scroll region with no affordance that more text exists — so the tail
       // of the body is absent until the control is used, then present.
       const dialog = app.reviewDetailDialog.locator();
@@ -231,8 +230,8 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       await app.tenantDashboard.selectTab('Reviews');
 
       // toBeVisible() alone would pass even for an element positioned past the
-      // right edge of the viewport with no scrollbar to reach it (the exact
-      // #1350-class false green this suite's fixtures exist to avoid) — so
+      // right edge of the viewport with no scrollbar to reach it (the false
+      // green this suite's fixtures exist to avoid) — so
       // reachability is asserted from the element's own viewport-relative
       // geometry, not just its CSS visibility.
       const newReview = await boundingBoxOf(app.tenantDashboard.newReviewButton(), 'New review');
@@ -244,7 +243,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       expect(scrollWidth).toBeLessThanOrEqual(1001);
 
       // The table itself is intentionally wider than the panel at this width
-      // (DataTable's minWidthClassName on the reviews table, #1378) so a
+      // (DataTable's minWidthClassName on the reviews table) so a
       // narrow reviews tab scrolls its table horizontally instead of
       // table-fixed squeezing every column — including the status badge —
       // below legibility. Confirm the panel actually offers that scroll.

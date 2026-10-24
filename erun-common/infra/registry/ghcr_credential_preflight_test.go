@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// The failure this exists to prevent: a brand-new environment that has never
-// authenticated to ghcr.io discovers that only after a full multi-arch build
-// spends itself at the push (#1201). It must be caught before the build, with
-// a message distinguishable from a bad-scope or create-package denial.
+// An environment that has never authenticated to ghcr.io must be refused
+// before the build, not at the push, with a message distinguishable from a
+// bad-scope or create-package denial.
 func TestVerifyGHCRCredentialConfiguredRefusesWhenNothingResolves(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 	useGHToken(t, func(string) (string, bool) { return "", false })

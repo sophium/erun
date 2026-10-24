@@ -113,9 +113,8 @@ const (
 )
 
 // testAWSAliasApp builds an App whose only configured cloud alias is an AWS
-// one — the exact shape the operator's own machine had: a tenant's primary
-// cloud alias is AWS-typed, and no erun platform alias is configured at all.
-// Used to prove the platform read no longer reaches for it.
+// one and no erun platform alias is configured at all, to prove the platform
+// read never reaches for it.
 func testAWSAliasApp(t *testing.T) *App {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")
@@ -158,9 +157,8 @@ func panelFor(t *testing.T, dashboard uiTenantDashboard, tab string) uiTenantDas
 	return uiTenantDashboardPanel{}
 }
 
-// TestTenantDashboardPanelsResolveIndependently is the operator-visible half of
-// the bug: one forbidden read used to abort the whole load, so every panel went
-// blank — including the ones the caller may read.
+// TestTenantDashboardPanelsResolveIndependently pins that one forbidden read
+// does not abort the whole load and blank the panels the caller may read.
 func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/reviews": true}, &requests)
@@ -266,9 +264,9 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 	}
 }
 
-// TestTenantDashboardResolvesReviewAuthorUsernames is the "u2 in the UI" bug
-// fixed for #1378: a review's raw authorUserId is enriched with the tenant
-// user directory's display name whenever the caller can read /v1/users.
+// TestTenantDashboardResolvesReviewAuthorUsernames: a review's raw
+// authorUserId is enriched with the tenant user directory's display name
+// whenever the caller can read /v1/users.
 func TestTenantDashboardResolvesReviewAuthorUsernames(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

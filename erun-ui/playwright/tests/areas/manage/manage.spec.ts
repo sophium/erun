@@ -18,7 +18,7 @@ test.describe('manage dialog', () => {
   });
 
   // The Ports tab's Service column names the user-facing purpose of each
-  // port, not the internal protocol/service key (#1218).
+  // port, not the internal protocol/service key.
   test('Ports tab labels services by purpose, not internal name', async ({ app }) => {
     await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -35,7 +35,7 @@ test.describe('manage dialog', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // Workspace sync is a distinct concept from SSH shell access (#1218): it
+  // Workspace sync is a distinct concept from SSH shell access: it
   // gets its own titled section on the Access tab instead of hiding as an
   // unlabeled checkbox nested inside "SSH access".
   test('Access tab separates SSH access from workspace sync', async ({ app }) => {

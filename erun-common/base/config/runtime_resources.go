@@ -97,36 +97,26 @@ const (
 	DefaultRuntimePodMemory = "16384Mi"
 )
 
-// DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource
-// limits (erun-devops/k8s/erun-devops/templates/service.yaml). Originally the
-// sidecar declared no resources of its own, so a namespace ResourceQuota's
-// LimitRange silently defaulted it to the *entire* configured quota width
-// (namespaceResourceQuotaManifest in kubernetes_resource_quota.go) — doubling
-// what the two-container pod actually asked a ResourceQuota to admit. It was
-// then sized to match the erun-devops container's own defaults (8916Mi) —
-// the shape the sidecar was already implicitly assigned while that bug was
-// live — but every image build runs in this sidecar, not the runtime
-// container, and a live cache-miss `erun release` OOMed against that number:
-// a single gate run inside the erun-devops build (golangci-lint
-// type-checking the AWS SDK is the driver) measured a peak of ~15.2Gi, so
-// 8916Mi was under half of what one gate run alone needs. Raised to 20Gi —
-// comfortably above the measured peak, not merely above the old default —
-// now that the sidecar is independently sizeable (`erun resize
-// --dind-memory`) so an environment that still needs more is not stuck at a
-// fixed number. These are only the fallback: an environment that sizes the
-// sidecar independently (`erun init`/`erun resize --dind-cpu/--dind-memory`,
-// EnvConfig.RuntimeDindPod) overrides them the same way RuntimePod already
-// overrides DefaultRuntimePodCPU/Memory.
+// DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource limits
+// (erun-devops/k8s/erun-devops/templates/service.yaml). Declaring them keeps
+// the namespace LimitRange from defaulting the sidecar to the entire quota
+// width. Every image build runs in this sidecar, and one gate run inside the
+// erun-devops build (golangci-lint type-checking the AWS SDK) peaks at ~15.2Gi,
+// so the memory default sits comfortably above that. These are only the
+// fallback: an environment that sizes the sidecar independently (`erun
+// init`/`erun resize --dind-cpu/--dind-memory`, EnvConfig.RuntimeDindPod)
+// overrides them the same way RuntimePod already overrides
+// DefaultRuntimePodCPU/Memory.
 //
-// Note the two axes are not in the same state. CPU *is* now a real ceiling on
-// build work: `erun dind-entrypoint` mirrors the sidecar's own kubelet-enforced
+// Note the two axes are not in the same state. CPU is a real ceiling on build
+// work: `erun dind-entrypoint` mirrors the sidecar's own kubelet-enforced
 // cpu.max into a dedicated /docker/erun-build-cpu-cap-<pod> cgroup, and
 // buildContainerCPUCapCgroupParent has every `docker build` nest its
-// RUN-instruction containers there via `--cgroup-parent`, so the
-// sidecar's configured CPU limit throttles a build rather than only sizing the
-// concurrency the Dockerfile asks for. That is what makes
-// `erun resize --dind-cpu` an effective lever on build CPU, and the cap
-// announces itself on stderr when the cgroup plumbing fails (report_uncapped).
+// RUN-instruction containers there via `--cgroup-parent`, so the sidecar's
+// configured CPU limit throttles a build rather than only sizing the
+// concurrency the Dockerfile asks for. That is what makes `erun resize
+// --dind-cpu` an effective lever on build CPU, and the cap announces itself on
+// stderr when the cgroup plumbing fails (report_uncapped).
 //
 // Memory has no equivalent, and this default does not by itself guarantee its
 // limit is enforced on every cluster: erun-dind's inner `dockerd` runs with no
@@ -134,40 +124,33 @@ const (
 // unnamespaced (privileged) view of the real cgroup tree, that means BuildKit's
 // own build containers land as siblings of the pod's own Kubernetes-limited
 // cgroup (/sys/fs/cgroup/docker/buildkit/*, memory.max: max) rather than as its
-// descendants — verified live. Nesting them properly was investigated and
-// shelved:
-// it requires moving the sidecar's own process out of its assigned cgroup so
-// that cgroup's cgroup.subtree_control can delegate the memory controller to
-// a child, and cgroup v2 then refuses to attach any *new* process directly
-// to that cgroup afterward (confirmed live) — which is exactly how
-// `kubectl exec`/`erun open`, the postStart hook, and the readiness probe
-// all reach this container. (The CPU cap above sidesteps that constraint by
-// mirroring the value into a sibling cgroup rather than reparenting the
-// sidecar, which is why CPU could be enforced where memory could not.)
-// Raising this default is real capacity-planning value for memory (it sizes
-// `erun init`/`erun resize`'s own suggestion and the backend tenant-quota
-// floor derived from MinimumRuntimeNamespaceQuota) even though it is a bigger
-// ceiling for the node to have room for, not a hard cgroup enforcement of it.
+// descendants. Nesting them properly is not possible here: it requires moving
+// the sidecar's own process out of its assigned cgroup so that cgroup's
+// cgroup.subtree_control can delegate the memory controller to a child, and
+// cgroup v2 then refuses to attach any *new* process directly to that cgroup
+// afterward — which is exactly how `kubectl exec`/`erun open`, the postStart
+// hook, and the readiness probe all reach this container. (The CPU cap above
+// sidesteps that constraint by mirroring the value into a sibling cgroup rather
+// than reparenting the sidecar, which is why CPU could be enforced where memory
+// could not.) The memory default still matters for capacity planning (it sizes
+// `erun init`/`erun resize`'s own suggestion and the backend tenant-quota floor
+// derived from MinimumRuntimeNamespaceQuota) even though it is a bigger ceiling
+// for the node to have room for, not a hard cgroup enforcement of it.
 //
 // DefaultRuntimeDindCPU is not a constant: it is RuntimeDindCPULimit's own
-// answer for the reference node the fleet is measured on (below). The default
-// used to be a flat "4" and that flatness was the bug: a limit of 4 on a
-// 24-CPU node leaves the node three-quarters idle while the build inside it is
-// throttled, because a CPU limit is a ceiling, not a claim on the node -- the
-// scheduler still shares the node fairly between whatever is actually
-// runnable, so a build capped well under the node's size is simply slower
-// while a co-tenant's own work goes unblocked either way.
+// answer for the reference node the fleet is measured on (below). A flat limit
+// would leave a large node mostly idle while the build inside it is throttled:
+// a CPU limit is a ceiling, not a claim on the node, so a build capped well
+// under the node's size is simply slower while a co-tenant's work goes
+// unblocked either way.
 const (
 	// MinimumRuntimeDindCPU is the floor RuntimeDindCPULimit refuses to size a
-	// build below, and the value the flat default used to be. Below this a
-	// gate build spends most of its wall clock throttled: the measured shape
-	// this replaced was ~80% CPU 'some' pressure at a load average of 2.18 on
-	// 24 CPUs, with IO pressure near zero -- quota throttling, not node
-	// saturation. It is also what keeps a small or heavily co-tenanted node
-	// from being sized into a cap no build can finish under.
+	// build below; under it a gate build spends most of its wall clock
+	// throttled. It also keeps a small or heavily co-tenanted node from being
+	// sized into a cap no build can finish under.
 	MinimumRuntimeDindCPU = "4"
 	// DefaultRuntimeDindCPUNodeCPUMilli is the node this default is sized
-	// against: the 24-CPU node the throttling above was measured on, and the
+	// against: the 24-CPU node the fleet is measured on, and the
 	// size a stock cluster node is provisioned at.
 	DefaultRuntimeDindCPUNodeCPUMilli int64 = 24000
 	// DefaultRuntimeDindCPUCoTenants is how many of a node's build-capable
@@ -236,14 +219,12 @@ func RuntimeDindCPULimit(nodeCPUMilli int64, coTenants int) string {
 // (a limit, which safely equals the namespace cap: it only bounds an unsized
 // container and costs nothing at scheduling time), a defaultRequest equal to
 // the cap turns the quota into a minimum node size — one unsized container
-// reserves the namespace's entire allowance. #1076 was exactly this: an
-// unsized init container inherited a request equal to the full quota width,
-// and Kubernetes schedules a pod on max(max(init container requests),
-// sum(container requests)), so the pod's effective request became the whole
-// quota and it could only land on a node at least that large. Sized to the
-// runtime container's own small fixed request rather than derived from the
-// cap, so an unsized container reserves little regardless of how large the
-// namespace quota is configured.
+// reserves the namespace's entire allowance, and since Kubernetes schedules a
+// pod on max(max(init container requests), sum(container requests)), the pod
+// could then only land on a node at least that large. Sized to the runtime
+// container's own small fixed request rather than derived from the cap, so an
+// unsized container reserves little regardless of how large the namespace quota
+// is configured.
 const (
 	DefaultLimitRangeDefaultRequestCPU    = "0.25"
 	DefaultLimitRangeDefaultRequestMemory = "1024Mi"
@@ -252,11 +233,11 @@ const (
 // DefaultRuntimeInitContainerCPU/Memory and
 // DefaultRuntimeInitContainerRequestCPU/Memory size the runtime chart's init
 // containers (prepare-volumes, adopt-worktree, install-binfmt in
-// erun-devops/k8s/erun-devops/templates/service.yaml). Before #1076 none of
-// them declared resources of their own, so each depended entirely on the
-// namespace LimitRange's defaults. Each does a few seconds of chown, a file
-// copy, or qemu binary registration — none of it CPU- or memory-heavy — so a
-// small fixed budget, independent of the namespace cap, covers all three.
+// erun-devops/k8s/erun-devops/templates/service.yaml), so none of them falls
+// back to the namespace LimitRange's defaults. Each does a few seconds of
+// chown, a file copy, or qemu binary registration — none of it CPU- or
+// memory-heavy — so a small fixed budget, independent of the namespace cap,
+// covers all three.
 const (
 	DefaultRuntimeInitContainerCPU           = "0.5"
 	DefaultRuntimeInitContainerMemory        = "256Mi"
@@ -278,11 +259,10 @@ const (
 // MinimumRuntimeNamespaceQuota is the smallest per-environment namespace
 // ResourceQuota that can admit the stock erun-devops chart's runtime pod: the
 // erun-devops and erun-dind containers' limits summed (a ResourceQuota counts
-// every container in the pod, not just the first), plus every PVC the chart
-// can render — the worktree claim included, so the floor is never short for a
-// remote-agent (worktreeStorage=pvc) environment. #1061 was this floor being
-// sized for one container instead of two: erun-backend-api's default tenant
-// quota (repository.DefaultMax*) and its pre-provision admission check
+// every container in the pod, not just the first), plus every PVC the chart can
+// render — the worktree claim included, so the floor is never short for a
+// remote-agent (worktreeStorage=pvc) environment. erun-backend-api's default
+// tenant quota (repository.DefaultMax*) and its pre-provision admission check
 // (routes.validateNamespaceQuotaFloor) both derive from this function so they
 // cannot drift back out of sync with each other or with the chart.
 func MinimumRuntimeNamespaceQuota() (cpuMillicores, memoryMB, storageGB int64) {
@@ -392,9 +372,8 @@ func liveRuntimePodMemoryLimit(usage RuntimeUsage) string {
 
 // NormalizeRuntimeDindPodResources and ValidateRuntimeDindPodResources are
 // NormalizeRuntimePodResources/ValidateRuntimePodResources's counterparts for
-// the erun-dind sidecar, now that it is operator-sizeable (`erun init`/`erun
-// resize --dind-cpu/--dind-memory`) rather than fixed at
-// DefaultRuntimeDindCPU/Memory for every environment.
+// the operator-sizeable erun-dind sidecar (`erun init`/`erun resize
+// --dind-cpu/--dind-memory`).
 func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodResources {
 	cpu := strings.TrimSpace(resources.CPU)
 	if cpu == "" {

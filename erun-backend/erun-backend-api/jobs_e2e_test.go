@@ -81,9 +81,7 @@ func claimJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context
 // The threshold is what moves, never the row. jobs_set_timestamps
 // (erun-backend-db/schema/triggers/timestamps.sql) stamps updated_at = NOW()
 // on every UPDATE, so a job cannot be aged by writing to it — the write that
-// would age it is the same write that refreshes it. This test used to
-// back-date the row directly, which against a real migrated PostgreSQL set
-// updated_at to NOW() and left the sweep with nothing to find.
+// would age it is the same write that refreshes it.
 func sweepPastEveryStamp(t *testing.T, repo *repository.JobRepository, ctx context.Context) []model.Job {
 	t.Helper()
 	abandoned, err := repo.AbandonStale(ctx, time.Now().UTC().Add(time.Hour))
@@ -182,7 +180,7 @@ func TestJobsSweepReleasesTheAbandonedScope(t *testing.T) {
 	}
 }
 
-// TestJobsAreTenantIsolated pins the RLS policy the issue's validation names:
+// TestJobsAreTenantIsolated pins the RLS policy:
 // an ordinary tenant session cannot read another tenant's jobs, whether it
 // lists or asks for one by id.
 func TestJobsAreTenantIsolated(t *testing.T) {
@@ -258,9 +256,8 @@ func plannedJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Conte
 	return job
 }
 
-// TestJobsSweepNeverAbandonsAPlannedJob is the regression the PLANNED status
-// would otherwise ship with, and the reason the sweep's exemption is asserted
-// against real SQL rather than left to a predicate nobody runs.
+// TestJobsSweepNeverAbandonsAPlannedJob asserts the sweep's PLANNED exemption
+// against real SQL rather than leaving it to a predicate nobody runs.
 //
 // The sweep closes a RUNNING job whose last update predates its threshold, on
 // a five-minute schedule and a thirty-minute TTL. A parked plan is by

@@ -3,11 +3,9 @@ import type { Page } from '@playwright/test';
 import { expect, test, type SeededEnvironment } from '../../../fixtures/erunApp.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// Switching to a session that has produced a lot of output while it was not
-// the visible tab used to re-feed its entire retained log, visibly scrolling
-// through it before landing at the live prompt -- and the cost grew with the
-// session's total history, unbounded for an alt-screen session.
-// TerminalController now snapshots a session's rendered screen on
+// Re-feeding a session's entire retained log on switch-back would visibly
+// scroll through it before landing at the live prompt, at a cost growing with
+// the session's total history. TerminalController snapshots a session's rendered screen on
 // switch-away (@xterm/addon-serialize) and restores it in one write on
 // switch-back, replaying only the (already retention-bounded) output
 // buffered since. These specs measure that directly rather than eyeballing a
@@ -26,9 +24,9 @@ import type { AppShell } from '../../../pages/index.js';
 // Sized so the replay below is long enough to be told apart from a snapshot
 // restore without pushing this spec's own body toward its 30s test timeout --
 // emission, the drain, and the measured switch are all linear in this number.
-// It is well short of MAX_RETAINED_BYTES (2_000_000, terminalBuffers.ts),
-// which an earlier comment here claimed it exceeded; reaching that budget at
-// this chunk size costs roughly ten times the runtime this spec can afford.
+// It is well short of MAX_RETAINED_BYTES (2_000_000, terminalBuffers.ts):
+// reaching that budget at this chunk size costs roughly ten times the runtime
+// this spec can afford.
 const BULK_CHUNKS = 400;
 const BULK_LINE = 'x'.repeat(400);
 
@@ -36,11 +34,8 @@ const BULK_LINE = 'x'.repeat(400);
 //
 // The clock is the whole click-to-settle time of the measured switch against
 // the same click on the same tab with almost no history behind it, so a slow
-// machine slows both and cancels out of the ratio. It used to be a flat 5s,
-// and a flat budget is a stopwatch on the machine rather than on the product:
-// a contended gate blew through it while the app was doing exactly what it is
-// meant to do, and the run reported a switch-timing regression that had not
-// happened. Both switches carry a fixed cost of their own -- the click, the
+// machine slows both and cancels out of the ratio; a flat budget would be a
+// stopwatch on the machine rather than on the product. Both switches carry a fixed cost of their own -- the click, the
 // pane re-attach, the poll that observes the landing -- and the control is
 // that same cost on the same machine.
 //
@@ -77,7 +72,7 @@ const SCENARIO_MARGIN_MS = 30_000;
 const SCENARIO_BUDGET_MS =
   DRAIN_BUDGET_MS + SWITCH_BOUNDS_PER_SCENARIO * SWITCH_STEP_BUDGET_MS + SCENARIO_MARGIN_MS;
 // How long the held-emit case below holds the bulk write. The clock it has to
-// disagree with is the pre-fix convergence's: an `expect` with no explicit
+// outlast is a default one: an `expect` with no explicit
 // timeout takes expect's own 10s, and the step this reproduces is the drain, so
 // the hold must outlast 10s. 12s covers that and still lands well inside
 // DRAIN_BUDGET_MS, so the case passes there for the right reason.
@@ -90,11 +85,9 @@ const EMIT_HOLD_MS = 12_000;
 const SWITCH_BUDGET_FLOOR_MS = 1_000;
 
 async function emitBulkOutput(app: AppShell, sessionId: number, marker: string): Promise<void> {
-  // One page.evaluate for every chunk in this loop used to cost a separate CDP
-  // round trip per chunk -- ~400 of them per call, harmless on an idle
-  // machine but ~12s of pure IPC overhead under this suite's real per-pod
-  // concurrency (#2173, #2174), enough on its own to blow the spec's global
-  // test timeout before either switch-timing measurement below even starts.
+  // One page.evaluate per chunk would cost a separate CDP round trip each --
+  // ~12s of pure IPC overhead under this suite's real per-pod concurrency,
+  // enough on its own to blow the spec's global test timeout.
   // emitOutputBatch keeps the same per-chunk event granularity (the app still
   // sees BULK_CHUNKS+1 discrete terminal-output events) in one round trip.
   const chunks = Array.from({ length: BULK_CHUNKS }, (_, i) => `${BULK_LINE} ${String(i)}\n`);
@@ -262,16 +255,13 @@ test.describe('terminal switch timing (#1322)', () => {
     expect(timing.activation.writes).toBeLessThan(BULK_CHUNKS);
   });
 
-  // The red a full-suite gate took on the case above, forced on demand instead
-  // of waited for.
+  // Contention on the case above, forced on demand instead of waited for.
   //
   // The drain is linear in the log it re-feeds, so a machine rendering that
-  // replay twice as slowly as the reference is not misbehaving -- it is slower,
-  // and the 10s `expect` clock the step carried gave up on a render that was
-  // still progressing (that run's own call log walks the replay chunk by chunk
-  // to the moment the clock expired, with most of the scenario's budget
-  // unspent). The fix is not a larger number on that step but the scenario's
-  // own declared clock, which the pre-fix step never consulted.
+  // replay twice as slowly as the reference is not misbehaving -- it is
+  // slower, and a 10s default `expect` clock would give up on a render that is
+  // still progressing. The step therefore uses the scenario's own declared
+  // clock rather than a larger fixed number.
   //
   // The hold reproduces the contention the report describes at a named seam:
   // emitOutput reaches xterm through the headless shim's EventsEmit, a POST to

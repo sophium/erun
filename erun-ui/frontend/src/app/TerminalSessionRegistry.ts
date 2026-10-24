@@ -58,7 +58,7 @@ export class TerminalSessionRegistry {
   // it was switched away from (see TerminalController.snapshotSession). A
   // switch back writes this once, then only the (already-bounded) display
   // buffer accumulated since -- O(delta since last visit), not O(session
-  // history) (#1322). Absent for a session that has never been switched away
+  // history). Absent for a session that has never been switched away
   // from yet; that session still replays its buffer from scratch once.
   private readonly sessionSnapshots = new Map<number, string>();
   // Sessions forgotten for good. The pane can still be on a forgotten session

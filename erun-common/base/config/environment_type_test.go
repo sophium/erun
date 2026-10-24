@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// TestEnvironmentTypeIsValid pins the canonical set including host — the
-// fourth type this test suite exists to protect (#1380).
+// TestEnvironmentTypeIsValid pins the canonical set, including host.
 func TestEnvironmentTypeIsValid(t *testing.T) {
 	cases := []struct {
 		envType EnvironmentType
@@ -48,13 +47,12 @@ func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 	}
 }
 
-// TestEnvironmentTypePredicatesCoverEveryValidType is the completeness net the
-// issue asks for: it walks every type IsValid() accepts and calls each
-// exclusion-shaped predicate. BuildsHere and RemoteWorktree panic on an
-// unhandled type, so a fifth type added to validEnvironmentTypes without a
-// matching case in both switches fails this test loudly — a compile-or-test
-// failure, not a silent reclassification into whichever branch nobody
-// updated.
+// TestEnvironmentTypePredicatesCoverEveryValidType is a completeness net: it
+// walks every type IsValid() accepts and calls each exclusion-shaped predicate.
+// BuildsHere and RemoteWorktree panic on an unhandled type, so a fifth type
+// added to validEnvironmentTypes without a matching case in both switches fails
+// this test loudly — a compile-or-test failure, not a silent reclassification
+// into whichever branch nobody updated.
 func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 	for _, envType := range ValidEnvironmentTypes {
 		t.Run(string(envType), func(t *testing.T) {
@@ -90,9 +88,8 @@ func TestHostEnvironmentPredicates(t *testing.T) {
 	if !env.BuildsHere() {
 		t.Error("BuildsHere() = false, want true — a host env builds locally")
 	}
-	// The bug the issue names verbatim: a host worktree is the most local
-	// thing in the product, so this must be false, not true from a
-	// "!= local-agent" exclusion.
+	// A host worktree is the most local thing in the product, so this must be
+	// false, not true from a "!= local-agent" exclusion.
 	if env.RemoteWorktree() {
 		t.Error("RemoteWorktree() = true, want false — a host worktree lives on this machine")
 	}

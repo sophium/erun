@@ -48,7 +48,7 @@ func testDoctorDryRunReportsLibraryExecutionMode(t *testing.T) {
 }
 
 func testDoctorDryRunReportsDeployDiagnosis(t *testing.T) {
-	// Regression coverage for erun#2403: --dry-run withholds mutations,
+	// --dry-run withholds mutations,
 	// not reads, so the helm/kubectl diagnosis reads must still run and
 	// their sections must still print -- the same content a real run
 	// would show -- instead of the diagnosis being silently suppressed.
@@ -165,12 +165,9 @@ func testDoctorDryRunRollbackTracesHelmRollback(t *testing.T) {
 }
 
 func testDoctorRealRunRollbackFailureReportsHelmStderr(t *testing.T) {
-	// erun#1768: RunDeployRecovery's rollback branch always captured
-	// helm's combined output, but runDeployRecoveryActions (the CLI
-	// caller) used to discard it on failure and return the bare error
-	// -- a real rollback failure read as a content-free "exit status
-	// 1" with no explanation of why. It must instead carry helm's own
-	// message.
+	// RunDeployRecovery's rollback branch captures helm's combined output,
+	// and runDeployRecoveryActions (the CLI caller) must carry it on failure
+	// rather than a content-free "exit status 1".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -191,10 +188,9 @@ func testDoctorRealRunRollbackFailureReportsHelmStderr(t *testing.T) {
 }
 
 func testDoctorRealRunReportsMemoryPressureAndTheSizingVerdict(t *testing.T) {
-	// The signal `erun usage` computes and doctor used to omit entirely: an
-	// environment pinned at 100% of its memory limit with real OOM kills and
-	// sustained CPU throttling. Doctor reported disk and nothing else, so the
-	// environment that most needed attention read as a disk question. The
+	// The signal `erun usage` computes: an environment pinned at 100% of its
+	// memory limit with real OOM kills and sustained CPU throttling must not
+	// read as a disk question. The
 	// verdict is reported and never applied -- resizing rolls the runtime pod
 	// -- so the run must name the explicit `erun resize` values and must not
 	// run a resize.
@@ -291,7 +287,7 @@ func testDoctorRealRunStorageUnhealthyDiagnosticError(t *testing.T) {
 	// stderr into the storage-unhealthy diagnostic
 	// (normalizeDoctorKubectlError → doctorKubectlDiagnostic's
 	// unhealthy-storage arm) and degrade the docker-storage check instead
-	// of aborting the whole command (#1325) — the helm/pod diagnosis
+	// of aborting the whole command — the helm/pod diagnosis
 	// above already reported the cluster is reachable, so this failure is
 	// specific to the docker inspection alone, and the requested prune is
 	// skipped for the same reason rather than attempted and failing too.
@@ -310,13 +306,11 @@ func testDoctorRealRunStorageUnhealthyDiagnosticError(t *testing.T) {
 }
 
 func testDoctorRealRunUnrecognizedWaitFailureStillReportsKubectlStderr(t *testing.T) {
-	// erun#1768: kubectl wait fails with a cause doctorKubectlDiagnostic
-	// does not recognize (neither the disk-i/o-error nor the
-	// namespace-lookup-failed shape above matches). Before the fix,
-	// normalizeDoctorKubectlError's unrecognized-cause branch discarded
-	// the captured stderr and returned the bare wrapped error, so the
-	// degraded report read "could not read: exit status 1" with no
-	// explanation. It must instead carry kubectl's own message.
+	// kubectl wait fails with a cause doctorKubectlDiagnostic does not
+	// recognize (neither the disk-i/o-error nor the namespace-lookup-failed
+	// shape above matches). normalizeDoctorKubectlError's unrecognized-cause
+	// branch must still carry kubectl's own message, not a bare
+	// "could not read: exit status 1".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -331,7 +325,7 @@ func testDoctorRealRunUnrecognizedWaitFailureStillReportsKubectlStderr(t *testin
 }
 
 func testDoctorRealRunUnrecognizedWaitFailureWithNoStderrReportsExitStatusPlainly(t *testing.T) {
-	// erun#1768's empty-stderr case: when kubectl wait fails with
+	// The empty-stderr case: when kubectl wait fails with
 	// nothing captured on stderr, normalizeDoctorKubectlError has
 	// nothing to add, so the degraded report must still name the exit
 	// status plainly rather than emitting a blank fragment.
@@ -356,7 +350,7 @@ func testDoctorRealRunNamespaceListedButApiFailingError(t *testing.T) {
 	// doctorNamespaceIsListed and the second diagnostic arm of
 	// doctorKubectlDiagnostic; the probe-then-diagnose sequence only
 	// runs on a real wait failure. Degrades the docker-storage check
-	// rather than aborting the command (#1325), same as the storage
+	// rather than aborting the command, same as the storage
 	// scenario above.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

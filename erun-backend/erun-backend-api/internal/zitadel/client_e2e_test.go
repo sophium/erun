@@ -60,7 +60,7 @@ import (
 //	ERUN_E2E_ZITADEL_PAT_PATH=/tmp/admin-sa.pat \
 //	  go test ./internal/zitadel/... -run TestClientAgainstRealZitadel -v
 //
-// Two more variables (issue #1168) additionally exercise the SMTP
+// Two more variables additionally exercise the SMTP
 // configuration path against a real local SMTP sink, e.g. mailhog on the
 // same docker network as the Zitadel core container above:
 //
@@ -90,12 +90,11 @@ func TestClientAgainstRealZitadel(t *testing.T) {
 	e2eCrossOrgListAndDeactivate(t, ctx, client)
 }
 
-// e2eCrossOrgListAndDeactivate proves the actual bug this issue reports,
-// against a real instance: a user created in another org (via
-// CreateHumanUserParams.OrgID, the same as enrolling a tenant's first
-// admin) must be listable and deactivatable by naming that same org again --
+// e2eCrossOrgListAndDeactivate proves, against a real instance, that a user
+// created in another org (via CreateHumanUserParams.OrgID, the same as
+// enrolling a tenant's first admin) must be listable and deactivatable by naming that same org again --
 // and must NOT show up in, or be reachable through, the credential's own
-// org, which is exactly the silent wrong-org behaviour before this fix.
+// org.
 func e2eCrossOrgListAndDeactivate(t *testing.T, ctx context.Context, client *Client) {
 	t.Helper()
 	orgName := fmt.Sprintf("erun-e2e-org-%d", time.Now().UnixNano())
@@ -203,9 +202,8 @@ func e2eUpdatesOrgSettings(t *testing.T, ctx context.Context, client *Client) {
 }
 
 // e2eConfiguresSMTPAndSkipsTheEmailFlow proves GetSMTPStatus/UpdateSMTPConfig
-// against a real Zitadel Admin API (issue #1168): the instance this test
-// runs against starts with no SMTP config at all (Zitadel's own 404, the
-// issue's exact starting point), so this converges one against
+// against a real Zitadel Admin API: the instance this test runs against
+// starts with no SMTP config at all (Zitadel's own 404), so this converges one against
 // ERUN_E2E_ZITADEL_SMTP_HOST (point it at a local SMTP sink such as
 // mailhog, e.g. "localhost:1025") and confirms GetSMTPStatus reports it
 // active. When ERUN_E2E_ZITADEL_SMTP_SINK_API also names that sink's own

@@ -11,12 +11,9 @@ import (
 	"time"
 )
 
-// TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders is the
-// regression for erun#1774's first acceptance criterion: a concurrent writer
-// must never let a reader observe a partial document. WriteFileAtomic's
-// write-to-temp-then-rename contract is what every Save*Config function in
-// config.go already routes through; this pins that a reader racing a stream
-// of writes only ever sees one complete write's content, never a mix.
+// TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders pins that a
+// reader racing a stream of WriteFileAtomic writes (which every Save*Config
+// routes through) only ever sees one complete write's content, never a mix.
 func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -70,15 +67,11 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 	}
 }
 
-// TestLoadConfigFileRetriesATornReadThenSucceeds is the regression for the
-// second acceptance criterion: a reader that hits a torn read recovers
-// rather than failing the request. It seeds the on-disk residue of an
-// interrupted write (a zero-length file, config.go's own documented torn-read
-// signature) and heals it deterministically via configReadRetryObserved,
-// which runs synchronously on the first retry instead of racing a real
-// concurrent writer goroutine against loadConfigFile's wall-clock sleep
-// budget -- a race that flaked under CPU contention from unrelated tests
-// running alongside this one in the same `go test ./...` process.
+// TestLoadConfigFileRetriesATornReadThenSucceeds pins that a reader hitting a
+// torn read (a zero-length file) recovers rather than failing. It heals the
+// file via configReadRetryObserved on the first retry instead of racing a real
+// writer goroutine against loadConfigFile's wall-clock budget, which flakes
+// under CPU contention.
 func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -155,12 +148,12 @@ func TestLoadConfigFileMissingFileReturnsNotInitializedImmediately(t *testing.T)
 	}
 }
 
-// TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized is the
-// regression for a read failure that is not a real absence -- a permission
-// error, a path that is a directory, or any other os.ReadFile failure that
-// is not os.IsNotExist. Reporting it as ErrNotInitialized would tell the
-// operator to run `erun init` for a problem `erun init` cannot fix; it must
-// surface as the real error instead.
+// TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized covers a
+// read failure that is not a real absence -- a permission error, a path that is
+// a directory, or any other os.ReadFile failure that is not os.IsNotExist.
+// Reporting it as ErrNotInitialized would tell the operator to run `erun init`
+// for a problem `erun init` cannot fix; it must surface as the real error
+// instead.
 func TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized(t *testing.T) {
 	dir := t.TempDir()
 	// A directory at the config path fails os.ReadFile for a reason other

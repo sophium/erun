@@ -53,9 +53,8 @@ func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextMissingContext locks the fix at the
-// The heart of the defect: a deployment that is running but whose kube context could
-// not be resolved must not be reported as absent, and the returned error
+// TestCheckKubernetesDeploymentWithContextMissingContext: a deployment that is
+// running but whose kube context could not be resolved must not be reported as absent, and the returned error
 // must name the context problem, reusing isKubernetesContextMissingMessage.
 func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	writeKubectlStub(t, `error: context "frs-prod" does not exist`, 1)
@@ -102,7 +101,7 @@ func TestCheckKubernetesDeploymentWithContextUnreachableAPIServer(t *testing.T) 
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextSanitizesKlogFrame is erun#1766: the
+// TestCheckKubernetesDeploymentWithContextSanitizesKlogFrame: the
 // operator-facing message must carry the cause klog's "Unhandled Error" line
 // names (the unreachable address) without the frame around it (severity,
 // timestamp, goroutine id, Go source location) that survives a fixed-width
@@ -178,10 +177,9 @@ func TestSanitizeKubectlFailureOutputReturnsEmptyForBlankInput(t *testing.T) {
 	}
 }
 
-// TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput is erun#1768's
-// pattern applied to the settings-match inspection: kubectl's combined output
-// is already captured, and the caller used to discard it entirely in favor of
-// the content-free "exit status N" a bare "%w" wrap renders.
+// TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput: the
+// settings-match inspection must surface kubectl's captured combined output,
+// not just the content-free "exit status N" a bare "%w" wrap renders.
 func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 	writeKubectlStub(t, `Error from server (NotFound): deployments.apps "frs-devops" not found`, 1)
 	_, err := deploymentMatchesExpectedSettings(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"})
@@ -194,7 +192,7 @@ func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 }
 
 // TestCheckKubernetesDeploymentWithContextRBACDenied locks the other "could
-// not ask" family member named by the issue: a request the cluster refused.
+// not ask" case: a request the cluster refused.
 func TestCheckKubernetesDeploymentWithContextRBACDenied(t *testing.T) {
 	writeKubectlStub(t, `Error from server (Forbidden): deployments.apps "frs-devops" is forbidden: User "jane" cannot get resource "deployments" in API group "apps"`, 1)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")

@@ -11,8 +11,8 @@ import {
   PlatformEnrollUsernameFields,
 } from './PlatformEnrollFields';
 
-// EnrollUserForm is the console's parity for `erun platform user enroll`
-// (erun#1744): it writes a user row directly via POST /v1/users, optionally
+// EnrollUserForm is the console's parity for `erun platform user enroll`:
+// it writes a user row directly via POST /v1/users, optionally
 // targeting a tenant other than the caller's own. The tenant selector only
 // ever renders for an OPERATIONS caller (TenantTargetSelect); every other
 // caller enrolls into their own tenant with no selector shown at all.

@@ -326,7 +326,7 @@ describe('AppShell identity chrome', () => {
   });
 });
 
-// erun#1816: the scope selector is a second, distinct tenant control next to
+// The scope selector is a second, distinct tenant control next to
 // the (label-only, since oidc is undefined here too) tenant switcher above
 // the nav -- picking a target must swap which tenant's environments render
 // without ever reaching the switcher's re-auth path.

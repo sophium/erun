@@ -227,11 +227,11 @@ function InvitesBody({
   return <InvitesTable invites={invitesState.invites} onRevoke={onRevoke} />;
 }
 
-// InvitesPanel is the console's invite-only registration surface (#1483):
+// InvitesPanel is the console's invite-only registration surface:
 // create a revocable, single-use invite link for this tenant, list the
 // outstanding ones, and revoke. Unlike Users/OrgSettings/SmtpSettings, this
 // is not restricted to an OPERATIONS tenant — every tenant needs its own way
-// to add members, since self-registration is closed (#1482).
+// to add members, since self-registration is closed.
 export function InvitesPanel({ token }: { token: string }): React.ReactElement {
   const { invitesState, createState, create, revoke, dismissCreated } = useInvitesController(token);
   return (

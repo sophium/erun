@@ -10,11 +10,10 @@ import (
 )
 
 // TestWriteReleaseRepoClaimBlobIncludesGitStderr and
-// TestLoadReleaseRepoClaimRecordCatFileIncludesGitStderr are erun#1768's
-// pattern applied to the release-claim CAS helpers: git's stderr is already
-// captured onto exec.ExitError.Stderr by Output(), and each caller (
-// takeReleaseRepoClaim/claimReleaseVersion) used to discard it in favor of
-// the content-free "exit status N" a bare "%w" wrap renders.
+// TestLoadReleaseRepoClaimRecordCatFileIncludesGitStderr: git's stderr is
+// already captured onto exec.ExitError.Stderr by Output(), and each caller
+// (takeReleaseRepoClaim/claimReleaseVersion) must surface it rather than the
+// content-free "exit status N" a bare "%w" wrap renders.
 func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: could not write blob object", 128)
 	now := time.Now()

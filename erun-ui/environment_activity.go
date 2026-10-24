@@ -76,7 +76,7 @@ type environmentActivityState struct {
 	// IDs whose lease is keeping this environment busy right now — how
 	// orchestrator pacing (orchestrator_pacing_env.go) tells "busy on work I
 	// dispatched" from "busy on someone else's job or an operator's own
-	// session" (erun#1699). A plain []string field would not compare with ==,
+	// session". A plain []string field would not compare with ==,
 	// which emitEnvActivityIfChanged relies on to detect a transition, so this
 	// stays a single comparable string.
 	busyHolderOrchestrators string
@@ -183,11 +183,9 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 		return observation
 	}
 	if !a.deps.canConnectLocalPort(forward.LocalPort) {
-		// The dropped forward — and the reason this sweep used to stop here.
-		// Every ordinary pod replacement makes kubectl exit outright, so the
-		// port is simply free afterwards and the environment is unreachable to
-		// every client of it. Returning "not reachable" and nothing else was
-		// true and useless: it renders as an environment nobody opened, which
+		// The dropped forward. Every ordinary pod replacement makes kubectl
+		// exit outright, so the port is simply free afterwards. Reporting only
+		// "not reachable" would render as an environment nobody opened, which
 		// is the one thing this environment is not.
 		observation.state.outage = a.reconcileForwardHealth(selection, forward.LocalPort, false)
 		return observation

@@ -35,7 +35,7 @@ func TestCreateEnvironmentStartsDeployWhenWired(t *testing.T) {
 
 // TestCreateEnvironmentStartsDeployWithResourceCaps: the tenant's quota row
 // (env count plus the per-environment CPU/memory/storage namespace ceiling)
-// threads through to the provisioner input unchanged (#605), not just the
+// threads through to the provisioner input unchanged, not just the
 // tenant/environment/version coordinates TestCreateEnvironmentStartsDeployWhenWired
 // already locks.
 func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
@@ -72,7 +72,7 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 // TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor: a tenant quota configured
 // below what a stock runtime pod needs is refused at create time with a clear
 // 409, instead of the Job later failing to admit the pod under its own
-// ResourceQuota (#605).
+// ResourceQuota.
 func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
@@ -101,7 +101,7 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 // running one runtime environment at the per-environment cap, whose
 // aggregate budget has no room for a second, is refused clearly (409) rather
 // than persisting a row that would push the tenant over its contracted
-// total (#1113).
+// total.
 func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
@@ -170,8 +170,7 @@ func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
 // answers 500, and the row created just before stays registered
 // (persistAndMaybeProvision already wrote it) — there is nothing to unwind
 // since the deploy Job was never started. A confirmed-missing tenant runtime
-// image is no longer this path: it now selects the canonical-image bootstrap
-// instead of failing Start.
+// image does not reach this path: it selects the canonical-image bootstrap.
 func TestCreateEnvironmentStartFailureLeavesRowRegistered(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",

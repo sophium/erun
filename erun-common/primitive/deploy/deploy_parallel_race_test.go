@@ -43,9 +43,8 @@ func parallelRaceTestSpecs() []DeploySpec {
 // (non-dry-run) parallel branch against a Context shaped like the MCP edge's
 // (erun-mcp/runtime.go builds Logger and Stdout/Stderr from plain
 // bytes.Buffer values) and proves the fan-out never writes one buffer from
-// more than one goroutine. Before the erun#1664 fix, every goroutine's
-// RunDeploySpec call traced through the same Context, so ctx.Trace/ctx.Info
-// raced on the shared buffers. ensureDeployNamespace is stubbed to fail fast
+// more than one goroutine: a RunDeploySpec tracing through the shared Context
+// would race ctx.Trace/ctx.Info on those buffers. ensureDeployNamespace is stubbed to fail fast
 // so the test never reaches the real helm invocation or the on-disk
 // single-flight marker.
 func TestRunDeployStepParallelSpecsShareNoWriter(t *testing.T) {

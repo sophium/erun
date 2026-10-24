@@ -21,19 +21,13 @@ import type { AppDispatch } from './store';
 import { loadTenantDashboard } from './tenantDialogThunks';
 import { defaultRegistrationState } from './tenantRegistrationState';
 
-// loginPrimaryCloudProvider logs in and updates the sidebar's alias state,
-// but never re-fetched whatever surface had failed with a stale identity —
-// a successful sign-in on the tenant-dashboard's not-signed-in state left
-// the identical state and button on screen. An earlier version of this alert
-// shipped with zero coverage of what happens after a *successful* login,
-// because the Playwright harness's aws stub is inert and can never make a
-// real login succeed. The seam that was missing is the RPC boundary itself
+// loginPrimaryCloudProvider alone never re-fetches whatever surface failed
+// with a stale identity. The Playwright harness's aws stub is inert and can
+// never make a real login succeed, so these tests stand up the RPC boundary
 // (window.go.main.App.*, which every wailsQueryFn-backed endpoint calls
-// through) — standing it up by hand here lets these tests drive a real
-// success through the exact production dispatch path (cloudApi/tenantApi
-// mutations and queries, real RTK Query middleware) rather than asserting
-// dispatch shape and stopping there, which is exactly how that regression
-// shipped.
+// through) by hand to drive a real success through the exact production
+// dispatch path (cloudApi/tenantApi mutations and queries, real RTK Query
+// middleware) rather than asserting dispatch shape alone.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -228,9 +222,9 @@ test('signing in while the alias is already busy is reported as skipped, not fai
   assert.equal(recoveredCalls, 0);
 });
 
-// Regression guard: the sidebar's own cloud-alias login button dispatches
-// loginPrimaryCloudProvider directly (no recovery callback) and must keep
-// behaving exactly as before signInAndRecover was introduced.
+// The sidebar's own cloud-alias login button dispatches
+// loginPrimaryCloudProvider directly (no recovery callback) and must still
+// log in and update cloud provider state on its own.
 test("the sidebar's own login thunk still logs in and updates cloud provider state", async () => {
   const store = buildTestStore();
   const dispatch = store.dispatch as unknown as AppDispatch;

@@ -21,7 +21,7 @@ import (
 // Certificate that is not Ready.
 // The CertificateRequest -> Order -> Challenge chain resolves to a Challenge
 // whose reason is an RBAC denial on the webhook solver — the exact failure
-// class #1138 exists to surface without three more hand-built kubectl calls.
+// class observe exists to surface without three more hand-built kubectl calls.
 func observeStubResponses() map[string]string {
 	return map[string]string{
 		"pods":                                `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
@@ -70,20 +70,16 @@ func TestObserve(t *testing.T) {
 	t.Run("dry_run_missing_tenant", testObserveDryRunMissingTenant)
 	t.Run("secret_flag_must_be_name_equals_key", testObserveSecretFlagMustBeNameEqualsKey)
 
-	// real_run_walks_certificate_failure_chain is the scenario #1138 exists
-	// for: a Certificate that is not Ready must surface the reason from the
+	// real_run_walks_certificate_failure_chain: a Certificate that is not Ready must surface the reason from the
 	// Challenge at the bottom of its CertificateRequest -> Order -> Challenge
 	// chain, in this one call, rather than requiring the caller to compose
 	// that walk from three more hand-built kubectl queries.
 	t.Run("real_run_walks_certificate_failure_chain", testObserveRealRunWalksCertificateFailureChain)
 
-	// real_run_kubectl_unreachable_reports_one_sanitized_line is erun#2392: an
-	// unreachable cluster API server made kubectl's retries emit klog's raw
-	// "Unhandled Error" frames (severity/timestamp/goroutine-id/source-location,
-	// none of it operator-relevant) straight into observe's own error, once per
-	// retry. sanitizeKubectlFailureOutput already existed for this shape
-	// (erun#1766) but observe's own kubectl error path never called it. The
-	// stub reproduces kubectl's real retry-storm shape verbatim.
+	// real_run_kubectl_unreachable_reports_one_sanitized_line: an unreachable
+	// API server makes kubectl's retries emit klog's raw "Unhandled Error"
+	// frames once per retry; observe's error must be sanitized to one line.
+	// The stub reproduces kubectl's real retry-storm shape verbatim.
 	t.Run("real_run_kubectl_unreachable_reports_one_sanitized_line", testObserveRealRunKubectlUnreachableReportsOneSanitizedLine)
 	t.Run("real_run_secret_presence_check", testObserveRealRunSecretPresenceCheck)
 	t.Run("real_run_secret_missing_key_never_reveals_value", testObserveRealRunSecretMissingKeyNeverRevealsValue)
@@ -94,7 +90,7 @@ func TestObserve(t *testing.T) {
 	// baseline, which agrees with the pod stub and SeedTenantEnv on every field.
 	t.Run("real_run_text_output_reports_images_release_and_drift", testObserveRealRunTextOutputReportsImagesReleaseAndDrift)
 
-	// real_run_reports_release_drift is the scenario #1448 exists for: a helm
+	// real_run_reports_release_drift: a helm
 	// release's own recorded values disagreeing with the running container
 	// (a hand-patched, out-of-band image) and with the env config's recorded
 	// runtimeversion/runtimepod must be named, not left for the reader to spot
@@ -104,26 +100,21 @@ func TestObserve(t *testing.T) {
 	// against a manufactured default.
 	t.Run("real_run_reports_release_drift", testObserveRealRunReportsReleaseDrift)
 
-	// real_run_runtime_pod_silent_config_reports_no_drift is the false-positive
-	// regression this scenario exists for: an env config that never recorded a
+	// real_run_runtime_pod_silent_config_reports_no_drift guards a false
+	// positive: an env config that never recorded a
 	// runtimepod (the SeedTenantEnv default, and the in-pod reality per
 	// runtime_resources.go's NormalizeRuntimePodResources doc) asserts nothing
 	// about the pod's shape, so a release sized well above the package's
-	// DefaultRuntimePodCPU/Memory (4 / 16384Mi) must report no runtimepod drift —
-	// comparing the release against a manufactured default nobody configured is
-	// exactly the bug, not the fix.
+	// DefaultRuntimePodCPU/Memory (4 / 16384Mi) must report no runtimepod drift
+	// against a manufactured default nobody configured.
 	//
-	// It is also the drift-verdict report's reproduction: the empty verdict is
-	// the one case `omitempty` dropped, so `--output json` on a clean
-	// environment carried no drift key at all while the text stream printed
-	// "Drift: none detected" and the MCP outputSchema declared one — three
-	// surfaces, three answers. The assertion below is on the payload rather
-	// than the golden alone, because "the key is present" is the exact
-	// contract the report found broken.
+	// The empty drift verdict must also survive `omitempty`, so `--output json`
+	// agrees with the text stream and the MCP outputSchema; the assertion below
+	// checks the payload for the key, not just the golden.
 	t.Run("real_run_runtime_pod_silent_config_reports_no_drift", testObserveRealRunRuntimePodSilentConfigReportsNoDrift)
 
 	// real_run_runtime_pod_configured_mismatch_reports_drift is the other
-	// direction of the same regression: once the env config actually records a
+	// direction: once the env config actually records a
 	// runtimepod, a release that disagrees with it must still be flagged. CPU
 	// agrees and only memory diverges, so the golden isolates the memory-only
 	// finding instead of always pairing it with a CPU one.
@@ -131,7 +122,7 @@ func TestObserve(t *testing.T) {
 
 	// real_run_helm_release_not_found confirms an absent release is reported
 	// as a confirmed "not found", distinct from a read that failed, and still
-	// flags that the env config expected one (#1448's "no dead ends" bar: an
+	// flags that the env config expected one (the "no dead ends" bar: an
 	// empty section must not look identical whether nothing is deployed or
 	// observe simply could not look).
 	t.Run("real_run_helm_release_not_found", testObserveRealRunHelmReleaseNotFound)
@@ -297,8 +288,7 @@ func testObserveRealRunReportsReleaseDrift(t *testing.T) {
 	responses := observeStubResponses()
 	// The running container's image and resource limits diverge from what
 	// the release itself records below (1.0.0 / 4 CPU / 8916Mi), the exact
-	// "hand-patched" and "resized without a matching redeploy" shapes #1448
-	// found by hand with kubectl/helm.
+	// "hand-patched" and "resized without a matching redeploy" shapes.
 	responses["pods"] = `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"10.43.0.100:5000/sophium/erun-devops:1.0.0-tini","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`
 	fixture.StubKubectlGetJSON(t, stubs, responses)
 	statusStub := `{"name":"team-devops","namespace":"team-dev","version":5,"info":{"status":"deployed"},` +

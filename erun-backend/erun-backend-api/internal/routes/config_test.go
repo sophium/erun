@@ -44,7 +44,7 @@ type stubEnvironmentRepository struct {
 	countByContext    map[string]int
 	countByContextErr error
 	// countByRuntimeType is what CountByType reports for
-	// model.EnvironmentTypeRuntime (#1113's aggregate resource-budget check).
+	// model.EnvironmentTypeRuntime (the aggregate resource-budget check).
 	countByRuntimeType int
 	countByTypeErr     error
 	err                error
@@ -115,7 +115,7 @@ func (r *stubEnvironmentRepository) CountByContext(_ context.Context, contextID 
 }
 
 // CountByType reports countByRuntimeType for model.EnvironmentTypeRuntime and
-// 0 otherwise; the aggregate resource-budget check (#1113) is the only
+// 0 otherwise; the aggregate resource-budget check is the only
 // caller, and it only ever asks about runtime environments.
 func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model.EnvironmentType) (int, error) {
 	if r.countByTypeErr != nil {
@@ -129,9 +129,8 @@ func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model
 
 // stubTenantQuotaRepository reports a fixed quota row for the quota guardrail.
 // Resource caps left at their zero value default to the same values an absent
-// tenant_quotas row would (repository.DefaultMax*), so existing test
-// constructions that only set maxEnvironments keep passing the resource-cap
-// floor check added for #605.
+// tenant_quotas row would (repository.DefaultMax*), so test constructions that
+// only set maxEnvironments pass the resource-cap floor check.
 type stubTenantQuotaRepository struct {
 	maxEnvironments       int
 	maxCPUMillicores      int

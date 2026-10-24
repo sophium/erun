@@ -221,8 +221,8 @@ const prepareOpenSelection =
     const newKey = selectionKey(selection);
     if (newKey !== previousKey) {
       // Reset the range for the environment being opened. Scope and commit are
-      // per-env now, so resetting them globally would clear an unrelated
-      // section's selection (#1178).
+      // per-env, so resetting them globally would clear an unrelated
+      // section's selection.
       const envKey = `${selection.tenant}/${selection.environment}`;
       dispatch(setEnvReviewScope({ envKey, scope: 'current' }));
       dispatch(setEnvReviewCommit({ envKey, commit: '' }));

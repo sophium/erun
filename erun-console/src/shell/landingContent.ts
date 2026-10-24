@@ -2,7 +2,7 @@ import { Columns2, Gauge, Layers, ShieldCheck } from 'lucide-react';
 
 // Bundled product-level defaults for the signed-out landing page. Mirrors how
 // BrandMark already falls back to a generic mark when an instance sets no
-// brand (#1327): an instance that configures no tagline still gets a real
+// brand: an instance that configures no tagline still gets a real
 // pitch instead of a blank hero, while one that does configure `tagline`
 // (GET /v1/platform) overrides this text entirely.
 export const DEFAULT_TAGLINE =

@@ -298,7 +298,7 @@ const relativeTimeUnits: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
 ];
 
 // relativeDashboardDate renders "2 days ago" instead of a raw locale string —
-// nobody scans absolute timestamps in a column of rows (#1378). Callers pair
+// nobody scans absolute timestamps in a column of rows. Callers pair
 // this with formatDashboardDate as the hover/title value so the exact moment
 // is still one hover away, never lost.
 export function relativeDashboardDate(value: string | undefined): string {
@@ -338,7 +338,7 @@ export function reviewAuthorInitials(name: string): string {
 
 // middleEllipsis keeps both ends of an identifier visible — a branch name's
 // prefix and suffix both carry meaning, unlike prose, where a trailing "…"
-// would drop the more identifying half (#1378).
+// would drop the more identifying half.
 export function middleEllipsis(value: string, keep = 20): string {
   const trimmed = value.trim();
   if (trimmed.length <= keep * 2 + 1) {

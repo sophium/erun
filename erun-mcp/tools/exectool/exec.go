@@ -14,10 +14,9 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// RawInput absorbs job_start's command mode (#1246): dir, env, and a
-// background job in addition to the plain foreground run exec_raw always
-// supported. Its agent mode became the separate exec_agent tool instead,
-// since a streaming AI-tool run has nothing in common with exec_raw's
+// RawInput carries dir, env, and a background job in addition to the plain
+// foreground run. Agent runs are the separate exec_agent tool, since a
+// streaming AI-tool run shares nothing with exec_raw's
 // argv-and-captured-output shape beyond both starting a job.
 type RawInput struct {
 	Command []string          `json:"command" jsonschema:"command and arguments to execute from the runtime repo root"`

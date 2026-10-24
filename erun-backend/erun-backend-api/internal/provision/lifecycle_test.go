@@ -264,7 +264,7 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 
 // TestEnvLifecycleDeleteMarksBlockedOnJobFailure: a failed teardown must not
 // silently forget an environment whose namespace may still exist, or leave it
-// claiming `running` (#1140) — it moves to deletion-blocked naming why.
+// claiming `running` — it moves to deletion-blocked naming why.
 func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
@@ -282,8 +282,8 @@ func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess pins the
-// interaction #1140 is about: `erun delete` exits 0 (and the Job reports
+// TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess pins
+// that `erun delete` exits 0 (and the Job reports
 // succeeded) even when the remote namespace teardown itself failed, so a
 // clean Job outcome alone must not be trusted to hard-delete the row.
 func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *testing.T) {
@@ -335,7 +335,7 @@ func jsonQuote(s string) string {
 }
 
 // TestEnvLifecycleStopRecordsUsageEvent and TestEnvLifecycleDeleteRecordsUsageEvent
-// lock the metering hook for #605: a successful stop/delete records the event,
+// lock the metering hook: a successful stop/delete records the event,
 // a failed one does not.
 func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
@@ -376,7 +376,7 @@ func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 
 // TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable: an
 // environment placed on a context but no resolver configured must fail
-// clearly rather than running the stop Job unauthenticated (#1112).
+// clearly rather than running the stop Job unauthenticated.
 func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)

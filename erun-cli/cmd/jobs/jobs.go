@@ -14,15 +14,11 @@ import (
 )
 
 // NewJobsCmd builds `erun jobs`: the platform-backed view of what agents and
-// orchestrators are working on right now, and what recently finished. It
-// answers the question the environment-scoped `erun exec job` verbs cannot -- those observe work in
-// one environment, this observes the tenant's whole queue, including work that
-// never entered an environment at all.
-//
-// It is deliberately its own top-level group rather than a verb on `erun exec
-// job`: that group is scoped to one environment's own jobs, and a platform
-// queue read is not. `erun job` is the deprecated alias for that group and is
-// on its way out, so nothing new is added under it.
+// orchestrators are working on right now, and what recently finished, across
+// the tenant's whole queue -- including work that never entered an
+// environment, which the environment-scoped `erun exec job` verbs cannot see.
+// That is why it is its own top-level group; `erun job` is the deprecated
+// alias for `erun exec job`, so nothing new is added under it.
 func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := shared.NewCommandGroup(

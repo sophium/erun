@@ -65,14 +65,10 @@ func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testi
 }
 
 // TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey guards the
-// one-way migration documented on migrateLegacyContainerRegistry (erun#1222):
-// a legacy scalar key an UnmarshalYAML migrated into a current field must
-// actually disappear on the next save, not survive as an "unknown" field the
-// plain struct has no name for. Left unfixed, the desktop's own save (which
-// clears EnvConfig.ContainerRegistries to route a local-agent env's marked
-// list into the project config instead) writes a merged file that still
-// carries the legacy key, so the very next load re-migrates it and clobbers
-// whatever roles the operator just set.
+// one-way migration documented on migrateLegacyContainerRegistry: a legacy
+// scalar key UnmarshalYAML migrated into a current field must disappear on
+// the next save, not survive as an "unknown" field; otherwise the next load
+// re-migrates it and clobbers whatever roles the operator just set.
 func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T) {
 	existing := []byte("name: alpha\ncontainerregistry: registry.example/test\ntype: local-agent\n")
 

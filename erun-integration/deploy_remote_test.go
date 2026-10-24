@@ -14,13 +14,12 @@ import (
 )
 
 func testDeployDryRunRuntimeEnvUnreachableRepoPathFallsBackToLocalPlan(t *testing.T) {
-	// #1116: a runtime env's configured repo path names an in-pod checkout
+	// A runtime env's configured repo path names an in-pod checkout
 	// (e.g. /home/erun/git/frs) that does not exist on the host running this
 	// deploy — the normal case for a runtime env driven from an operator's
-	// laptop. Clearing (or never setting) deploy.components used to silently
-	// drop selection to the runtime chart alone instead of following the repo
-	// plan, because the plan read depended solely on that unreachable
-	// configured path. Deploy now also tries the project rooted at its own
+	// laptop. With no deploy.components, selection must still follow the
+	// repo plan rather than drop to the runtime chart alone, so deploy also
+	// tries the project rooted at its own
 	// working directory (which here is exactly where the plan lives, the
 	// normal case for a host sitting inside the tenant checkout), so the
 	// plan's four components are selected without --components. No saved

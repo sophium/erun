@@ -3,9 +3,9 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { AppShell } from '../../../pages/index.js';
 
-// erun#2377: the sidebar rendered the confident "No environments yet" empty
+// The sidebar must not render the confident "No environments yet" empty
 // state (with its "Initialize environment" action) before the tenant list
-// had come back at all, contradicting the main pane's own "Loading
+// has come back, contradicting the main pane's own "Loading
 // environments..." message shown in the same frame. Gate the LoadState
 // response so the assertions can observe the still-loading window before
 // releasing it, the way a real cold start's network latency would.

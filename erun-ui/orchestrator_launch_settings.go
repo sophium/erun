@@ -88,7 +88,7 @@ func orchestratorInfoWithLaunchSettings(info orchestratorInfo, settings orchestr
 }
 
 // orchestratorLaunchSettingsRemedy names what the operator can do about
-// settings eruncommon.ValidateOrchestratorLaunchSettings refused, whose reasons
+// settings orchestrator.ValidateOrchestratorLaunchSettings refused, whose reasons
 // deliberately name no surface.
 func orchestratorLaunchSettingsRemedy(settings orchestratorLaunchInput, catalog *config.OpenRouterConfig) string {
 	if settings.UseGateway && !catalog.Configured() {

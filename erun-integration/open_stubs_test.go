@@ -34,7 +34,7 @@ func skipIfPortsBusy(t *testing.T, ports ...int) {
 
 // openHostOSOverride pins DetectHost() to darwin for the open scenarios that
 // cross a host-OS branch. Two branches need it, and both resolve through
-// eruncommon.DetectHost (which honors this seam), so a single canonical OS keeps
+// core.DetectHost (which honors this seam), so a single canonical OS keeps
 // the Unix-recorded goldens deterministic on any host — including Windows, where
 // they would otherwise diverge:
 //   - the `open --no-shell` setup preamble dialect: POSIX
@@ -211,8 +211,7 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
-// stubKubectlKlogFramedError reproduces erun#1766's real captured toast
-// verbatim: client-go's klog "Unhandled Error" carrier around the same
+// stubKubectlKlogFramedError reproduces a real captured toast verbatim: client-go's klog "Unhandled Error" carrier around the same
 // connection-refused cause stubKubectlGenericError uses, framed with the
 // severity/timestamp/goroutine-id/source-location an operator can never act
 // on.

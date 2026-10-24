@@ -207,7 +207,7 @@ function EnrollForm({
 }
 
 // DeactivateUserDialog gates the access-revoking half of the toggle behind an
-// explicit confirmation (erun-ui/AGENTS.md's design-language record, #1419):
+// explicit confirmation (erun-ui/AGENTS.md's design-language record):
 // deactivating blocks the user's next sign-in immediately, and the row it was
 // clicked from looks identical to every other row, so a misclick is easy and
 // its consequence is invisible until the person locked out reports it.
@@ -265,7 +265,7 @@ function DeactivateUserDialog({
 // own service accounts, never a tenant member), or an IdP-only account —
 // someone who exists in the identity provider (most likely via
 // self-registration) but has no erun access at all. Rendering all three
-// identically is exactly the surface #1482 asks not to present.
+// identically would hide who actually has erun access.
 function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
   if (user.isMachine) {
     return <span className="text-xs text-muted-foreground">Machine account</span>;
@@ -280,13 +280,11 @@ function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
 // that already appears in reviews, roles, audit entries, and the console
 // header (whoami's own `username`) -- is the primary label whenever the row
 // is enrolled, with the IdP's own username shown as a secondary line only
-// when the two actually diverge: rendering just one name is the defect
-// that was reported, since an operator seeing a different name here than in
-// the header cannot tell it is their own row. The OIDC subject (`user.id`)
-// is always shown too, in small monospace text -- the one stable value that
-// actually joins the erun and IdP directories, and previously nowhere an
-// operator could read it from at all (item 3). isCaller marks
-// the row matching the signed-in operator's own erun user id (item 1).
+// when the two actually diverge: an operator seeing a different name here
+// than in the header cannot otherwise tell it is their own row. The OIDC
+// subject (`user.id`) is always shown too, in small monospace text -- the one
+// stable value that joins the erun and IdP directories. isCaller marks the
+// row matching the signed-in operator's own erun user id.
 function UsernameCell({
   user,
   isCaller,

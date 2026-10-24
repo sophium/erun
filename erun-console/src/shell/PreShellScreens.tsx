@@ -156,7 +156,7 @@ export function NotEnrolledScreen({
 // commonly a shared, org-scoped issuer whose token carries no matching org
 // claim. Unlike NotEnrolledScreen, this deliberately does not tell the
 // caller to ask an operator to enrol them: they may already be enrolled
-// somewhere, and that advice would not help (erun#1721). `message` carries
+// somewhere, and that advice would not help. `message` carries
 // the API's own diagnosis (issuer, org claim seen or its absence) so an
 // operator debugging this does not have to query the database for it.
 export function TenantUnresolvedScreen({
@@ -208,7 +208,7 @@ export function TenantUnresolvedScreen({
 // unexpected database failure) rather than a real answer about enrolment --
 // distinct from both NotEnrolledScreen and TenantUnresolvedScreen, since
 // neither "an operator has to enrol you" nor "you may already be enrolled
-// somewhere else" is the right advice here (erun#1752). This screen never
+// somewhere else" is the right advice here. This screen never
 // offers an enrolment command: whatever the API's record of this identity
 // is, it was not what failed, so no command derived from it would help.
 export function ResolutionErrorScreen({

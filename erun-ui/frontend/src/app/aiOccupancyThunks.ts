@@ -29,7 +29,7 @@ const AI_TAB_KIND: TerminalTabKind = 'ai';
 // (initial env open, dead-tab respawn): it starts unconfirmed, and when the
 // environment is already held by another job's activity lease, opens the
 // occupancy prompt instead of recording a tab — starting a second agent stays
-// a deliberate choice (erun#1221). Returns the started session, or null when
+// a deliberate choice. Returns the started session, or null when
 // the prompt took over and nothing was started yet.
 export const startAITabOrPrompt =
   (params: StartAITabParams): AppThunk<Promise<StartSessionResult | null>> =>

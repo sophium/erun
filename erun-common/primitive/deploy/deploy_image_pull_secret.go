@@ -30,11 +30,9 @@ stringData:
 // refreshImagePullSecrets re-mints every dockerconfigjson Secret named in
 // deployInput.ImagePullSecrets, from credentials resolved host-side for every
 // registry the deploy is about to pull an image from. An ECR authorization
-// token expires after twelve hours (#1256): an operator who named a pull
-// secret once via `--image-pull-secret` had no way to keep its content live
-// short of noticing the rot and recreating it by hand. This runs before every
-// rollout, so the pod a redeploy creates always starts with a fresh
-// credential instead of the one a previous manual fix wrote.
+// token expires after twelve hours, so a pull secret named once via
+// `--image-pull-secret` would otherwise rot. This runs before every rollout,
+// so the pod a redeploy creates always starts with a fresh credential.
 //
 // The registry a component's imageOverrides names can differ from
 // containerRegistry (a runtime image built into a BUILD-role registry while

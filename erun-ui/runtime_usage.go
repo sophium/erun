@@ -20,7 +20,7 @@ import (
 )
 
 // runtime_usage.go wires the desktop's Runtime tab to the same reader
-// erun-common/runtime_usage.go already gives `erun usage` and the MCP usage
+// podruntime.RunRuntimeUsage already gives `erun usage` and the MCP usage
 // tool: CPU quota utilisation, memory against the runtime container's own
 // cgroup limit with a real OOM-kill count, and disk on the workspace mount.
 // The tab already holds the CPU/memory sliders, so this reading is directly

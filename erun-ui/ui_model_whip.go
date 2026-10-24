@@ -7,7 +7,7 @@ import (
 )
 
 // The whip surface's models -- one flat list of per-target outcomes, folded
-// from both populations' eruncommon.WhipResult/WhipCandidate into the shape
+// from both populations' orchestrator.WhipResult/WhipCandidate into the shape
 // the titlebar control renders, so a click's report reads the same whether
 // the target was an environment or an orchestrator. uiWhipTargetRef and the
 // WhipTargets population below are the selection half of the same surface:

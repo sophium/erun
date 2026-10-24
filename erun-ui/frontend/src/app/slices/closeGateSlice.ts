@@ -3,8 +3,8 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { ActivityQueueEntry } from '../activityQueueState';
 
 // Backs the "close anyway?" confirmation the desktop shows when the operator
-// tries to close the window while a build/deploy/release is still running
-// (erun#1214): closing used to SIGKILL every in-flight job with no warning.
+// tries to close the window while a build/deploy/release is still running,
+// since closing SIGKILLs every in-flight job.
 export interface CloseGateState {
   open: boolean;
   running: ActivityQueueEntry[];

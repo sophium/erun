@@ -51,7 +51,7 @@ type ListInput struct {
 	Preview bool `json:"preview,omitempty" jsonschema:"trace every live check this call would make (controlPlanes' plane and linked-surface probes and its registry lookup, versionDriftTenant's per-environment helm read for an environment with no version recorded locally) without making any of them"`
 }
 
-// ListToolResult is eruncommon.ListResult plus the optional version-drift
+// ListToolResult is lifecycle.ListResult plus the optional version-drift
 // report; embedded (not wrapped) so existing callers reading ListResult
 // fields directly still find them at the top level.
 type ListToolResult struct {

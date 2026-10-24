@@ -119,7 +119,7 @@ func TestStopEnvironmentSurfacesLifecycleFailure(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentStartsDeleteAsynchronously pins #1140's bounded-delete
+// TestDeleteEnvironmentStartsDeleteAsynchronously pins the bounded-delete
 // contract: the handler claims the delete (moving the row to `deleting`) and
 // starts the durable workflow, then returns 202 immediately rather than
 // waiting on the teardown itself — which could run long or wedge entirely.
@@ -220,17 +220,14 @@ func TestDeleteEnvironmentRejectsConcurrentDelete(t *testing.T) {
 	}
 }
 
-// The three tests below cover the refusal *messages* for #1163. The guard that
-// produces the refusal lives in ClaimDeploy/ClaimDelete's SQL, which this
-// package's stub repository cannot exercise and which no Postgres-backed
-// harness exists for here — that half is verified against a live control plane
-// instead. What these hold is the half that is testable in Go: that a refusal
-// caused by an outstanding teardown is reported as such, rather than as the
-// misleading "a deploy is already in progress" a caller used to get.
+// The three tests below cover the refusal messages only: the guard itself
+// lives in ClaimDeploy/ClaimDelete's SQL, which the stub repository cannot
+// exercise. A refusal caused by an outstanding teardown must be reported as
+// such, not as "a deploy is already in progress".
 
 // TestDeployEnvironmentRefusalNamesAnOutstandingDelete: a deploy refused
-// because the environment is mid-teardown must say so. The old message sent
-// the caller looking for a concurrent deploy that does not exist.
+// because the environment is mid-teardown must say so, not send the caller
+// looking for a concurrent deploy that does not exist.
 func TestDeployEnvironmentRefusalNamesAnOutstandingDelete(t *testing.T) {
 	for _, tc := range []struct {
 		status model.EnvironmentStatus

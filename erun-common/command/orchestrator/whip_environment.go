@@ -24,7 +24,7 @@ import (
 // desktop) reaches the same environment the same way: call its "whip" tool.
 
 // WhipEnvironmentAgentSessionID matches the AppSession id erun open's AI tab
-// creates (see erun-common/open.go, erun-ui/terminal_sessions.go), so a whip
+// creates (see primitive/open, erun-ui/terminal_sessions.go), so a whip
 // nudge always targets the same dtach session an operator's "AI" tab reattaches
 // to.
 const WhipEnvironmentAgentSessionID = "ai"

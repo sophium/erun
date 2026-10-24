@@ -46,7 +46,7 @@ type createContextRequest struct {
 	InstanceType       string `json:"instanceType"`
 	DiskType           string `json:"diskType"`
 	DiskSizeGB         int    `json:"diskSizeGb"`
-	// MaxEnvironments is this context's placement capacity (#1112); zero uses
+	// MaxEnvironments is this context's placement capacity; zero uses
 	// repository.DefaultContextMaxEnvironments.
 	MaxEnvironments int  `json:"maxEnvironments"`
 	Preview         bool `json:"preview"`

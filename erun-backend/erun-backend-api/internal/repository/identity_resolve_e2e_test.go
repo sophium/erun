@@ -14,11 +14,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim proves the
-// erun#1721 root cause is reported distinctly: once an issuer is org-scoped,
-// a token that simply carries no matching org claim (exactly what erun-console
-// presented before requesting the org scope) must not be confused with "not
-// enrolled" -- the caller may be a genuine member of a tenant this one token
+// TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim proves that once
+// an issuer is org-scoped, a token that carries no matching org claim is not
+// confused with "not enrolled" -- the caller may be a genuine member of a tenant this one token
 // cannot resolve to.
 func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) {
 	db := identityBootstrapDatabase(t)
@@ -48,8 +46,8 @@ func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) 
 	}
 }
 
-// TestResolveIdentityDistinguishesNotEnrolledFromUnresolved locks in the
-// erun#1721 acceptance criterion directly: a genuinely-unenrolled identity (a
+// TestResolveIdentityDistinguishesNotEnrolledFromUnresolved locks in that a
+// genuinely-unenrolled identity (a
 // real tenant exists, this subject simply isn't one of its users) must report
 // differently from an identity whose tenant could not be resolved at all --
 // even when, in the second case, the very same already-enrolled subject
@@ -167,17 +165,16 @@ func TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL(t *testing.T) {
 	}
 }
 
-// TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail reproduces
-// erun#1752's exact reported shape at the read path GET /v1/whoami drives on
-// every call: a tenant with three enrolled users -- "erun" (its bootstrap
-// user), "va-admin", and "rihards@frs.lv", the last already holding a
-// user_external_ids link for the reported subject, exactly like the real
-// erun platform's own tenant frs -- and a token whose username claim
-// collides with a different enrolled user's username. Enrolment through
+// TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail exercises
+// the read path GET /v1/whoami drives on every call: a tenant with three
+// enrolled users -- "erun" (its bootstrap user), "va-admin", and
+// "rihards@frs.lv", the last already holding a user_external_ids link for the
+// subject -- and a token whose username claim collides with a different
+// enrolled user's username. Enrolment through
 // ResolveIdentity's own bootstrap only ever creates a *tenant's first* user
 // (insertFirstTenantUser refuses once any user exists), so rihards@frs.lv
-// and her link are seeded directly, matching how she was really enrolled
-// (through the ordinary UserRepository.Create path, not bootstrap).
+// and her link are seeded directly, as the ordinary UserRepository.Create
+// path would enrol her.
 func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -199,8 +196,7 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 		tenant.TenantID, "va-admin",
 	).Err(), "seed a second, unrelated enrolled user")
 
-	// The reported subject's link already exists, exactly per the issue's
-	// ground truth -- seeded directly, since this is not a tenant's first
+	// The subject's link already exists -- seeded directly, since this is not a tenant's first
 	// user and ResolveIdentity's own bootstrap would refuse to create it.
 	const subject = "387534471668170904"
 	var rihardsID string
@@ -217,8 +213,7 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	// GET /v1/whoami, repeated, exactly as the issue reported it firing on
-	// every call: the token's username claim now collides with va-admin's
+	// GET /v1/whoami, repeated, as it fires on every call: the token's username claim now collides with va-admin's
 	// username, so every one of these calls attempts (and must survive) the
 	// same refresh collision.
 	for i := 0; i < 3; i++ {
@@ -242,8 +237,7 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 }
 
 // TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint
-// proves erun#1752 items 2 and 3 for the *other* candidate branch named in
-// the issue: two callers racing to become a zero-user tenant's first user,
+// covers the other branch that writes users: two callers racing to become a zero-user tenant's first user,
 // both deriving the same username, must not let the loser's raw
 // unique-violation (constraint name, SQLSTATE) escape ResolveIdentity -- it
 // is sanitized into ErrIdentityResolutionFailed exactly like the

@@ -309,15 +309,14 @@ func testPushDryRunLocalPushAssemblesPerArchManifest(t *testing.T) {
 }
 
 func testPushRealRunLocalPushAssemblesPerArchManifest(t *testing.T) {
-	// Companion real-run to the dry-run manifest scenario: this path
-	// previously failed "tag does not exist" on the arch-less push and must
-	// now complete.
+	// Companion real-run to the dry-run manifest scenario: the per-arch
+	// manifest assembly must complete without an arch-less push.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 	fixture.StubBinary(t, stubs, "helm", "")
-	// #1201: the registry-credential preflight needs a resolvable credential
+	// The registry-credential preflight needs a resolvable credential
 	// to let this scenario reach the manifest-assembly behavior it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
@@ -355,7 +354,7 @@ func testPushRealRunTransientChartVerifyReadRetriesThenVerifies(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// #1201: give the registry-credential preflight a resolvable credential
+	// Give the registry-credential preflight a resolvable credential
 	// so this scenario still reaches the chart-verify-read retry it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
@@ -400,7 +399,7 @@ func testPushRealRunPersistentChartVerifyReadReportsPartialPublish(t *testing.T)
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// #1201: give the registry-credential preflight a resolvable credential
+	// Give the registry-credential preflight a resolvable credential
 	// so this scenario still reaches the partial-publish report it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")

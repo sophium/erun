@@ -2,13 +2,10 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// A row span for over six hours with nothing running (#955). Every input to its
-// busy state was desktop-local — set when the desktop starts something, cleared
-// when the desktop sees it end — so any path that loses the ending left a latch
-// with nothing able to release it. The environment's own report was already
-// fetched by the row and then discarded.
+// A row's busy state must not latch when the desktop never sees a command
+// end: the environment's own idle report must release it.
 //
-// This is that failure staged whole: a running command entry with no ending ever
+// This stages that whole: a running command entry with no ending ever
 // delivered, which is precisely what a command driven from a terminal or over
 // MCP looks like from here, and then the environment answering that it is idle.
 // The unit derivation is owned by Sidebar.helpers.test.ts and the observation by

@@ -23,7 +23,7 @@ const SIZING_EMPTY_STATE =
   'No standing sizing recommendation is available for this environment yet.';
 
 // RuntimeSizingField turns the environment's own standing sizing
-// recommendation into a one-click action (erun#1320): applying it is
+// recommendation into a one-click action: applying it is
 // `erun resize --apply-recommendation`, run inside the pod, so the operator
 // never retypes the numbers this panel already shows. A resize rolls the
 // pod, so it is refused while another worker holds the environment — that
@@ -47,8 +47,8 @@ export function RuntimeSizingField({
       .unwrap()
       .catch((error: unknown) => {
         const message = readError(error);
-        // Stable wording from RuntimeResizeOccupancyError.Error()
-        // (erun-common/runtime_resize.go) -- matched here only to decide
+        // Stable wording from the Go lifecycle.RuntimeResizeOccupancyError.Error()
+        // -- matched here only to decide
         // whether the explicit override affordance renders, never to
         // reinterpret or hide the error itself.
         setHeldByOther(message.includes('pass the override') ? message : null);

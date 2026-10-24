@@ -16,9 +16,8 @@ import { activityTargetLabel } from '@/components/app/ActivityQueueDrawer.helper
 import { InlineAlert } from '@/components/app/InlineAlert';
 
 // Shown when the operator tries to close the window while a build, deploy, or
-// release is still running. Closing used to SIGKILL every one of these with
-// no warning and no record (erun#1214); this names what is running before
-// the operator chooses, per erun-ui/AGENTS.md's "clear action boundaries"
+// release is still running. Closing SIGKILLs every one of these, so this
+// names what is running before the operator chooses, per erun-ui/AGENTS.md's "clear action boundaries"
 // rule for destructive/side-effect flows (Nielsen #1 visibility of system
 // status, #2 recognition over recall — the operator sees exactly what would
 // be lost instead of having to remember what they started).

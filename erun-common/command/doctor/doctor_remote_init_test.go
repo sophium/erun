@@ -10,9 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
 
-// TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory pins the same
-// dry-run purity contract erun#1907 fixed for init's config directory: tracing
-// the git clone must not create the project root it would clone into.
+// TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory pins the same dry-run
+// purity contract init's config directory follows: tracing the git clone must
+// not create the project root it would clone into.
 func TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory(t *testing.T) {
 	projectRoot := filepath.Join(t.TempDir(), "unborn-checkout")
 	err := finishRemoteInitGitCheckout(core.Context{DryRun: true}, projectRoot, "", remoteinit.RemoteRepositorySpec{URL: "git@example.test:acme/repo.git"})
@@ -24,10 +24,9 @@ func TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory(t *testing.T) {
 	}
 }
 
-// TestIsInRuntimeEnvironment pins the fix for the bug where a local-agent
-// pod's hostPath-mounted worktree (ERUN_REPO_REMOTE=false) made this function
-// report "not in a runtime pod" while running inside one. ERUN_ENV_TYPE is
-// the signal now: set by the chart on every pod it renders, to a value other
+// TestIsInRuntimeEnvironment pins that a local-agent pod's hostPath-mounted
+// worktree (ERUN_REPO_REMOTE=false) still reads as a runtime pod: ERUN_ENV_TYPE
+// is the signal, set by the chart on every pod it renders, to a value other
 // than host only for a pod.
 func TestIsInRuntimeEnvironment(t *testing.T) {
 	cases := []struct {

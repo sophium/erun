@@ -62,7 +62,7 @@ func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testin
 
 // TestCreateEnvironmentPreviewStillEnforcesPlacement: preview must apply the
 // same placement check as a real create, not a laxer one — a raw
-// kubernetesContext stays refused everywhere (#1112).
+// kubernetesContext stays refused everywhere.
 func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironmentPreview(t, environments, underCapQuota, `{
@@ -97,8 +97,7 @@ var runtimeFloorQuotaCases = map[string]struct {
 	},
 }
 
-// TestProvisionPreviewAgreesWithCreateOnRuntimeQuotaFloor locks the fix for
-// the provision preview skipping validateNamespaceQuotaFloor: both preview
+// TestProvisionPreviewAgreesWithCreateOnRuntimeQuotaFloor: both preview
 // entry points (POST /v1/provision and POST /v1/environments?preview=true)
 // must discharge the same runtime namespace-quota floor the executing create
 // path enforces, across the same quota shapes, so a plan that previews as

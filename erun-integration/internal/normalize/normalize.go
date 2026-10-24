@@ -244,8 +244,8 @@ func Apply(s string, extra ...Replacement) string {
 }
 
 // timingLinePattern matches an already-redacted step-timing row: leading
-// indentation (always an even number of spaces — renderStepTimingRows in
-// erun-common/timing.go indents each depth by two), then a label, then the
+// indentation (always an even number of spaces — core.RenderStepTimingRows
+// indents each depth by two), then a label, then the
 // "[<ELAPSED>]" token the bracket-duration rule above just produced, then an
 // optional status suffix — a failed row appends " — <error>" (or "— exit
 // status N") after its duration. The bracket shape is deliberately unique to
@@ -255,21 +255,15 @@ func Apply(s string, extra ...Replacement) string {
 // The suffix has to be part of the pattern rather than the row ending at the
 // bracket: a failed row is a timing row like any other and must still be
 // recognized, sorted among its siblings, and carry its suffix through
-// unchanged. Without it a failed row is not recognized at all, and because
-// canonicalizeStepTimingOrder ends a run at the first line it cannot parse,
-// one unrecognized row silently disables the canonicalization for the whole
-// tree it sits in — leaving exactly the wall-clock sibling order this is here
-// to remove, and reparenting the rows after it under the wrong step. That is
-// invisible on an idle machine (every sibling ties inside the production
-// noise floor, so the recorded order already is name order) and only shows up
-// where the timings actually diverge, which is why it read as a
-// venue-specific failure. TestGoldenTimingBlocksAreOrderInvariant is what
-// keeps a future row shape from reopening the same hole silently.
+// unchanged. An unrecognized row would silently disable canonicalization for
+// its whole tree and reparent the rows after it, which only shows up where
+// timings actually diverge. TestGoldenTimingBlocksAreOrderInvariant guards
+// new row shapes.
 var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$`)
 
 // canonicalizeStepTimingOrder reorders each step-timing block's sibling rows
 // by name instead of leaving them in the real wall-clock order they were
-// recorded in. orderedTimingRows (erun-common/timing.go) already breaks a
+// recorded in. core's orderedTimingRows already breaks a
 // same-process tie within its noise floor by name for exactly this
 // determinism reason, but a subprocess integration test measures real
 // wall-clock time with no fake clock to inject — the timing root lives
@@ -300,7 +294,7 @@ func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); {
-		// A block is delimited by the header reportStepTiming prints above the
+		// A block is delimited by the header core.ReportStepTiming prints above the
 		// table and the footer it prints below it, so the whole table is one
 		// forest no matter what lands between its rows. Bounding a run by the
 		// first line that is not a row instead -- the rule this replaces --
@@ -343,11 +337,11 @@ func canonicalizeStepTimingOrder(s string) string {
 	return strings.Join(out, "\n")
 }
 
-// timingBlockHeader is the line reportStepTiming prints above the ordered
+// timingBlockHeader is the line core.ReportStepTiming prints above the ordered
 // table, and the only anchor that says a table follows.
 const timingBlockHeader = "step timing (ordered by duration):"
 
-// timingBlockFooter prefixes the line reportStepTiming prints once the
+// timingBlockFooter prefixes the line core.ReportStepTiming prints once the
 // machine-readable record is written, closing the table.
 const timingBlockFooter = "timing record written to "
 
@@ -391,7 +385,7 @@ func timingRunEnd(lines []string, start int) int {
 // the table's rows (the rows themselves, plus the indented continuation lines
 // carrying a row's own multi-line message) and the foreign lines that do not.
 //
-// reportStepTiming indents every line of a row, so an unindented line inside a
+// core.ReportStepTiming indents every line of a row, so an unindented line inside a
 // delimited block cannot be part of the table: it is output from somewhere
 // else that landed there. That is what makes this separable at all -- while a
 // row's own message was emitted at column zero the two were genuinely
@@ -413,8 +407,8 @@ func splitTimingBlockBody(body []string) (rows, foreign []string) {
 }
 
 // timingLineDepth reports a timing row's nesting depth (an offset from the
-// row's real depth in erun-common/timing.go by the constant amount
-// reportStepTiming's own extra indent adds — irrelevant here, since only
+// row's real depth in core.RenderStepTimingRows by the constant amount
+// core.ReportStepTiming's own extra indent adds — irrelevant here, since only
 // relative depth, to build the tree, matters) and whether line is a timing
 // row at all.
 func timingLineDepth(line string) (int, bool) {
@@ -430,7 +424,7 @@ func timingLineDepth(line string) (int, bool) {
 // error after the duration, and an error can be several lines long (the
 // missing-binfmt refusal ends with a command to run on its own line), so those
 // lines have to travel with the row they belong to when siblings are
-// reordered. Every line of the table is indented — reportStepTiming prefixes
+// reordered. Every line of the table is indented — core.ReportStepTiming prefixes
 // each row, and a wrapped error keeps its own leading whitespace — while the
 // "timing record written to ..." line that closes the block, and anything
 // printed after it, is not. Indentation is therefore what separates a

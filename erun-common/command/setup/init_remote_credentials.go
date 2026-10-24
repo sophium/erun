@@ -38,7 +38,8 @@ func (s BootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResul
 // identity when the platform will mint one, and this host's own signed-in alias
 // otherwise. Unlike the registry credential it is not gated on anything the
 // environment declared -- any agent environment may be promoted to drive the
-// merge queue, so the question is only whether the host has an identity to give.
+// merge queue, so the question is only whether the host has an identity to
+// give.
 //
 // The machine identity is asked for first because it is the whole point of
 // preferring one: an environment's platform calls are attributed to whoever ran
@@ -47,9 +48,8 @@ func (s BootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResul
 // reason the platform will not mint one -- this host holds no alias to ask
 // with, the environment is not registered yet, the tenant resolves by no issuer
 // the platform administers, or the credential it returned does not exchange for
-// a token -- falls back to that delegated session, which is exactly what the
-// environment would have had before this existed. The fallbacks are traced, not
-// silent: a deployment that stayed on the operator's identity has to be
+// a token -- falls back to that delegated session. The fallbacks are traced,
+// not silent: a deployment that stayed on the operator's identity has to be
 // distinguishable from one that never asked.
 func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (string, error) {
 	namespace := config.KubernetesNamespaceName(target.Tenant, target.Environment)
@@ -73,14 +73,13 @@ func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (s
 // ensureRemoteRegistryCredentials fails init when the pod it just deployed has
 // no way to authenticate to a ghcr.io registry the env is configured to build
 // to or deploy from. Left unchecked, a build-role registry with no credential
-// is only discovered after a full multi-arch release build spends itself at
-// the push (MissingGHCRCredentialError, checked again by release's own
-// preflight), and a deploy-role registry with no credential leaves every
-// registry read this pod makes unable to tell "denied" from "not published"
-// (#1193). This only proves a credential source EXISTS in the pod -- a docker
-// config entry, a gh session, or GH_TOKEN/GITHUB_TOKEN -- not that it is valid
-// or correctly scoped; release's own preflight still confirms that before
-// spending a build.
+// is only discovered after a full multi-arch release build spends itself at the
+// push (MissingGHCRCredentialError, checked again by release's own preflight),
+// and a deploy-role registry with no credential leaves every registry read this
+// pod makes unable to tell "denied" from "not published". This only proves a
+// credential source EXISTS in the pod -- a docker config entry, a gh session,
+// or GH_TOKEN/GITHUB_TOKEN -- not that it is valid or correctly scoped;
+// release's own preflight still confirms that before spending a build.
 func (s BootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResult, req config.ShellLaunchParams) error {
 	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	for _, registry := range registries {
@@ -140,12 +139,12 @@ func (s BootstrapRunner) remoteGHCRCredentialConfigured(req config.ShellLaunchPa
 }
 
 // remoteGHCRCredentialCheckScript mirrors resolveGHCRBasicAuth's three routes
-// (erun-common/registry_auth.go) in shell: that Go logic runs wherever the
-// pod's own erun binary executes and cannot be invoked remotely, so this
-// checks the same three sources directly -- a docker config entry for the
-// registry host, a gh session, or GH_TOKEN/GITHUB_TOKEN. It reports 1/0 on
-// stdout rather than failing the script itself, so a missing credential is a
-// normal result init can act on rather than a script error.
+// (infra/registry) in shell: that Go logic runs wherever the pod's own erun
+// binary executes and cannot be invoked remotely, so this checks the same three
+// sources directly -- a docker config entry for the registry host, a gh
+// session, or GH_TOKEN/GITHUB_TOKEN. It reports 1/0 on stdout rather than
+// failing the script itself, so a missing credential is a normal result init
+// can act on rather than a script error.
 func remoteGHCRCredentialCheckScript(registry string) string {
 	host, _, _ := strings.Cut(registry, "/")
 	return strings.Join([]string{

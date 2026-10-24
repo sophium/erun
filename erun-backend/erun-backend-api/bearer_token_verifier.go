@@ -46,7 +46,7 @@ type awsSTSClaims struct {
 // BearerTokenVerifierOptions configures the API verifier. An empty AllowedIssuers
 // allows any issuer a token resolves to, and an empty AllowedAudiences likewise
 // allows any audience an OIDC token carries; an empty Audience defaults to
-// eruncommon.APITokenAudience, which only the desktop file:// path uses.
+// mcpauth.APITokenAudience, which only the desktop file:// path uses.
 //
 // AllowedAudiences is deliberately separate from Audience: the desktop mints its
 // own tokens and can be held to erun's own audience, while a hosted IdP puts the

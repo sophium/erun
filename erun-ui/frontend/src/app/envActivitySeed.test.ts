@@ -11,13 +11,10 @@ function tenant(name: string, environments: UITenant['environments']): UITenant 
   return { name, environments };
 }
 
-// The bug (erun#1216): the env-activity Wails event only fires on a
-// transition, so a boot with no prior transition to replay (a page reload
-// via ErrorBoundary's "Reload app", not a process restart) had nothing to
-// seed a still-busy env's row from. The fix is that uiEnvironment now carries
-// the poller's last observation directly, so a fetch alone reproduces the
-// correct seed with no event required — the same shape planOrchestratorBusySeed
-// already uses for orchestrator rows.
+// The env-activity Wails event only fires on a transition, so a boot with no
+// prior transition to replay (a page reload via ErrorBoundary's "Reload app",
+// not a process restart) must seed a still-busy env's row from the poller's
+// last observation carried on uiEnvironment, with no event required.
 test('an env with a busy observation seeds its activity from the snapshot alone', () => {
   const seed = planEnvActivitySeed([
     tenant('acme', [

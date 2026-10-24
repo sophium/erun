@@ -72,7 +72,7 @@ type orchestratorSession struct {
 	// aiBusyAtUnix is when that report was written, carried for the same
 	// reason shellStartedAtUnix is: "working" alone cannot tell the operator
 	// whether a turn just started or has been going for ten minutes, which is
-	// the whole question a busy indicator is asked (#1343, finishing #1228).
+	// the whole question a busy indicator is asked.
 	aiBusyAtUnix int64
 	// shellRunning, shellCommand and shellStartedAtUnix are the last background
 	// shell report the poller observed — a fact independent of aiBusy,
@@ -135,7 +135,7 @@ type orchestratorSession struct {
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
 // Role is empty for undeclared -- the same "empty means undeclared, never a
-// default" contract eruncommon.OrchestratorEnvConfig.Role documents.
+// default" contract config.OrchestratorEnvConfig.Role documents.
 type orchestratorEnvInput struct {
 	Tenant      string                        `json:"tenant"`
 	Environment string                        `json:"environment"`
@@ -144,7 +144,7 @@ type orchestratorEnvInput struct {
 }
 
 // orchestratorLaunchInput is the dialog's gateway, model and effort for
-// create/update (eruncommon.OrchestratorConfig.UseGateway/Model/Effort). An
+// create/update (config.OrchestratorConfig.UseGateway/Model/Effort). An
 // empty Model or Effort is the default, never a value of its own.
 type orchestratorLaunchInput struct {
 	UseGateway bool   `json:"useGateway"`
@@ -177,7 +177,7 @@ type orchestratorLaunchChoices struct {
 // local-agent worktree and a host environment's directory derive it this way).
 // Neither
 // applies to a runtime env: DefaultDirectory is "" and Mirrored is false, and
-// RequiredRole names the one role (eruncommon.OrchestratorEnvRoleRuntime) it
+// RequiredRole names the one role (config.OrchestratorEnvRoleRuntime) it
 // must be linked with — the dialog uses this to offer that role directly
 // instead of the mirror/worktree directory controls, which have nothing to
 // show for a link with no review directory. RequiredRole is "" when no single
@@ -306,7 +306,7 @@ type orchestratorInfo struct {
 	// missing" reason that does not apply here. See orchestratorRolesChanged.
 	RoleChanged bool `json:"roleChanged"`
 	// Alias is the erun platform alias this orchestrator acts as, empty when it
-	// declares none of its own (eruncommon.OrchestratorConfig.Alias). It is the
+	// declares none of its own (config.OrchestratorConfig.Alias). It is the
 	// dialog's own field, seeded from here and sent back on save, so a value
 	// written by `erun orchestrator set-alias` survives an unrelated edit made
 	// in the desktop.
@@ -344,7 +344,7 @@ func orchestratorIDFromSessionKey(key string) (string, bool) {
 }
 
 // orchestratableEnv reports whether role may be linked against env — a thin
-// wrapper over eruncommon.OrchestratorEnvRoleAllowed, the single decision this
+// wrapper over config.OrchestratorEnvRoleAllowed, the single decision this
 // gate and the CLI's SetOrchestratorEnvRole both consult so neither can drift
 // from the other on what a role is allowed to be. A local-agent or
 // remote-agent env has a worktree to review and an in-pod agent to delegate
@@ -360,7 +360,7 @@ func orchestratableEnv(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRo
 
 // orchestratorIneligibilityReason explains, in the operator's language, why
 // role cannot be declared for env — a thin wrapper over
-// eruncommon.OrchestratorEnvRoleIneligibilityReason, reusing orchestratableEnv's
+// config.OrchestratorEnvRoleIneligibilityReason, reusing orchestratableEnv's
 // own reasoning rather than restating it. Returns "" when the link is allowed.
 func orchestratorIneligibilityReason(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRole) string {
 	return configpkg.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)

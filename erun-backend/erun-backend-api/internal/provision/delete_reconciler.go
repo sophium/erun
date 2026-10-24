@@ -26,7 +26,7 @@ type EnvDeleteReconcilerEnvironments interface {
 	// MarkDeleteBlocked is what keeps a claim from stranding a row: the claim
 	// has already moved it to `deleting`, so any failure between the claim and
 	// the workflow actually starting must record why, or the row is left
-	// claiming an in-flight delete that does not exist (#1166).
+	// claiming an in-flight delete that does not exist.
 	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
@@ -106,7 +106,7 @@ func deleteRetryDue(environment model.Environment, now time.Time) bool {
 // teardown is mid-flight (deleting past its own deadline, or
 // deletion-blocked) so a namespace that finishes terminating — or a solver
 // that starts answering again — on its own converges the row without an
-// operator noticing and re-issuing the delete (#1140). It runs as a DBOS
+// operator noticing and re-issuing the delete. It runs as a DBOS
 // scheduled workflow, the platform-wide cron primitive the deploy/provision
 // side of this codebase does not otherwise need.
 type EnvDeleteReconciler struct {
@@ -131,7 +131,7 @@ func NewEnvDeleteReconciler(dbosCtx dbos.DBOSContext, environments EnvDeleteReco
 func (r *EnvDeleteReconciler) tick(dctx dbos.DBOSContext, _ time.Time) (int, error) {
 	// Rooted in the DBOS context, not context.Background(): a scan on a
 	// background context is uncancellable and keeps running straight through a
-	// shutdown (#1166).
+	// shutdown.
 	ctx := security.WithContext(dctx, security.Context{TenantType: string(model.TenantTypeOperations)})
 	return r.reconcile(ctx)
 }
@@ -146,8 +146,7 @@ func (r *EnvDeleteReconciler) reconcile(ctx context.Context) (int, error) {
 	environments, err := r.environments.ListByStatuses(ctx, []model.EnvironmentStatus{model.EnvironmentStatusDeleting, model.EnvironmentStatusDeletionBlocked})
 	if err != nil {
 		// A reconciler failing every tick must not be indistinguishable from
-		// one with nothing to do -- silence is what let the original bug hide
-		// behind a successful-looking deploy (#1166).
+		// one with nothing to do.
 		log.Printf("erun api env delete reconciler: scan failed: %v", err)
 		return 0, err
 	}
@@ -241,7 +240,7 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 	}
 
 	// Past this point the row is claimed and reads `deleting`, so every exit
-	// must either start a workflow or record why it could not (#1166).
+	// must either start a workflow or record why it could not.
 	tenant, ok := tenantsByID[environment.TenantID]
 	if !ok {
 		return false, r.unclaim(ctx, environment.TenantID, environment.EnvironmentID, fmt.Errorf("tenant %q not found", environment.TenantID))
@@ -271,9 +270,8 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 // unclaim records why a claimed row's attempt never started, moving it back out
 // of `deleting` to `deletion-blocked` with a reason. Without this the reconciler
 // leaves the row claiming an in-flight delete that does not exist -- strictly
-// worse than not having ticked at all, and exactly the misreporting #1140 was
-// about. Returns the original cause so the caller still logs it; a failure to
-// record is folded in rather than replacing it.
+// worse than not having ticked at all. Returns the original cause so the caller
+// still logs it; a failure to record is folded in rather than replacing it.
 func (r *EnvDeleteReconciler) unclaim(ctx context.Context, tenantID, environmentID string, cause error) error {
 	if err := r.environments.MarkDeleteBlocked(ctx, tenantID, environmentID, cause.Error()); err != nil {
 		return fmt.Errorf("%w (and recording it did not persist: %w)", cause, err)

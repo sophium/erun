@@ -71,7 +71,7 @@ export function TitlebarLeftControls(): React.ReactElement {
 // Rendered only when the active session is an environment tab. They are hidden
 // rather than disabled in orchestrator mode, following the tab strip's
 // precedent of swapping content: disabling would leave dead icons whose
-// tooltips describe an environment the operator is not working in (#1178).
+// tooltips describe an environment the operator is not working in.
 function TitlebarEnvControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((state) => state.selection.selected);
@@ -107,10 +107,10 @@ function TitlebarEnvControls(): React.ReactElement {
 
 // TitlebarRightControls renders the right titlebar cluster. In orchestrator mode
 // it keeps only the diff panel toggle: that is the one control meaningful for a
-// cross-env session, and the three env-scoped ones acted on whichever
-// environment the sidebar happened to have selected — independent of which
-// terminal tab was active, so with an orchestrator focused they targeted an
-// environment it may not even be linked to (#1178).
+// cross-env session, and the three env-scoped ones act on whichever
+// environment the sidebar happens to have selected — independent of which
+// terminal tab is active, so with an orchestrator focused they would target an
+// environment it may not even be linked to.
 //
 // The changed-files sub-toggle stays: it renders only when the diff panel is
 // open and toggles that panel's own file tree, so it is diff-panel chrome

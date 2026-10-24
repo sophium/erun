@@ -6,13 +6,13 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// AISessionEvent is the DB-backed twin of eruncommon.AISessionRecord: the
-// last turn-boundary event an environment's own AI tool hooks reported for
-// one session, over the authenticated edge instead of the local activity
+// AISessionEvent is the DB-backed twin of erun-common's
+// model.AISessionRecord: the last turn-boundary event an environment's own AI
+// tool hooks reported for one session, over the authenticated edge instead of the local activity
 // dir a desktop/agent-env process reads directly. One row per (tenant,
 // environment, session); a later report replaces the row outright, since
 // only the most recent event decides the resolved state (see
-// eruncommon.ResolveAISessionStatus).
+// model.ResolveAISessionStatus in erun-common).
 type AISessionEvent struct {
 	bun.BaseModel `bun:"table:ai_sessions,alias:ais"`
 	TenantID      string    `json:"tenantId" bun:"tenant_id,scanonly"`

@@ -18,10 +18,9 @@ export interface Tenant {
 // states a delete moves through: `deleting` while an attempt is in flight and
 // `deletion-blocked` when one finished without tearing the namespace down.
 // Parsed leniently so an unknown future state renders no badge rather than
-// failing the parse — which is exactly why the teardown states had to be added
-// explicitly: without them a deleting environment rendered with no badge at
-// all, indistinguishable from an ordinary one, and the console offered Deploy
-// on it (#1170).
+// failing the parse, which is why the teardown states are listed explicitly:
+// otherwise a deleting environment looks ordinary and the console offers
+// Deploy on it.
 export type EnvironmentStatus =
   | 'registered'
   | 'provisioning'

@@ -62,7 +62,7 @@ type EnvDeleteRunner interface {
 
 // EnvDeleter runs the durable env-delete workflow, so a control-plane restart
 // resumes an in-flight delete rather than leaving the environment stranded in
-// `deleting` until something notices (#1140). It wraps EnvDeleteRunner in a
+// `deleting` until something notices. It wraps EnvDeleteRunner in a
 // DBOS workflow keyed by the delete attempt, mirroring EnvProvisioner's
 // wrapping of EnvCoordinator for deploy.
 type EnvDeleter struct {
@@ -82,7 +82,7 @@ func NewEnvDeleter(dbosCtx dbos.DBOSContext, runner EnvDeleteRunner) *EnvDeleter
 }
 
 // Start kicks off one delete attempt asynchronously so the HTTP handler
-// returns immediately (bounded, per #1140) while the durable workflow runs
+// returns immediately (bounded) while the durable workflow runs
 // the actual teardown, however long that takes. input.DeleteID must be a
 // fresh id per attempt (see EnvDeleteInput.DeleteID) — the caller's
 // responsibility, since both a fresh operator request and a reconciler

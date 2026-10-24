@@ -15,9 +15,8 @@ import { UITracePane } from './DebugPanel.UITrace';
 // DebugPanel is the Diagnostics console: it shows whatever evidence the
 // current DiagnosticsContext resolves to (an orchestrator's own state, the
 // selected environment's, or the desktop app's own log when neither is
-// active) rather than being hardwired to an environment selection — an
-// orchestrator session used to leave this panel reading "environment: none
-// selected" with no trace at all (#1241). Two copyable surfaces plus a report
+// active) rather than being hardwired to an environment selection, so an
+// orchestrator session still has a trace. Two copyable surfaces plus a report
 // button meant to be filed straight into the tracker: the primary pane is
 // always-on evidence for the active context, the UI trace exists because the
 // packaged WebView has no Redux DevTools and stays available in every

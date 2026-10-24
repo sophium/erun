@@ -150,7 +150,7 @@ describe('beginLogin', () => {
     expect(url.searchParams.get('prompt')).toBe('select_account');
   });
 
-  // erun#1721: without this scope a shared, org-scoped issuer's token carries
+  // Without this scope a shared, org-scoped issuer's token carries
   // no org claim, so an already-enrolled operator's console session cannot
   // resolve its tenant even though the CLI/desktop (which already request
   // this scope by default) resolve fine.
@@ -248,7 +248,7 @@ describe('resolveToken', () => {
     expect(await resolveToken(undefined)).toBeUndefined();
   });
 
-  // erun#1721: a dedicated/BYO issuer has never heard of the org-claim scope
+  // A dedicated/BYO issuer has never heard of the org-claim scope
   // and refuses the authorization request with error=invalid_scope. resolveToken
   // must retry sign-in once, without that scope, rather than treating the
   // refusal as "no token" (which would loop back to the landing screen).

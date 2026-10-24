@@ -62,7 +62,7 @@ test('does not match a bare root or an empty token', () => {
 
 test('a pod-side path with no host equivalent is still a syntactic match', () => {
   // Matching is origin-agnostic; TerminalPathLinkProvider decides
-  // resolvability. /etc/hosts is the canonical case #1354 calls out.
+  // resolvability. /etc/hosts is the canonical case.
   const matches = findAbsolutePathMatches('/etc/hosts');
   assert.equal(matches.length, 1);
 });

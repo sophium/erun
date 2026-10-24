@@ -39,7 +39,7 @@ type StopJobParams struct {
 	// watching a prior attempt's terminal one. Empty keeps the bare
 	// tenant+environment name.
 	StopID string
-	// Placement names the cluster this stop targets (#1112); see
+	// Placement names the cluster this stop targets; see
 	// DeployJobParams.Placement.
 	Placement PlacementParams
 }
@@ -55,7 +55,7 @@ type DeleteJobParams struct {
 	// DeployJobParams.DeployID: it is what lets DeleteJobName give a retried
 	// delete a new Job instead of watching a prior attempt's terminal one.
 	DeleteID string
-	// Placement names the cluster this delete targets (#1112); see
+	// Placement names the cluster this delete targets; see
 	// DeployJobParams.Placement.
 	Placement PlacementParams
 	// ExposeServicesZone/ExposePlatformNamespace thread the same platform
@@ -220,7 +220,7 @@ func UnexposeFailureFromOutput(output string) string {
 	return strings.TrimSpace(output[idx+len(marker):])
 }
 
-// deleteJobResult is the one field of eruncommon.DeleteEnvironmentResult the
+// deleteJobResult is the one field of lifecycle.DeleteEnvironmentResult the
 // delete Job's --json output carries that the API needs back.
 type deleteJobResult struct {
 	NamespaceDeleteError string `json:"namespaceDeleteError"`
@@ -234,7 +234,7 @@ type deleteJobResult struct {
 // (its own local config cleanup still runs and it still exits 0), so a Job
 // the jobexec runner reports as succeeded can still have left the namespace
 // stuck — this is the only place that failure is visible. The result is
-// pretty-printed JSON (eruncommon.Context.WriteResult), so this decodes from
+// pretty-printed JSON (core.Context.WriteResult), so this decodes from
 // the first '{' rather than scanning single lines, and ignores whatever
 // non-JSON audit/trace text or chained unexpose output surrounds it.
 func NamespaceDeleteFailureFromOutput(output string) string {
@@ -250,7 +250,7 @@ func NamespaceDeleteFailureFromOutput(output string) string {
 }
 
 // RunStop creates the stop Job and blocks until it reaches a terminal state.
-// When params.Placement targets a remote cluster (#1112), it first upserts
+// When params.Placement targets a remote cluster, it first upserts
 // the Secret the Job's container reads its admin token from. Unlike deploy
 // and delete, an explicit stop carries no durable workflow and no DB-level
 // claim guarding it, so the in-flight dedup a resumed workflow gets for free
@@ -300,7 +300,7 @@ func (l *Launcher) activeStopJobName(ctx context.Context, params StopJobParams) 
 }
 
 // RunDelete creates the delete Job and blocks until it reaches a terminal
-// state. When params.Placement targets a remote cluster (#1112), it first
+// state. When params.Placement targets a remote cluster, it first
 // upserts the Secret the Job's container reads its admin token from.
 func (l *Launcher) RunDelete(ctx context.Context, params DeleteJobParams) (Result, error) {
 	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {

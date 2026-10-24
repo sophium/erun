@@ -234,8 +234,7 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): s
 
 // RowHeading names the environment and, once the caller administers more than
 // its own tenant (shell/ScopeSelector.tsx), the tenant it belongs to --
-// otherwise a row from a scope-widened list reads as the caller's own
-// (erun#1816).
+// otherwise a row from a scope-widened list reads as the caller's own.
 function RowHeading({
   environment,
   tenants,
@@ -254,9 +253,8 @@ function RowHeading({
 
 // TeardownRow replaces the whole deploy control for an environment whose delete
 // is outstanding. The API refuses a deploy on these with 409, so offering the
-// button meant an operator clicked it and got a raw Kubernetes admission error
-// back (#1170) — and before the API guard existed, the deploy was accepted and
-// overwrote the teardown state. Showing the recorded blocker instead is the
+// button would only lead to a raw Kubernetes admission error. Showing the
+// recorded blocker instead is the
 // thing an operator can actually act on: it names the finalizer holding the
 // namespace.
 function TeardownRow({
@@ -377,8 +375,7 @@ export function EnvironmentsPanel({
   // nothing to disambiguate rows with, so no tenant badge renders.
   tenants?: PlatformTenant[];
   // Set once shell/ScopeSelector.tsx points this caller at another tenant;
-  // undefined means "my own tenant", the default and every caller's ordinary
-  // behavior before the scope selector existed -- in which case `environments`
+  // undefined means "my own tenant", the default -- in which case `environments`
   // above (already resolved by the parent from GET /v1/config) is shown
   // unchanged, with no extra request.
   scopeTenantId?: string;

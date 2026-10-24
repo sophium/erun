@@ -10,11 +10,9 @@ import {
   SEED_TENANT,
 } from '../../../fixtures/seedRoot.js';
 
-// erun-ui/whip.go's WhipNow used to take no target argument at all: one click
-// pushed every configured environment plus every live orchestrator, most of
-// which were never even whippable. WhipNow now takes an explicit target list,
-// and the titlebar control resolves it from a real selection surface rather
-// than fanning out unconditionally (erun#1700). This spec covers: the default
+// erun-ui/whip.go's WhipNow takes an explicit target list, and the titlebar
+// control resolves it from a real selection surface rather than fanning out
+// to every configured target. This spec covers: the default
 // single-target case (whatever the sidebar has focused), individual
 // selection, the three group-select shortcuts, the count the primary action
 // states before it acts, the nothing-focused case (which must not fall back
@@ -183,11 +181,10 @@ test('the whip control renders a pending state and then every target with its ow
 test('the whip action renders outside the scrollable target list and states the selected count', async ({
   app,
 }) => {
-  // erun#1748: the action used to be a sibling AFTER the scrollable target
-  // list, so a long enough population pushed it below the fold. It now lives
-  // in the popover header, a sibling BEFORE the scrollable region -- assert
-  // the structure directly (not just that it's visible today, which would
-  // also pass with the old, buggy layout at this small seeded population).
+  // The action lives in the popover header, a sibling BEFORE the scrollable
+  // target list, so a long population cannot push it below the fold -- assert
+  // the structure directly, since visibility alone would also pass for an
+  // action after the list at this small seeded population.
   await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
   await app.titlebar.openWhipPanel();
   await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
@@ -206,7 +203,7 @@ test('the control stays reachable from an orchestrator tab, not only an environm
   // render only for an environment tab and disappear in orchestrator mode.
   // Whip is global -- it must not follow that pattern -- so this
   // opens an orchestrator session first and asserts the button is still
-  // there, which is the regression this spec exists to catch.
+  // there.
   await app.sidebar.openOrchestratorSession(SEED_ORCHESTRATOR);
   await expect(app.titlebar.whipButton()).toBeVisible();
 });
@@ -253,8 +250,7 @@ test('individually checking another target widens the selection and the report n
 test('the nothing-focused case starts from an empty selection, not everything', async ({ app }) => {
   // The tenant dashboard is neither an environment nor an orchestrator
   // session, so selectWhipDefaultTarget resolves to null here -- this must
-  // not fall back to "select every configured target" (erun#1700's core
-  // regression).
+  // not fall back to "select every configured target".
   await app.sidebar.openTenantDashboard(SEED_TENANT);
 
   await app.titlebar.openWhipPanel();
@@ -376,20 +372,13 @@ test('the selection surface is operable end to end without a mouse', async ({ ap
 });
 
 // Each group shortcut is an icon with no visible text, so its
-// IconTooltip label is the only label an operator can see and read out. The
-// button's accessible name was written separately from that label, by hand,
-// one line away -- two of the three agreed and the third had drifted to
-// "Select all". An icon-only control is named by its aria-label, and the
-// tooltip is only a *description* (aria-describedby), so the name that drifted
-// was the one in force: an operator using voice control reading "Select all
-// orchestrators and environments" off the screen matched nothing, while the
-// two shortcuts beside it worked (WCAG 2.5.3 "Label in Name").
+// IconTooltip label is the only label an operator can see and read out. An
+// icon-only control is named by its aria-label, and the tooltip is only a
+// *description* (aria-describedby), so a name that drifts from the label
+// breaks voice control (WCAG 2.5.3 "Label in Name").
 //
-// This asserts the invariant the fix establishes rather than the fix's own
-// literals: the label the tooltip shows is *in* the button's accessible name.
-// It read the diverged name before the change, because the tooltip already
-// said "Select all orchestrators and environments" while the name said
-// "Select all" -- which contains it not at all.
+// This asserts the invariant rather than literals: the label the tooltip
+// shows is *in* the button's accessible name.
 test('every group shortcut’s accessible name contains the label its tooltip shows', async ({
   app,
 }) => {
@@ -456,10 +445,10 @@ function nextOrchestratorListRefresh(
   });
 }
 
-// A whip's outcome used to be visible only in the transient report panel: the
-// durable hover card (Sidebar.OrchestratorHoverCard.tsx's Nudges row) reads
-// from the store's own cached orchestrator list, which nothing refetched
-// after a whip. This asserts the refetch itself -- the closest observable
+// A whip's outcome must reach the durable hover card
+// (Sidebar.OrchestratorHoverCard.tsx's Nudges row), not only the transient
+// report panel; the card reads from the store's own cached orchestrator list,
+// so a whip refetches it. This asserts the refetch itself -- the closest observable
 // signal reachable without a live orchestrator PTY (this harness must not
 // spawn a real one, see orchestrator-pacing-nudge.spec.ts) that the card is
 // wired to reflect a whip immediately rather than needing an unrelated

@@ -25,7 +25,7 @@ import (
 // job_agent_finish_test.go's self-dispatch scenarios do (both run inside the
 // environment, via inEnvironment's ERUN_REPO_REMOTE=true).
 //
-// The two dispatch paths converge on the identical eruncommon.StartEnvironmentJob
+// The two dispatch paths converge on the identical jobs.StartEnvironmentJob
 // call and the identical `exec job supervise` re-exec, so nothing in the
 // session-capture/reinvocation code itself reads how the start request
 // arrived -- but that convergence had never been proven end-to-end for the

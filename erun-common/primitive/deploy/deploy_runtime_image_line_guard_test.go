@@ -23,12 +23,11 @@ func TestGuardRuntimeImageLineSwitchProceedsWhenLinesAgree(t *testing.T) {
 	}
 }
 
-// TestGuardRuntimeImageLineSwitchRefusesCrossLineSwitch pins the core fix:
-// this env's last confirmed deploy ran the tenant's own frs-devops image, but
-// this deploy is about to resolve the stock erun-devops image instead (the
-// exact silent-rollback shape erun#1754 describes: the wrong tag resolves
-// fine, so only comparing release lines catches it). Refuse before any
-// cluster mutation.
+// TestGuardRuntimeImageLineSwitchRefusesCrossLineSwitch: this env's last
+// confirmed deploy ran the tenant's own frs-devops image, but this deploy is
+// about to resolve the stock erun-devops image instead. The wrong tag resolves
+// fine, so only comparing release lines catches it; refuse before any cluster
+// mutation.
 func TestGuardRuntimeImageLineSwitchRefusesCrossLineSwitch(t *testing.T) {
 	target := config.OpenResult{
 		Tenant:      "frs",

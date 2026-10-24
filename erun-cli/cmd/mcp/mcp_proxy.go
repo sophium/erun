@@ -67,9 +67,8 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 		DescribeError: func(err error) string { return shared.McpEdgeError(target, err).Error() },
 		LocalTools: []mcp.MCPLocalTool{
 			sshdSyncLocalTool(resolveOpen, params),
-			// Deprecated alias for one release (#1186), so an upgrade does not
-			// break a client pinned to the old name. Same handler; only the name
-			// and the description differ.
+			// Deprecated alias for one release, so an upgrade does not break a
+			// client pinned to the old name.
 			deprecatedAlias(sshdSyncLocalTool(resolveOpen, params), "workspace_sync", "sshd_sync"),
 			inputsUploadLocalTool(resolveOpen, params),
 		},
@@ -78,9 +77,8 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 
 // deprecatedAlias returns tool under a retired name, with a description that
 // says so. The rule on this surface is that a tool's name equals its CLI path
-// with "_" for spaces, and this one drifted from `erun sshd sync` (#1186); the
-// alias keeps the retired name callable for one release rather than breaking a
-// pinned client on an upgrade.
+// with "_" for spaces, and this one drifted from `erun sshd sync`; the alias
+// keeps the retired name callable for one release.
 func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCPLocalTool {
 	tool.Name = retired
 	tool.Description = "Deprecated: use " + replacement + ". Retained for one release; this name will be removed."

@@ -112,9 +112,8 @@ describe('UsersPanel', () => {
     expect(screen.queryByText(/Temporary password/)).not.toBeInTheDocument();
   });
 
-  // erun#1756's default-path guarantee: leaving the target tenant untouched
-  // must send the exact same request body as before orgId existed, and must
-  // never resolve an org at all — a network call the caller never asked for
+  // Leaving the target tenant untouched must send no orgId and must never
+  // resolve an org at all — a network call the caller never asked for
   // is itself a defect, not just an unused result.
   it('omits orgId and never resolves an org when the target tenant is unchanged', async () => {
     let enrollBody: unknown;
@@ -551,11 +550,9 @@ describe('UsersPanel', () => {
   });
 });
 
-// The header names the signed-in identity by its erun username
-// (whoami's own `username`) while this table used to render only the IdP's
-// own username, so an operator's own row was unrecognizable, and looked
-// entirely absent when the two names shared nothing in common. These lock
-// the fix: the row matching the caller's own erun user id is marked "You",
+// The header names the signed-in identity by its erun username (whoami's
+// `username`), so the table must make the caller's own row recognizable: the
+// row matching the caller's own erun user id is marked "You",
 // the erun username renders as the primary label with the IdP username
 // alongside it when the two diverge, and the OIDC subject -- the one value
 // that actually joins the erun and IdP directories -- is always reachable.

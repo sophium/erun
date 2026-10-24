@@ -11,10 +11,9 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// AgentInput is job_start's agent mode as its own tool (#1246): a streaming AI
-// tool run has nothing in common with a plain command beyond both starting a
-// job, and splitting it out means its own schema no longer has to carry
-// command's fields (or vice versa).
+// AgentInput is the agent-mode job tool's input: a streaming AI tool run has
+// nothing in common with a plain command beyond both starting a job, so it
+// has its own schema rather than carrying command's fields.
 type AgentInput struct {
 	Agent           string            `json:"agent" jsonschema:"AI tool to run: claude or codex. erun invokes it in its streaming mode, so exec_job_output returns events while it works and exec_job_status reports its current activity rather than only running"`
 	Prompt          string            `json:"prompt" jsonschema:"what the agent should do"`

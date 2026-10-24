@@ -13,10 +13,10 @@ import (
 
 // syncConfigTestEnv returns the env lookup a runtime pod's chart-injected
 // ERUN_* vars would populate for a managed-cloud runtime env, with any
-// overrides layered on top -- e.g. {"ERUN_CLOUD_CONTEXT_NAME": ""} to model
-// erun#1662's trigger: a cluster whose kube-context was never registered with
-// `erun context init`, so the entrypoint leaves the context name unset while
-// still resolving provider/alias/region from the AWS alias.
+// overrides layered on top -- e.g. {"ERUN_CLOUD_CONTEXT_NAME": ""} to model a
+// cluster whose kube-context was never registered with `erun context init`, so
+// the entrypoint leaves the context name unset while still resolving
+// provider/alias/region from the AWS alias.
 func syncConfigTestEnv(overrides map[string]string) func(string) string {
 	env := map[string]string{
 		"ERUN_TENANT":               "team",
@@ -34,12 +34,11 @@ func syncConfigTestEnv(overrides map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
 
-// TestInjectedCloudContextNameDefaultsToKubernetesContext pins the erun#1662
-// fix: an unset ERUN_CLOUD_CONTEXT_NAME must default the injected context name
-// the same way NormalizeCloudContextConfig -- the rule every writer already
-// applies -- defaults it, so the injected projection is comparable against the
-// on-disk config by construction instead of via a second, driftable copy of
-// the rule.
+// TestInjectedCloudContextNameDefaultsToKubernetesContext: an unset
+// ERUN_CLOUD_CONTEXT_NAME must default the injected context name the same way
+// NormalizeCloudContextConfig -- the rule every writer already applies --
+// defaults it, so the injected projection is comparable against the on-disk
+// config by construction instead of via a second, driftable copy of the rule.
 func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
 	if !ok {
@@ -70,12 +69,10 @@ func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
 	}
 }
 
-// TestSyncConfigSecondRunReachesInSync is the end-to-end proof that erun#1662's
-// perpetual-drift loop is gone: with ERUN_CLOUD_CONTEXT_NAME unset, a first
-// --sync-config run must reconcile the missing cloud context, and -- this is
-// the assertion that actually proves the loop is broken, not just the first
-// reconcile -- a second run against the files the first run wrote must report
-// InSync().
+// TestSyncConfigSecondRunReachesInSync proves there is no perpetual-drift
+// loop: with ERUN_CLOUD_CONTEXT_NAME unset, a first --sync-config run must
+// reconcile the missing cloud context, and a second run against the files the
+// first run wrote must report InSync().
 func TestSyncConfigSecondRunReachesInSync(t *testing.T) {
 	configHome := t.TempDir()
 	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""})

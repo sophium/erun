@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 // ReviewDetailDialog is the hosted platform review's own detail surface,
-// opened from a row in the tenant dashboard's Reviews tab (#1199). Named
+// opened from a row in the tenant dashboard's Reviews tab. Named
 // apart from ReviewPanel (the local diff panel's POM) on purpose — see
 // ReviewDetailDialog.tsx's own header comment for why.
 export class ReviewDetailDialog {

@@ -1,15 +1,13 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtures/seedRoot.js';
 
-// erun#1745: OrchestratorEnvConfig.Role could be read (`erun list`) but had no
-// writer -- neither the desktop dialog nor the CLI could set it. This locks in
-// the dialog's write path: a per-linked-env Role control that appears only for
+// This locks in the dialog's write path for OrchestratorEnvConfig.Role: a per-linked-env Role control that appears only for
 // a checked environment, defaults to "Not declared" (never silently to "Code"
 // or "Build"), and persists across a real CreateOrchestrator/UpdateOrchestrator
 // round trip -- not just this render's component state. The CLI's own writer
 // (`erun orchestrator set-role`) and the shared legal-values contract both
 // surfaces validate against are covered by
-// erun-integration/orchestrator_test.go and erun-common's own tests instead;
+// erun-integration/orchestrator_test.go and command/orchestrator's tests instead;
 // this harness has no CLI subprocess to drive.
 //
 // Creates a throwaway orchestrator rather than reusing the seeded
@@ -65,8 +63,7 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
     }
   });
 
-  // erun#1770: a runtime environment used to be listed disabled, unable to
-  // link at all. It is now checkable, but carries exactly one legal role, so
+  // A runtime environment is checkable but carries exactly one legal role, so
   // it gets a plain statement of fact instead of the Code/Build/Not declared
   // Select every other candidate offers, and it persists with no review
   // directory — the operate link's whole point.
@@ -80,7 +77,7 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
       await app.sidebar.newOrchestratorButton().click();
       await app.orchestratorDialog.waitForOpen();
 
-      // Checkable, not greyed out -- the fix's whole point.
+      // Checkable, not greyed out.
       await expect(
         app.orchestratorDialog.envCheckbox(SEED_TENANT, seededRuntimeEnv.environment),
       ).toBeEnabled();
@@ -141,7 +138,7 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
   // orchestrator session, as an environment tool that never works. The shared
   // gate both this picker and the CLI validate against is covered by
   // TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment in
-  // erun-common/orchestrator_env_role_test.go; this spec drives the rendering
+  // command/orchestrator/orchestrator_env_role_test.go; this spec drives the rendering
   // and the persistence that Go test cannot reach.
   test('a host environment is linkable, reviewed in place, and offered no runtime role', async ({
     app,
@@ -154,7 +151,7 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
       await app.sidebar.newOrchestratorButton().click();
       await app.orchestratorDialog.waitForOpen();
 
-      // Checkable, not greyed out with a reason — the fix's whole point.
+      // Checkable, not greyed out with a reason.
       await expect(app.orchestratorDialog.envCheckbox(tenant, environment)).toBeEnabled();
       await app.orchestratorDialog.toggleEnv(tenant, environment);
 

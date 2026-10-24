@@ -3,14 +3,9 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// #1204: the tenant dashboard, an orchestrator's session, and an environment's
-// session each used to compute their own "active"/"selected" sidebar
-// highlight from a different state slice, with nothing enforcing that only
-// one applied. Opening an orchestrator while the tenant dashboard was open
-// attached its session but never showed it (the dashboard stayed painted
-// over the terminal pane) while both rows rendered selected at once. The fix
-// is a single derived focus value every row reads from, and this spec
-// exercises all three pairings of the invariant it restores: at most one of
+// The tenant dashboard, an orchestrator's session, and an environment's
+// session all read one derived focus value. This spec exercises all three
+// pairings of the invariant: at most one of
 // the tenant dashboard, an orchestrator row, and an environment row is ever
 // the sidebar's focused row, and the main pane always agrees with it.
 

@@ -13,7 +13,7 @@ import (
 // guardRuntimeImageLineSwitch refuses a runtime deploy that would move the pod
 // from one release line to a different one -- stock erun-devops vs a
 // tenant's own <tenant>-devops -- without the operator saying so on this very
-// call. It exists for the pairing erun#1754 was filed over: a persisted
+// call. A persisted
 // runtimeimage can drift away from the line an environment actually moved
 // onto (nothing catches half of a two-field coordinate updating), and the
 // wrong tag can resolve fine -- erun's own stock image genuinely exists at

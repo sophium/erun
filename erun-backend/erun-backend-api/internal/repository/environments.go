@@ -17,19 +17,18 @@ const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_co
 
 // environmentsMidTeardownStatuses are the statuses Count excludes: a delete
 // has been requested for these rows, so they must not lock a tenant out of
-// its own environment allowance through a teardown it cannot complete (#1140)
+// its own environment allowance through a teardown it cannot complete
 // — the same "requested a delete" boundary ClaimDelete and MarkDeleteBlocked
 // use.
 var environmentsMidTeardownStatuses = []string{string(model.EnvironmentStatusDeleting), string(model.EnvironmentStatusDeletionBlocked)}
 
 // maxExcludedMidTeardownEnvironments bounds how many mid-teardown rows Count
 // will discount at once. The exclusion exists so one stuck teardown cannot
-// lock a tenant out of its own allowance (#1140), but left unbounded it is the
+// lock a tenant out of its own allowance, but left unbounded it is the
 // opposite failure: every wedged environment still holds a live namespace and
 // real cluster capacity, so a tenant that accumulates them consumes unlimited
-// resource while its quota reports room to spare (#1163). Bounding the
-// discount keeps the #1140 property for the case it was written for — a
-// handful of stuck deletes — and restores accounting beyond that, where
+// resource while its quota reports room to spare. Bounding the discount covers
+// a handful of stuck deletes and restores accounting beyond that, where
 // "stuck" has become "abandoned".
 const maxExcludedMidTeardownEnvironments = 3
 
@@ -77,9 +76,8 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 // the tenant's environment-count quota cap. Environments mid-teardown
 // (deleting, deletion-blocked) are discounted, but only up to
 // maxExcludedMidTeardownEnvironments: a delete that cannot complete must not
-// lock the tenant out of its own allowance (#1140), while an unbounded
-// discount would let a tenant hold unlimited live namespaces that its quota
-// never sees (#1163). Both subqueries are scoped explicitly by tenant_id from
+// lock the tenant out of its own allowance, while an unbounded discount would
+// let a tenant hold unlimited live namespaces that its quota never sees. Both subqueries are scoped explicitly by tenant_id from
 // the security context: erun_operations' RLS policy is unconditional, so an
 // OPERATIONS caller's quota would otherwise count every tenant's environments,
 // not its own.
@@ -102,8 +100,8 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 }
 
 // CountByContext returns how many of the caller's tenant's environments are
-// already placed on the given context, for the placement capacity check
-// (#1112): a context's contexts.max_environments names how many it can host.
+// already placed on the given context, for the placement capacity check:
+// a context's contexts.max_environments names how many it can host.
 // Scoped explicitly by tenant_id from the security context alongside
 // context_id, the same reason Count is: erun_operations' RLS policy is
 // unconditional.
@@ -125,7 +123,7 @@ func (r *EnvironmentRepository) CountByContext(ctx context.Context, contextID st
 }
 
 // CountByType returns how many of the caller's tenant's environments are of
-// the given type, for the aggregate resource-budget check (#1113): only
+// the given type, for the aggregate resource-budget check: only
 // runtime environments ever get a namespace ResourceQuota, so the projected
 // tenant-wide total is (runtime count + 1) * the per-environment cap. Scoped
 // explicitly by tenant_id from the security context alongside type, the same
@@ -153,7 +151,7 @@ func (r *EnvironmentRepository) CountByType(ctx context.Context, envType model.E
 // a failed deploy does not erase the version the cluster is still running.
 // ExposeError is distinct from ProvisionError: it names why the deploy Job's
 // best-effort chained exposure did not succeed, without moving Status away
-// from `running` — the deploy itself landed a healthy workload (#1086).
+// from `running` — the deploy itself landed a healthy workload.
 // Cleared (like ProvisionError) whenever a write carries no expose failure, so
 // a later successful expose overwrites a stale one. ExposedHostname is the
 // hostname that same chained exposure produced when it succeeded; like
@@ -220,7 +218,7 @@ func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, tenantID, 
 //
 // A row mid-teardown is refused outright, and unlike the in-flight guard this
 // refusal is not relaxed by staleAfter: a delete has been requested, so
-// adopting the row into a deploy would abandon that request (#1163). Left
+// adopting the row into a deploy would abandon that request. Left
 // unguarded a deploy claims a `deleting` or `deletion-blocked` row, runs
 // against a namespace Kubernetes is already terminating, and writes its own
 // `failed` over the teardown state — losing the outstanding delete and
@@ -278,19 +276,16 @@ func (r *EnvironmentRepository) Delete(ctx context.Context, tenantID, environmen
 // there is nothing in flight to race with.
 //
 // A fresh `provisioning` claim is refused, making the two lifecycles mutually
-// exclusive in both directions (#1163): claiming a row out from under a
+// exclusive in both directions: claiming a row out from under a
 // running deploy leaves that deploy's terminal write to land on top of
 // `deleting` and resurrect a row whose namespace is being torn down. The guard
 // is relaxed by the same staleAfter as the deploy's own, so a control plane
 // that died mid-deploy still cannot block a teardown permanently.
 //
-// The claim does NOT clear delete_error (#1166). Clearing it on claim meant the
-// recorded blocker vanished for as long as the new attempt took to reach the
-// same conclusion -- up to NamespaceDeleteTimeout, on a five-minute reconcile
-// cycle -- so an operator, the console, or an orchestrator polling during that
-// window saw `deleting` with no reason at all for an environment that had been
-// stuck for hours. The attempt's own outcome overwrites it instead, so the row
-// is never less informative after a tick than it was before.
+// The claim does NOT clear delete_error: clearing it would hide the recorded
+// blocker for as long as the new attempt takes to reach the same conclusion
+// (up to NamespaceDeleteTimeout). The attempt's own outcome overwrites it
+// instead, so the row is never less informative after a tick than before.
 //
 // It does increment delete_attempts, which is what lets the reconciler back off
 // per attempt and eventually stop, rather than re-attempting a teardown that
@@ -323,7 +318,7 @@ func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, tenantID, envir
 }
 
 // MarkDeleteBlocked records a delete attempt that did not tear the namespace
-// down, naming why. `running` must not survive a delete attempt (#1140): this
+// down, naming why. `running` must not survive a delete attempt: this
 // is the write that keeps a failed or blocked teardown from leaving the row
 // exactly where it was, silently claiming to still be up.
 // tenantID owns the row being marked and is an explicit predicate, for the
@@ -343,7 +338,7 @@ func (r *EnvironmentRepository) MarkDeleteBlocked(ctx context.Context, tenantID,
 
 // ListByStatuses returns every environment (across tenants, when run under
 // the erun_operations RLS role) whose status is one of the given values. The
-// delete reconciler (#1140) uses this, scoped to `deleting`/`deletion-blocked`,
+// delete reconciler uses this, scoped to `deleting`/`deletion-blocked`,
 // to find environments whose teardown needs re-attempting without an operator
 // noticing and re-issuing the delete.
 func (r *EnvironmentRepository) ListByStatuses(ctx context.Context, statuses []model.EnvironmentStatus) ([]model.Environment, error) {

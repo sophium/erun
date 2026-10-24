@@ -42,7 +42,7 @@ const (
 	tenantEnrollmentTenantMismatch = tenantPlatformStateTenantMismatch
 )
 
-// uiInviteRequest is the JSON-safe mirror of eruncommon.PlatformInviteRequest
+// uiInviteRequest is the JSON-safe mirror of platformclient.PlatformInviteRequest
 // the frontend renders (request dialog status, operator queue rows).
 type uiInviteRequest struct {
 	InviteRequestID   string `json:"inviteRequestId"`
@@ -329,9 +329,8 @@ func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnr
 
 // tenantPlatformHost names the host of a platform resolution's API URL, or ""
 // when there is none to name. It exists so the enrollment copy can say which
-// platform actually answered instead of asserting one: the fixed hostname it
-// used to carry is only ever right on a machine talking to that platform, and
-// a machine can be configured against several.
+// platform actually answered instead of asserting one: a machine can be
+// configured against several.
 func tenantPlatformHost(apiURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(apiURL))
 	if err != nil {
@@ -389,9 +388,8 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	// PlatformAuthErrorCode decodes 401 envelopes only -- so while the platform
 	// did resolve *a* tenant for this credential, it declines to say which,
 	// and there is nothing to hold against this row. Refusing it would render
-	// "not enrolled" for an identity the platform already recognizes, the
-	// regression TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden
-	// pins. This branch is therefore a "no answer to compare", not a skipped
+	// "not enrolled" for an identity the platform already recognizes (see
+	// TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden). This branch is therefore a "no answer to compare", not a skipped
 	// comparison; a platform that learns to name the tenant on 403 gets the
 	// mismatch check for free by answering here instead of failing.
 	if errors.Is(whoamiErr, platformclient.ErrPlatformForbidden) {

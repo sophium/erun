@@ -12,7 +12,7 @@ import (
 )
 
 // review.go exposes `erun review`'s operations as MCP tools over the same
-// shared eruncommon.RunReview* functions the CLI drives
+// shared command/review RunReview* functions the CLI drives
 // (erun-cli/cmd/review/review.go), mirroring platform.go's pattern so preview
 // (this module's non-interactive analogue of --dry-run) reuses the exact
 // same trace rather than a separately hand-maintained plan.

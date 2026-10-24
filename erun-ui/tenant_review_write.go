@@ -12,7 +12,7 @@ import (
 // tenant_review_write.go gives the desktop the review write surface the CLI's
 // `erun review create|close|merge-queue advance` and the equivalent MCP tools
 // already have: opening a review, closing one, and advancing a target
-// branch's merge queue, all through the same eruncommon.PlatformClient the
+// branch's merge queue, all through the same platformclient.PlatformClient the
 // dashboard's reads already use.
 
 // The write routes the dashboard gates on, in the same canonical

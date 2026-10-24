@@ -150,10 +150,9 @@ func TestFileDirFollowsTheFirstMatchingRuleAndTestsFollowTheirSource(t *testing.
 	}
 }
 
-// TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt is the reproduction of
-// a move that lost tests: a test moved back into its file's own package and a
-// helper copied into that package both wrote that one path, so the second
-// write erased the test. Both have to survive, in source order.
+// TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt: a test moved back into
+// its file's own package and a helper copied into that package both write one
+// path, and both have to survive, in source order.
 func TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"root.go":       "package fixture\n\nfunc Root() int { return 1 }\n",
@@ -228,8 +227,7 @@ func TestApplyAppendsToAFileAPackageAlreadyHas(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyDropsAnImportOnlyAShadowingLocalStillSpells is the reproduction of
-// a moved file that kept an import it no longer used: a parameter named like
+// TestApplyDropsAnImportOnlyAShadowingLocalStillSpells: a parameter named like
 // the package it shadows is not a use of that package, so once the one real
 // use moves away, the import goes with it.
 func TestApplyDropsAnImportOnlyAShadowingLocalStillSpells(t *testing.T) {
@@ -246,11 +244,10 @@ func TestApplyDropsAnImportOnlyAShadowingLocalStillSpells(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyMovesAHelperTypeWithItsMethods is the reproduction of a copied stub
-// that lost its methods: a test-only type used both at home and by a moved
-// test is copied, and its methods have to be copied with it -- Go keeps
-// methods with their type, so a copy without them stops implementing the
-// interface its users pass it as.
+// TestApplyMovesAHelperTypeWithItsMethods: a test-only type used both at home
+// and by a moved test is copied, and its methods have to be copied with it --
+// Go keeps methods with their type, so a copy without them stops implementing
+// the interface its users pass it as.
 func TestApplyMovesAHelperTypeWithItsMethods(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
@@ -295,12 +292,11 @@ func TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplyKeepsAMovedReentryHelperReachable is the reproduction of a moved
-// test that hung: its helper process is this test binary re-executed, which
-// only works while the package's TestMain hands the re-entered process to the
-// helper. A helper registers itself from an init in its own file, so the init
-// moves with it, and the TestMain generated for its new package has to run
-// the registry before the suite.
+// TestApplyKeepsAMovedReentryHelperReachable: a helper process is the test
+// binary re-executed, which only works while the package's TestMain hands the
+// re-entered process to the helper. A helper registers itself from an init in
+// its own file, so the init moves with it, and the TestMain generated for its
+// new package has to run the registry before the suite.
 func TestApplyKeepsAMovedReentryHelperReachable(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"base/core/timing.go": "package core\n\nconst TimingRecordDirEnv = \"FIXTURE_TIMING_DIR\"\n",
@@ -339,9 +335,8 @@ func TestApplyMovesSeveralInitsIntoOnePackage(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 }
 
-// TestApplyMovesAStubTypeOnlyAMovedTestUses is the reproduction of stub types
-// left behind unused: a test-only type with methods, declared in a file that
-// stays, used only by a test that moves. Its own methods are not a use that
+// TestApplyMovesAStubTypeOnlyAMovedTestUses covers a test-only type with
+// methods, declared in a file that stays, used only by a test that moves. Its own methods are not a use that
 // keeps it at home, so the type moves with its methods instead of being
 // copied and leaving an unused original.
 func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
@@ -362,10 +357,8 @@ func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
 	goIn(t, dir, "test", "./...")
 }
 
-// TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto is the
-// reproduction of root tests that lost their setup: a test file's init pinned
-// a seam for every test in the binary, the file was split between two
-// packages, and the init went with one half. An init is referred to by
+// TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto: a test file's init
+// can pin a seam for every test in the binary, and an init is referred to by
 // nothing, so it is copied to every package that receives part of its file.
 func TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto(t *testing.T) {
 	dir := writeFixture(t, map[string]string{

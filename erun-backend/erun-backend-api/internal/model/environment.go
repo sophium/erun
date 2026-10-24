@@ -14,8 +14,8 @@ const (
 	EnvironmentTypeRuntime     EnvironmentType = "runtime"
 )
 
-// EnvironmentStatus is the provisioning lifecycle of a hosted environment
-// (#605): a row is `registered` when created, then the server-side deploy
+// EnvironmentStatus is the provisioning lifecycle of a hosted environment:
+// a row is `registered` when created, then the server-side deploy
 // executor moves it `provisioning` → `running`/`failed`. A running or failed
 // environment moves to `deleting` when a teardown is requested, then either
 // disappears (the row is hard-deleted once the namespace is confirmed torn
@@ -35,7 +35,7 @@ const (
 )
 
 // Environment is the per-tenant system of record for an erun environment, the
-// DB-backed shape of eruncommon.EnvConfig. Its link to a context is a real
+// DB-backed shape of erun-common's config.EnvConfig. Its link to a context is a real
 // tenant-scoped foreign key (ContextID), not a kubernetes-context string match.
 type Environment struct {
 	bun.BaseModel     `bun:"table:environments,alias:e"`
@@ -60,21 +60,17 @@ type Environment struct {
 	// ExposeError carries why the deploy Job's best-effort chained exposure
 	// (DNS + Ingress) did not succeed, distinct from ProvisionError: it never
 	// moves Status away from `running`, since exposure failing does not mean
-	// the deployed workload is unhealthy (#1086). Owned by the deploy executor,
-	// so scan-only; empty means exposure succeeded, was never attempted, or the
-	// environment predates chaining an expose at all.
+	// the deployed workload is unhealthy. Owned by the deploy executor, so
+	// scan-only; empty means exposure succeeded or was never attempted.
 	ExposeError string `json:"exposeError,omitempty" bun:"expose_error,scanonly,nullzero"`
 	// ExposedHostname is the MCP edge hostname
 	// (mcp.<tenant>-<env>.<services-zone>) the deploy Job's chained
 	// `erun expose mcp` call actually produced. Owned by the deploy executor,
-	// so scan-only; empty means "not exposed" and always definitely so — the
-	// chain has never once succeeded for this environment, whether because no
-	// platform ingress IP is configured for this deployment (never attempted)
-	// or every attempt so far has failed (see ExposeError) — never a separate
-	// "exposed, hostname unknown" state. Once set it is preserved across
-	// unrelated writes (see EnvironmentStatusUpdate), so a later failed
-	// re-expose does not erase discovery of a hostname the cluster is still
-	// actually serving.
+	// so scan-only; empty definitely means "not exposed" (never attempted, or
+	// every attempt so far failed, see ExposeError), never "exposed, hostname
+	// unknown". Once set it is preserved across unrelated writes (see
+	// EnvironmentStatusUpdate), so a later failed re-expose does not erase a
+	// hostname the cluster is still serving.
 	ExposedHostname string `json:"exposedHostname,omitempty" bun:"exposed_hostname,scanonly,nullzero"`
 	// DeleteError carries why a delete attempt did not tear the namespace down
 	// (the namespace's own conditions, verbatim, when it's stuck on an
@@ -82,7 +78,7 @@ type Environment struct {
 	// delete executor, so scan-only. It is NOT cleared when a retry claims the
 	// row: an attempt's outcome overwrites it, so the recorded blocker stays
 	// readable for the whole time a teardown is stuck rather than blinking out
-	// on every reconciler tick (#1166).
+	// on every reconciler tick.
 	DeleteError string `json:"deleteError,omitempty" bun:"delete_error,scanonly,nullzero"`
 	// DeleteAttempts counts how many delete attempts have claimed this row.
 	// Incremented by the claim, so it survives an attempt that dies without

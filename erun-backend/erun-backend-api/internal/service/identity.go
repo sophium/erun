@@ -29,8 +29,8 @@ type IdentityUserCreator interface {
 // ErrIdentityMappingFailed marks an enrollment where the IdP half landed but
 // the erun-side mapping did not. Wrapping it (rather than only the
 // underlying repository error) lets a caller distinguish "nothing happened"
-// from "an IdP user now exists with no erun mapping" — the exact half-landed
-// state the issue asks to report precisely rather than silently swallow.
+// from "an IdP user now exists with no erun mapping", so the half-landed
+// state is reported precisely rather than silently swallowed.
 var ErrIdentityMappingFailed = errors.New("identity created in the identity provider but the erun user mapping failed")
 
 // IdentityService coordinates enrollment: creating the IdP identity and the
@@ -79,7 +79,7 @@ type EnrollIdentityParams struct {
 // identity precisely rather than as an opaque failure.
 //
 // MailDeliveryConfigured and TemporaryPassword report the other half of
-// what actually landed (issue #1168): when the platform's IdP has no SMTP
+// what actually landed: when the platform's IdP has no SMTP
 // configured, Zitadel's own invitation email can never arrive, so Enroll
 // does not create the usual passwordless, email-pending account -- it mints
 // a random initial password instead and reports it here, once, for the
@@ -105,7 +105,7 @@ type EnrollIdentityResult struct {
 // IdPUser still attached, rather than as an opaque enrollment failure.
 //
 // Before creating the IdP identity, it checks whether the platform can
-// actually send mail at all (issue #1168). When it cannot, Zitadel's usual
+// actually send mail at all. When it cannot, Zitadel's usual
 // invite-by-email flow would create an account stuck in USER_STATE_INITIAL
 // forever, waiting on a link nothing will ever send -- a success response
 // that silently does nothing, exactly the dead end this checks for. A

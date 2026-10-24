@@ -64,15 +64,14 @@ function environmentRows(
   }));
 }
 
-// TitlebarWhipTargetPicker is the selection surface issue erun#1700 asks for:
-// individual environments and orchestrators, checkable, plus the three group
+// TitlebarWhipTargetPicker is the whip's selection surface: individual environments and orchestrators, checkable, plus the three group
 // shortcuts. Plain checkboxes and buttons rather than a Command/cmdk list:
 // the population here is short and never needs type-to-filter, and every row
 // is reachable with a plain Tab (WCAG 2.1.1 keyboard) the same way the
 // existing deploy-components and orchestrator-environments checklists
 // already are. The primary whip action lives in the popover header
 // (Titlebar.WhipAction.tsx) rather than here, so it stays reachable without
-// scrolling this list (erun#1748).
+// scrolling this list.
 export function TitlebarWhipTargetPicker({
   targets,
   targetsLoading,

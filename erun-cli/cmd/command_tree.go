@@ -43,7 +43,7 @@ func ContextSensitiveTopLevelCommands() map[string]*cobra.Command {
 
 // cliOnlyAgentFacingCommands declares CLI commands that have no matching MCP
 // tool yet are still not something a human reaches through the desktop app.
-// This is the CLI-side twin of eruncommon.MCPToolDescriptor.AgentFacing: an
+// This is the CLI-side twin of mcptools.MCPToolDescriptor.AgentFacing: an
 // explicit, reviewable exemption from the desktop-surface gate rather than a
 // silent omission. Keyed by the command's path below "erun" (space-joined,
 // e.g. "app restart").

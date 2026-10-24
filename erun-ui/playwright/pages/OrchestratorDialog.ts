@@ -307,7 +307,7 @@ export class OrchestratorDialog {
     await this.saveButton().click();
   }
 
-  // The two guidance layers (#1231): "role" is this orchestrator's own
+  // The two guidance layers: "role" is this orchestrator's own
   // CLAUDE.<id>.md, "shared" is the one CLAUDE.md every orchestrator obeys.
   // Each renders its resolved host path as secondary text and a reveal
   // button per IDE, labelled with this same title text. Guidance only renders
@@ -340,7 +340,7 @@ export class OrchestratorDialog {
     });
   }
 
-  // The restart-required banner (erun#1319): shown at the top of the form when
+  // The restart-required banner: shown at the top of the form when
   // this orchestrator's live session was spawned with a scope that no longer
   // matches what it is linked to now, naming why and carrying its own action
   // rather than pointing at the footer button below.

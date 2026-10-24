@@ -19,7 +19,7 @@ import (
 )
 
 // decodedAuthError reads the {code, message} envelope every auth-layer error
-// response now carries (erun#1721), failing the test if the body isn't that shape.
+// response carries, failing the test if the body isn't that shape.
 func decodedAuthError(t *testing.T, rec *httptest.ResponseRecorder) authErrorEnvelope {
 	t.Helper()
 	var envelope authErrorEnvelope
@@ -306,8 +306,8 @@ func TestAuthMiddlewareRejectsUnknownExternalUser(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing is the erun#1721
-// regression test at the middleware boundary: a combined IdentityResolver
+// TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing checks at the
+// middleware boundary that a combined IdentityResolver
 // (the production wiring) reporting security.ErrTenantUnresolved -- an
 // org-scoped issuer whose token carries no matching org claim -- must render
 // as TENANT_UNRESOLVED, never the generic "not enrolled" message that sends
@@ -374,16 +374,12 @@ func TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound(t *testing.
 	}
 }
 
-// TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError is
-// the erun#1752 regression test at the middleware boundary: a
-// repository.ErrIdentityResolutionFailed (already sanitized by
-// IdentityRepository before it reaches here) must render as its own
-// RESOLUTION_FAILED code, distinct from NOT_ENROLLED and TENANT_UNRESOLVED --
-// neither "you need enrolling" nor "your tenant could not be determined" is
-// true when the real cause was an internal database error -- and the
-// client-facing message and the auth-rejected log line must both carry only
-// the sanitized sentinel's safe text, never a raw constraint name or
-// SQLSTATE.
+// TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError
+// checks at the middleware boundary that a repository.ErrIdentityResolutionFailed
+// renders as its own RESOLUTION_FAILED code, distinct from NOT_ENROLLED and
+// TENANT_UNRESOLVED, and that the client-facing message and the auth-rejected
+// log line carry only the sanitized sentinel's text, never a raw constraint
+// name or SQLSTATE.
 func TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError(t *testing.T) {
 	var logBuf bytes.Buffer
 	log.SetOutput(&logBuf)

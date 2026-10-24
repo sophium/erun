@@ -11,7 +11,7 @@ import {
 
 // tenant-dashboard-requests.spec.ts covers the operator/admin queue (the
 // Requests tab, TenantDashboardPanels.Requests.tsx): who is waiting, and the
-// Issue invitation / Decline actions -- the desktop half of #1682 alongside
+// Issue invitation / Decline actions -- the counterpart of
 // request-invitation-dialog.spec.ts's requester-side dialog. Like
 // tenant-dashboard-registration.spec.ts, this stubs the __erun_invoke RPC
 // boundary rather than a real erun-backend-api, which the inert harness

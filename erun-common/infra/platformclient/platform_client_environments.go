@@ -128,7 +128,7 @@ func (c *PlatformClient) StopEnvironment(ctx context.Context, environmentID stri
 
 // DeleteEnvironment starts tearing down a runtime environment's namespace and
 // its row, the server-side equivalent of `erun delete`. The teardown itself
-// runs asynchronously (#1140): this call returns as soon as the delete is
+// runs asynchronously: this call returns as soon as the delete is
 // claimed and the durable workflow behind it starts, not once the namespace
 // is actually gone, since a stuck namespace finalizer can otherwise wedge for
 // as long as Kubernetes is willing to sit in Terminating. The returned

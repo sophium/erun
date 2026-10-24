@@ -7,11 +7,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap pins #1076:
-// the LimitRange's `default` (limit) tracks the namespace cap, but
-// `defaultRequest` must stay a small fixed value regardless of the cap. Before
-// the fix both fields echoed quota.CPU/Memory, so an unsized container's
-// inherited request equalled the whole namespace allowance.
+// TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap: the
+// LimitRange's `default` (limit) tracks the namespace cap, but
+// `defaultRequest` must stay a small fixed value regardless of the cap, or an
+// unsized container's inherited request equals the whole namespace allowance.
 func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing.T) {
 	quota := config.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
 	manifest := namespaceResourceQuotaManifest("team-dev", quota)

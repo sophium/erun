@@ -19,11 +19,10 @@ func listTools(t *testing.T, session *mcp.ClientSession) []*mcp.Tool {
 	return result.Tools
 }
 
-// TestNoToolShipsOnTheSpecDefaults is the whole point of #1186. The SDK models
-// destructiveHint and openWorldHint as *bool and treats nil as TRUE, so a tool
-// that declares nothing goes out as destructive and open-world. That is how
-// `version` and `list` were advertised as destructive open-world tools, leaving
-// a client that wanted to gate on destructiveHint gating everything or nothing.
+// TestNoToolShipsOnTheSpecDefaults: the SDK models destructiveHint and
+// openWorldHint as *bool and treats nil as TRUE, so a tool that declares
+// nothing goes out as destructive and open-world, leaving a client that gates
+// on destructiveHint gating everything or nothing.
 func TestNoToolShipsOnTheSpecDefaults(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)

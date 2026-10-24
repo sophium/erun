@@ -12,7 +12,7 @@ import (
 )
 
 // whipTestStore mirrors jobsTestStore's shape: one resolvable tenant/
-// environment so eruncommon.ResolveOpen succeeds.
+// environment so open.ResolveOpen succeeds.
 func whipTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
@@ -121,13 +121,10 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 	}
 }
 
-// TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot is the
-// regression test for the "identity was never the pod's to supply" half of
-// Every other return path in whipOneEnvironmentNow already stamps
-// Candidate.ID/Name from the host's own id, but the success path used to
-// trust whatever the pod echoed back verbatim. A pod that decodes to an empty
-// (or wrong) identity must still be reported under the id the desktop itself
-// resolved, never a blank row.
+// TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot: identity
+// is never the pod's to supply. A pod that decodes to an empty (or wrong)
+// identity must still be reported under the id the desktop itself resolved,
+// never a blank row.
 func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
@@ -154,14 +151,11 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 
 // TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive covers the
 // MCP call itself failing (e.g. an old runtime image without the "whip" tool,
-// or -- since the fix below now forwards a real target -- a tenant/
-// environment mismatch the pod's own resolveLocalTarget refused): the
-// environment must be reported as a genuine failure, never folded into
+// or a tenant/environment mismatch the pod's own ResolveLocalTarget refused):
+// the environment must be reported as a genuine failure, never folded into
 // WhipReasonNotAlive. The whip tool itself already reports a dead session as
 // a *successful* result carrying that reason, so an error at this call site
-// can only mean the call itself did not work -- erun#1709's "a reason that
-// contradicts the error" defect (a not-alive skip citing an unrelated
-// call-level error, e.g. a missing target) is exactly what this guards.
+// can only mean the call itself did not work.
 func TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
@@ -182,12 +176,9 @@ func TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive(t *testing
 	}
 }
 
-// TestWhipOneEnvironmentNowForwardsTheResolvedTarget is the plumbing
-// regression test for erun#1709: the desktop used to call the "whip" MCP tool
-// with only {"preview": false}, relying entirely on the pod defaulting to its
-// own bound context. whipOneEnvironmentNow already resolved tenant/environment
-// to reach this edge in the first place, so it must restate them in the call
-// -- the stronger assertion that turns a stale edge pointed at the wrong
+// TestWhipOneEnvironmentNowForwardsTheResolvedTarget: whipOneEnvironmentNow
+// already resolved tenant/environment to reach this edge, so it must restate
+// them in the call rather than rely on the pod's own bound context -- the stronger assertion that turns a stale edge pointed at the wrong
 // environment into a named mismatch instead of a silent act on the wrong one.
 func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
 	var gotTenant, gotEnvironment string
@@ -299,8 +290,7 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 	}
 }
 
-// TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments is the regression
-// test for the desktop's own blast-radius bug (erun#1700): an environment not
+// TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments: an environment not
 // in the requested set must not be pushed at all, not merely omitted from the
 // report after being attempted anyway.
 func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
@@ -358,8 +348,8 @@ func TestListWhipEnvironmentTargetsSkipsHostEnvs(t *testing.T) {
 	}
 }
 
-// TestWhipNowRefusesAnEmptyTargetList is the acceptance-criteria contract
-// (erun#1700): an empty selection is not "all" -- WhipNow must refuse rather
+// TestWhipNowRefusesAnEmptyTargetList: an empty selection is not "all" --
+// WhipNow must refuse rather
 // than fall back to whipping everything configured.
 func TestWhipNowRefusesAnEmptyTargetList(t *testing.T) {
 	app := NewApp(erunUIDeps{store: whipTestStore(t)})
@@ -409,7 +399,7 @@ func TestWhipTargetsListsEnvironmentsAndOrchestrators(t *testing.T) {
 
 // TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision pins the
 // inverse of orchestratorPacingDecisionFromWhip/orchestratorPacingReasonFromWhip
-// used to fold an orchestrator outcome into the shared eruncommon.WhipResult
+// used to fold an orchestrator outcome into the shared orchestrator.WhipResult
 // shape: every decision/reason pair the reconciler can produce must survive
 // the round trip, or WhipNow's report would misname an orchestrator's actual
 // outcome.
@@ -482,8 +472,8 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 	}
 }
 
-// TestWhipResultToUIRendersACallFailureAsFailed is the erun#1709 regression
-// test for the UI facade: a WhipReasonCallFailed result (the tool call itself
+// TestWhipResultToUIRendersACallFailureAsFailed covers the UI facade: a
+// WhipReasonCallFailed result (the tool call itself
 // erroring out, never the tool reporting a dead session) must render as
 // "failed", not fold into whipSkipReasonText's "not alive" wording the way a
 // genuine skip does. Split out from TestWhipResultToUIRendersEveryOutcome to

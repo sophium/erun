@@ -12,12 +12,12 @@ import (
 )
 
 // DetachBackgroundProcess puts a port-forward in its own session, mirroring
-// detachEnvironmentJobSupervisor (erun-common/job_process_unix.go): a session
-// leader has no controlling terminal to be hung up with and is not in the
-// caller's process group, which is what lets it survive `erun open` exiting
-// (a doomed non-interactive shell, or a normal --no-shell return) without the
-// caller wrapping anything in setsid itself. Setpgid alone still shares that
-// session and does not give the same guarantee.
+// core.DetachEnvironmentJobSupervisor: a session leader has no controlling
+// terminal to be hung up with and is not in the caller's process group, which
+// is what lets it survive `erun open` exiting (a doomed non-interactive shell,
+// or a normal --no-shell return) without the caller wrapping anything in setsid
+// itself. Setpgid alone still shares that session and does not give the same
+// guarantee.
 func DetachBackgroundProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }

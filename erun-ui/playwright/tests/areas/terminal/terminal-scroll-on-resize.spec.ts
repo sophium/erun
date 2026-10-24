@@ -2,10 +2,10 @@ import { test, expect } from '../../../fixtures/erunApp.js';
 import type { Page } from '@playwright/test';
 import { parseInvoke } from '../../../pages/index.js';
 
-// Regression: a terminal resize refit xterm but never re-anchored the
-// viewport, leaving a user at the live prompt stranded mid-history. The fix
-// re-anchors only a viewport that was already at the bottom, so a reader
-// parked in scrollback is not yanked down.
+// A terminal resize refits xterm and must re-anchor the viewport, or a user at
+// the live prompt is stranded mid-history. It re-anchors only a viewport that
+// was already at the bottom, so a reader parked in scrollback is not yanked
+// down.
 //
 // A real OS window resize is not reachable headless, so a layout-panel toggle
 // drives the same shared re-anchor path; scrollback is staged by injecting
@@ -55,7 +55,7 @@ const STAGING_PAYLOAD =
   ) + `\r\n${STAGING_SENTINEL}\r\n`;
 
 // How long the held-emit case below holds the staging write. The clock it has
-// to disagree with is the pre-fix convergence's: an `expect.poll` with no
+// to outlast is a default one: an `expect.poll` with no
 // explicit timeout takes expect's own 10s (playwright.config.ts), and that
 // deadline is a give-up point rather than a lower bound -- the poll loop breaks
 // rather than sleeping past it -- so the hold must outlast 10s plus the head
@@ -140,19 +140,15 @@ test.describe('terminal scroll on resize (#465)', () => {
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
   });
 
-  // The reproduction the earlier exemption on #2459 claimed was impossible:
-  // "no RPC, no stub, no route gates the write". A route does, and the staging
-  // write goes through it. emitOutput reaches xterm via the headless shim's
+  // A route gates the staging write: emitOutput reaches xterm via the headless shim's
   // EventsEmit, which is a POST to /__erun_emit (headlessserver/shim.go) that
   // the backend then re-broadcasts down the /__erun_events SSE stream to the
-  // app's own listener -- so holding that POST holds the render, and the
-  // overlap the full-suite gate produced by contention is forced on demand here
-  // instead of waited for.
+  // app's own listener -- so holding that POST holds the render, forcing the
+  // contention overlap on demand instead of waiting for it.
   //
-  // This isolates the budget half of the fix: the same staging step, payload
-  // and sentinel as the case above, with the emit held past the 10s `expect`
-  // clock the pre-fix convergence inherited and well inside the
-  // STAGING_BUDGET_MS that replaced it.
+  // This isolates the budget: the same staging step, payload and sentinel as
+  // the case above, with the emit held past the 10s default `expect` clock and
+  // well inside STAGING_BUDGET_MS.
   test('staging converges when the emit carrying it is held past the old bound', async ({
     app,
     page,
@@ -225,14 +221,9 @@ async function resizeSettled(page: Page, change: () => Promise<void>): Promise<v
 //
 // The faulty force-scroll fires asynchronously after the refit, so the
 // re-anchor has to be observed across the whole resize rather than checked
-// once. It used to be sampled for a fixed 600ms after the refit, which is a
-// clock on the machine rather than on the product: on a contended builder the
-// refit it was meant to cover had not finished when the window closed, and the
-// spec reported a yank that had not happened. Both ends of the observation are
-// now app events — it opens before the toggle, and closes once the refit has
-// settled, rendered, and the new geometry has converged (so the trailing edge
-// is still anchored behind the same observable state the old window covered,
-// not merely behind the refit that produced it) — so a loaded machine
+// once. Both ends of the observation are app events rather than a fixed
+// clock — it opens before the toggle, and closes once the refit has settled,
+// rendered, and the new geometry has converged — so a loaded machine
 // stretches the window with the work instead of expiring ahead of it.
 async function watchViewportAnchor(page: Page): Promise<void> {
   await page.evaluate(() => {

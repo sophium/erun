@@ -149,7 +149,7 @@ func StartUnboundPortForwardProcess(t testing.TB) int {
 // the OS to actually reap it rather than for a fixed delay. Unlike a bound
 // port's holder, a never-bound forward leaves no listener to dial, so
 // liveness here goes through the real process table (see
-// eruncommon.DesktopProcessAlive) instead of a network probe.
+// core.DesktopProcessAlive) instead of a network probe.
 func ProcessStopped(pid int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

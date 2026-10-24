@@ -7,7 +7,7 @@ import { createApi } from '@reduxjs/toolkit/query';
 import type { TenantConfigView } from '../models/platformConfig';
 import { buildPlatformConfigEndpoints, type PlatformBaseQuery } from './platformConfigEndpoints';
 
-// This is the erun#1283 proof that the seam is real: the SAME endpoint
+// Proof that the seam is real: the SAME endpoint
 // definition (buildPlatformConfigEndpoints), injected into two independent
 // createApi instances with two independently-implemented base queries — one
 // shaped like a real HTTP fetch, one shaped like erun-ui/frontend's real

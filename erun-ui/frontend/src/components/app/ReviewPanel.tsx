@@ -299,8 +299,7 @@ function ReviewBoundaryTrack({
 
 // ReviewRangeControl is per-environment: ReviewBase, ReviewCommits, Scope and
 // SelectedCommit are all per-repository, so a commit list or a base commit
-// shared across two unrelated checkouts would be a value that means nothing
-// (#1178).
+// shared across two unrelated checkouts would be a value that means nothing.
 function ReviewRangeControl({
   target,
   showEnvLabel,
@@ -403,7 +402,7 @@ function ReviewBoundaryButton({
 
 // ChangedFilesHeader is the panel's single header, so its counts are the total
 // across every environment shown. Summed rather than taken from one env: with a
-// cross-env session the header describes the whole panel (#1178).
+// cross-env session the header describes the whole panel.
 // ReviewRangeControls renders one range control per environment shown, since
 // each has its own commit list.
 function ReviewRangeControls(): React.ReactElement {

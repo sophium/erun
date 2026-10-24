@@ -13,7 +13,7 @@ import (
 )
 
 // errorEnvelope is the {code, message, details} JSON body every error
-// response now carries. code is always populated, even where no call site
+// response carries. code is always populated, even where no call site
 // names a more specific business code, so a client branching on it never sees
 // the field simply absent.
 type errorEnvelope struct {
@@ -83,7 +83,7 @@ func writeRepositoryError(w http.ResponseWriter, req *http.Request, err error) {
 }
 
 // logServerError is the one log line every 5xx from an authenticated route
-// must leave behind (erun#1722): which route, which actor, and the real
+// must leave behind: which route, which actor, and the real
 // underlying error — never shown to the caller, whose response body stays
 // the generic status text. An unauthenticated route (no security context
 // yet resolved) still logs, just without an actor to name.

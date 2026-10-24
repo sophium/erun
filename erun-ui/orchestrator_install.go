@@ -141,7 +141,7 @@ func orchestratorSkillsNotInstalledNotice(cause error) string {
 // step. It installs a skill when absent and refreshes an untouched one when the
 // shipped source changed, preserving in-place operator edits -- the same
 // install-or-refresh the runtime pod applies to its baked skills
-// (eruncommon.InstallOrRefreshSkills). An unresolvable source is returned as an
+// (podruntime.InstallOrRefreshSkills). An unresolvable source is returned as an
 // error rather than skipped silently: the caller keeps launching, and says so.
 func ensureOrchestratorSkills() error {
 	root, err := hostSkillsSource()

@@ -1,13 +1,8 @@
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// theme covers the class-based `.dark` toggle (#1356). Before this, erun-ui
-// shipped 29 `dark:` Tailwind utilities but nothing ever set the gating
-// class, so every one of them was dead code and an operator had no way to
-// reach a dark theme at all. This spec is the red-then-green proof: on
-// `main` the app never carries the `dark` class under any OS preference, so
-// every assertion below that expects it fails there and only passes once
-// `applyTheme`/`initialTheme` (app/theme.ts) are wired in.
+// theme covers the class-based `.dark` toggle that gates every `dark:`
+// Tailwind utility, set by `applyTheme`/`initialTheme` (app/theme.ts).
 
 test.describe('theme', () => {
   test.describe('dark OS preference, no stored choice', () => {

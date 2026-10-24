@@ -409,8 +409,8 @@ type PlatformEnvDeleteInput struct {
 }
 
 // PlatformEnvDeleteTool starts an environment's delete and returns
-// immediately rather than waiting for the namespace to actually disappear
-// (#1140): a namespace stuck on an unsatisfiable finalizer can otherwise wedge
+// immediately rather than waiting for the namespace to actually disappear: a
+// namespace stuck on an unsatisfiable finalizer can otherwise wedge
 // for as long as Kubernetes is willing to sit in Terminating. The returned
 // Environment reflects the claim (status "deleting"); call platform_env_get
 // to watch it converge to gone (not found) or "deletion-blocked" (its

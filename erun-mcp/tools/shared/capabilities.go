@@ -83,12 +83,10 @@ const PreviewAdvertised = "Supports preview."
 // AdvertisePreview makes "Supports preview." follow from the tool's input type,
 // in both directions.
 //
-// The sentence used to be typed by hand onto some descriptions and not others:
-// 22 tools advertised a dry run while 58 more accepted `preview` silently. A
-// caller reading that split reasonably concludes the silent ones have no dry
-// run, which is the one direction that costs something -- the tools it hides
-// include the destructive ones. Deriving the sentence from In instead of from
-// an author's memory means the description cannot drift from the schema.
+// Deriving the sentence from In rather than writing it by hand means the
+// description cannot drift from the schema; a tool silently accepting
+// `preview` would read as having no dry run, and those include the
+// destructive ones.
 func AdvertisePreview[In any](tool *mcp.Tool) {
 	description := strings.TrimSpace(tool.Description)
 	claims := strings.HasSuffix(description, PreviewAdvertised)
@@ -192,12 +190,12 @@ func outputSchemaFor[Out any]() *jsonschema.Schema {
 }
 
 // describeTool attaches the tool's family, CLI path, title and annotations from
-// erun-common's descriptor table.
+// mcptools' descriptor table.
 //
 // It panics on a tool with no descriptor, deliberately. The alternative is
 // shipping it on the MCP spec defaults -- readOnlyHint false, destructiveHint
-// true, openWorldHint true -- which is how `version` came to be advertised as a
-// destructive open-world tool (#1186). A missing descriptor is a programming
+// true, openWorldHint true -- which advertises even `version` as a destructive
+// open-world tool. A missing descriptor is a programming
 // error in a binary that is built and tested together, so failing at
 // registration is loud and immediate; a silent conservative default would be
 // the same invisible-wrong-answer this table exists to remove.

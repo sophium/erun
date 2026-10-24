@@ -12,19 +12,10 @@ const (
 
 	// CgroupV2FSType is the sentinel the reading script prints when
 	// $cg/cgroup.controllers exists -- the portable systemd-style cgroup v2
-	// test (a cgroup2 mount always has this file at its root, delegated
-	// subtree or not; a v1 hierarchy never does). The script used to test
-	// `stat -fc %T "$cg"` = "cgroup2fs" instead, which depends on the local
-	// `stat` binary recognising the cgroup2 magic number by name -- true for
-	// GNU coreutils (the erun-devops runtime container) but not for BusyBox
-	// (the erun-dind sidecar's own shell), which reports every filesystem
-	// type as "UNKNOWN" regardless of what is actually mounted. That silently
-	// made every dind-sidecar reading report "cgroup v2 not detected" on a
-	// real cluster even though cgroup v2 was genuinely mounted there,
-	// confirmed live by exec'ing into erun-dind directly (busybox stat's
-	// docstring has no filesystem-type table at all). The file-existence test
-	// has no such binary dependency: `[ -f ... ]` means the same thing
-	// everywhere.
+	// test (a cgroup2 mount always has this file at its root, delegated subtree
+	// or not; a v1 hierarchy never does). It avoids `stat -fc %T`, because
+	// BusyBox stat (the erun-dind sidecar's shell) reports every filesystem
+	// type as "UNKNOWN".
 	CgroupV2FSType = "cgroup2fs"
 
 	// DefaultCgroupRoot is the container's own cgroup v2 directory, read
@@ -118,9 +109,9 @@ type RuntimeCPUUsage struct {
 	Unavailable      string `json:"unavailable,omitempty"`
 }
 
-// RuntimeMemoryUsage mirrors what erun-common/ai_launch.go's post-mortem OOM
-// message would like to have had beforehand: current usage, the high-water
-// mark, and a real OOM-kill counter instead of "likely out of memory".
+// RuntimeMemoryUsage mirrors what the AI launch's post-mortem OOM message would
+// like to have had beforehand: current usage, the high-water mark, and a real
+// OOM-kill counter instead of "likely out of memory".
 type RuntimeMemoryUsage struct {
 	CurrentBytes int64 `json:"currentBytes,omitempty"`
 	PeakBytes    int64 `json:"peakBytes,omitempty"`

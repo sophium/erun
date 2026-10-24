@@ -248,7 +248,7 @@ export class TerminalController {
     this.terminalDataDisposable = this.terminal.onData((data) => {
       // Before the write, not after: a synthetic resize cycle in flight has to
       // stand down as early as possible, because it is the reflow landing on a
-      // line being typed that corrupts the submission (#1330).
+      // line being typed that corrupts the submission.
       this.reattachRepaint.noteInput();
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
         store.dispatch(showTerminalError(readError(error)));
@@ -621,7 +621,7 @@ export class TerminalController {
   // and replays only the delta buffered since -- bounded, and independent of
   // how long the session has been running. A session with no snapshot yet
   // (never switched away from in this window) falls back to a bounded replay
-  // of its retained history, same as before #1322.
+  // of its retained history.
   activateSession(sessionId: number): void {
     this.switchQueue.noteRendered(sessionId);
     const snapshot = this.sessions.snapshot(sessionId);

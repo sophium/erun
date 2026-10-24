@@ -66,10 +66,7 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	register(http.MethodPost, "/v1/identity/users/{external_id}/reactivate", http.HandlerFunc(routes.reactivateUser))
 	// Creating an org is what makes a *second* tenant possible on the
 	// platform's own IdP: an org-scoped issuer resolves tenants by the org
-	// claim, so a new tenant needs an org for its mapping to point at. Until
-	// this, that was a hand-made org in Zitadel's own console — erun could
-	// register the tenant and the issuer mapping and then had nowhere to
-	// point them.
+	// claim, so a new tenant needs an org for its mapping to point at.
 	register(http.MethodPost, "/v1/identity/orgs", http.HandlerFunc(routes.createOrg))
 	register(http.MethodGet, "/v1/identity/org-settings", http.HandlerFunc(routes.getOrgSettings))
 	register(http.MethodPatch, "/v1/identity/org-settings", http.HandlerFunc(routes.updateOrgSettings))
@@ -151,10 +148,9 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 // the same value security.Context.ExternalUserID/model.User.ExternalUserID
 // carries for an enrolled row (mergeIdentityUsers below joins on exactly
 // that equality), and the same value GET /v1/whoami reports as `subject`
-// for the caller's own session. It is not renamed or duplicated onto a
-// second field here -- it is already the join key a client needs to
-// recognize "this is the same person" across the erun and IdP directories,
-// it was simply never rendered anywhere before this.
+// for the caller's own session. It is not renamed or duplicated: it is
+// already the join key a client needs to recognize "this is the same person"
+// across the erun and IdP directories.
 type identityUserView struct {
 	zitadel.User
 	Enrolled   bool   `json:"enrolled"`
@@ -426,8 +422,8 @@ func (r IdentityRoutes) updateOrgSettings(w http.ResponseWriter, req *http.Reque
 	writeJSON(w, http.StatusOK, settings)
 }
 
-// getSMTPSettings answers "can this instance send mail at all" (issue
-// #1168) directly, rather than leaving Zitadel's own unhandled 404 as the
+// getSMTPSettings answers "can this instance send mail at all" directly,
+// rather than leaving Zitadel's own unhandled 404 as the
 // only signal.
 func (r IdentityRoutes) getSMTPSettings(w http.ResponseWriter, req *http.Request) {
 	if _, ok := r.securityContext(w, req); !ok {

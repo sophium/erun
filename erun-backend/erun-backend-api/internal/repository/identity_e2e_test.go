@@ -97,20 +97,14 @@ func TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant(t *testing.T
 	assertHasExactlyRoles(t, db, user.UserID, "TenantAdmin")
 }
 
-// TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles is the
-// regression test for a bug caught while adding erun#1480's reconcile workflow: a
-// second OPERATIONS-type tenant's own per-tenant-first-user bootstrap runs
-// as erun_operations, whose RLS policy is cross-tenant (USING (true)) rather
-// than scoped like erun_tenant's. insertDefaultUserAccess used to grant
-// predefined roles through an untenanted "WHERE name = ?" lookup that relied
-// on the active role's RLS scoping to stay tenant-safe -- true for
-// erun_tenant, false for erun_operations, so once any tenant anywhere already
-// had a "ReadAll" role, this looked it up, found a foreign tenant's row, and
-// the ensuing role_permissions insert (tenant_id defaulted to the new
-// tenant, role_id pointing at the other tenant's role) violated its
-// composite foreign key outright. Registering a second OPERATIONS tenant is
-// a legitimate, documented action (POST /v1/tenants with type=OPERATIONS),
-// so this must succeed and grant the new tenant's *own* roles.
+// TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles: a second
+// OPERATIONS-type tenant's per-tenant-first-user bootstrap runs as
+// erun_operations, whose RLS policy is cross-tenant (USING (true)), so a
+// role lookup that relies on RLS scoping would find a foreign tenant's
+// "ReadAll" role and violate role_permissions' composite foreign key.
+// Registering a second OPERATIONS tenant is a legitimate action
+// (POST /v1/tenants with type=OPERATIONS), so this must succeed and grant the
+// new tenant's *own* roles.
 func TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -192,7 +186,7 @@ func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
 }
 
 // TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping
-// proves the fix for erun#1605's first defect: bootstrapping against a token
+// proves that bootstrapping against a token
 // that carries the shipped Zitadel org claim must register the issuer
 // org-scoped (issuers.org_field_key set), with the bootstrap caller's own org
 // as the first tenant_issuers mapping's org_field_value — not single-tenant,
@@ -230,10 +224,9 @@ func TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFir
 }
 
 // TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict proves
-// the fix for erun#1605's compounding case: once bootstrap has registered a
-// shared issuer org-scoped (previous test), a second tenant created on that
-// same issuer with a different org value must succeed — the 409 the issue
-// reported no longer fires for this legitimate case.
+// that once bootstrap has registered a shared issuer org-scoped (previous
+// test), a second tenant created on that same issuer with a different org
+// value succeeds rather than conflicting.
 func TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
@@ -314,15 +307,12 @@ func TestBootstrapFirstIdentityLeavesAlreadyBootstrappedDatabaseAlone(t *testing
 	}
 }
 
-// TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution is the
-// regression test for erun#1721: an OPERATIONS-tenant user (rihards@frs.lv on
-// frs-prod) stopped resolving after a second tenant was registered on the
-// same issuer, despite tenant_issuers and user_external_ids both being
-// intact. The suspected mechanism was that org-scoping an issuer silently
-// leaves the first tenant's mapping behind; TenantIssuerRepository.UpdateOrgScope
-// instead backfills it atomically as one explicit, operations-only step (see
+// TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution: org-scoping
+// an issuer must not leave the first tenant's mapping behind.
+// TenantIssuerRepository.UpdateOrgScope backfills it atomically as one
+// explicit, operations-only step (see
 // TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills), and this
-// proves that backfill is what keeps the first tenant's already-enrolled user
+// proves that backfill keeps the first tenant's already-enrolled user
 // resolving once a second tenant shares the issuer -- registering tenant B
 // must never change how tenant A resolves.
 func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing.T) {
@@ -354,7 +344,7 @@ func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing
 	mustNoErr(t, err, "convert the issuer to org-scoped and backfill the first tenant's mapping")
 
 	// Register a second tenant on the same issuer under a different org --
-	// the action the issue reports as breaking the first tenant.
+	// the action that must not break the first tenant.
 	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
 	_, err = tenants.Create(opsCtx, CreateTenantParams{
 		Name:          "validationagent",

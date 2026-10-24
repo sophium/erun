@@ -39,7 +39,7 @@ func testBuildDryRunBuildDeployResolvesDockerTargetDeploySpecs(t *testing.T) {
 }
 
 func testBuildDryRunBuildDeployErunDevopsComponentResolvesRuntimeImageMemo(t *testing.T) {
-	// erun#1746: when the docker component being built --deploy'd IS the
+	// When the docker component being built --deploy'd IS the
 	// runtime chart's own erun-devops (true for the "erun" tenant, whose
 	// own devops component is literally named erun-devops), the resolved
 	// spec's image doubles as the runtime-line memo a real deploy would

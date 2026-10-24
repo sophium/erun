@@ -263,14 +263,10 @@ func assertSessionStartReinjectsRoleAndContract(t *testing.T, shell, orchestrato
 	}
 }
 
-// TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact is the
-// end-to-end reproduction from #1232: an orchestrator's standing role
-// (CLAUDE.<id>.md) survives on disk across a /clear or a compaction, but
-// nothing re-injected it into context because SessionStart's "clear" and
-// "compact" sources were not registered alongside "startup"/"resume". This
-// runs the actual installed hook commands, the way Claude Code would dispatch
-// them for each source, and checks the role text is really printed to stdout
-// rather than merely asserting the matcher string covers the source.
+// TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact runs the
+// installed hook commands for each SessionStart source, including "clear" and
+// "compact", and checks the role file (CLAUDE.<id>.md) is really printed to
+// stdout rather than merely asserting the matcher string covers the source.
 func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {

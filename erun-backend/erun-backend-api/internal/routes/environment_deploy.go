@@ -67,7 +67,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	// quota (TenantQuotaRepository.Set) after the environment already exists,
 	// and a redeploy is the next thing that would hit the now-insufficient
 	// floor or budget. Failing here is a clear 409 instead of the Job's
-	// Deployment sitting at 0/1 until the rollout times out (#1061).
+	// Deployment sitting at 0/1 until the rollout times out.
 	if err := r.revalidateResourceQuota(ctx); err != nil {
 		var exceeded *resourceQuotaExceededError
 		if errors.As(err, &exceeded) {
@@ -151,8 +151,8 @@ func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.En
 // deployInput assembles the durable workflow input. The deploy needs the tenant
 // name (RLS-scoped to the caller, so always the caller's own) plus the
 // request-scoped identity so the workflow's status writes rebind to the right
-// tenant. placement carries the target cluster's non-secret coordinates
-// (#1112); the credential itself is resolved fresh at Job-build time, never
+// tenant. placement carries the target cluster's non-secret coordinates; the
+// credential itself is resolved fresh at Job-build time, never
 // checkpointed in this durable-workflow input.
 func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.Environment, version string, placement resolvedPlacement) (provision.EnvProvisionInput, error) {
 	tenant, err := r.tenants.Current(ctx)

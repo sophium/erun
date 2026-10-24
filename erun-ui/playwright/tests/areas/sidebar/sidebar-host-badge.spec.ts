@@ -2,8 +2,7 @@ import { test, expect } from '../../../fixtures/erunApp.js';
 
 // A host environment has no pod and no cluster at all — it must render like
 // any other environment, with its own distinct badge, never as a pod that
-// failed to start (root AGENTS.md "Smooth, Seamless, No Dead Ends"; issue
-// #1380). This mirrors sidebar-local-badge.spec.ts's shape but for the badge
+// failed to start (root AGENTS.md "Smooth, Seamless, No Dead Ends"). This mirrors sidebar-local-badge.spec.ts's shape but for the badge
 // that must NOT collapse into "Local" even though a host env is also local by
 // worktree location.
 test.describe('sidebar HOST badge', () => {

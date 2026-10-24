@@ -272,13 +272,10 @@ func requireAlias(alias string) error {
 	}
 }
 
-// TestBareRequiredInputPatternCatchesShapeVariants is the regression for the
-// bug this gate widening exists to fix: exec_agent's target resolution
-// failed with "tenant and environment are required", a third phrasing the
-// old literal-enumeration gate did not know about. This locks that the
-// pattern generalizes over conjunction order and singular/plural, not just
-// the two original literals, while still leaving an unrelated
-// specifically-named subject alone.
+// TestBareRequiredInputPatternCatchesShapeVariants locks that the pattern
+// generalizes over conjunction order and singular/plural (e.g. "tenant and
+// environment are required"), not just fixed literals, while still leaving an
+// unrelated specifically-named subject alone.
 func TestBareRequiredInputPatternCatchesShapeVariants(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

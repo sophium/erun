@@ -427,7 +427,7 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 
 // mcpConfigServerKeys reads back the wired MCP server map for id and returns
 // its keys, so a test can assert exactly which environments a live session's
-// toolset covers rather than trusting the in-memory scope alone (erun#1319).
+// toolset covers rather than trusting the in-memory scope alone.
 func mcpConfigServerKeys(t *testing.T, id string) []string {
 	t.Helper()
 	data, err := os.ReadFile(orchestratorMCPConfigPath(id))
@@ -447,7 +447,7 @@ func mcpConfigServerKeys(t *testing.T, id string) []string {
 
 // requireOnlyOrchestratorMCPKey fails unless id's on-disk MCP config wires
 // exactly wantKey, so a test can assert what a live session can actually
-// reach rather than trusting the in-memory scope alone (erun#1319).
+// reach rather than trusting the in-memory scope alone.
 func requireOnlyOrchestratorMCPKey(t *testing.T, id, wantKey, label string) {
 	t.Helper()
 	if keys := mcpConfigServerKeys(t, id); len(keys) != 1 || keys[0] != wantKey {
@@ -465,17 +465,10 @@ func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, l
 	}
 }
 
-// TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale is the red-then-
-// green case for erun#1319: re-scoping a running orchestrator changes what it
-// is allowed to touch but the live session — its --mcp-config was resolved at
-// launch and cannot be rewired in place — keeps whatever it was spawned with
-// until it is restarted. Both defect directions are asserted on disk, not just
-// against in-memory state: the unlinked env's server entry must still be
-// there (RED: it stays fully tool-reachable) and the newly linked env's must
-// not be (RED: it has no tools at all). The fix is UpdateOrchestrator no
-// longer reporting "running" as if the save took effect: it flags
-// RestartRequired, and ListOrchestrators keeps reporting it on every poll
-// until a restart actually re-wires the session (GREEN).
+// TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale: re-scoping a
+// running orchestrator cannot rewire its --mcp-config in place, so the on-disk
+// wiring keeps the old scope, UpdateOrchestrator flags RestartRequired, and
+// ListOrchestrators keeps reporting it until a restart re-wires the session.
 func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	// Pin the executable seam, for the same reason
 	// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired does:
@@ -509,17 +502,15 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 		t.Fatalf("expected UpdateOrchestrator to flag a restart as required for a live scope change, got %+v", updated)
 	}
 
-	// RED: the live session's actual MCP config, read back from disk, has not
-	// moved — frs/dev (unlinked) is still wired and frs/laptop (newly linked)
-	// has no tools at all. Quoted here so the defect is visible, not asserted
-	// away.
+	// Before restart the on-disk MCP config has not moved: frs/dev (unlinked)
+	// is still wired and frs/laptop (newly linked) has no tools at all.
 	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "RED: after re-scope, before restart")
 	// The same mismatch must keep showing up on every subsequent poll, not
 	// just in UpdateOrchestrator's own return value.
 	requireLoneOrchestratorRestartRequired(t, app, true, "RED: polled after re-scope")
 
-	// GREEN: restarting is the only thing that re-wires the session, and it
-	// resolves the flag along with the actual toolset.
+	// Restarting is the only thing that re-wires the session, and it resolves
+	// the flag along with the actual toolset.
 	restarted, err := app.RestartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")
 	if restarted.RestartRequired {

@@ -25,7 +25,7 @@ import (
 // from.
 //
 // set-role also re-checks the requested role against the linked
-// environment's real type (eruncommon.OrchestratorEnvRoleAllowed), the same
+// environment's real type (config.OrchestratorEnvRoleAllowed), the same
 // gate the desktop's link/edit dialog enforces, so every scenario below that
 // reaches the gate seeds a real environment config via
 // fixture.SeedTenantEnv/SeedRuntimeTenantEnv rather than only the
@@ -249,8 +249,8 @@ func testOrchestratorSetRoleUnlinkedEnvironmentFails(t *testing.T) {
 
 // set_role_refuses_role_not_allowed_for_the_linked_environments_type locks
 // the environment-type gate on this writer: a runtime-type environment
-// only ever accepts the runtime role (eruncommon.OrchestratorEnvRoleAllowed),
-// the same gate the desktop's link/edit dialog enforces, and set-role now
+// only ever accepts the runtime role (config.OrchestratorEnvRoleAllowed),
+// the same gate the desktop's link/edit dialog enforces, and set-role
 // refuses to walk past it on an already-linked entry. The refusal names
 // the environment's type, the role that was requested, and the escape
 // hatch (set it to runtime instead), the same information the desktop's
@@ -286,7 +286,7 @@ func testOrchestratorSetRoleRefusesRoleNotAllowedForTheLinkedEnvironmentsType(t 
 // deliberate exception to "clearing must always work": a runtime-type
 // environment has no worktree to review and no in-pod agent to delegate
 // to, so undeclared is exactly as illegal for it as code or build --
-// eruncommon.OrchestratorEnvRoleAllowed(runtime, "") is false, the same as
+// config.OrchestratorEnvRoleAllowed(runtime, "") is false, the same as
 // for any other non-runtime role. "none" is only ever a clear escape for
 // a type that has one to begin with.
 func testOrchestratorSetRoleRefusesClearingRoleOnARuntimeTypeEnvironment(t *testing.T) {
@@ -344,7 +344,7 @@ func testOrchestratorSetRoleRealRunAcceptsTheRuntimeRoleOnARuntimeTypeEnvironmen
 // no cluster at all, so the runtime role -- which means the orchestrator
 // operates the environment directly, deploy, pin, observe -- has nothing to
 // act on, and every one of those verbs refuses a host env outright
-// (eruncommon.OrchestratorEnvRoleAllowed(host, runtime) is false). Offering
+// (config.OrchestratorEnvRoleAllowed(host, runtime) is false). Offering
 // it would promise a relationship the link cannot deliver and the mismatch
 // would surface only later, in the orchestrator session, as an environment
 // tool that never works. The refusal names the type and the escape hatch
@@ -412,13 +412,12 @@ func testOrchestratorSetRoleRealRunAcceptsANonRuntimeRoleOnAHostEnvironment(t *t
 }
 
 // set_role_recovers_a_preexisting_invalid_pairing locks the decision for
-// a config written before this gate existed: role=code was persisted
-// against a runtime-type environment (something the desktop's link gate
-// would refuse to create today, but an older config can still carry).
+// a config written before this gate existed: role=code persisted against a
+// runtime-type environment, which the desktop's link gate refuses to create
+// but an older config can still carry.
 // The gate does not special-case "already invalid" -- it checks the
 // requested role the same way regardless of what was there before -- so
-// the fix is simply that setting a legal role succeeds and clears the
-// bad pairing, with no separate recovery path needed.
+// setting a legal role succeeds and clears the bad pairing, with no separate recovery path needed.
 func testOrchestratorSetRoleRecoversAPreexistingInvalidPairing(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")

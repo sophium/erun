@@ -19,7 +19,7 @@ import (
 // hostnameAPIStubServer runs a minimal erun-backend-api double covering the
 // two calls the platform-route DNS write path makes (GET /v1/environments to
 // resolve the environment id by name, then PUT/DELETE .../hostname), so a
-// real-run scenario exercises erun-common/expose_platform_dns.go's actual
+// real-run scenario exercises erun-common/command/expose/expose_platform_dns.go's actual
 // network calls, not only their --dry-run trace.
 func hostnameAPIStubServer(t testing.TB) (*httptest.Server, *[]string) {
 	t.Helper()
@@ -289,10 +289,8 @@ func testExposePlatformOverrideRequiresBoth(t *testing.T) {
 
 func testExposeSkipIfUnconfiguredNoProject(t *testing.T) {
 	// --skip-if-unconfigured must cover "no project at all", not just "a
-	// project with no platform block" -- a gap that used to mean the deploy
-	// Job's --skip-if-unconfigured could not save it because project
-	// resolution itself failed outright with "cannot find git project"
-	// before the skip decision ever ran.
+	// project with no platform block" -- project resolution failing with
+	// "cannot find git project" must not pre-empt the skip decision.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--skip-if-unconfigured", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

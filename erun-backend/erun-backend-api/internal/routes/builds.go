@@ -86,10 +86,9 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 // id and an id that exists nowhere are both simply not-found and are
 // answered identically. That indistinguishability is the point: the row this
 // build would land in carries the caller's own tenant, so row-level security
-// never objected, and the environment reference used to be single-column, so
-// the schema accepted another tenant's id -- which made a created build
-// versus a refusal on this route report whether an id existed in *any*
-// tenant, to any tenant user.
+// never objects; without this check a created build versus a refusal on this
+// route would report whether an id existed in *any* tenant, to any tenant
+// user.
 func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID string) error {
 	if strings.TrimSpace(environmentID) == "" {
 		return nil
@@ -99,7 +98,7 @@ func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID strin
 }
 
 // createUnattachedBuild is POST /v1/builds: an ordinary `erun build`
-// self-reporting outside any review (erun#1954). ReviewID is always cleared
+// self-reporting outside any review. ReviewID is always cleared
 // regardless of what the body carries -- a review-linked build is reported
 // through the review-nested route above, never through this one, so there is
 // exactly one way to report each kind of build.

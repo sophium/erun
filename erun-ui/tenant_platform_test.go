@@ -15,8 +15,7 @@ import (
 
 // TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
 // tenant must fail loudly, naming the operation and its recovery, rather
-// than silently returning null the way the old apiUrl/cloudProviderAlias
-// precondition used to.
+// than silently returning null.
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
@@ -100,11 +99,9 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 // TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead:
 // TenantConfig.APIURL is documented only as `erun open`'s own port-forward
 // address (erun-docs/docs/reference/configuration.md), not a platform-URL
-// override. Honoring it here used to send the resolved alias's bearer token
-// to whatever address the field named — a credential-disclosure shape
-// (erun#1955) — so the platform read must always use the alias's own known
-// URL and never reach the address this test's httptest server would prove it
-// used if the override still won.
+// override. Honoring it would send the resolved alias's bearer token to
+// whatever address the field named, so the platform read must always use the
+// alias's own known URL.
 func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)
@@ -125,12 +122,10 @@ func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *tes
 	}
 }
 
-// TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant is the
-// erun#1955 regression: a global erun alias exists and is even signed in,
-// but this tenant's own configuration selected only an AWS alias (exactly
-// the operator's own machine — an "erun" tenant whose Manage tenant dialog
-// had an AWS alias checked and Primary, with the erun alias explicitly
-// unchecked). The dashboard must never authenticate this tenant's platform
+// TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant: a global
+// erun alias exists and is even signed in, but this tenant's own
+// configuration selected only an AWS alias. The dashboard must never
+// authenticate this tenant's platform
 // reads with a credential the tenant itself did not select, even though it
 // is the only erun alias configured anywhere.
 func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testing.T) {
@@ -173,9 +168,8 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	}
 }
 
-// TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias is the positive
-// half of the erun#1955 fix: once the tenant's own selection DOES include an
-// erun alias, that alias is used even though a different erun alias is also
+// TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias: once the tenant's
+// own selection DOES include an erun alias, that alias is used even though a different erun alias is also
 // configured globally — the tenant's own choice, not "the only one on the
 // machine", decides.
 func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {

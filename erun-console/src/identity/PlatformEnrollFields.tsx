@@ -206,9 +206,8 @@ export function OrgTargetStatus({
 }
 
 // PlatformEnrollFeedback renders alreadyEnrolled and a genuine username
-// collision as two distinct messages (erun#1744's acceptance criterion) —
-// the backend already discriminates them (200+alreadyEnrolled vs 409
-// USERNAME_TAKEN); this is where the console stops collapsing them into one.
+// collision as two distinct messages; the backend already discriminates them
+// (200+alreadyEnrolled vs 409 USERNAME_TAKEN).
 export function PlatformEnrollFeedback({
   state,
   tenants,

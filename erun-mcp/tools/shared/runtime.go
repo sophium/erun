@@ -202,7 +202,7 @@ func RuntimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 // erun binary, so an explicit tenant/environment naming a DIFFERENT environment
 // can never be honoured. Accepting one and acting locally anyway is worse than
 // refusing it, because the result then asserts a target the work never reached
-// and the caller is left holding written evidence that it worked (#1195).
+// and the caller is left holding written evidence that it worked.
 func ResolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
 	resolvedTenant, resolvedEnvironment, err := matchOrDefaultLocalTarget(
 		strings.TrimSpace(runtime.Context.Tenant), strings.TrimSpace(runtime.Context.Environment),

@@ -153,7 +153,7 @@ export class TenantDashboard {
   }
 
   // The Users tab is the tenant's roster, so its rows are the tenant's users —
-  // not the signed-in operator's single row (#2281).
+  // not the signed-in operator's single row.
   usersTable(): Locator {
     return this.activePanel().getByRole('table');
   }
@@ -206,7 +206,7 @@ export class TenantDashboard {
   }
 
   // Mine's accessible name gains a count badge (e.g. "Mine 2"), so this
-  // matches the prefix rather than the exact former label (#1378).
+  // matches the prefix rather than the exact label.
   mineFilterButton(): Locator {
     return this.activePanel().getByRole('button', { name: /^Mine\b/ });
   }

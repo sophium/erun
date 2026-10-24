@@ -1,5 +1,5 @@
-// The one shared RTK Query endpoint definition erun#1283 asks for: written
-// once here, injected into the console's own `createApi` over a real
+// The one shared RTK Query endpoint definition: written once here, injected
+// into the console's own `createApi` over a real
 // `httpBaseQuery` and, in the desktop's own test suite, over its real
 // `wailsQueryFn`-shaped base query — proving the seam is real rather than two
 // parallel stacks wearing one name. Nothing here calls `fetch` or knows about
@@ -31,8 +31,8 @@ export interface PlatformApiError {
   // (erun-backend-api/internal/routes/errors.go and, for the pre-route auth
   // layer, auth.go's authErrorEnvelope) when the transport could read one —
   // e.g. TENANT_UNRESOLVED vs NOT_ENROLLED on a 401, which a caller must
-  // render as two different messages rather than one generic "not enrolled"
-  // (erun#1721). Absent when the response carried no such envelope.
+  // render as two different messages rather than one generic "not enrolled".
+  // Absent when the response carried no such envelope.
   code?: string;
 }
 

@@ -67,8 +67,8 @@ func TestDefaultTenantIssuerNameFallsBackForEmptyIssuer(t *testing.T) {
 	}
 }
 
-// TestSanitizeResolutionErrorReplacesRawPostgresErrors proves erun#1752's
-// item 3: a raw PostgreSQL error (a constraint name and SQLSTATE) must never
+// TestSanitizeResolutionErrorReplacesRawPostgresErrors proves that a raw
+// PostgreSQL error (a constraint name and SQLSTATE) must never
 // escape ResolveIdentity, since the auth middleware logs and returns an
 // identity error's message verbatim as both the auth-rejected reason and the
 // client-facing response. The step label distinguishes which internal branch
@@ -140,8 +140,7 @@ func TestBootstrapOrgScopeReadsTheShippedIdPOrgClaim(t *testing.T) {
 }
 
 // An issuer erun does not ship keeps the single-tenant registration: that is
-// correct for a dedicated per-tenant IdP, and is what every deployment made
-// before this change already has.
+// correct for a dedicated per-tenant IdP.
 func TestBootstrapOrgScopeStaysSingleTenantWithoutAKnownClaim(t *testing.T) {
 	for _, raw := range []map[string]any{
 		nil,

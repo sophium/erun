@@ -116,8 +116,7 @@ func TestLoadConfigRejectsIncomplete(t *testing.T) {
 	}
 }
 
-// TestCleanUpToleratesADeletedTokenSecret is the regression test for #1174.
-// An environment delete removes the env's DNS-01 token Secret as ordinary
+// TestCleanUpToleratesADeletedTokenSecret: an environment delete removes the env's DNS-01 token Secret as ordinary
 // namespace content, with no ordering guarantee against cert-manager
 // finalizing a still-pending Challenge in the same namespace. If cleanup
 // errors there it errors forever -- nothing recreates the Secret -- so the

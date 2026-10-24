@@ -242,7 +242,7 @@ function repoDir(): string {
 // back to back).
 let atomicWriteCounter = 0;
 
-// writeConfigFile mirrors erun-common's writeFileAtomic (erun-common/config.go):
+// writeConfigFile mirrors base/config's WriteFileAtomic:
 // write a sibling temp file in the same directory, then rename over the
 // destination. A plain fs.writeFileSync truncates before writing, so the
 // backend's fsnotify-triggered config reader can observe an empty or
@@ -912,13 +912,13 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
-// environmentActivityDir is eruncommon.EnvironmentActivityDir:
+// environmentActivityDir is activity.EnvironmentActivityDir:
 // XDG_CACHE_HOME/erun/activity/<tenant>/<environment>.
 function environmentActivityDir(tenant: string, environment: string): string {
   return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment);
 }
 
-// activityLeaseDir is where eruncommon.TakeEnvironmentActivityLease persists
+// activityLeaseDir is where activity.TakeEnvironmentActivityLease persists
 // leases.
 function activityLeaseDir(tenant: string, environment: string): string {
   return path.join(environmentActivityDir(tenant, environment), 'leases');
@@ -945,7 +945,7 @@ export function removeActivitySnapshot(tenant: string, environment: string, kind
 }
 
 // writeHeldLease stages a real activity lease file — the same on-disk shape
-// eruncommon.TakeEnvironmentActivityLease writes — so a headless spec can
+// activity.TakeEnvironmentActivityLease writes — so a headless spec can
 // drive the AI-tab occupancy check without a live orchestrator job. It is
 // renamed into place like the backend's own: a lease reader reclaims a lease
 // it cannot parse, and the idle poll reads this directory every second.
@@ -976,7 +976,7 @@ function environmentJobDir(tenant: string, environment: string): string {
 }
 
 // writeCompletedJob stages a real, already-finished job record — the same
-// on-disk shape eruncommon.EnvironmentJob writes — so a headless spec can
+// on-disk shape shared.EnvironmentJob writes — so a headless spec can
 // prove a lease is genuinely backed by a job without spawning a real
 // supervisor process. A terminal state ("exited") skips the read-time
 // liveness reconciliation a "running" job would need a live PID for.
@@ -1010,8 +1010,8 @@ export function removeCompletedJob(tenant: string, environment: string, id: stri
 
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
-// uninitialized. Mirrors what `erun init` writes (createTenantConfig in
-// erun-common/init.go).
+// uninitialized. Mirrors what `erun init` writes (command/setup's
+// init_tenant.go).
 export function seedTenant(tenant: string, defaultEnvironment: string, extraYaml = ''): void {
   const tenantDir = path.join(erunConfigDir(), tenant);
   fs.mkdirSync(tenantDir, { recursive: true });
@@ -1255,9 +1255,9 @@ function withERunCloudProviderAlias(source: string, alias: string, apiURL: strin
 // addERunCloudProviderAlias stages a throwaway erun-type cloud provider
 // alias in the shared root config.yaml, the way seedBaseline's aws/cloudflare
 // aliases are staged -- for specs that need a real, resolvable erun platform
-// alias to exist on the machine without ever signing in to one (erun#1955's
-// tenant-scoped-alias-selection regression needs the alias to exist globally
-// while the tenant under test never selected it). Returns a restore function
+// alias to exist on the machine without ever signing in to one (e.g. an alias
+// that exists globally while the tenant under test never selected it).
+// Returns a restore function
 // that puts the root config back exactly as found, mirroring addOrchestrators.
 export function addERunCloudProviderAlias(alias: string, apiURL: string): () => void {
   const configPath = path.join(erunConfigDir(), 'config.yaml');

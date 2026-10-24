@@ -10,11 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The scenario from #1201: a brand-new environment configured to build+push to
-// ghcr.io, with no docker config, no gh session, and no GH_TOKEN. Before the
-// fix, resolveGHCRBasicAuth's "no credential" case was treated the same as
-// "inconclusive" and the release proceeded to spend a full multi-arch build
-// before dying at the push. The preflight must refuse before any build runs.
+// A brand-new environment configured to build+push to ghcr.io, with no docker
+// config, no gh session, and no GH_TOKEN: resolveGHCRBasicAuth's "no
+// credential" case is not "inconclusive", so the preflight must refuse before
+// any build runs.
 func TestPreflightRegistryPushAccessRefusesBeforeBuildWhenNoCredentialConfigured(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 	useGHToken(t, func(string) (string, bool) { return "", false })

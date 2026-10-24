@@ -176,7 +176,7 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 // branch produced it (e.g. "username refresh" vs "bootstrap first tenant
 // user"), since both write to users and can violate the identical
 // users_tenant_username_key constraint, and are otherwise indistinguishable
-// once the error reaches the auth-rejected log line alone (erun#1752).
+// once the error reaches the auth-rejected log line alone.
 // Errors already classified as ErrNotFound or security.ErrTenantUnresolved
 // pass through unchanged -- they are safe, expected outcomes, not internal
 // failures.

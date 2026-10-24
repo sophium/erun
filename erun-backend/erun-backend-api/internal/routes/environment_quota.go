@@ -17,7 +17,7 @@ func (e *resourceQuotaExceededError) Error() string { return e.detail }
 
 // revalidateResourceQuota re-runs the two resource-quota checks a redeploy
 // must still satisfy: the per-environment floor and the tenant's aggregate
-// budget (#1113). A redeploy does not add a new environment — it is already
+// budget. A redeploy does not add a new environment — it is already
 // counted — so the aggregate projection uses the runtime count as-is, not
 // +1 the way a create does.
 func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
@@ -42,8 +42,7 @@ func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
 // counterpart: the same per-environment floor and aggregate budget checks,
 // against a quota createEnvironment has already fetched, and against
 // runtimeCount+1 — this new environment is not counted yet, unlike a
-// redeploy's recheck. Split out (rather than inlined in createEnvironment) to
-// keep that function's own branching under the cyclomatic-complexity budget.
+// redeploy's recheck.
 func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Context, quota model.TenantQuota) error {
 	if err := validateNamespaceQuotaFloor(quota); err != nil {
 		return &resourceQuotaExceededError{detail: err.Error()}
@@ -60,17 +59,12 @@ func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Conte
 
 // minRuntimeCPUMillicores/MemoryMB/StorageGB are the smallest tenant quota
 // that can host a stock runtime environment, derived from
-// eruncommon.MinimumRuntimeNamespaceQuota rather than restated as independent
-// literals — the erun-devops chart's own runtime pod, summed across BOTH its
-// containers (erun-devops + erun-dind; a ResourceQuota counts every container
-// in the pod), plus its PVCs. A tenant quota below this floor cannot host a
-// stock runtime environment: Kubernetes would reject the pod at admission
-// once the namespace ResourceQuota is applied. Checking it before the deploy
-// Job starts (validateNamespaceQuotaFloor, called from both the create and
-// the deploy path) turns that into a clear 409 naming the quota and the
-// shortfall, instead of a Job whose Deployment sits at 0/1 until the rollout
-// times out five minutes later with the real cause in a FailedCreate event on
-// a ReplicaSet the caller never sees (#1061).
+// config.MinimumRuntimeNamespaceQuota: the erun-devops runtime pod summed
+// across both its containers (a ResourceQuota counts every container in the
+// pod), plus its PVCs. Below this floor Kubernetes rejects the pod at
+// admission, so checking it before the deploy Job starts turns a silent
+// five-minute rollout timeout (cause hidden in a ReplicaSet FailedCreate
+// event) into a clear 409 naming the shortfall.
 var minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB = func() (int, int, int) {
 	cpu, memory, storage := config.MinimumRuntimeNamespaceQuota()
 	return int(cpu), int(memory), int(storage)
@@ -92,7 +86,7 @@ func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
 
 // validateAggregateResourceBudget refuses admitting a runtime environment
 // that would push the tenant's projected total CPU/memory/storage past its
-// aggregate budget (#1113). Every runtime environment gets the SAME
+// aggregate budget. Every runtime environment gets the SAME
 // per-environment cap (quota.MaxCPUMillicores etc.), so the projection is
 // exact, not an estimate: projectedRuntimeCount * the per-environment cap.
 // The caller computes the count: existingCount+1 for a new environment not

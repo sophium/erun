@@ -48,10 +48,8 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 
 // ListEnvironmentServices powers the Ports tab's service picker: what the
 // environment is actually running, and which of those already have a public
-// hostname. It answers the question that used to have no answer anywhere in
-// the product — exposing a service meant typing a name you had to know
-// already, and knowing the naming convention the Ingress backend is derived
-// from.
+// hostname, so exposing one does not require already knowing its name or the
+// naming convention the Ingress backend is derived from.
 func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServiceList, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list environment services", selection.Tenant, selection.Environment); err != nil {
@@ -75,7 +73,7 @@ func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServi
 }
 
 // ExposeEnvironmentService exposes one Service at a public hostname under the
-// platform's services zone. See eruncommon.RunExposeService for the resolved
+// platform's services zone. See expose.RunExposeService for the resolved
 // plan; it is applied here directly (no dry-run switch -- the Ports tab form
 // commits on submit, matching every other Manage dialog save action).
 // RunExposeService's own DNS write automatically routes through the
@@ -117,7 +115,7 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 // every hostname the Ports tab shows, not just one row: the wildcard record
 // covers the whole environment, and there is no narrower primitive that
 // removes a single service's route without it (see
-// eruncommon.RunUnexposeService).
+// expose.RunUnexposeService).
 func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("unexpose environment", selection.Tenant, selection.Environment); err != nil {

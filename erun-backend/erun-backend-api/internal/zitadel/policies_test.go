@@ -133,8 +133,7 @@ func TestUpdateOrgSettingsForceMFAPreservesOtherLoginFields(t *testing.T) {
 }
 
 // TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields is the
-// registration-control half of the same read-modify-write contract #1482
-// asks for: closing self-registration must not touch forceMfa or any other
+// registration-control half of the same read-modify-write contract: closing self-registration must not touch forceMfa or any other
 // login-policy field already set on the org.
 func TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields(t *testing.T) {
 	var loginPutBody map[string]any

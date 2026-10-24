@@ -308,8 +308,8 @@ func (e *fakeMCPEdge) requestFor(t *testing.T, method string) fakeMCPRequest {
 
 // assertToolArgumentsNameTarget asserts a tools/call request restated the
 // tenant/environment the host already resolved to reach this edge, rather
-// than leaving the tool to infer them from the server's own bound context
-// (erun#1709). Every off-environment idle/job/activity-lease call must carry
+// than leaving the tool to infer them from the server's own bound context.
+// Every off-environment idle/job/activity-lease call must carry
 // its own tenant/environment on the wire.
 func assertToolArgumentsNameTarget(t *testing.T, request fakeMCPRequest, tenant, environment string) {
 	t.Helper()

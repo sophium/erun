@@ -54,9 +54,8 @@ type DeployJobParams struct {
 	Tenant      string
 	Environment string
 	Version     string
-	// Placement names the cluster this deploy targets (#1112). The zero value
-	// keeps the Job targeting its own cluster via its ServiceAccount token,
-	// unchanged from before multi-cluster placement existed.
+	// Placement names the cluster this deploy targets. The zero value keeps
+	// the Job targeting its own cluster via its ServiceAccount token.
 	Placement PlacementParams
 	// DeployID scopes the Job to one deploy attempt. It is carried in the durable
 	// workflow input, so a resumed workflow rebuilds the same Job name and
@@ -86,30 +85,27 @@ type DeployJobParams struct {
 	// interactive run does — project resolution fails outright with
 	// "cannot find git project", which --skip-if-unconfigured cannot cover
 	// because the skip decision itself needs a resolved project). The control
-	// plane already carries both for its own purposes — ExposeServicesZone from
-	// the same services zone its DNS-01 cert issuance uses, ExposePlatformNamespace
-	// from the namespace its own Jobs (and, in a self-hosted platform, the
-	// PowerDNS singleton) run in — so this reuses that knowledge rather than
-	// inventing a second source for it. Either left empty falls the chained
-	// expose back to project-based resolution, which fails exactly as it always
-	// has for a sourceless Job; since exposure is best-effort (see
-	// exposeChainScript), that failure no longer takes the deploy down with it.
+	// plane already carries both: ExposeServicesZone from the services zone its
+	// DNS-01 cert issuance uses, ExposePlatformNamespace from the namespace its
+	// own Jobs (and, in a self-hosted platform, the PowerDNS singleton) run in.
+	// Either left empty falls the chained expose back to project-based
+	// resolution, which fails for a sourceless Job; since exposure is
+	// best-effort (see exposeChainScript), that failure does not fail the deploy.
 	ExposeServicesZone      string
 	ExposePlatformNamespace string
 	// RuntimeImageOverride, when set, threads `--runtime-image <value>` to the
 	// in-Job `erun deploy` — the caller's bootstrap decision for a tenant with no
 	// published <tenant>-devops image: install the canonical published
 	// erun-devops chart+image by reference instead of resolving artifacts that do
-	// not exist. Empty leaves the Job's deploy command exactly as it was before
-	// this existed, deploying the tenant's own artifacts.
+	// not exist. Empty deploys the tenant's own artifacts.
 	RuntimeImageOverride string
 	// MaxCPU/MaxMemory/MaxStorage are Kubernetes quantity strings (e.g. "4",
 	// "8Gi", "80Gi") threaded to `erun deploy` as --max-cpu/--max-memory/
 	// --max-storage, capping the environment's namespace with a ResourceQuota +
-	// LimitRange (erun-common/kubernetes_resource_quota.go). Empty leaves the
-	// Job's deploy command unchanged from before these existed. All three are
-	// set together or not at all (routes.validateNamespaceQuotaFloor and
-	// eruncommon.ValidateNamespaceResourceQuota both require completeness).
+	// LimitRange (infra/kube/kubernetes_resource_quota.go). Empty leaves the
+	// namespace uncapped. All three are set together or not at all
+	// (routes.validateNamespaceQuotaFloor and config.ValidateNamespaceResourceQuota
+	// both require completeness).
 	MaxCPU     string
 	MaxMemory  string
 	MaxStorage string
@@ -125,19 +121,17 @@ type DeployJobParams struct {
 	// (mcptoken.Signer), threaded to the in-Job `erun deploy` as
 	// --mcp-auth-public-key so the runtime's MCP edge trusts tokens the backend
 	// mints for the console — the same file://-issuer mechanism the
-	// desktop uses with its own key, not the OIDC issuer path. Empty leaves the
-	// Job's deploy command unchanged, so the edge stays loopback-only exactly as
-	// before this existed.
+	// desktop uses with its own key, not the OIDC issuer path. Empty keeps the
+	// edge loopback-only.
 	MCPAuthPublicKeyPEM string
 	// TLSDNS01Token/TLSDNS01BrokerURL/TLSDNS01WebhookGroupName/TLSACMEEmail/
 	// TLSACMEServer thread a per-env TLS certificate through erun's DNS-01
 	// broker: the deploy Job writes the token to disk and passes it to
 	// the chained `erun expose`, which provisions the env's own namespaced
 	// cert-manager Issuer + Certificate so the Ingress's wildcard TLS secret
-	// actually gets populated. All empty (the default, no DNS-01 broker
-	// configured) leaves the chained expose exactly as it was before this
-	// existed — the Ingress still references the wildcard secret, nothing
-	// provisions it. Only takes effect alongside ExposeTargetIP, since there is
+	// actually gets populated. All empty (no DNS-01 broker configured): the
+	// Ingress still references the wildcard secret, but nothing provisions it.
+	// Only takes effect alongside ExposeTargetIP, since there is
 	// no Ingress to serve the cert without one.
 	TLSDNS01Token            string
 	TLSDNS01BrokerURL        string
@@ -193,9 +187,9 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 // ~/.config/erun/<tenant>/<environment>/config.yaml for `erun deploy` to
 // resolve — a freshly-registered environment was never baked into any image,
 // so nothing on disk describes it. bootstrapEnvironmentScript seeds both
-// explicitly before `erun deploy` runs, keeping `deploy` itself an unchanged
-// pure primitive: the Job (this caller) supplies the environment's shape, the
-// primitive still only consumes on-disk config exactly as it always has.
+// explicitly before `erun deploy` runs, keeping `deploy` a pure primitive: the
+// Job supplies the environment's shape, the primitive only consumes on-disk
+// config.
 func buildDeployCommand(params DeployJobParams) []string {
 	deploy := []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version}
 	if override := strings.TrimSpace(params.RuntimeImageOverride); override != "" {
@@ -276,7 +270,7 @@ const exposeFailureMarker = "ERUN_EXPOSE_FAILED"
 // failure fail the Job. Exposure (DNS + Ingress) is best-effort: the
 // deploy already landed a healthy workload, so failing the whole Job over a
 // DNS/Ingress problem would record a running environment as a failed
-// provision, exactly the misdirection the issue reported. `{ ... || printf
+// provision. `{ ... || printf
 // ...; }` always exits 0, so the deploy's own `&&` is the only thing that can
 // still fail the script; on a real expose failure the marker line carries
 // expose's own combined output so ExposeFailureFromOutput can recover it from
@@ -375,8 +369,7 @@ ENV_EOF
 `, tenant, environment, placement.kubernetesContextOrInCluster())
 }
 
-// inClusterKubeconfigScript is the pre-#1112 behavior, byte-for-byte: the
-// Job's own mounted ServiceAccount token authenticates against the cluster
+// inClusterKubeconfigScript is the default placement: the Job's own mounted ServiceAccount token authenticates against the cluster
 // the Job itself runs in.
 const inClusterKubeconfigScript = `set -e
 mkdir -p "$HOME/.kube"
@@ -494,9 +487,8 @@ func (l *Launcher) PollEvery(every time.Duration) {
 }
 
 // Run creates the deploy Job and blocks until it reaches a terminal state,
-// returning the result. When params.Placement targets a remote cluster
-// (#1112), it first upserts the Secret the Job's container reads its admin
-// token from.
+// returning the result. When params.Placement targets a remote cluster, it
+// first upserts the Secret the Job's container reads its admin token from.
 func (l *Launcher) Run(ctx context.Context, params DeployJobParams) (Result, error) {
 	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
 		return Result{}, fmt.Errorf("provision placement credential: %w", err)

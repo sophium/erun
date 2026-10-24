@@ -113,13 +113,10 @@ test.describe('sidebar tenant enrollment status icon', () => {
     ).toBeVisible();
   });
 
-  // The erun#1955 regression, driven through the real Go resolution path --
-  // no RPC stub. A tenant whose own Manage-tenant selection is AWS-only must
-  // never authenticate its platform reads with a different, unselected erun
-  // alias that happens to exist on the machine (the operator's own machine
-  // hit exactly this: an "erun" tenant with an AWS alias checked and
-  // Primary, and a different tenant's erun credential silently backing its
-  // "enrolled" dot and dashboard).
+  // Driven through the real Go resolution path -- no RPC stub. A tenant whose
+  // own Manage-tenant selection is AWS-only must never authenticate its
+  // platform reads with a different, unselected erun alias that happens to
+  // exist on the machine.
   //
   // The sidebar glyph alone cannot tell the two failure shapes apart: an
   // unselected-but-configured alias and a selected-but-never-signed-in alias
@@ -127,13 +124,9 @@ test.describe('sidebar tenant enrollment status icon', () => {
   // collapses every non-ready platform state to local-only. The dashboard's
   // own platform-state heading does not collapse them -- "Connect this
   // tenant to erunpaas.com" (not-connected, this test's assertion) versus
-  // "Sign in to the erun platform" (not-signed-in, what the pre-fix
-  // resolution produced by reaching the wrong alias and finding it
-  // unsigned-in) -- so this test opens the dashboard rather than reading the
-  // icon, and is a genuine regression guard: it fails against the pre-fix
-  // resolution (which shows the sign-in heading for the alias it should
-  // never have reached) and passes only once the tenant's own selection is
-  // consulted. erun-ui/tenant_platform_test.go's
+  // "Sign in to the erun platform" (not-signed-in, what reaching the wrong,
+  // unsigned-in alias would produce) -- so this test opens the dashboard
+  // rather than reading the icon. erun-ui/tenant_platform_test.go's
   // TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant covers
   // the same branch directly against the Go resolution.
   test('the dashboard reports not-connected, never sign-in for an unselected alias, when a tenant selected only an AWS alias', async ({
@@ -344,10 +337,10 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
-  // The bug this guards: nextEnrollmentPollingInterval used to return 0 for
-  // 'unknown' (treating a genuine round-trip failure as terminal, same as
-  // 'local-only' and 'enrolled'), so a transient outage never recovered on
-  // its own. It must keep polling exactly like 'pending'/'declined'.
+  // nextEnrollmentPollingInterval must not treat 'unknown' (a genuine
+  // round-trip failure) as terminal like 'local-only' and 'enrolled', or a
+  // transient outage never recovers on its own. It must keep polling exactly
+  // like 'pending'/'declined'.
   test('unknown keeps polling rather than going silent, and recovers once the platform answers again', async ({
     app,
     page,
@@ -405,10 +398,10 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
-  // The bug this guards: local-only was excluded from polling on the premise
-  // that nothing is pending, but the popover built on that very state offers
-  // a sign-in -- exactly a local-only -> enrolled transition with nothing
-  // pending. The fix is an invalidation on sign-in success, not a timer, so
+  // local-only is excluded from polling since nothing is pending, but the
+  // popover built on that very state offers a sign-in -- a local-only ->
+  // enrolled transition with nothing pending. Sign-in success invalidates the
+  // status rather than waiting on a timer, so
   // this drives the popover's own sign-in action (not a direct dashboard
   // open) and asserts the row itself updates with no restart and no manual
   // refresh.
@@ -451,7 +444,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       enrollment.respondWith({ data: [{ tenant, state: 'enrolled' }] });
       await app.tenantDashboard.signInButton().click();
 
-      // The regression is the sidebar dot sitting stale beside a dashboard
+      // The failure mode is the sidebar dot sitting stale beside a dashboard
       // that already recovered -- so the assertion that matters is back on
       // the row, not on the dashboard the operator navigated away from.
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');

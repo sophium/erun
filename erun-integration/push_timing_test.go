@@ -15,11 +15,8 @@ import (
 func pushStepTimingScenarios(t *testing.T) {
 	// The two scenarios below cover step timing: a push reports where its time
 	// went, per component and per architecture, on success and on failure,
-	// plus a JSON record alongside the trace. Before that change, `push`
-	// reported only a single `==> Pushed in <ELAPSED>` (or `Push failed after
-	// <ELAPSED>`) line — no per-component/per-architecture breakdown, no
-	// cache-hit/miss duration, and no machine-readable record at all — so a
-	// slow or failed push could never be attributed to a cause. The table's
+	// plus a JSON record alongside the trace, so a slow or failed push can be
+	// attributed to a cause. The table's
 	// per-step durations are real, sub-second wall-clock measurements even
 	// under an instant stub, so they cannot be locked into a byte-exact golden
 	// the way the rounded `<ELAPSED>` marker in the existing `==> ...` lines
@@ -42,7 +39,7 @@ func testPushRealRunReportsStepTimingTableAndJsonRecord(t *testing.T) {
 		`esac`,
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
-	// #1201: give the registry-credential preflight a resolvable credential
+	// Give the registry-credential preflight a resolvable credential
 	// so this scenario still reaches the step-timing behavior it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
@@ -157,8 +154,8 @@ type timingRecord struct {
 	Steps   []timingRecordStep `json:"steps"`
 }
 
-// timingRecordStep/timingRecord mirror the shape of eruncommon.TimingStepJSON/
-// TimingRecord (timing.go) closely enough for these tests to assert on
+// timingRecordStep/timingRecord mirror the shape of core.TimingStepJSON/
+// core.TimingRecord closely enough for these tests to assert on
 // structure without importing erun-common's internal types.
 type timingRecordStep struct {
 	Name     string             `json:"name"`

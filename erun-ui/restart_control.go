@@ -89,7 +89,7 @@ func handleRestartControl(app *App) http.HandlerFunc {
 //
 // It sits on its own path rather than behind a flag on the restart path so a
 // desktop that predates it cannot read the question as a command. See
-// eruncommon.DesktopControlPlanPath.
+// core.DesktopControlPlanPath.
 func handleRestartPlanControl(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, ok := decodeRestartControlRequest(w, r)

@@ -1,8 +1,7 @@
 // readTokenIdentity pulls the display-only claims out of a bearer token, for the
 // "authenticated but not enrolled" screen. Someone in that state has to tell an
 // operator WHICH identity to enrol, and reading it off the screen beats an
-// operator querying the database for it — which is exactly what happened the
-// first time this came up (#1167).
+// operator querying the database for it.
 //
 // This decodes without verifying, and that is safe only because the result is
 // never used for a security decision: it is text on a screen. The API remains

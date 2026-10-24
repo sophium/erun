@@ -3,16 +3,13 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// #1230: the review panel used to flatten every MCP-unreachable LoadDiff
-// failure into one fixed "Cannot reach the environment runtime / connection
-// is down" red alert with a "Reconnect…" action, discarding the distinction
-// DescribeLocalMCPUnreachable already computes between a never-opened/stopped
-// environment (informational, "Open") and a genuinely stale port-forward (a
-// fault, "Reconnect…"). It also rendered that alert twice at once -- once in
-// the diff panel, once in the changed-files aside -- for the same env slot.
+// The review panel keeps the distinction DescribeLocalMCPUnreachable computes
+// between a never-opened/stopped environment (informational, "Open") and a
+// genuinely stale port-forward (a fault, "Reconnect…"), and renders it once
+// per env slot, not in both the diff panel and the changed-files aside.
 //
 // These specs stub LoadDiff's error message with the two marker prefixes
-// erun-ui/mcp_errors.go now emits (mcpUnreachableKindMarkers) rather than
+// erun-ui/mcp_errors.go emits (mcpUnreachableKindMarkers) rather than
 // driving a real unreachable MCP edge, matching the stubbing pattern already
 // used by orchestrator-cross-env-diff.spec.ts for this same RPC.
 //
@@ -122,8 +119,7 @@ test.describe('review panel reachability framing (#1230)', () => {
     const review = app.reviewPanel;
 
     // Both surfaces are visible at once here -- no collapseChangedFilesSection()
-    // -- which is exactly the layout that used to render two copies of the
-    // same alert (#1230).
+    // -- the layout where a duplicate alert would show.
     await expect(review.changedFilesTree()).toBeVisible(withTestBudget());
     await expect(review.errorAlerts()).toHaveCount(1, withTestBudget());
   });
@@ -193,10 +189,9 @@ test.describe('review panel reachability framing (#1230)', () => {
 
     // The dialog is reached *from* the unreachable state, so it is shown
     // exactly when the environment may be down for a reason the reconnect
-    // cannot address. It used to promise the runtime "will be redeployed";
+    // cannot address. It must not promise the runtime "will be redeployed":
     // the action is `erun open --reconnect`, which refuses a stopped
-    // environment and never deploys, so that was a recovery it could not
-    // perform at all.
+    // environment and never deploys.
     const dialog = page.getByRole('dialog', { name: 'Reconnect to environment?' });
     await expect(dialog).toBeVisible(withTestBudget());
     await expect(dialog).not.toContainText('it will be redeployed');
@@ -305,10 +300,8 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
     page,
   }) => {
     // Opening an orchestrator session clears the sidebar's own selection
-    // (selection.selected = null): the pre-#1230 reconnect thunks read their
-    // target from that selection, so clicking a linked env's action was a
-    // silent no-op whenever it did not match -- which for an orchestrator
-    // session was always, since there was no sidebar selection at all.
+    // (selection.selected = null), so a reconnect thunk that read its target
+    // from that selection would silently no-op for every linked env.
     const { reconnectCalls } = await stubOrchestratorNotOpenAlpha(page);
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
@@ -345,14 +338,11 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
   // assertions on them carry no timeout of their own: `toBeVisible` and
   // `toHaveCount` resolve to expect's 10s default rather than the budget this
   // test declares. Under contention a read that is merely slow therefore reds
-  // the step with the test's own clock almost entirely unspent, which is how a
-  // loaded builder turns into a failing branch nobody touched.
+  // the step with the test's own clock almost entirely unspent.
   //
   // The hold below is deliberately just past that 10s default: the smallest
   // delay that discriminates, so the suite pays seconds here rather than the
-  // tens a genuinely loaded machine would. Pre-fix this case reds at exactly
-  // 10_000ms with 20s of its own budget unused; with the read pointed at that
-  // budget it passes at the read's real arrival. The delay is injected at a
+  // tens a genuinely loaded machine would. The delay is injected at a
   // named RPC (this spec's own LoadDiff stub) rather than by loading the
   // machine, so the reproduction is deterministic on a quiet host.
   test('a reachability status that lands past the step cap is waited out, not cut off', async ({

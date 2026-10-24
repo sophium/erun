@@ -3,15 +3,13 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The orchestrator's Environments picker used to drop an ineligible env (an
-// unrecognized type) without a trace: it simply was not in the list, which an
-// operator who knows the env exists cannot distinguish from "erun has not
-// noticed it" or "this is a bug". The picker lists every env it considered,
+// The orchestrator's Environments picker must not drop an ineligible env (an
+// unrecognized type) without a trace, which an operator cannot distinguish
+// from "erun has not noticed it". The picker lists every env it considered,
 // disabled with its reason when genuinely ineligible, and the empty state
 // names which of the two ways it can be empty applies.
 //
-// A runtime environment is no longer one of those ineligible cases (erun#1770):
-// it is checkable, but offers only the runtime role instead of the usual
+// A runtime environment is not one of those ineligible cases: it is checkable, but offers only the runtime role instead of the usual
 // Code/Build picker — see orchestrator-env-role.spec.ts's runtime-role test
 // for that coverage. Go coverage for the underlying data (which
 // type/role combinations are eligible, what the reason text says) lives in

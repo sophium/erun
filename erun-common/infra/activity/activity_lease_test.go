@@ -42,12 +42,11 @@ func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActiv
 	}
 }
 
-// TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run
-// purity contract erun#1907 fixed for the config tree: resolving the
-// activity directory is a pure read (job_supervisor.go's environmentJobDir
-// and RunLocalEnvironmentWhip both resolve it ahead of their own dry-run
-// checks) and must not create ~/.cache/erun/activity/<tenant>/<environment>/
-// as a side effect.
+// TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run purity
+// contract the config tree follows: resolving the activity directory is a pure
+// read (job_supervisor.go's environmentJobDir and RunLocalEnvironmentWhip both
+// resolve it ahead of their own dry-run checks) and must not create
+// ~/.cache/erun/activity/<tenant>/<environment>/ as a side effect.
 func TestEnvironmentActivityDirDoesNotCreateDirectory(t *testing.T) {
 	isolateActivityCache(t)
 	dir, err := EnvironmentActivityDir("acme", "dev")
@@ -95,11 +94,9 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 }
 
-// TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases is the regression test
-// for the second complaint: a job's plain presence lease and its
-// exclusive environment claim are one piece of work, but a refusal that lists
-// every lease separately reported them as two unrelated claimants. Once both
-// leases carry the same Holder, the refusal must say so once.
+// TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases: a job's plain
+// presence lease and its exclusive environment claim are one piece of work, so
+// once both carry the same Holder, the refusal must name it once.
 func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
 	sameHolder := EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
 	leases := []EnvironmentActivityLease{
@@ -267,9 +264,9 @@ func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
 	}
 }
 
-// erun#1245: two orchestrators, or two agent jobs, driving the same worktree
-// with no shared visibility. A plain lease is presence, not exclusion, so the
-// tests below cover the exclusive mode that actually refuses a second holder.
+// Two orchestrators, or two agent jobs, can drive the same worktree with no
+// shared visibility. A plain lease is presence, not exclusion, so the tests
+// below cover the exclusive mode that actually refuses a second holder.
 
 func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 	isolateActivityCache(t)
@@ -295,8 +292,8 @@ func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 		t.Fatalf("expected a conflict error, got %v", err)
 	}
 	if conflict.Holder.ID != "job-fix-1201" || conflict.Holder.Holder.Orchestrator != "petios" {
-		// The Validation section of #1245 is explicit: assert on the identity
-		// carried in the error, not merely that the call failed.
+		// Assert on the identity carried in the error, not merely that the
+		// call failed.
 		t.Fatalf("refusal must name the actual holder, got %+v", conflict.Holder)
 	}
 }
@@ -356,9 +353,9 @@ func TestExclusiveLeaseRenewalBySameHolderSucceeds(t *testing.T) {
 }
 
 func TestExclusiveLeaseTakeRaceExactlyOneWins(t *testing.T) {
-	// The test #1245 calls out explicitly: two concurrent exclusive takes in
-	// the same scope, exactly one succeeds. Plain os.WriteFile (create-or-
-	// overwrite) cannot pass this; only the O_EXCL create can.
+	// Two concurrent exclusive takes in the same scope: exactly one succeeds.
+	// Plain os.WriteFile (create-or-overwrite) cannot pass this; only the
+	// O_EXCL create can.
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -554,13 +551,13 @@ func TestEnvironmentOperatorPresenceReason(t *testing.T) {
 		t.Fatalf("a busy ssh marker must report an operator present, got present=%v reason=%q", present, reason)
 	}
 
-	// Deliberately narrower than a literal reading of #1245: "process" and
-	// "codex" also fire for an orchestrator's own detached job (job_agent.go
-	// execs the same wrapped claude/codex binaries the interactive session
-	// uses), so gating on them would make an orchestrator refuse itself and
-	// would make a second legitimate job in a different clone of the same pod
-	// refuse against the first job's resident process. Only ssh is
-	// unambiguous. See the comment on environmentOperatorPresenceMarkers.
+	// Deliberately narrow: "process" and "codex" also fire for an
+	// orchestrator's own detached job (job_agent.go execs the same wrapped
+	// claude/codex binaries the interactive session uses), so gating on them
+	// would make an orchestrator refuse itself and would make a second
+	// legitimate job in a different clone of the same pod refuse against the
+	// first job's resident process. Only ssh is unambiguous. See the comment on
+	// environmentOperatorPresenceMarkers.
 	for _, kind := range []string{ActivityKindProcess, configpkg.ActivityKindCodex, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindAPI} {
 		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
 		if _, present := EnvironmentOperatorPresenceReason(status); present {

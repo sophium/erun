@@ -82,7 +82,7 @@ type HandlerOptions struct {
 	// instead of a generic placeholder. Empty falls back to that placeholder.
 	BootstrapTenantName string
 	// IdentityAdmin drives Zitadel's Management API for identity
-	// administration (issue #1209): the org-owner PAT the erun-zitadel chart
+	// administration: the org-owner PAT the erun-zitadel chart
 	// already provisions, read from a mounted file. Nil when unconfigured —
 	// the /v1/identity/* routes are then not registered at all, rather than
 	// present and always failing.
@@ -123,7 +123,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if resolvers := resolveIdentityResolvers(options); options.MCPSigner != nil && options.TokenVerifier != nil && resolvers.tenant != nil {
 		registrytoken.NewHandler(options.TokenVerifier, resolvers.tenant, options.MCPSigner).Register(mux)
 	}
-	// Accepting an invite (#1483) has no bearer token to authenticate with —
+	// Accepting an invite has no bearer token to authenticate with —
 	// the token in the request body is the credential — so it is registered
 	// directly on the mux like the platform route above. It needs the same
 	// Zitadel client identity administration does, so it shares that
@@ -270,7 +270,7 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 
 // databaseRepositories bundles every repository registerDatabaseRoutes wires,
 // so registration reads as what each route needs rather than as 12 repeated
-// repository.NewXRepository(txManager) calls (#1302).
+// repository.NewXRepository(txManager) calls.
 type databaseRepositories struct {
 	reviews                *repository.ReviewRepository
 	reviewReviewers        *repository.ReviewReviewerRepository
@@ -318,12 +318,12 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 // threaded through only for the routes that need a per-caller entitlement
 // check beyond the route-level TenantUser/TenantAdmin gate already enforced
 // by the outer middleware -- today just the MCP token mint route's erun:admin
-// check (erun#1891). It returns the tenant repository so whoami can read the
+// check. It returns the tenant repository so whoami can read the
 // caller's own tenant name off the identical repository tenant list uses.
 func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *repository.TenantRepository {
 	repos := newDatabaseRepositories(txManager)
-	// contextCredentials resolves a placed environment's live admin token
-	// (#1112). nil without a cipher (the same precondition context
+	// contextCredentials resolves a placed environment's live admin token.
+	// nil without a cipher (the same precondition context
 	// bootstrapping itself already requires), which leaves every context
 	// reference refused at deploy time rather than silently unauthenticated —
 	// see deployexec.ResolvePlacementToken.
@@ -494,7 +494,7 @@ func registerTenantAdminRoutes(register routes.ProtectedRouteRegistrar, options 
 	routes.RegisterInviteRequestRoutes(register, inviteRequests, repos.tenants, inviteRequestService)
 }
 
-// registerIdentityAdminRoutes wires /v1/identity/* (issue #1209) when a
+// registerIdentityAdminRoutes wires /v1/identity/* when a
 // Zitadel Management API client is configured; nil leaves the routes
 // unregistered entirely, matching every other optional dependency's
 // convention in this file.
@@ -505,7 +505,7 @@ func registerIdentityAdminRoutes(register routes.ProtectedRouteRegistrar, option
 	userRepo := repository.NewUserRepository(txManager)
 	identityService := service.NewIdentityService(options.IdentityAdmin, userRepo)
 	routes.RegisterIdentityRoutes(register, options.IdentityAdmin, identityService, userRepo)
-	// Invite creation (#1483) is only meaningful when this platform enrolls
+	// Invite creation is only meaningful when this platform enrolls
 	// users through the shared Zitadel org identity administration already
 	// depends on — a platform with no IdentityAdmin has no accept path an
 	// invite could ever complete, so it shares that same optional-dependency
@@ -530,8 +530,7 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 
 // newRuntimeImageChecker wires the one published-image probe every Job that
 // runs a tenant's erun toolchain shares (deploy, stop, delete, the
-// release-queue runner) — each used to make its own image decision, and only
-// deploy fell back. It runs with the deploy Job's own pull credential, read
+// release-queue runner), so they all fall back the same way. It runs with the deploy Job's own pull credential, read
 // from the platform namespace, so a private registry namespace answers it
 // decisively instead of identically for absent and forbidden. Nil without an
 // in-cluster client to read the credential Secret with, which leaves every
@@ -597,7 +596,7 @@ func newEnvironmentLifecycle(options HandlerOptions, environments *repository.En
 	return lifecycle
 }
 
-// newEnvironmentDeleter wires live delete (#1140): the same stop/delete
+// newEnvironmentDeleter wires live delete: the same stop/delete
 // executor newEnvironmentLifecycle wraps, but run inside a durable DBOS
 // workflow so a control-plane restart resumes an in-flight delete rather than
 // leaving the environment stranded in `deleting`. nil under the same

@@ -40,12 +40,12 @@ type mcpPortResolver func(tenant, environment string) int
 type mcpReachabilityProber func(port int) bool
 
 // mcpEnvTypeResolver reports an environment's resolved type (an
-// eruncommon.EnvironmentType constant, or its zero value when the environment
+// config.EnvironmentType constant, or its zero value when the environment
 // no longer resolves), so the builder can tell an environment that has no MCP
 // edge AT ALL from one whose edge merely failed to answer. A host environment
 // is the former: it has no pod, so nothing runs the erun MCP edge for it and no
 // port-forward can ever reach one. A seam rather than a field on
-// eruncommon.OrchestratorEnvConfig, which records where an orchestrator reviews
+// config.OrchestratorEnvConfig, which records where an orchestrator reviews
 // an environment, not what the environment is.
 type mcpEnvTypeResolver func(tenant, environment string) configpkg.EnvironmentType
 
@@ -53,7 +53,7 @@ type mcpEnvTypeResolver func(tenant, environment string) configpkg.EnvironmentTy
 // entry, and why. Carried out of the builder rather than dropped: an
 // orchestrator is told by its own operating contract to know which environments
 // are its own, so an environment silently missing from its toolset is a
-// falsehood it cannot detect from the inside (#1185).
+// falsehood it cannot detect from the inside.
 type orchestratorMCPSkip struct {
 	Label  string
 	Reason string
@@ -103,7 +103,7 @@ func splitOrchestratorMCPHostSkips(skipped []orchestratorMCPSkip) (hostEnvs, pro
 // orchestratorMCPUnreachable is one linked environment that got a wired MCP
 // server entry — it is NOT skipped — even though its edge did not answer a
 // quick probe at launch time. Reported separately from orchestratorMCPSkip
-// because the environment IS wired: erun-common/mcp_proxy.go already recovers
+// because the environment IS wired: infra/mcp's proxy already recovers
 // a transient edge outage per request ("a transient edge outage must not kill
 // the session"), so dropping the environment here would strand it for the
 // whole session even after the edge recovers. What is missing without this is
@@ -125,9 +125,9 @@ type orchestratorMCPWiredEnv struct {
 // "<tenant>-<environment>". An env is skipped (not an error) when its MCP port
 // does not resolve — that env is not wired for MCP at all — so an orchestrator
 // still gets the envs it can reach. Every skip is returned alongside, so a
-// PARTIAL skip is reportable: previously only the all-envs-failed case produced
-// any signal, and a session missing one of two environments looked identical to
-// a healthy one until its first call into the missing env.
+// PARTIAL skip is reportable: otherwise a session missing one of two
+// environments looks identical to a healthy one until its first call into the
+// missing env.
 //
 // An env whose port resolves but whose edge does not answer a quick probe is
 // wired anyway and reported as unreachable rather than skipped — see

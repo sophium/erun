@@ -15,7 +15,7 @@ import (
 //
 // It drives the dialog's save path (updatedEnvironmentConfig, the function
 // SaveEnvironmentConfig persists through) over the fixture set declared in
-// erun-common/local_repo_path_test.go and asserts the dialog's verdict equals
+// erun-common/base/config/local_repo_path_test.go and asserts the dialog's verdict equals
 // the shared definition's verdict for every one of them — so the two sides are
 // compared to each other, not to a second copy of the expectations.
 func TestManageDialogRepoPathMatchesInit(t *testing.T) {

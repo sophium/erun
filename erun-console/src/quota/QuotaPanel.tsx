@@ -66,7 +66,7 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): s
 // Wired to shell/ScopeSelector.tsx: an OPERATIONS caller pointed at another
 // tenant sees that tenant's caps here too, named by the badge below rather
 // than rendering unlabeled -- otherwise a scoped read is indistinguishable
-// from the caller's own (erun#1816).
+// from the caller's own.
 export function QuotaPanel({
   token,
   tenants = [],

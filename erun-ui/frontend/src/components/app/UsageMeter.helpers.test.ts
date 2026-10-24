@@ -4,8 +4,7 @@ import { test } from 'vitest';
 
 import { usageSeverity } from './UsageMeter.helpers';
 
-// The fail-soft contract, which is the whole point of #1336: a reading that was
-// never taken must not be rendered as a measurement. The tempting naive
+// The fail-soft contract: a reading that was never taken must not be rendered as a measurement. The tempting naive
 // implementation -- `(percent ?? 0) >= warnAt` -- passes every case below
 // EXCEPT the unmeasured ones, where it silently asserts "0%, comfortably fine"
 // about a field the reader could not read at all.

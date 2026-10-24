@@ -1,8 +1,6 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// erun#1217: first run had no in-app route to documentation at all — no
-// BrowserOpenURL call anywhere in the frontend, no native menu in Go. This
-// locks the new sidebar affordance. It goes through the Wails runtime
+// This locks the sidebar's in-app route to documentation. It goes through the Wails runtime
 // binding (see documentationThunks.ts) rather than a plain window.open, and
 // the headless harness's shim maps that binding to a real window.open — the
 // desktop's native "open in a real external browser" behavior itself is not

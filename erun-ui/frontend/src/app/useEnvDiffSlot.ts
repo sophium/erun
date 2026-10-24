@@ -5,7 +5,7 @@ import { emptyEnvDiffState, type EnvDiffState } from './slices/reviewSlice';
 // slot when the environment has not been fetched yet. diffByEnv is deliberately
 // sparse, so without this every consumer repeats the same fallbacks -- which is
 // both noise and, in ReviewRangeControl, enough branching to blow the module's
-// complexity budget (#1178).
+// complexity budget.
 export function useEnvDiffSlot(envKey: string): EnvDiffState {
   return useAppSelector((state) => state.review.diffByEnv[envKey] ?? emptyEnvDiffState);
 }

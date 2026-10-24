@@ -18,16 +18,14 @@ func parseKubernetesQuantityOrFatal(t *testing.T, parse func(string) (int64, err
 	return amount
 }
 
-// TestDefaultTenantQuotaAdmitsTheStockRuntimePod pins the invariant #1061 was
-// about: an unconfigured tenant's default quota must be enough to admit the
+// TestDefaultTenantQuotaAdmitsTheStockRuntimePod pins that an unconfigured tenant's default quota must be enough to admit the
 // erun-devops chart's own runtime pod, summed across BOTH its containers
 // (a Kubernetes ResourceQuota counts every container in the pod, not just the
 // first), plus its PVCs. It recomputes the expected floor independently from
-// the individual eruncommon constants — not by calling
-// eruncommon.MinimumRuntimeNamespaceQuota again, which DefaultMaxCPUMillicores
+// the individual config constants — not by calling
+// config.MinimumRuntimeNamespaceQuota again, which DefaultMaxCPUMillicores
 // et al. already derive from — so a bug in that derivation (e.g. forgetting
-// the dind sidecar, as #1061 was) fails this test instead of passing by
-// construction.
+// the dind sidecar) fails this test instead of passing by construction.
 func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
 	devopsCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimePodCPU)
 	dindCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimeDindCPU)
@@ -55,7 +53,7 @@ func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
 }
 
 // TestDefaultTenantQuotaAggregateBudgetAccommodatesTheDefaultEnvironmentCount
-// pins #1113's derivation: a tenant with no quota row set can still reach its
+// pins the derivation: a tenant with no quota row set can still reach its
 // default environment-count cap (DefaultMaxEnvironments) at the default
 // per-environment size without also hitting the aggregate ceiling first —
 // the aggregate defaults are DefaultMaxEnvironments * the per-environment

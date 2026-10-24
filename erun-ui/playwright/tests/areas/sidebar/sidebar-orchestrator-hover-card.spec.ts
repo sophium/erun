@@ -3,19 +3,14 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// #1343: hovering an orchestrator row produced nothing. The only hover surface
-// in the ERun section was an IconTooltip on the busy spinner, which exists only
-// WHILE the orchestrator is spinning — so an idle orchestrator, the common case,
-// had no hover target at all, and a working one offered a tooltip on a 12px icon
-// rather than on the row the operator is pointing at. The environment row has
-// had a full hover card since EnvHoverCard.
+// Hovering an orchestrator row raises a hover card, like the environment row's
+// EnvHoverCard. The busy spinner's IconTooltip exists only WHILE the
+// orchestrator is spinning, so it cannot serve an idle orchestrator, the
+// common case.
 //
-// #1228 had also aimed at "says what it is working on and for how long" and
-// shipped `${name} is working` — the fact the spinner already conveys — because
-// orchestratorInfo carried no timestamp to spend. It does now (`busyAtUnix`).
-//
-// The card's mere existence is the regression guard: against the old code every
-// assertion here fails, because no dialog is rendered on hover at all.
+// The card says what the orchestrator is working on and for how long, from
+// orchestratorInfo's `busyAtUnix`, not just `${name} is working` — the fact
+// the spinner already conveys.
 
 const RUNNING_SESSION_ID = 4242;
 
@@ -57,7 +52,7 @@ function card(page: Page) {
 test.describe('orchestrator row hover card (#1343)', () => {
   test('a working orchestrator names what it is doing and for how long', async ({ app, page }) => {
     // 4m12s before now, so the label must render a real duration rather than
-    // the bare "is working" #1228 shipped.
+    // a bare "is working".
     const busyAtUnix = Math.floor(Date.now() / 1000) - 252;
     await stubOrchestratorList(
       page,
@@ -76,7 +71,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Running');
-    // The half #1228 promised and did not deliver.
+    // How long it has been working.
     await expect(card(page)).toContainText('Working, for 4m');
     // Linked scope, which the row itself has never shown.
     await expect(card(page)).toContainText('acme / build');
@@ -102,9 +97,8 @@ test.describe('orchestrator row hover card (#1343)', () => {
     app,
     page,
   }) => {
-    // The point of the issue: before this, an orchestrator that was not
-    // spinning had no hover surface whatsoever, because the only one hung off
-    // the spinner.
+    // An orchestrator that is not spinning still needs a hover surface; the
+    // spinner's own tooltip cannot provide one.
     await stubOrchestratorList(page, snapshot({ status: 'stopped', sessionId: 0 }));
     await app.reboot();
 

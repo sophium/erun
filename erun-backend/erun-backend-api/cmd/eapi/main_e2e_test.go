@@ -40,11 +40,9 @@ func seedOperationsTenant(t *testing.T, db *sql.DB, name string) string {
 	return tenantID
 }
 
-// TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch is the
-// startup report for erun#1480: a platform whose declared ERUN_TENANT
-// disagrees with the name its own OPERATIONS tenant actually bootstrapped
-// under says so plainly in the identity status line, rather than leaving the
-// mismatch discoverable only by querying the database directly.
+// TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch checks that a
+// platform whose declared ERUN_TENANT disagrees with the name its OPERATIONS
+// tenant bootstrapped under says so in the identity status line.
 func TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch(t *testing.T) {
 	db := startupIdentityDatabase(t)
 	seedOperationsTenant(t, db, "operations-legacy-test")

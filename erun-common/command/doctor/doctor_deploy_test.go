@@ -57,10 +57,9 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 			wantOK:     true,
 		},
 		{
-			// This is the defect erun#1659 exists to fix: a status string
-			// that would otherwise fall into the "failed" default arm must
-			// not recommend a rollback when the read itself is the thing
-			// that failed, not the release.
+			// A status string that would otherwise fall into the "failed"
+			// default arm must not recommend a rollback when the read itself is
+			// the thing that failed, not the release.
 			name:          "unreadable release offers nothing even though the status text looks like a failure",
 			helmStatus:    "Error from server (Forbidden): secrets is forbidden: User \"jane\" cannot list resource \"secrets\"",
 			helmReadError: `observe: not authorized to read helm release "team-devops" in namespace "team-dev"`,
@@ -102,11 +101,11 @@ func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Setenv("ERUN_HELM_BIN", path)
 }
 
-// TestRunDeployDiagnosisRecordsHelmReadError is the end-to-end half of
-// erun#1659's fix: a failed helm read (here, an RBAC denial reading the
-// release Secrets) must populate HelmReadError, and that alone must be enough
-// for RecommendedDeployRecovery to refuse a destructive recovery -- without
-// this repo adding another strings.Contains arm for the RBAC wording.
+// TestRunDeployDiagnosisRecordsHelmReadError: a failed helm read (here, an RBAC
+// denial reading the release Secrets) must populate HelmReadError, and that
+// alone must be enough for RecommendedDeployRecovery to refuse a destructive
+// recovery -- without this repo adding another strings.Contains arm for the
+// RBAC wording.
 func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
@@ -142,10 +141,10 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisPopulatesUnderDryRun is the regression test for
-// erun#2403: --dry-run scopes itself to mutations, and this diagnosis is
-// strictly read-only, so it must populate HelmStatus/Pods under --dry-run
-// exactly as it does on a real run instead of returning an empty result.
+// TestRunDeployDiagnosisPopulatesUnderDryRun: --dry-run scopes itself to
+// mutations, and this diagnosis is strictly read-only, so it must populate
+// HelmStatus/Pods under --dry-run exactly as it does on a real run instead of
+// returning an empty result.
 func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
 	writeKubectlStub(t, "", 0)
@@ -157,8 +156,8 @@ func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback is the test that
-// stops erun#1659's fix from regressing into "never recommend anything":
+// TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback keeps the
+// unreadable-release guard from turning into "never recommend anything":
 // `helm status` exits 0 for a release that exists but genuinely failed, so
 // HelmReadError must stay empty and the rollback recommendation must survive.
 func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
@@ -176,12 +175,11 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable is the regression
-// for an unreachable cluster: a helm status read that fails with the cluster's
-// own unreachable-API-server signal must set ClusterUnreachable and skip the
-// second kubectl probe entirely, rather than paying its own timeout to
-// rediscover the same fact. kubectl is pointed at a stub that fails the test
-// if ever invoked, so a regression that re-adds the probe fails loudly.
+// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable: a helm status
+// read that fails with the cluster's own unreachable-API-server signal must set
+// ClusterUnreachable and skip the second kubectl probe entirely, rather than
+// paying its own timeout to rediscover the same fact. kubectl is pointed at a
+// stub that fails the test if ever invoked.
 func TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version": dial tcp 198.51.100.10:6443: i/o timeout`, 1)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))

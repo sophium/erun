@@ -14,7 +14,7 @@ import (
 // relative to this CLI.
 type desktopAppLayout struct {
 	// Launch is what a launch has to name: on macOS the .app bundle, which is
-	// the shape eruncommon.DesktopAppCommand opens as a fresh instance, and
+	// the shape core.DesktopAppCommand opens as a fresh instance, and
 	// elsewhere the binary itself.
 	Launch string
 	// Bundle marks an .app directory. It is both the reason Binary sits inside

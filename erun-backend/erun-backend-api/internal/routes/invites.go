@@ -14,9 +14,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// inviteTTL is the fixed lifetime every invite is minted with (#1483 item 7:
-// invites expire by default). Not yet operator-configurable — a fixed,
-// honest default is simpler than a per-invite input nobody has asked for.
+// inviteTTL is the fixed lifetime every invite is minted with, so invites
+// expire by default. Deliberately not operator-configurable.
 const inviteTTL = 7 * 24 * time.Hour
 
 // InviteStore is the persistence dependency for POST/GET/DELETE /v1/invites.
@@ -31,8 +30,8 @@ type InviteRoutes struct {
 	invites InviteStore
 }
 
-// RegisterInviteRoutes registers the authenticated half of #1483's
-// invite-only registration model: an enrolled user creates, lists, and
+// RegisterInviteRoutes registers the authenticated half of the invite-only
+// registration model: an enrolled user creates, lists, and
 // revokes invites for a tenant they can access. Unlike identity
 // administration (which is restricted to an OPERATIONS tenant, since it
 // manages the platform's shared IdP org settings), invite creation is open
@@ -40,8 +39,7 @@ type InviteRoutes struct {
 // resolveTargetTenant already gates the one case that needs to stay
 // OPERATIONS-only: minting an invite for a tenant other than the caller's
 // own, which is how an invite to an OPERATIONS tenant (a cross-tenant grant
-// by URL) gets its own explicit gate today, ahead of #1481's finer-grained
-// permission.
+// by URL) gets its own explicit gate.
 func RegisterInviteRoutes(register ProtectedRouteRegistrar, invites InviteStore) {
 	routes := InviteRoutes{invites: invites}
 	register(http.MethodPost, "/v1/invites", http.HandlerFunc(routes.createInvite))
@@ -180,8 +178,8 @@ func RegisterInviteAcceptRoute(mux *http.ServeMux, accepter InviteAccepter) {
 	})
 }
 
-// writeInviteAcceptError distinguishes the token-shaped failures #1483 asks
-// to report plainly (not found, expired, already consumed) from a downstream
+// writeInviteAcceptError distinguishes the token-shaped failures that must be
+// reported plainly (not found, expired, already consumed) from a downstream
 // Zitadel failure, which forwards the IdP's own real status and message the
 // same way writeIdentityAdminError does.
 func writeInviteAcceptError(w http.ResponseWriter, err error) {

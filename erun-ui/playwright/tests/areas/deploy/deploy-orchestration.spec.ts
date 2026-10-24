@@ -8,7 +8,7 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 // The backend signals that orchestrated deploy with orchestrated=true, and the
 // desktop shows no foreground shell because progress lives in the activity
 // queue. The plain Deploy button, by contrast, installs an existing version by
-// reference and never builds (#739).
+// reference and never builds.
 //
 // This spec locks only the reachable, deterministic half: the create-version
 // action on the seeded local-agent env returns orchestrated=true. The env type

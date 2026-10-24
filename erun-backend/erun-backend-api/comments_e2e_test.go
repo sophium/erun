@@ -106,10 +106,9 @@ func (f commentsFixture) createReply(ctx context.Context, parentCommentID, fileP
 	return f.comments.Create(ctx, prepared)
 }
 
-// TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed is the regression
-// from #1198: a comment's identity used to be (commit, line) alone, so a
-// second root comment on line 42 of a different file collided with the
-// first. Both must now succeed because file_path is part of the key.
+// TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed checks that
+// file_path is part of a comment's identity, so root comments on the same
+// line of different files do not collide.
 func TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -124,8 +123,8 @@ func TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed(t *testing.T) {
 	}
 }
 
-// TestCommentReplyRecordsOwnAuthor proves a reply is no longer authorless:
-// the child's creator_user_id must be the replying user, not empty.
+// TestCommentReplyRecordsOwnAuthor proves a reply's creator_user_id is the
+// replying user, not empty.
 func TestCommentReplyRecordsOwnAuthor(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -194,7 +193,7 @@ func TestCommentCreateRequiresNonEmptyBody(t *testing.T) {
 }
 
 // commentsTenantFixture seeds one tenant of tenantType with one user and one
-// review, for the cross-tenant scoping regression test below, which needs
+// review, for the cross-tenant scoping test below, which needs
 // two independent tenants rather than commentsDatabase's single shared one.
 func commentsTenantFixture(t *testing.T, db *sql.DB, label, tenantType string) (ctx context.Context, comments *repository.CommentRepository, reviewID string) {
 	t.Helper()

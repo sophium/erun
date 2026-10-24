@@ -103,7 +103,7 @@ func testActivityLeaseTakeRequiresAName(t *testing.T) {
 }
 
 func testActivityLeaseTakeExclusiveDryRun(t *testing.T) {
-	// erun#1245: the dry-run trace must show the exclusive claim and its
+	// The dry-run trace must show the exclusive claim and its
 	// resolved scope, since that is the decision the command would make.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -118,8 +118,8 @@ func testActivityLeaseTakeExclusiveDryRun(t *testing.T) {
 }
 
 func testActivityLeaseTakeExclusiveRefusesASecondHolderAndNamesIt(t *testing.T) {
-	// The collision #1245 exists to close: two agent jobs in the same
-	// worktree. The second exclusive take must fail and name the first.
+	// The collision exclusive mode exists to close: two agent jobs in the
+	// same worktree. The second exclusive take must fail and name the first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	first := erun.Run(t, []string{

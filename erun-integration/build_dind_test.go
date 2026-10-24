@@ -23,7 +23,7 @@ func buildDindScenarios(t *testing.T) {
 }
 
 func testBuildDryRunDockerfileDindArgsResolveConfiguredRuntimeDindPod(t *testing.T) {
-	// erun#2081: a Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
+	// A Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
 	// DIND_MEMORY_LIMIT_MIB (the erun-devops Dockerfile's own in-build gate
 	// sizing) must have those ARGs fed from the *building* environment's
 	// actual configured erun-dind sidecar resources
@@ -49,9 +49,8 @@ func testBuildDryRunDockerfileDindArgsResolveConfiguredRuntimeDindPod(t *testing
 }
 
 func testBuildDryRunDockerfileDindArgsDefaultToConservativeConstantWhenUnconfigured(t *testing.T) {
-	// erun#2081: an environment with no configured runtimedindpod must not
-	// fall back to the host node's real CPU/memory capacity (the bug that
-	// issue is about) -- it must fall back to the same fixed constant the
+	// An environment with no configured runtimedindpod must not fall back
+	// to the host node's real CPU/memory capacity -- it must fall back to the same fixed constant the
 	// sidecar's own chart default and the Dockerfile's own ARG default
 	// use, regardless of how large the machine actually running this test
 	// is. The constant's own value is erun-common's rule to decide (it is
@@ -75,7 +74,7 @@ func testBuildDryRunDockerfileDindArgsDefaultToConservativeConstantWhenUnconfigu
 }
 
 func testBuildDryRunDockerfileWithoutDindArgsIsUnaffected(t *testing.T) {
-	// erun#2081: a Dockerfile that declares neither ARG must not get either
+	// A Dockerfile that declares neither ARG must not get either
 	// build-arg, even when the building environment has a configured
 	// runtimedindpod -- the regex-gated detection in
 	// dockerfileConsumesDindCPULimit/dockerfileConsumesDindMemoryLimit
@@ -128,7 +127,7 @@ func testBuildDryRunDockerfileCgroupParentAppliesInsideInjectedRuntimePod(t *tes
 }
 
 func testBuildDryRunDockerfileCgroupParentAbsentOutsideInjectedRuntimePod(t *testing.T) {
-	// erun#2255: a bare host build (no ERUN_TENANT/ERUN_ENVIRONMENT injected)
+	// A bare host build (no ERUN_TENANT/ERUN_ENVIRONMENT injected)
 	// has no dind sidecar limit to escape, so it must not carry
 	// --cgroup-parent -- forcing one would throttle a developer's own
 	// machine for a problem that does not exist there.

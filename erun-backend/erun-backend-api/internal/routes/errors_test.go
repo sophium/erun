@@ -16,7 +16,7 @@ import (
 
 // captureLog redirects the standard logger for the duration of fn and
 // returns what it wrote, so a test can assert on the one place an operator
-// would see why a request 500'd (erun#1722).
+// would see why a request 500'd.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -82,7 +82,7 @@ func TestWriteRepositoryErrorMapsEverySentinelToACode(t *testing.T) {
 	}
 }
 
-// TestWriteRepositoryErrorLogsRouteActorAndErrorOn500 is erun#1722's
+// TestWriteRepositoryErrorLogsRouteActorAndErrorOn500 locks the
 // observability requirement: a 500 on an authenticated route must leave a
 // server-side trace naming the route, the actor, and the real underlying
 // error — none of which reaches the client-facing response body.

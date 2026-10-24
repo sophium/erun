@@ -117,8 +117,8 @@ func hostTypeEnvironmentStore(localPath string) stubUIStore {
 // same "reading the diff works" contract TestLoadHostDiffReadsHostWorktreeWithoutMCP
 // proves for a remote-agent's synced mirror, but for a host env: no SSHD, no
 // workspace sync, no pod at all — just the local directory itself, resolved
-// entirely through EnvConfig.RemoteWorktree() correctly answering false for
-// host (erun-common/config.go).
+// entirely through config.EnvConfig.RemoteWorktree() correctly answering
+// false for host.
 func TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment(t *testing.T) {
 	local := t.TempDir()
 	store := hostTypeEnvironmentStore(local)

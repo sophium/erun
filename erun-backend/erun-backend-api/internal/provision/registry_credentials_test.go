@@ -86,7 +86,7 @@ func captureLog(t *testing.T, fn func()) string {
 }
 
 func TestKubeImagePullSecretCredentialsLogsAnUnreadableSecretOnce(t *testing.T) {
-	// missing-role stands in for #1058: the Secret exists but the
+	// missing-role stands in for the case where the Secret exists but the
 	// ServiceAccount's Role does not grant "get" on it, so the fake client
 	// (which has no RBAC of its own) is instead given no such secret at all --
 	// the same "cannot read it" outcome the checker sees either way.

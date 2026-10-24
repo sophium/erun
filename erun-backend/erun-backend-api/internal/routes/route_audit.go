@@ -2,7 +2,7 @@ package routes
 
 // InternalAPIRoutes declares API routes that need no operator entry point in
 // erun-ui/frontend or erun-console, using the same explicit-marker
-// discipline eruncommon.MCPToolDescriptor's AgentFacing field and
+// discipline mcptools.MCPToolDescriptor's AgentFacing field and
 // erun-cli/cmd/command_tree.go's cliOnlyAgentFacingCommands already use:
 // silence must never be how a route opts out of the desktop-surface gate
 // (erun-integration/AGENTS.md § "Desktop-surface gate"). Keyed by
@@ -25,7 +25,7 @@ var InternalAPIRoutes = map[string]bool{
 	// desktop surface, which is what actually needs one.
 	"POST /v1/reviews/{review_id}/builds": true,
 	// Same self-report shape as the route above, for a build with no review
-	// attached -- an ordinary `erun build` run in an environment (erun#1954).
+	// attached -- an ordinary `erun build` run in an environment.
 	// GET /v1/builds is not listed here: it has a real operator surface (the
 	// desktop tenant dashboard's Builds tab, extended to include unattached
 	// builds alongside review builds -- see erun-ui/tenant_dashboard.go).
@@ -52,8 +52,7 @@ var InternalAPIRoutes = map[string]bool{
 	// The read half of that log is a resume position, not a report: a client
 	// reconnecting to a stream hands back the cursor it last reached and gets
 	// the backlog it missed. Its operator-facing form is a live-updating view
-	// this change does not build (that is client work, and the console has no
-	// live-update consumer of any kind yet), so it is recorded here as a
+	// the console does not have yet, so it is recorded here as a
 	// transport endpoint driven by a client's own reconnect loop rather than
 	// left unclassified -- but it is not exempted as "nobody has needed a
 	// surface": a console live view is the reader it is ultimately for.
@@ -68,15 +67,11 @@ var InternalAPIRoutes = map[string]bool{
 	// has no tenant-scoped job ids to filter by, not by giving an operator a
 	// capability the flat route does not already have.
 	"GET /v1/environments/{environment_id}/jobs": true,
-	// The definition upload used to be CLI-only, listed here on the grounds
-	// that nothing an operator clicks triggers it. The desktop now owns it
-	// from both ends -- the config watcher uploads an environment whose
-	// settings moved, and the hosted-marker panel's own control is the
-	// recovery action when that could not reach the platform -- so it is
-	// classified normally and bound through apiRouteWailsBindings below. The
-	// write->event->write loop that kept it off the desktop is closed by an
-	// origin filter and a definition digest (erun-ui/AGENTS.md
-	// § "Hosted definition transfer"), not by withholding the route.
+	// The definition upload is not listed: the desktop owns it (config
+	// watcher plus the hosted-marker panel's recovery control), bound through
+	// apiRouteWailsBindings below. Its write->event->write loop is closed by
+	// an origin filter and a definition digest (erun-ui/AGENTS.md
+	// § "Hosted definition transfer").
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's
@@ -89,45 +84,28 @@ var InternalAPIRoutes = map[string]bool{
 	"PATCH /v1/tenants/reconcile-bootstrap-name": true,
 	// erun platform provision's own preview: it renders a plan for a
 	// standalone new-cluster bootstrap (Context block) that the desktop's
-	// environment form has never exposed a control for. The desktop's own
-	// register-preview action used to call this route too (with only the
-	// name/type/kubernetesContext fields, never the Context block), but that
-	// meant the plan it rendered couldn't express a contextId or
-	// runtimeVersion the way a real register call could -- a preview that
-	// cannot model what submit does. It now previews through
-	// POST /v1/environments with preview:true instead (the exact route and
-	// body Register submits), so this route stays a real, exercised CLI-only
-	// preview with no separate desktop surface to keep in sync.
+	// environment form never exposes. The desktop previews a register through
+	// POST /v1/environments with preview:true (the exact route and body
+	// Register submits), so this stays a CLI-only preview.
 	"POST /v1/provision": true,
 }
 
-// KnownUnsurfacedRoutes is a record of known gaps, not a design decision: it
-// started as the 33 routes that had no operator entry point in either
-// erun-ui/frontend/src or erun-console/src the day the desktop-surface gate
-// was taught to see API-only capabilities, kept here so that day's already-red
-// gate could still be adopted without either declaring most of them
-// permanently internal (most need a real surface, not an exemption) or
-// weakening the gate itself. It is the opposite claim from InternalAPIRoutes
+// KnownUnsurfacedRoutes is a record of known gaps, not a design decision:
+// routes with no operator entry point in either erun-ui/frontend/src or
+// erun-console/src that need a real surface rather than an exemption. It is
+// the opposite claim from InternalAPIRoutes
 // above: an entry here asserts nothing about whether the route deserves a
 // surface, only that it does not have one yet.
 //
-// This map is the tracker of record for that remaining work, and its entries
-// are the whole answer to "is this still open?": every one of them is work
-// nobody has done yet -- not a settled decision, and not deferred to a
-// document or an issue that can move on without it. Nothing here cites a
-// tracking issue, deliberately: root AGENTS.md § "Code Comments" keeps
-// tracker references out of source (enforced by
-// erun-integration/issue_reference_test.go), and the one indirect pointer
-// this map used to carry -- a document naming the issue that tracked it --
-// was followed to a closed issue while entries remained here, which taught a
-// reader nothing about whether the rest was abandoned or forgotten. What
-// keeps the list honest is the shrink-only enforcement
+// This map is the tracker of record for that remaining work: every entry is
+// work nobody has done yet, not a settled decision. What keeps the list
+// honest is the shrink-only enforcement
 // (desktopsurface.FindStaleBaselineEntries, erun-integration/AGENTS.md
 // § "Desktop-surface gate" § "Baseline for pre-existing gaps"): a route that
 // gains a real reference in either tree must be removed from this map in the
 // same change, or the gate fails. That check reads the routes the API
 // registers, so it catches an entry whose gap has since been closed, but not
-// one whose route no longer exists at all: remove an entry here by hand when
+// one whose route was deleted: remove an entry here by hand when
 // the route itself goes. Closing one out means giving it that surface, or
 // moving it to InternalAPIRoutes above with the reason it needs none.
 //

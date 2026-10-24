@@ -141,7 +141,7 @@ type uiRuntimeUsage struct {
 	// ExcludesBuilds marks an environment whose runtime pod carries the
 	// erun-dind sidecar builds actually run in: CPU and Memory above are the
 	// runtime container's alone and can never see a build. Mirrors
-	// eruncommon.RuntimeUsage.ExcludesBuilds.
+	// config.RuntimeUsage.ExcludesBuilds.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
 	// Dind is the sidecar's own reading, and is what makes a build-capable
 	// environment's CPU legible: a release lane waiting on bounded `erun exec
@@ -157,12 +157,12 @@ type uiRuntimeUsage struct {
 	// declared resources.requests, which no cgroup file records. It is what the
 	// limits above must be read against: `Mem 0% of 27.0GiB` measures a ceiling
 	// that reserves nothing, so the card states the reservation beside it.
-	// Mirrors eruncommon.RuntimeUsage.Requests; nil when nothing was read, and
+	// Mirrors config.RuntimeUsage.Requests; nil when nothing was read, and
 	// carrying Unavailable (never a zero) when the pod spec could not be.
 	Requests *uiRuntimeUsageRequests `json:"requests,omitempty"`
 }
 
-// uiRuntimeUsageRequests mirrors the half of eruncommon.RuntimeUsageRequests
+// uiRuntimeUsageRequests mirrors the half of config.RuntimeUsageRequests
 // this surface renders: the runtime container's own request, which is the
 // reservation the CPU and Memory rows above are measured against, resolved here
 // rather than in the component so no frontend code has to know the chart's

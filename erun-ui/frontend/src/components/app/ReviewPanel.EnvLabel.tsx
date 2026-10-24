@@ -4,7 +4,7 @@ import type { ReviewTarget } from '@/app/selectors';
 
 // ReviewEnvLabel is the one label treatment shared by the review-layers block
 // (ReviewPanel.tsx) and the changed-files tree section (ReviewPanel.ChangedFiles.tsx)
-// for the same environment (#1314): both render this exact component when
+// for the same environment: both render this exact component when
 // more than one environment is in scope, so the two read as one group instead
 // of two independently-labelled lists. "tenant / environment" (spaced) reads
 // as the app's existing environment presentation, matching the format

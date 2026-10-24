@@ -79,8 +79,7 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 	}
 }
 
-// TestLoadStateFirstRunNeverRendersBareCLIInstruction is the red-then-green
-// regression for the first-run dead end: a genuinely fresh install (no tool
+// TestLoadStateFirstRunNeverRendersBareCLIInstruction: a genuinely fresh install (no tool
 // config at all) must resolve to the same renderable, non-nil-tenants shape
 // as "initialized with zero tenants", never a bare CLI instruction the
 // desktop cannot carry out and never a shape that crashes the frontend's
@@ -109,8 +108,7 @@ func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 	}
 }
 
-// TestLoadStateConfigCorruptedRendersDistinctFromEmptyList is the regression
-// for erun#1774: a torn/corrupt config file must not surface as "zero
+// TestLoadStateConfigCorruptedRendersDistinctFromEmptyList: a torn/corrupt config file must not surface as "zero
 // environments configured" (which the sidebar renders identically to a
 // genuinely empty install), and the raw yaml/unmarshal error text must never
 // reach the caller -- it crosses the headless HTTP bridge verbatim into a
