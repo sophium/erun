@@ -141,7 +141,11 @@ func (d decisions) declAt(file string, offset int) *declTarget {
 // visibleDir is where code in package directory from finds an object: its
 // own copy when the object is a test helper duplicated there.
 func (w *world) visibleDir(key, from string, d decisions) string {
-	if decl := d.declAt(w.objects[key].file, offsetOf(key)); decl != nil && decl.dups[from] {
+	o := w.objects[key]
+	if decl := d.declAt(o.file, offsetOf(key)); decl != nil && decl.dups[from] {
+		return from
+	}
+	if strings.HasSuffix(o.file, "_test.go") && w.alreadyDeclares(from, o) {
 		return from
 	}
 	return d.dir[key]

@@ -428,3 +428,26 @@ func TestApplyGivesASplitOutsideTheBaseModuleItsSuiteFromTheNamedSeam(t *testing
 	}
 	goIn(t, dir, "test", "./...")
 }
+
+// TestApplyResolvesAMovedTestToTheHelperItsNewPackageDeclares pins a test
+// moving beside a helper of the same name its new package already declares:
+// it uses that helper, so no import of the package it left is needed.
+func TestApplyResolvesAMovedTestToTheHelperItsNewPackageDeclares(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"a.go":               "package fixture\n\nfunc A() int { return 1 }\n",
+		"helper_test.go":     "package fixture\n\nfunc helper() int { return 2 }\n",
+		"stays_test.go":      "package fixture\n\nimport \"testing\"\n\nfunc TestStays(t *testing.T) {\n\tif A()+helper() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"moves_test.go":      "package fixture\n\nimport \"testing\"\n\nfunc TestMoves(t *testing.T) {\n\tif helper() != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/sub.go":         "package sub\n\nfunc Sub() int { return 0 }\n",
+		"sub/helper_test.go": "package sub\n\nfunc helper() int { return 2 }\n",
+		"packages.map":       "sub moves_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if strings.Contains(readFile(t, filepath.Join(dir, "sub", "moves_test.go")), "example.com/fixture\"") {
+		t.Error("the moved test must use its new package's own helper, not import the old package")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
