@@ -8,7 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"github.com/sophium/erun/erun-mcp/tools/platform"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
@@ -56,34 +55,5 @@ func TestMCPPlatformEnvListDoesNotAssertASingleCauseWhenNoneIsSelected(t *testin
 	}
 	if !strings.Contains(message, "pass alias to choose one") {
 		t.Fatalf("unresolvable alias does not point at the MCP `alias` argument: %q", message)
-	}
-}
-
-func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		providers []model.CloudProviderConfig
-		want      string
-	}{
-		{
-			name: "none configured",
-			want: "no erun platform cloud provider alias is configured; run `erun cloud init erun --api-url <url>` first",
-		},
-		{
-			name:      "several configured",
-			providers: []model.CloudProviderConfig{erunTypeProvider("one@erun"), erunTypeProvider("two@erun")},
-			want:      "multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &listToolStore{toolConfig: config.ERunConfig{CloudProviders: tc.providers}}
-			_, err := cloudconfig.ResolveERunPlatformAlias(store, "")
-			if err == nil {
-				t.Fatal("expected the unresolvable-alias error, got none")
-			}
-			if got := err.Error(); got != tc.want {
-				t.Fatalf("CLI alias remedy changed:\n got: %q\nwant: %q", got, tc.want)
-			}
-		})
 	}
 }

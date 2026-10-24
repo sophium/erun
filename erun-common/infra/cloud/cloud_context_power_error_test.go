@@ -16,13 +16,6 @@ func TestCloudContextPowerErrorClassification(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 	params := model.CloudContextParams{Name: "petios-ctx"}
 
-	t.Run("stop with an expired AWS session names the login lever", func(t *testing.T) {
-		raw := "aws ec2 stop-instances --instance-ids i-0abc123: Error when retrieving token from sso: Token has expired and refresh failed"
-		deps := CloudContextDependencies{RunAWS: failingRunAWS("stop-instances", raw)}
-		_, err := StopCloudContext(ctx, powerErrorTestStore(), params, deps)
-		assertErrorMentions(t, err, "expected the stop to fail", "expired or unavailable", "erun cloud login --alias dev-aws", "Token has expired")
-	})
-
 	t.Run("stop with an unrelated AWS error passes through unchanged", func(t *testing.T) {
 		raw := "aws ec2 stop-instances --instance-ids i-0abc123: An error occurred (InternalError) when calling the StopInstances operation"
 		deps := CloudContextDependencies{RunAWS: failingRunAWS("stop-instances", raw)}

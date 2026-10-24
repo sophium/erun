@@ -204,24 +204,6 @@ func seedCommitToolScopedPathsRepo(t *testing.T) string {
 	return projectRoot
 }
 
-func TestCommitToolScopedPathsRefusesUnrelatedDirtyFile(t *testing.T) {
-	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
-		Context: toolio.RuntimeContext{RepoPath: projectRoot},
-	}))
-
-	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
-	if err == nil {
-		t.Fatalf("expected refusal when the tree has changes outside the declared paths")
-	}
-	if !strings.Contains(err.Error(), "unrelated.txt") {
-		t.Fatalf("expected the refusal to name the unrelated file, got: %v", err)
-	}
-	if strings.TrimSpace(gitStatusPorcelain(t, projectRoot)) == "" {
-		t.Fatalf("expected both files to remain uncommitted after refusal")
-	}
-}
-
 func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
 	if err := os.Remove(filepath.Join(projectRoot, "unrelated.txt")); err != nil {

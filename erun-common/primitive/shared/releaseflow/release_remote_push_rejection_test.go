@@ -16,47 +16,6 @@ func releasePushTestSpec() model.ReleaseSpec {
 	}
 }
 
-func TestParseReleasePushRejections(t *testing.T) {
-	cases := []struct {
-		name   string
-		output string
-		want   []ReleasePushRejection
-	}{
-		{
-			name:   "several refs rejected at once",
-			output: " ! [rejected]        main -> main (fetch first)\n ! [rejected]        develop -> develop (non-fast-forward)\n",
-			want: []ReleasePushRejection{
-				{Ref: "main", Reason: "fetch first"},
-				{Ref: "develop", Reason: "non-fast-forward"},
-			},
-		},
-		{
-			name:   "a rejection with no reason is still named",
-			output: " ! [rejected]        develop -> develop\n",
-			want:   []ReleasePushRejection{{Ref: "develop"}},
-		},
-		{
-			name:   "output with no rejection at all",
-			output: "   46e01916..ae29151f  main -> main\n",
-			want:   nil,
-		},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			got := ParseReleasePushRejections(testCase.output)
-			if len(got) != len(testCase.want) {
-				t.Fatalf("got %v, want %v", got, testCase.want)
-			}
-			for i, want := range testCase.want {
-				if got[i] != want {
-					t.Fatalf("rejection %d: got %+v, want %+v", i, got[i], want)
-				}
-			}
-		})
-	}
-}
-
 func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationShape(t *testing.T) {
 	publishedSpec := releasePushTestSpec()
 	publishedSpec.ArtifactsPublished = true

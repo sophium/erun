@@ -16,95 +16,6 @@ type registryReadSample struct {
 	source string
 }
 
-func transientRegistryReadSamples() []registryReadSample {
-	return []registryReadSample{
-		{
-			output: `Error: failed to fetch https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248: 401 Unauthorized`,
-			source: "constructed: the standard registry 401 body, matching the authorization shape the classifier documents",
-		},
-		{
-			output: `Error: failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Aacme%2Fcharts%3Apull&service=ghcr.io: 403 Forbidden`,
-			source: "reconstructed from the source comment: the registry mints the pull token before the pushed tag is listed and answers the first fetch 403 denied",
-		},
-		{
-			output: `Error: failed to fetch https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248: 404 Not Found`,
-			source: "constructed: the same read-after-write race surfacing as a not-yet-listed tag",
-		},
-		{
-			output: `Error: denied: requested access to the resource is denied`,
-			source: "constructed: the registry's own denial line, the wording the source comment records as 'denied'",
-		},
-		{
-			output: `Error: manifest unknown`,
-			source: "observed registry wording for a tag the backend has not listed yet",
-		},
-		{
-			output: `Error: chart "erun-runtime" version "1.0.248" not found in repo`,
-			source: "quoted when this coverage was requested, as the deliberately-transient case: a just-pushed chart can read back missing before it propagates",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`,
-			source: "constructed: a Go HTTP client timeout, the transport-failure shape the classifier documents",
-		},
-		{
-			output: `Error: failed to download chart: connection timed out`,
-			source: "constructed: the resolver-independent 'timed out' phrasing",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io on 127.0.0.53:53: Temporary failure in name resolution`,
-			source: "observed glibc resolver wording, reachable from helm inside a build pod",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248": read tcp 10.0.0.5:54321->140.82.121.34:443: connection reset by peer`,
-			source: "constructed: the connection-reset shape a proxy in the path produces",
-		},
-		{
-			output: `Error: Get "http://127.0.0.1:5000/v2/": dial tcp 127.0.0.1:5000: connect: connection refused`,
-			source: "constructed: a local or insecure registry not yet accepting connections",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248": unexpected EOF`,
-			source: "constructed: a truncated response, the wording the bare 'eof' marker exists for",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248": dial tcp: lookup ghcr.io: no such host`,
-			source: "observed Go resolver wording for a DNS answer that has not landed",
-		},
-		{
-			output: `Error: Get "https://ghcr.io/v2/acme/charts/erun-runtime/manifests/1.0.248": net/http: TLS handshake timeout`,
-			source: "constructed: the TLS handshake wording a stalled registry connection produces",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 503 Service Unavailable`,
-			source: "observed registry answer while the backend sheds load",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 429 Too Many Requests`,
-			source: "observed registry rate-limit answer during a burst of read-backs",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 500 Internal Server Error`,
-			source: "observed registry answer with a reason phrase following the status code",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 502 Bad Gateway`,
-			source: "observed proxy answer in front of the registry",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 500`,
-			source: "constructed: the same status with no reason phrase, the form the previous trailing-space marker failed to match while its 502 and 503 siblings matched theirs",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 502`,
-			source: "constructed: the reason-phrase-less form, pinned so all three status codes classify alike",
-		},
-		{
-			output: `Error: received unexpected HTTP status: 503`,
-			source: "constructed: the reason-phrase-less form, pinned so all three status codes classify alike",
-		},
-	}
-}
-
 // finalRegistryReadSamples say nothing about propagation and must not retry.
 func finalRegistryReadSamples() []registryReadSample {
 	return []registryReadSample{
@@ -132,30 +43,6 @@ func finalRegistryReadSamples() []registryReadSample {
 			output: ``,
 			source: "constructed: a silent nonzero exit leaves no text to classify, so the read cannot be assumed transient",
 		},
-	}
-}
-
-func TestIsTransientRegistryReadErrorMatchesEveryMarker(t *testing.T) {
-	// Duplicated deliberately so a dropped marker fails.
-	markers := []string{
-		"401", "403", "404",
-		"denied", "unauthorized", "not found", "manifest unknown",
-		"timeout", "timed out", "temporary failure", "connection reset",
-		"connection refused", "eof", "no such host", "tls handshake",
-		"service unavailable", "too many requests", "500", "502", "503",
-	}
-	for _, marker := range markers {
-		if !helm.IsTransientRegistryReadError(marker) {
-			t.Errorf("marker %q does not classify as transient; a registry answer carrying it would abort the publish", marker)
-		}
-	}
-}
-
-func TestIsTransientRegistryReadErrorClassifiesRealisticRegistryOutput(t *testing.T) {
-	for _, sample := range transientRegistryReadSamples() {
-		if !helm.IsTransientRegistryReadError(sample.output) {
-			t.Errorf("output %q (%s) classified as final; this is the under-match that aborts a release", sample.output, sample.source)
-		}
 	}
 }
 

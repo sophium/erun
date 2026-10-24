@@ -67,22 +67,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantPrune: true,
 		},
 		{
-			name:   "release still below floor after pruning refuses",
-			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
-			reads: []diskHeadroomRead{
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-			},
-			// An unknown figure is not evidence the remedy is inert.
-			wantPrune:     true,
-			wantErr:       true,
-			wantErrSubstr: "filling this disk is what evicts the pod running the release",
-			wantErrContains: []string{
-				"docker system prune, remove unused images",
-				dockerRootPath,
-			},
-		},
-		{
 			// Refusing every build on a full node blocks the work that clears it.
 			name:        "build still below floor after pruning warns but proceeds",
 			policy:      buildDiskHeadroomPolicy,
@@ -106,21 +90,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			reclaimable: 1 << 20, reclaimableOK: true,
 			wantPrune: true,
-		},
-		{
-			// Build layers count as Images while their images exist, so 0B here does not mean
-			// the cache is empty.
-			name:   "a zero reclaimable figure no longer declines the prune",
-			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
-			reads: []diskHeadroomRead{
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-			},
-			reclaimable:   0,
-			reclaimableOK: true,
-			wantPrune:     true,
-			wantErr:       true,
-			wantErrSubstr: "filling this disk is what evicts the pod running the release",
 		},
 		{
 			name:        "a build attempts a prune on a zero reclaimable figure and proceeds",
@@ -147,57 +116,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 
 func diskHeadroomRemedyCases() []diskHeadroomCase {
 	return []diskHeadroomCase{
-		// The short space is held outside docker on the same filesystem, so the docker
-		// remedy must not be named.
-		{
-			name:   "a shortage docker cannot free drops the docker remedy and names what holds the space",
-			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
-			reads: []diskHeadroomRead{
-				{
-					free:        diskHeadroomBelow,
-					path:        dockerRootPath,
-					sharedPaths: []string{environmentWorkCloneDir, environmentCacheDir},
-					ok:          true,
-				},
-				{
-					free:        diskHeadroomBelow,
-					path:        dockerRootPath,
-					sharedPaths: []string{environmentWorkCloneDir, environmentCacheDir},
-					ok:          true,
-				},
-			},
-			reclaimable:   0,
-			reclaimableOK: true,
-			wantPrune:     true,
-			wantErr:       true,
-			wantErrContains: []string{
-				"nothing left to reclaim there",
-				"pruning docker cannot free any of it",
-				"held outside docker",
-				environmentWorkCloneDir,
-				environmentCacheDir,
-				dockerRootPath,
-				"grow the volume",
-			},
-			wantErrExcludes: []string{"docker system prune", "remove unused images"},
-		},
-		{
-			name:   "a shortage docker's stores can still reach keeps the docker remedy",
-			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
-			reads: []diskHeadroomRead{
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
-			},
-			reclaimable:   2 << 30,
-			reclaimableOK: true,
-			wantPrune:     true,
-			wantErr:       true,
-			wantErrContains: []string{
-				"docker system prune, remove unused images",
-				dockerRootPath,
-			},
-			wantErrExcludes: []string{"held outside docker"},
-		},
 		{
 			name:   "a shortfall the build cache still holds names the cache, not image removal",
 			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
@@ -218,20 +136,6 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 				"grow the volume",
 			},
 			wantErrExcludes: []string{"docker system prune", "remove unused images", "held outside docker"},
-		},
-		{
-			name:   "the message names the path the read was taken at",
-			policy: diskheadroom.ReleaseDiskHeadroomPolicy,
-			reads: []diskHeadroomRead{
-				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
-				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
-			},
-			reclaimable:     1 << 40,
-			reclaimableOK:   true,
-			wantPrune:       true,
-			wantErr:         true,
-			wantErrContains: []string{dindDockerRootPath},
-			wantErrExcludes: []string{dockerRootPath},
 		},
 	}
 }

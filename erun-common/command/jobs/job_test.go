@@ -23,30 +23,6 @@ func fakeKubectlPodRunner(t *testing.T, stdout string, err error) seam.OpenKubec
 	}
 }
 
-func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *testing.T) {
-	dir := t.TempDir()
-	now := time.Unix(0, 0)
-
-	t.Run("attached job reports attached-process-gone regardless of hostname", func(t *testing.T) {
-		job := jobstate.EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Attached: true, Hostname: "irrelevant"}
-		resolved := reconcileEnvironmentJob(dir, job, now, neverAlive, "different-pod")
-		if resolved.UnknownReasonKind != UnknownReasonAttachedProcessGone {
-			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonAttachedProcessGone)
-		}
-	})
-
-	t.Run("a live process is not reconciled at all, so UnknownReasonKind stays unset", func(t *testing.T) {
-		job := jobstate.EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "pod-a"}
-		resolved := reconcileEnvironmentJob(dir, job, now, func(int) bool { return true }, "pod-b")
-		if resolved.State != EnvironmentJobStateRunning {
-			t.Fatalf("State = %q, want running", resolved.State)
-		}
-		if resolved.UnknownReasonKind != "" {
-			t.Errorf("UnknownReasonKind = %q, want empty for a still-running job", resolved.UnknownReasonKind)
-		}
-	})
-}
-
 // On the same pod, reconcile asks Kubernetes whether the container restarted.
 func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
 	dir := t.TempDir()

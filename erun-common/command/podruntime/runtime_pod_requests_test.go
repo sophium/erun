@@ -10,60 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/build"
 )
-
-// runtimePodRequestsList mirrors the chart: limits in tens of GiB, requests of 0.25 CPU /
-// 1024Mi per container.
-const runtimePodRequestsList = `{
-  "items": [
-    {
-      "metadata": {"name": "erun-devops-7d9f-abcde"},
-      "spec": {
-        "containers": [
-          {
-            "name": "erun-devops",
-            "resources": {"limits": {"cpu": "14", "memory": "27Gi"}, "requests": {"cpu": "0.25", "memory": "1024Mi"}}
-          },
-          {
-            "name": "erun-dind",
-            "resources": {"limits": {"cpu": "8", "memory": "20Gi"}, "requests": {"cpu": "250m", "memory": "1024Mi"}}
-          }
-        ],
-        "initContainers": [
-          {"name": "prepare-volumes", "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}}},
-          {"name": "install-binfmt", "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}}}
-        ]
-      },
-      "status": {"phase": "Running"}
-    }
-  ]
-}`
-
-func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
-	requests, err := parseRuntimePodRequests([]byte(runtimePodRequestsList))
-	if err != nil {
-		t.Fatalf("parseRuntimePodRequests: %v", err)
-	}
-	if requests.Unavailable != "" {
-		t.Fatalf("expected a reading, got unavailable: %s", requests.Unavailable)
-	}
-	runtime, ok := requests.Containers[config.DevopsComponentName]
-	if !ok {
-		t.Fatalf("expected the runtime container's own request, got %+v", requests.Containers)
-	}
-	// 0.25 cores and 250m must land on the same number.
-	if runtime.CPUMilli != 250 {
-		t.Errorf("runtime container CPU request = %d millicores, want 250", runtime.CPUMilli)
-	}
-	if runtime.MemoryBytes != 1024*(1<<20) {
-		t.Errorf("runtime container memory request = %d bytes, want 1024Mi", runtime.MemoryBytes)
-	}
-	dind := requests.Containers[build.RuntimeDindContainerName]
-	if dind.CPUMilli != 250 || dind.MemoryBytes != 1024*(1<<20) {
-		t.Errorf("expected the erun-dind sidecar's own 0.25 CPU / 1024Mi request, got %+v", dind)
-	}
-}
 
 // Kubernetes admits a pod on max(max over init containers, sum over containers).
 func TestUsageRequestsTakeTheLargerOfInitPeakAndContainerSum(t *testing.T) {

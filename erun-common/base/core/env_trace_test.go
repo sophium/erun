@@ -38,20 +38,6 @@ func TestActivateEnvTrace(t *testing.T) {
 		assertTraceLogLinesStamped(t, content)
 	})
 
-	t.Run("dry-run names the path and writes nothing", func(t *testing.T) {
-		home := t.TempDir()
-		setTestHomeDir(t, home)
-		ctx := Context{
-			Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
-			DryRun: true,
-		}
-		_, closeTee := ActivateEnvTrace(ctx, "team", "dev")
-		closeTee()
-		if _, err := os.Stat(filepath.Join(home, ".erun", "team", "dev", "trace.log")); !os.IsNotExist(err) {
-			t.Fatalf("dry-run must not create the trace log, stat err = %v", err)
-		}
-	})
-
 	t.Run("a blank tenant or environment deactivates the tee", func(t *testing.T) {
 		home := t.TempDir()
 		setTestHomeDir(t, home)

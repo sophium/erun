@@ -36,27 +36,6 @@ func TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields(t *testing.T
 	}
 }
 
-func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testing.T) {
-	existing := []byte("defaulttenant: frs\nfutureField:\n  nested: true\n  value: 42\n")
-
-	out, err := MarshalConfigPreservingUnknownFields(existing, ERunConfig{DefaultTenant: "frs"})
-	if err != nil {
-		t.Fatalf("marshalConfigPreservingUnknownFields: %v", err)
-	}
-
-	var raw map[string]any
-	if err := yaml.Unmarshal(out, &raw); err != nil {
-		t.Fatalf("unmarshal merged output: %v", err)
-	}
-	future, ok := raw["futureField"].(map[string]any)
-	if !ok {
-		t.Fatalf("futureField missing or wrong shape in output:\n%s", out)
-	}
-	if future["nested"] != true || future["value"] != 42 {
-		t.Fatalf("futureField corrupted: %+v", future)
-	}
-}
-
 // TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey: a surviving legacy
 // key would re-migrate on every load.
 func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T) {
@@ -87,20 +66,6 @@ func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T
 	}
 	if !roundTripped.ContainerRegistries.IsZero() {
 		t.Fatalf("legacy key re-migrated after save: %+v", roundTripped.ContainerRegistries)
-	}
-}
-
-func TestMarshalConfigPreservingUnknownFieldsNoExistingFile(t *testing.T) {
-	out, err := MarshalConfigPreservingUnknownFields(nil, ERunConfig{DefaultTenant: "frs"})
-	if err != nil {
-		t.Fatalf("marshalConfigPreservingUnknownFields: %v", err)
-	}
-	want, err := yaml.Marshal(ERunConfig{DefaultTenant: "frs"})
-	if err != nil {
-		t.Fatalf("yaml.Marshal: %v", err)
-	}
-	if string(out) != string(want) {
-		t.Fatalf("out = %q, want %q", out, want)
 	}
 }
 

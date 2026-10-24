@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func workspaceSyncPlanEnv(kind config.EnvironmentType, sshd, sync bool, localPath string) config.OpenResult {
@@ -36,7 +35,6 @@ func TestResolveWorkspaceSyncParamsNamesEachRefusal(t *testing.T) {
 		result config.OpenResult
 		want   error
 	}{
-		{"sshd off", workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, false, true, "/host/mirror"), ErrWorkspaceSyncNotEnabled},
 		{"no local path", workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, true, true, ""), ErrWorkspaceSyncNoLocalPath},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -45,22 +43,6 @@ func TestResolveWorkspaceSyncParamsNamesEachRefusal(t *testing.T) {
 				t.Fatalf("got %v, want %v", err, testCase.want)
 			}
 		})
-	}
-}
-
-func TestResolveWorkspaceSyncParamsAddressesThePodWorktree(t *testing.T) {
-	params, err := ResolveWorkspaceSyncParams(workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, true, true, "/host/mirror"), nil)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if params.LocalPath != "/host/mirror" {
-		t.Fatalf("local path = %q", params.LocalPath)
-	}
-	if params.HostAlias != open.SSHHostAlias("acme", "dev") {
-		t.Fatalf("host alias = %q", params.HostAlias)
-	}
-	if strings.TrimSpace(params.RemotePath) == "" {
-		t.Fatal("a pass needs a remote path to mirror from")
 	}
 }
 

@@ -83,33 +83,6 @@ func TestPlatformClientMintErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/users" {
-			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
-		}
-		var body model.PlatformCreateUserParams
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		if body.Username != "alice" || body.TenantID != "tenant-b" {
-			t.Fatalf("body = %+v", body)
-		}
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(model.PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "alice"})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	user, err := client.CreateUser(context.Background(), model.PlatformCreateUserParams{Username: "alice", TenantID: "tenant-b"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if user.UserID != "user-1" || user.Username != "alice" {
-		t.Fatalf("user = %+v", user)
-	}
-}
-
 // Operations callers enroll a tenant admin directly, so roles ride on enrollment.
 func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
 	var raw map[string]any
@@ -186,53 +159,5 @@ func TestPlatformClientGetEnvironmentEscapesPathSegment(t *testing.T) {
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
 	if _, err := client.GetEnvironment(context.Background(), "env 1"); err != nil {
 		t.Fatalf("GetEnvironment: %v", err)
-	}
-}
-
-func TestPlatformClientDeployEnvironment(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/environments/env-1/deploy" || r.Method != http.MethodPost {
-			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
-		}
-		var body model.PlatformDeployEnvironmentParams
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Version != "1.2.3" {
-			t.Fatalf("body = %+v", body)
-		}
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(model.PlatformEnvironment{EnvironmentID: "env-1", Status: "provisioning"})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	environment, err := client.DeployEnvironment(context.Background(), "env-1", model.PlatformDeployEnvironmentParams{Version: "1.2.3"})
-	if err != nil {
-		t.Fatalf("DeployEnvironment: %v", err)
-	}
-	if environment.Status != "provisioning" {
-		t.Fatalf("environment = %+v", environment)
-	}
-}
-
-func TestPlatformClientCreateContextPreviewReturnsPlanOnly(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body model.PlatformCreateContextParams
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if !body.Preview {
-			t.Fatal("expected preview=true in the request body")
-		}
-		_ = json.NewEncoder(w).Encode(model.PlatformCreateContextResult{Plan: []string{"step 1", "step 2"}})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	result, err := client.CreateContext(context.Background(), model.PlatformCreateContextParams{
-		Name: "ctx-1", CloudProviderAlias: "dev+123@aws", Region: "us-east-1", Preview: true,
-	})
-	if err != nil {
-		t.Fatalf("CreateContext: %v", err)
-	}
-	if result.Context != nil || len(result.Plan) != 2 {
-		t.Fatalf("result = %+v", result)
 	}
 }

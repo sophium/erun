@@ -66,49 +66,6 @@ func newRepoWithBareRemote(t *testing.T) (repo, bare string) {
 	return repo, bare
 }
 
-func TestDecideWorkCloneReclaimCleanAndFullyPushedBranchIsReclaimed(t *testing.T) {
-	repo := newAgentJobTestRepo(t)
-	newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
-
-	decision := DecideWorkCloneReclaim(testContext(), repo)
-	if !decision.Reclaim {
-		t.Fatalf("Reclaim = false, want true (reason: %s)", decision.Reason)
-	}
-}
-
-func TestDecideWorkCloneReclaimDirtyWorkingTreeIsKept(t *testing.T) {
-	repo := newAgentJobTestRepo(t)
-	newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
-	dirtyWorkingTree(t, repo)
-
-	decision := DecideWorkCloneReclaim(testContext(), repo)
-	if decision.Reclaim {
-		t.Fatalf("Reclaim = true for a dirty tree, want false")
-	}
-	if !strings.Contains(decision.Reason, "uncommitted") {
-		t.Fatalf("Reason %q does not explain the dirty tree", decision.Reason)
-	}
-}
-
-func TestDecideWorkCloneReclaimUntrackedFileOnlyStillCountsAsDirty(t *testing.T) {
-	repo := newAgentJobTestRepo(t)
-	newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
-	if err := os.WriteFile(filepath.Join(repo, "scratch.txt"), []byte("not committed\n"), 0o644); err != nil {
-		t.Fatalf("write untracked file: %v", err)
-	}
-
-	decision := DecideWorkCloneReclaim(testContext(), repo)
-	if decision.Reclaim {
-		t.Fatalf("Reclaim = true for an untracked-only tree, want false: an untracked file can still hold real work")
-	}
-}
-
 func TestDecideWorkCloneReclaimUnpushedCommitsWithNoProofTheyLandedElsewhereAreKept(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, repo)

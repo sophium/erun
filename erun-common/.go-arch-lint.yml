@@ -187,7 +187,6 @@ deps:
       - base-seam
       - infra-cloud
       - infra-gitx
-      - infra-kube
       - infra-remoteinit
       - orchestration-diagnosis
       - primitive-build
@@ -211,7 +210,6 @@ deps:
       - base-core
       - base-model
       - base-seam
-      - command-observe
       - infra-cloud
       - infra-kube
       - infra-mcpauth
@@ -265,8 +263,6 @@ deps:
       - primitive-open
       - primitive-shared-gitref
       - primitive-shared-opentarget
-    canUse:
-      - github-com-adrg-xdg
   command-mergequeue:
     mayDependOn:
       - base-core
@@ -341,7 +337,6 @@ deps:
       - base-core
       - base-model
       - base-seam
-      - command-lifecycle
       - infra-activity
       - infra-cloud
       - infra-gitx
@@ -454,7 +449,6 @@ deps:
       - gopkg-in-yaml-v3
   orchestration-build:
     mayDependOn:
-      - base-config
       - base-core
       - base-model
       - base-seam

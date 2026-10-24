@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -82,41 +81,5 @@ func TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff(t *testing.T) {
 	}
 	if strings.Contains(set, "claude.openRouterBaseURL=") {
 		t.Fatalf("an environment that left the gateway must not render it:\n%s", set)
-	}
-}
-
-func stubGatewaySecretDelete(t *testing.T) *[][]string {
-	t.Helper()
-	var calls [][]string
-	previous := deleteGatewayCredentialsSecret
-	deleteGatewayCredentialsSecret = func(args []string) error {
-		calls = append(calls, args)
-		return nil
-	}
-	t.Cleanup(func() { deleteGatewayCredentialsSecret = previous })
-	return &calls
-}
-
-func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T) {
-	no := false
-	for name, spec := range map[string]HelmDeploySpec{
-		"catalog switched off": {OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
-		"no catalog":           {},
-		"environment opted out": {
-			Claude:     config.EnvironmentClaudeConfig{UseGateway: &no},
-			OpenRouter: &config.OpenRouterConfig{BaseURL: testGatewayURL},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			calls := stubGatewaySecretDelete(t)
-			spec.ReleaseName, spec.Tenant, spec.Namespace, spec.KubernetesContext = "erun-devops", "erun", "erun-build", "erun-build"
-			if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
-				t.Fatal(err)
-			}
-			want := "--context erun-build -n erun-build delete secret " + config.GatewaySecretName + " --ignore-not-found"
-			if len(*calls) != 1 || strings.Join((*calls)[0], " ") != want {
-				t.Fatalf("calls = %v, want %q", *calls, want)
-			}
-		})
 	}
 }

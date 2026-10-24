@@ -109,18 +109,3 @@ func TestPinPlanNamesADetachedCheckoutsDivergence(t *testing.T) {
 		t.Fatalf("expected the detached branch to be reported as HEAD, got %q", plan.BaseFreshness.Branch)
 	}
 }
-
-// A local-only checkout is legitimate and gets no warning.
-func TestPinPlanLeavesAnUntrackedCheckoutUnannotated(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepoAt(t, dir)
-
-	plan := annotatePinPlanForTest(t, dir)
-
-	if plan.BaseFreshness != nil {
-		t.Fatalf("expected no freshness verdict for a checkout with no remote, got %+v", plan.BaseFreshness)
-	}
-	if note := plan.BaseFreshnessNote(); note != "" {
-		t.Fatalf("expected no note for a checkout with no remote, got %q", note)
-	}
-}

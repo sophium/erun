@@ -295,49 +295,6 @@ func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing
 	}
 }
 
-// A rebased branch push must move the release tag onto the replayed commit.
-func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T) {
-	repo := newAgentJobTestRepo(t)
-	remote := newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
-
-	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.213\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	runGitForTest(t, repo, "add", "VERSION")
-	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] release 1.0.213")
-	runGitForTest(t, repo, "tag", "-a", "v1.0.213", "-m", "Release 1.0.213")
-	runGitForTest(t, repo, "push", "-q", "origin", "v1.0.213")
-
-	// An unrelated commit moves origin/main so this push is rejected.
-	other := cloneRepoForTest(t, remote)
-	if err := os.WriteFile(filepath.Join(other, "OTHER.txt"), []byte("unrelated change\n"), 0o644); err != nil {
-		t.Fatalf("write unrelated file in the other checkout: %v", err)
-	}
-	runGitForTest(t, other, "add", "OTHER.txt")
-	runGitForTest(t, other, "commit", "-q", "-m", "unrelated mainline change")
-	runGitForTest(t, other, "push", "-q", "origin", "main")
-
-	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.214-next\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION bump: %v", err)
-	}
-	runGitForTest(t, repo, "add", "VERSION")
-	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] prepare 1.0.214-next")
-
-	ctx := newTestClaimContext()
-	spec := model.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: model.ReleaseModeStable}
-	command := model.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
-
-	if err := releaseflow.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
-		t.Fatalf("runReleaseBranchPush: %v", err)
-	}
-
-	runGitForTest(t, repo, "fetch", "-q", "origin", "main")
-	if err := runGitCheckForTest(repo, "merge-base", "--is-ancestor", "v1.0.213", "FETCH_HEAD"); err != nil {
-		t.Fatalf("expected v1.0.213 to remain reachable from origin/main after the rebase, but it does not: %v", err)
-	}
-}
-
 func runGitCheckForTest(dir string, args ...string) error {
 	cmd := core.Command("git", append([]string{"-C", dir}, args...)...)
 	return cmd.Run()

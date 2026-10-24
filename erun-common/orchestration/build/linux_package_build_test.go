@@ -1,17 +1,12 @@
 package build
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 const (
@@ -57,51 +52,14 @@ func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	return projectRoot, uiDir, cliDir
 }
 
-func linuxPackageNames(packages []model.LinuxPackageSpec) []string {
-	names := make([]string, 0, len(packages))
-	for _, pkg := range packages {
-		names = append(names, pkg.Name)
-	}
-	return names
-}
-
-func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
+// The build side is the integration golden build/dry_run_linux_package_from_component_dir.
+func TestPushFromALinuxPackageDirectoryIsRefusedByName(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, uiDir)
 
-	if contexts, err := build.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot)); !errors.Is(err, dockerspec.ErrDockerBuildContextNotFound) {
-		t.Fatalf("a package directory resolved image contexts %+v, %v", contexts, err)
-	}
-	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(execution.DockerBuilds) != 0 || !slices.Equal(linuxPackageNames(execution.LinuxPackages), []string{"erun-ui"}) {
-		t.Fatalf("expected only the erun-ui package, got images %+v and packages %+v", execution.DockerBuilds, execution.LinuxPackages)
-	}
-	_, _, err = ResolveDockerPushSpec(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	_, _, err := ResolveDockerPushSpec(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err == nil || !strings.Contains(err.Error(), "is a linux package, not an image") {
 		t.Fatalf("a push from a package directory must be refused by name, got %v", err)
-	}
-}
-
-func TestPlainBuildResolvesLinuxPackagesBesideImages(t *testing.T) {
-	projectRoot, _, _ := linuxPackageProject(t)
-	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
-	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(execution.DockerBuilds) != 1 || len(execution.LinuxPackages) != 2 {
-		t.Fatalf("expected one image and two packages, got %+v and %+v", execution.DockerBuilds, execution.LinuxPackages)
-	}
-	for _, pkg := range execution.LinuxPackages {
-		if pkg.ContextDir != projectRoot {
-			t.Fatalf("package %s builds from %s, want the project root %s", pkg.Name, pkg.ContextDir, projectRoot)
-		}
-	}
-	if result := NewBuildResult(execution); !slices.Equal(result.Packages, []string{"erun-cli", "erun-ui"}) {
-		t.Fatalf("build result packages = %v", result.Packages)
 	}
 }
 

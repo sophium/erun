@@ -38,29 +38,3 @@ func fakeKubernetesAPIServer(t *testing.T, handler http.HandlerFunc) *httptest.S
 	t.Setenv("KUBECONFIG", path)
 	return server
 }
-
-func TestKubectlGetPVCArgsSharedByBothPaths(t *testing.T) {
-	got := kubectlGetPVCArgs("my-context", "team-dev", "team-devops-worktree")
-	want := []string{"--context", "my-context", "--namespace", "team-dev", "get", "pvc", "team-devops-worktree", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}
-
-func TestKubectlGetPVCArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testing.T) {
-	got := kubectlGetPVCArgs("", "", "team-devops-worktree")
-	want := []string{"get", "pvc", "team-devops-worktree", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}

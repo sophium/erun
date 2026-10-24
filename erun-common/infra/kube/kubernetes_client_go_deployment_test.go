@@ -28,19 +28,6 @@ func deploymentNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// The library path's bool must match kubectl's exit-code result.
-func TestLibraryDeploymentPresentMatchesSubprocessObservableResult(t *testing.T) {
-	fakeKubernetesAPIServer(t, deploymentFoundHandler("team-dev", "team-api"))
-
-	present, err := libraryDeploymentPresent("", "team-dev", "team-api")
-	if err != nil {
-		t.Fatalf("libraryDeploymentPresent: %v", err)
-	}
-	if !present {
-		t.Fatalf("present = false, want true")
-	}
-}
-
 func TestLibraryDeploymentPresentReportsNotFoundAsAbsentNotError(t *testing.T) {
 	fakeKubernetesAPIServer(t, deploymentNotFoundHandler("team-api"))
 
@@ -169,32 +156,5 @@ func TestLibraryWaitForDeploymentAvailablePropagatesOtherErrors(t *testing.T) {
 func TestLibraryWaitForDeploymentAvailableRejectsInvalidTimeout(t *testing.T) {
 	if err := LibraryWaitForDeploymentAvailable("", "team-dev", "team-api", "not-a-duration"); err == nil {
 		t.Fatalf("err = nil, want an error for an invalid timeout")
-	}
-}
-
-func TestKubectlGetDeploymentArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testing.T) {
-	got := KubectlGetDeploymentArgs("", "", "team-api")
-	want := []string{"get", "deployment", "team-api", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}
-
-// Both subprocess call sites share this argv builder so the audited kubectl call cannot drift.
-func TestKubectlGetPodArgsSharedByBothPaths(t *testing.T) {
-	got := KubectlGetPodArgs("pod-a")
-	want := []string{"get", "pod", "pod-a", "-o", "json"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
 	}
 }

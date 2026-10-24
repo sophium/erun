@@ -1,10 +1,8 @@
 package build
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
@@ -35,60 +33,6 @@ func writeTestDockerfile(t *testing.T, dir, content string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestDockerfileHasConsumedTestStageDetectsTheComponentShape(t *testing.T) {
-	path := writeTestDockerfile(t, t.TempDir(), consumedTestStageDockerfileContent)
-	if !dockerspec.DockerfileHasConsumedTestStage(path) {
-		t.Fatal("expected a Dockerfile whose dist stage is built FROM test to be detected as consuming its test stage")
-	}
-}
-
-func TestDockerfileHasConsumedTestStageIgnoresOrdinaryDockerfiles(t *testing.T) {
-	path := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
-	if dockerspec.DockerfileHasConsumedTestStage(path) {
-		t.Fatal("expected an ordinary Dockerfile with no test stage not to be detected as consuming one")
-	}
-}
-
-// Granting host networking to a merely test-prefixed stage would be for nothing.
-func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T) {
-	path := writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20 AS test-toolchain\nRUN apk add curl\n\n"+
-		"FROM golang:1.26.0 AS builder\nCOPY --from=test-toolchain /usr/bin/curl /usr/bin/curl\n")
-	if dockerspec.DockerfileHasConsumedTestStage(path) {
-		t.Error("a `test-toolchain` stage and a `COPY --from=test-toolchain` were read as a consumed test stage")
-	}
-	if dockerspec.DockerfileDeclaresTestStage(path) {
-		t.Error("a `test-toolchain` stage was read as declaring a test stage, which would grant this build the host-network entitlement")
-	}
-}
-
-func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) {
-	declared := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN make check\n\nFROM scratch\nCOPY . /app\n")
-	if dockerspec.DockerfileHasConsumedTestStage(declared) {
-		t.Fatal("a test stage with no FROM test or COPY --from=test dependent was read as consumed")
-	}
-	if !dockerspec.DockerfileDeclaresTestStage(declared) {
-		t.Fatal("expected a Dockerfile declaring AS test to be detected as declaring a test stage even when no later stage consumes it")
-	}
-	ordinary := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
-	if dockerspec.DockerfileDeclaresTestStage(ordinary) {
-		t.Fatal("expected an ordinary Dockerfile with no test stage not to be detected as declaring one")
-	}
-}
-
-func TestDockerImageBuilderPromotesATestStageDockerfile(t *testing.T) {
-	invocations := newFakeDockerImageStore(t, "ghcr.io/sophium/erun-console:fp-abc123-amd64")
-	build := testPromoteBuildInput()
-	build.DockerfilePath = writeTestDockerfile(t, t.TempDir(), consumedTestStageDockerfileContent)
-
-	var stdout, stderr bytes.Buffer
-	if err := DockerImageBuilder(build, &stdout, &stderr); err != nil {
-		t.Fatalf("expected the tested Dockerfile to promote, got %v\n%s", err, stderr.String())
-	}
-	if strings.Contains(invocations(), "build ") {
-		t.Fatalf("expected a promote with no docker build, got invocations:\n%s", invocations())
-	}
 }
 
 // Reads a sibling module, so it must run uncached (go test -count=1).

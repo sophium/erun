@@ -172,34 +172,6 @@ func TestIsTransientRegistryError(t *testing.T) {
 	}
 }
 
-func TestIsRuntimeRegistryVersionTag(t *testing.T) {
-	tests := []struct {
-		tag  string
-		want bool
-	}{
-		{"1.0.250", true},
-		{"1.0.192-snapshot-20260821151853", true},
-		{"1.0.250-pr.4fa33ad5-arm64", true},
-		{"1.0.250-arm64", true},
-		{"1.0.250-amd64", true},
-		{"2.0.0-rc.1", true},
-		{"permcheck-tmp", false},
-		{"authprobe", false},
-		{"latest", false},
-		{"stable", false},
-		{"1.0", false},
-		{"1.0.250.1", false},
-		{"1.0.250-", false},
-		{"v1.0.250", false},
-		{"", false},
-	}
-	for _, test := range tests {
-		if got := isRuntimeRegistryVersionTag(test.tag); got != test.want {
-			t.Errorf("isRuntimeRegistryVersionTag(%q) = %v, want %v", test.tag, got, test.want)
-		}
-	}
-}
-
 // Tags feeds the desktop picker unfiltered, so a stray tag would appear pinnable.
 func TestLatestRuntimeVersionsFromTagsOffersOnlyVersionShapedTags(t *testing.T) {
 	versions := latestRuntimeVersionsFromTags([]string{

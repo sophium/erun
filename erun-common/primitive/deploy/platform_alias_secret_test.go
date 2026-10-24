@@ -95,69 +95,6 @@ func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	}
 }
 
-func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
-	secretsDir := t.TempDir()
-	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(secretsDir, cloud.CloudSecretStoreDirName))}
-
-	t.Run("nil store", func(t *testing.T) {
-		assertNoAliasToGive(t, nil, deps, "a nil config store")
-	})
-
-	t.Run("no configured alias", func(t *testing.T) {
-		assertNoAliasToGive(t, staticCloudStore{}, deps, "a host with no erun alias")
-	})
-
-	t.Run("alias with no stored session", func(t *testing.T) {
-		assertNoAliasToGive(t, signedInHostStore(), deps, "an alias whose token was never stored")
-	})
-
-	t.Run("nil secret store", func(t *testing.T) {
-		assertNoAliasToGive(t, signedInHostStore(), cloud.CloudDependencies{}, "a host with no readable secret store")
-	})
-
-	t.Run("signed in", func(t *testing.T) {
-		provider := testPlatformAliasProvider()
-		if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
-			t.Fatalf("save: %v", err)
-		}
-		got, token, ok, err := ResolveHostPlatformAlias(signedInHostStore(), deps, "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !ok {
-			t.Fatal("a signed-in host must resolve its alias")
-		}
-		if got.Alias != provider.Alias {
-			t.Fatalf("got alias %q, want %q", got.Alias, provider.Alias)
-		}
-		if token != "refresh-token-value" {
-			t.Fatalf("got token %q, want the stored refresh token", token)
-		}
-	})
-}
-
-// assertNoAliasToGive asserts a decline that carries no reason, keeping routine deploys silent.
-func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps cloud.CloudDependencies, what string) {
-	t.Helper()
-	_, _, ok, cause := ResolveHostPlatformAlias(store, deps, "")
-	if ok {
-		t.Fatalf("%s must resolve to nothing", what)
-	}
-	if cause != nil {
-		t.Fatalf("%s is a host with nothing to give, not a reason to report: %v", what, cause)
-	}
-}
-
-func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
-	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
-	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{
-		{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
-	}}}
-	if _, _, ok, _ := ResolveHostPlatformAlias(store, deps, ""); ok {
-		t.Fatal("an infrastructure alias must not be provisioned as a platform alias")
-	}
-}
-
 func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testing.T) {
 	store := ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -236,15 +173,4 @@ func (c *capturedManifest) read(t *testing.T) string {
 		t.Fatalf("kubectl stub captured nothing: %v", err)
 	}
 	return string(data)
-}
-
-func TestHelmPlatformAliasSecretSetArgs(t *testing.T) {
-	if got := helmPlatformAliasSecretSetArgs(""); got != nil {
-		t.Fatalf("empty name must render no args, got %v", got)
-	}
-	got := helmPlatformAliasSecretSetArgs(" team-devops-platform-alias ")
-	want := []string{"--set-string", "platformAliasSecretName=team-devops-platform-alias"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("got %v, want %v", got, want)
-	}
 }

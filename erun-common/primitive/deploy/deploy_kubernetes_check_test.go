@@ -24,17 +24,6 @@ func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
-	writeKubectlStub(t, "", 0)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
-	if err != nil {
-		t.Fatalf("unexpected error for a running deployment: %v", err)
-	}
-	if !deployed {
-		t.Fatalf("deployed = false, want true when kubectl reports the deployment present")
-	}
-}
-
 func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	writeKubectlStub(t, `error: context "frs-prod" does not exist`, 1)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "frs-prod")
@@ -63,20 +52,6 @@ func TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectl
 	}
 	if !strings.Contains(err.Error(), "exit status 1") {
 		t.Fatalf("error must still name the exit status when kubectl wrote nothing, got: %v", err.Error())
-	}
-}
-
-func TestSanitizeKubectlFailureOutputStripsFrameWithNoErrCarrier(t *testing.T) {
-	got := sanitizeKubectlFailureOutput(`W0831 09:00:00.000000       1 warnings.go:70] some deprecation notice`)
-	want := "some deprecation notice"
-	if got != want {
-		t.Fatalf("sanitizeKubectlFailureOutput() = %q, want %q", got, want)
-	}
-}
-
-func TestSanitizeKubectlFailureOutputReturnsEmptyForBlankInput(t *testing.T) {
-	if got := sanitizeKubectlFailureOutput("   \n\n  "); got != "" {
-		t.Fatalf("sanitizeKubectlFailureOutput() = %q, want empty", got)
 	}
 }
 

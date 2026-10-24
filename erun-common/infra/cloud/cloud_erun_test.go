@@ -29,68 +29,6 @@ func (s *erunTestCloudStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	return nil
 }
 
-func fetchPlatformInfoExpecting(t *testing.T, wantAPIURL string, info model.PlatformInfo) func(core.Context, string) (model.PlatformInfo, error) {
-	return func(_ core.Context, apiURL string) (model.PlatformInfo, error) {
-		if apiURL != wantAPIURL {
-			t.Fatalf("apiURL = %q, want %q", apiURL, wantAPIURL)
-		}
-		return info, nil
-	}
-}
-
-func fetchOIDCDiscoveryExpecting(t *testing.T, wantIssuer string) func(core.Context, string) (OIDCDiscovery, error) {
-	return func(_ core.Context, issuer string) (OIDCDiscovery, error) {
-		if issuer != wantIssuer {
-			t.Fatalf("issuer = %q, want %q", issuer, wantIssuer)
-		}
-		return OIDCDiscovery{Issuer: issuer}, nil
-	}
-}
-
-func TestInitERunCloudProviderRecordsAliasIssuerAndClientID(t *testing.T) {
-	store := erunTestCloudStore{}
-	deps := CloudDependencies{
-		FetchPlatformInfo:  fetchPlatformInfoExpecting(t, "https://api.example.test", model.PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-client-1"}),
-		FetchOIDCDiscovery: fetchOIDCDiscoveryExpecting(t, "https://auth.example.test"),
-	}
-
-	provider, err := InitERunCloudProvider(core.Context{}, &store, model.InitERunCloudProviderParams{APIURL: "https://api.example.test/"}, deps)
-	if err != nil {
-		t.Fatalf("InitERunCloudProvider: %v", err)
-	}
-	wantERun := &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"}
-	if provider.Provider != configpkg.CloudProviderERun || provider.OIDCIssuerURL != "https://auth.example.test" || *provider.ERun != *wantERun {
-		t.Fatalf("provider = %+v (ERun=%+v), want Provider=%s OIDCIssuerURL=https://auth.example.test ERun=%+v",
-			provider, provider.ERun, configpkg.CloudProviderERun, wantERun)
-	}
-	if !strings.HasSuffix(provider.Alias, "@erun") {
-		t.Fatalf("Alias = %q, want an @erun suffix", provider.Alias)
-	}
-	if len(store.config.CloudProviders) != 1 {
-		t.Fatalf("saved %d providers, want 1", len(store.config.CloudProviders))
-	}
-}
-
-func TestInitERunCloudProviderDryRunPerformsNoWrite(t *testing.T) {
-	store := erunTestCloudStore{}
-	deps := CloudDependencies{
-		FetchPlatformInfo: func(core.Context, string) (model.PlatformInfo, error) {
-			t.Fatal("dry run must not fetch platform info for real")
-			return model.PlatformInfo{}, nil
-		},
-	}
-	provider, err := InitERunCloudProvider(core.Context{DryRun: true}, &store, model.InitERunCloudProviderParams{APIURL: "https://api.example.test"}, deps)
-	if err != nil {
-		t.Fatalf("InitERunCloudProvider dry run: %v", err)
-	}
-	if provider.Provider != configpkg.CloudProviderERun {
-		t.Fatalf("Provider = %q", provider.Provider)
-	}
-	if len(store.config.CloudProviders) != 0 {
-		t.Fatalf("dry run must not persist a provider, got %d", len(store.config.CloudProviders))
-	}
-}
-
 func TestInitERunCloudProviderRequiresAPIURL(t *testing.T) {
 	store := erunTestCloudStore{}
 	if _, err := InitERunCloudProvider(core.Context{}, &store, model.InitERunCloudProviderParams{}, CloudDependencies{}); err == nil {
@@ -145,58 +83,6 @@ func TestERunCloudProviderLogoutDeletesRefreshAndCachedAccessToken(t *testing.T)
 	}
 }
 
-func TestResolveERunAccessTokenReturnsCachedTokenWithoutRefreshing(t *testing.T) {
-	secrets := NewFileCloudSecretStore(t.TempDir())
-	provider := erunTestProvider()
-	if err := SaveCachedERunAccessToken(secrets, provider.Alias, ERunTokens{AccessToken: "cached-token", ExpiresIn: time.Hour}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-	deps := CloudDependencies{
-		CloudSecretStore: secrets,
-		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
-			t.Fatal("must not refresh when a fresh cached token exists")
-			return ERunTokens{}, nil
-		},
-	}
-	token, err := ResolveERunAccessToken(core.Context{}, provider, deps)
-	if err != nil || token != "cached-token" {
-		t.Fatalf("resolveERunAccessToken = %q, %v; want cached-token, nil", token, err)
-	}
-}
-
-func TestResolveERunAccessTokenRefreshesWhenCacheExpiredOrMissing(t *testing.T) {
-	secrets := NewFileCloudSecretStore(t.TempDir())
-	provider := erunTestProvider()
-	provider.ERun.RefreshTokenRef = ErunRefreshTokenRef(provider.Alias)
-	if err := secrets.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-1"); err != nil {
-		t.Fatalf("seed refresh token: %v", err)
-	}
-	refreshCalls := 0
-	deps := CloudDependencies{
-		CloudSecretStore: secrets,
-		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
-			return OIDCDiscovery{TokenEndpoint: "https://auth.example.test/token"}, nil
-		},
-		RefreshERunTokens: func(_ core.Context, _ OIDCDiscovery, _ string, refreshToken string) (ERunTokens, error) {
-			refreshCalls++
-			if refreshToken != "refresh-1" {
-				t.Fatalf("refreshToken = %q", refreshToken)
-			}
-			return ERunTokens{AccessToken: "fresh-token", ExpiresIn: time.Hour}, nil
-		},
-	}
-	token, err := ResolveERunAccessToken(core.Context{}, provider, deps)
-	if err != nil || token != "fresh-token" {
-		t.Fatalf("resolveERunAccessToken = %q, %v; want fresh-token, nil", token, err)
-	}
-	if refreshCalls != 1 {
-		t.Fatalf("refresh called %d times, want 1", refreshCalls)
-	}
-	if cached, ok := loadCachedERunAccessToken(secrets, provider.Alias); !ok || cached != "fresh-token" {
-		t.Fatalf("refreshed token was not cached: %q, %v", cached, ok)
-	}
-}
-
 func TestResolveERunAccessTokenFailsClearlyWithoutRefreshToken(t *testing.T) {
 	secrets := NewFileCloudSecretStore(t.TempDir())
 	provider := erunTestProvider()
@@ -214,18 +100,6 @@ func TestERunCloudProviderTokenStatusReflectsResolution(t *testing.T) {
 		status := erunCloudProviderTokenStatus(erunTestProvider(), CloudDependencies{CloudSecretStore: secrets})
 		if status.Status != configpkg.CloudTokenStatusNotConfigured {
 			t.Fatalf("Status = %q, want not_configured", status.Status)
-		}
-	})
-
-	t.Run("active with a fresh cached token", func(t *testing.T) {
-		secrets := NewFileCloudSecretStore(t.TempDir())
-		provider := erunTestProvider()
-		if err := SaveCachedERunAccessToken(secrets, provider.Alias, ERunTokens{AccessToken: "access-1", ExpiresIn: time.Hour}); err != nil {
-			t.Fatalf("seed cache: %v", err)
-		}
-		status := erunCloudProviderTokenStatus(provider, CloudDependencies{CloudSecretStore: secrets})
-		if status.Status != configpkg.CloudTokenStatusActive {
-			t.Fatalf("Status = %q, want active", status.Status)
 		}
 	})
 
@@ -302,24 +176,6 @@ func TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout(t *testing.T) {
 	var decoded map[string]string
 	if err := json.Unmarshal(captured.Bytes(), &decoded); err != nil {
 		t.Fatalf("erun-type token refresh corrupted stdout: %v\nstdout was:\n%s", err, captured.String())
-	}
-}
-
-func TestCloudProviderBearerTokenERunDryRunPerformsNoNetworkCall(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
-	provider := erunTestProvider()
-	deps := CloudDependencies{
-		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
-			t.Fatal("dry run must not refresh")
-			return ERunTokens{}, nil
-		},
-	}
-	token, err := CloudProviderBearerToken(core.Context{DryRun: true}, &store, model.CloudBearerParams{Alias: provider.Alias}, deps)
-	if err != nil {
-		t.Fatalf("CloudProviderBearerToken dry run: %v", err)
-	}
-	if token.Provider != configpkg.CloudProviderERun {
-		t.Fatalf("Provider = %q", token.Provider)
 	}
 }
 

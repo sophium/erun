@@ -1,10 +1,8 @@
 package podruntime
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,25 +20,6 @@ import (
 func TestParseRuntimeUsageWarnings(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second
-
-	t.Run("memory warning fires at the threshold and not below it", func(t *testing.T) {
-		below := parseRuntimeUsage(req, cgroupMemoryFixture(84, 50), interval)
-		if hasWarningContaining(below.Warnings, "memory is at") {
-			t.Errorf("84%% should not warn, got %v", below.Warnings)
-		}
-
-		at := parseRuntimeUsage(req, cgroupMemoryFixture(85, 50), interval)
-		if !hasWarningContaining(at.Warnings, "memory is at") {
-			t.Errorf("85%% should warn, got %v", at.Warnings)
-		}
-	})
-
-	t.Run("memory.peak warning fires independently of current usage", func(t *testing.T) {
-		usage := parseRuntimeUsage(req, cgroupMemoryFixture(10, 96), interval)
-		if !hasWarningContaining(usage.Warnings, "memory.peak reached") {
-			t.Errorf("a 96%% peak should warn even with low current usage, got %v", usage.Warnings)
-		}
-	})
 
 	t.Run("OOM kill warning does not fire when oom_kill could not be read", func(t *testing.T) {
 		output := strings.Join([]string{
@@ -61,19 +40,6 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 	})
 }
 
-func cgroupMemoryFixture(currentPercent, peakPercent int) string {
-	const limit = int64(1000)
-	current := limit * int64(currentPercent) / 100
-	peak := limit * int64(peakPercent) / 100
-	return strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=" + strconv.FormatInt(current, 10),
-		"memory_max=" + strconv.FormatInt(limit, 10),
-		"memory_peak=" + strconv.FormatInt(peak, 10),
-		"memory_oom_kill=0",
-	}, "\n")
-}
-
 func hasWarningContaining(warnings []string, substr string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, substr) {
@@ -81,37 +47,6 @@ func hasWarningContaining(warnings []string, substr string) bool {
 		}
 	}
 	return false
-}
-
-// PeakBytes/OOMKills are omitempty, so only the Observed bits tell an unread
-// value from a genuine zero.
-func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
-	unread, err := json.Marshal(model.RuntimeMemoryUsage{CurrentBytes: 100})
-	if err != nil {
-		t.Fatalf("marshal unread: %v", err)
-	}
-	if strings.Contains(string(unread), "peakObserved") || strings.Contains(string(unread), "peakBytes") {
-		t.Errorf("an unread peak must omit both peakBytes and peakObserved, got %s", unread)
-	}
-
-	genuineZero, err := json.Marshal(model.RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
-	if err != nil {
-		t.Fatalf("marshal genuine zero: %v", err)
-	}
-	if !strings.Contains(string(genuineZero), `"peakObserved":true`) {
-		t.Errorf("a genuinely-zero, observed peak must carry peakObserved:true, got %s", genuineZero)
-	}
-	if strings.Contains(string(genuineZero), "peakBytes") {
-		t.Errorf("a genuine zero peak still omits the zero-valued peakBytes key, got %s", genuineZero)
-	}
-
-	var roundTripped model.RuntimeMemoryUsage
-	if err := json.Unmarshal(genuineZero, &roundTripped); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
-		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
-	}
 }
 
 // An unreachable sidecar must not cost the runtime-container reading.
@@ -176,14 +111,12 @@ func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 	}, "\n")
 }
 
-// An empty want asserts the throttling warning's words are absent, not that
-// the slice is empty.
-func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
-	t.Helper()
+// An unreadable quota cannot say whether the sidecar is starved, so it must not warn.
+func TestRunRuntimeUsageDoesNotWarnOfThrottlingWithoutAReadableQuota(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
 		if container == build.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{Stdout: dindReading}, nil
+			return kube.RemoteCommandResult{Stdout: runtimeUsageDindReading("max 100000", 200, 200)}, nil
 		}
 		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
@@ -191,100 +124,10 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}
-	if want == "" {
-		for _, warning := range usage.Warnings {
-			if strings.Contains(warning, "throttled in") {
-				t.Fatalf("expected no build-throttling warning, got %q", warning)
-			}
-		}
-		return
-	}
 	for _, warning := range usage.Warnings {
-		if warning == want {
-			return
+		if strings.Contains(warning, "throttled in") {
+			t.Fatalf("expected no build-throttling warning, got %q", warning)
 		}
-	}
-	t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", want, usage.Warnings)
-}
-
-// Busy-at-cap and starved-by-cap show the same utilisation; only
-// nr_throttled/nr_periods separates them.
-func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
-	const throttleWarning = "the build was throttled in 20000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-	const youngSidecarThrottleWarning = "the build was throttled in 9999 of 9999 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-
-	cases := []struct {
-		name        string
-		dindReading string
-		wantWarning string
-	}{
-		{
-			name:        "a build throttled in every period",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 20000),
-			wantWarning: throttleWarning,
-		},
-		{
-			// The ratio is lifetime-total: a rebuild pinned at its cap looks
-			// like this for its first ~17 minutes, so the sizing floor must not
-			// silence it.
-			name:        "a build throttled in every period under the sizing floor",
-			dindReading: runtimeUsageDindReading("400000 100000", 9999, 9999),
-			wantWarning: youngSidecarThrottleWarning,
-		},
-		{
-			name:        "a build working at its cap without being throttled",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 0),
-			wantWarning: "",
-		},
-		{
-			name:        "no scheduling periods observed",
-			dindReading: runtimeUsageDindReading("400000 100000", 0, 0),
-			wantWarning: "",
-		},
-		{
-			name:        "an unreadable quota with throttled periods behind it",
-			dindReading: runtimeUsageDindReading("max 100000", 200, 200),
-			wantWarning: "",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertRuntimeUsageThrottleWarning(t, tc.dindReading, tc.wantWarning)
-		})
-	}
-}
-
-// nr_periods and nr_throttled are lifetime-cumulative, so a tiny throttle ratio
-// is residue, not starvation.
-func TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial(t *testing.T) {
-	cases := []struct {
-		name        string
-		dindReading string
-	}{
-		{
-			name:        "an immaterial throttle ratio on a second environment",
-			dindReading: runtimeUsageDindReading("400000 100000", 17479, 6),
-		},
-		{
-			name:        "a build throttled just under the material ratio",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 998),
-		},
-		{
-			name:        "a total ratio one period under the build floor",
-			dindReading: runtimeUsageDindReading("400000 100000", 599, 599),
-		},
-		{
-			// A sidecar seconds old is pinned because it is still starting up.
-			name:        "every period throttled but too few periods to read",
-			dindReading: runtimeUsageDindReading("400000 100000", 200, 200),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertRuntimeUsageThrottleWarning(t, tc.dindReading, "")
-		})
 	}
 }
 

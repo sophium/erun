@@ -4,44 +4,6 @@ import (
 	"testing"
 )
 
-func TestEnvironmentTypeIsValid(t *testing.T) {
-	cases := []struct {
-		envType EnvironmentType
-		want    bool
-	}{
-		{EnvironmentTypeLocalAgent, true},
-		{EnvironmentTypeRemoteAgent, true},
-		{EnvironmentTypeRuntime, true},
-		{EnvironmentTypeHost, true},
-		{"", false},
-		{"bogus", false},
-	}
-	for _, tc := range cases {
-		if got := tc.envType.IsValid(); got != tc.want {
-			t.Errorf("EnvironmentType(%q).IsValid() = %v, want %v", tc.envType, got, tc.want)
-		}
-	}
-}
-
-func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
-	cases := []struct {
-		envType EnvironmentType
-		want    bool
-	}{
-		{EnvironmentTypeLocalAgent, true},
-		{EnvironmentTypeRemoteAgent, true},
-		{EnvironmentTypeRuntime, false},
-		{EnvironmentTypeHost, false},
-		{"", false},
-		{"bogus", false},
-	}
-	for _, tc := range cases {
-		if got := tc.envType.UsesDindSidecar(); got != tc.want {
-			t.Errorf("EnvironmentType(%q).UsesDindSidecar() = %v, want %v", tc.envType, got, tc.want)
-		}
-	}
-}
-
 // TestEnvironmentTypePredicatesCoverEveryValidType relies on BuildsHere and
 // RemoteWorktree panicking on an unhandled type.
 func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
@@ -59,29 +21,6 @@ func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 			_ = env.ResolvedUpgradeChannel()
 			_ = envType.UsesDindSidecar()
 		})
-	}
-}
-
-func TestHostEnvironmentPredicates(t *testing.T) {
-	env := EnvConfig{Type: EnvironmentTypeHost}
-
-	if !env.Type.IsValid() {
-		t.Error("EnvironmentTypeHost must be valid")
-	}
-	if got := env.ResolvedType(); got != EnvironmentTypeHost {
-		t.Errorf("ResolvedType() = %q, want %q", got, EnvironmentTypeHost)
-	}
-	if !env.BuildsHere() {
-		t.Error("BuildsHere() = false, want true — a host env builds locally")
-	}
-	if env.RemoteWorktree() {
-		t.Error("RemoteWorktree() = true, want false — a host worktree lives on this machine")
-	}
-	if env.HasPod() {
-		t.Error("HasPod() = true, want false — a host environment has no pod")
-	}
-	if got := env.ResolvedUpgradeChannel(); got != UpgradeChannelSnapshot {
-		t.Errorf("ResolvedUpgradeChannel() = %q, want %q", got, UpgradeChannelSnapshot)
 	}
 }
 

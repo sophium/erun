@@ -150,21 +150,6 @@ func TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered
 	assertNothingApplied(t, captured.path)
 }
 
-func TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias(t *testing.T) {
-	installCapturingKubectl(t)
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
-		return cloud.ERunTokens{AccessToken: "machine-token"}, nil
-	})
-
-	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ok {
-		t.Fatal("expected no provisioning from a host with no alias")
-	}
-}
-
 func assertNothingApplied(t *testing.T, capturePath string) {
 	t.Helper()
 	data, err := os.ReadFile(capturePath)

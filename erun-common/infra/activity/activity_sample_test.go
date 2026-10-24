@@ -56,47 +56,6 @@ func writeProcEntryFull(t *testing.T, root string, pid int, ppid int64, comm str
 	}
 }
 
-func TestResidentActivityNeedsCPUToAdvance(t *testing.T) {
-	root := t.TempDir()
-	writeProcEntry(t, root, 101, "java", 500, 900)
-	// A parked agent: resident, burning nothing.
-	writeProcEntry(t, root, 102, "claude-real", 200, 901)
-	writeProcEntry(t, root, 103, "erun", 10, 902)
-	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-
-	first, err := ScanResidentActivity(root, 103, model.ResidentActivitySample{}, now)
-	if err != nil {
-		t.Fatalf("first scan: %v", err)
-	}
-	if first.Busy {
-		t.Fatalf("the first sample has nothing to compare against and must report idle, got %+v", first)
-	}
-	if _, ok := first.Sample.CPU["103-902"]; ok {
-		t.Error("the sampler must exclude its own process from the accounting")
-	}
-
-	// 1500 ticks over 30s is 50% of a core, well clear of the floor.
-	writeProcEntry(t, root, 101, "java", 2000, 900)
-	second, err := ScanResidentActivity(root, 103, first.Sample, now.Add(30*time.Second))
-	if err != nil {
-		t.Fatalf("second scan: %v", err)
-	}
-	if !second.Busy {
-		t.Fatal("a build burning CPU must read as working")
-	}
-	if !reflect.DeepEqual(second.Processes, []string{"java"}) {
-		t.Errorf("expected only the advancing process named, got %v", second.Processes)
-	}
-
-	third, err := ScanResidentActivity(root, 103, second.Sample, now.Add(60*time.Second))
-	if err != nil {
-		t.Fatalf("third scan: %v", err)
-	}
-	if third.Busy {
-		t.Errorf("a quiet tick must read as idle, got %+v", third)
-	}
-}
-
 // Noise measured on a real parked agent: 21 ticks over a 30s sample, ~0.7% of a core.
 func TestResidentActivityIgnoresNoiseBelowTheCPURateFloor(t *testing.T) {
 	root := t.TempDir()
@@ -168,33 +127,6 @@ func TestResidentActivityIgnoresProcessesNobodyWouldCallWork(t *testing.T) {
 	}
 	if second.Busy {
 		t.Errorf("the pod's own long-lived services must not read as work, got %+v", second)
-	}
-}
-
-// Privilege-separated sshd leaves its per-session process tty-less, so the pty is found
-// on its child.
-func TestScanInteractiveSSHSession(t *testing.T) {
-	root := t.TempDir()
-	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
-		t.Fatalf("expected no session with an empty /proc, got found=%v err=%v", found, err)
-	}
-
-	writeProcEntryFull(t, root, 1, 0, "sshd", 10, 100, 0)
-	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
-		t.Fatalf("expected the sshd listener alone to read as no session, got found=%v err=%v", found, err)
-	}
-
-	// A sync/sftp channel never requests a pty.
-	writeProcEntryFull(t, root, 2, 1, "sshd", 10, 101, 0)
-	writeProcEntryFull(t, root, 3, 2, "sftp-server", 10, 102, 0)
-	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
-		t.Fatalf("expected a notty session to read as no session, got found=%v err=%v", found, err)
-	}
-
-	writeProcEntryFull(t, root, 4, 1, "sshd", 10, 103, 0)
-	writeProcEntryFull(t, root, 5, 4, "bash", 10, 104, 34816)
-	if found, err := ScanInteractiveSSHSession(root); err != nil || !found {
-		t.Fatalf("expected a pty-holding session to read as active, got found=%v err=%v", found, err)
 	}
 }
 

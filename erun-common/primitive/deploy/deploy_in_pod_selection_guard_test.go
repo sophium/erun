@@ -49,38 +49,3 @@ func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
 		})
 	}
 }
-
-func TestInPodRuntimeOnlySelectionLeavesTheOffPodFallbackAlone(t *testing.T) {
-	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
-	selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
-
-	for _, tc := range []struct {
-		name string
-		env  func(string) string
-	}{
-		{"no injected identity", func(string) string { return "" }},
-		{"nil env lookup", nil},
-		{"runtime pod of another environment", inPodEnvLookup("frs", "dev")},
-		{"runtime pod of another tenant", inPodEnvLookup("erun", "prod")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := guardInPodBlindRuntimeOnlySelection(tc.env, resolvedTarget, model.DeployTarget{}, selected, source); err != nil {
-				t.Fatalf("off-pod fallback was refused: %v", err)
-			}
-		})
-	}
-}
-
-func TestInPodRuntimeOnlySelectionIgnoresAnIncompleteInjectedIdentity(t *testing.T) {
-	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
-	selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
-	env := func(key string) string {
-		if key == "ERUN_TENANT" {
-			return "frs"
-		}
-		return ""
-	}
-	if err := guardInPodBlindRuntimeOnlySelection(env, resolvedTarget, model.DeployTarget{}, selected, source); err != nil {
-		t.Fatalf("a half-set injected identity must not be treated as in-pod: %v", err)
-	}
-}

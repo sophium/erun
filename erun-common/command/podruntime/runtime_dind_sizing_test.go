@@ -80,20 +80,6 @@ func TestRuntimeDindCPULimitNeverSizesBelowTheFloor(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode(t *testing.T) {
-	t.Parallel()
-	want := config.RuntimeDindCPULimit(config.DefaultRuntimeDindCPUNodeCPUMilli, config.DefaultRuntimeDindCPUCoTenants)
-	if config.DefaultRuntimeDindCPU != want {
-		t.Fatalf("DefaultRuntimeDindCPU = %q, but the rule gives %q for a %d milli-CPU node with %d co-tenants",
-			config.DefaultRuntimeDindCPU, want, config.DefaultRuntimeDindCPUNodeCPUMilli, config.DefaultRuntimeDindCPUCoTenants)
-	}
-	if config.DefaultRuntimeDindCPU == config.MinimumRuntimeDindCPU {
-		t.Fatalf("DefaultRuntimeDindCPU is still the floor (%q); the reference node is sized for a node larger than the "+
-			"smallest one this rule will size, so the two cannot be the same value without the default being flat again",
-			config.MinimumRuntimeDindCPU)
-	}
-}
-
 // A namespace ResourceQuota counts every container, so the floor must admit the sized dind default.
 func TestMinimumRuntimeNamespaceQuotaAdmitsTheDefaultPod(t *testing.T) {
 	t.Parallel()

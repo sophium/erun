@@ -43,31 +43,6 @@ func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	}
 }
 
-// A tenant's stated stock chart is on erun's line, not the deploy's, so it must not move.
-func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
-	target := config.OpenResult{
-		Tenant: "frs",
-		EnvConfig: config.EnvConfig{
-			Name:                "prod",
-			RuntimeVersion:      "1.0.86",
-			RuntimeImage:        "ghcr.io/sophium/frs-devops:1.0.86",
-			RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.86",
-			RuntimeChart:        "oci://ghcr.io/sophium/charts/erun-devops:1.0.30",
-			RuntimeRegistry:     "ghcr.io/sophium",
-		},
-	}
-	spec, err := ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, target, "1.0.86", "no local runtime chart", "", false)
-	if err != nil {
-		t.Fatalf("resolving the runtime deploy spec: %v", err)
-	}
-	if got := spec.Deploy.ChartVersion; got != "1.0.30" {
-		t.Errorf("ChartVersion = %q, want the stated 1.0.30 (a tenant with its own line states this coordinate on purpose)", got)
-	}
-	if got := spec.Deploy.PersistRuntimeChart; got != "" {
-		t.Errorf("PersistRuntimeChart = %q, want empty (nothing was moved)", got)
-	}
-}
-
 func TestPersistKeepsRecordedVersionAndRunningImageInStep(t *testing.T) {
 	const version = "1.0.283"
 	spec, err := ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)

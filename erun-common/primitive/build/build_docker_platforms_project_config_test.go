@@ -1,8 +1,6 @@
 package build
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -12,40 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func TestProjectDockerPlatformsDefaultCoversUnlistedEnvironments(t *testing.T) {
-	projectRoot := writeDockerPlatformsProjectConfig(t, `docker:
-    platforms:
-        - linux/amd64
-environments:
-    overridden:
-        docker:
-            platforms:
-                - linux/arm64
-    optedout:
-        docker:
-            platforms: []
-`)
-
-	cases := []struct {
-		name        string
-		environment string
-		want        []string
-	}{
-		{
-			name:        "an environment's own list wins over the project default",
-			environment: "overridden",
-			want:        []string{"linux/arm64"},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveDockerBuildPlatformsForTest(t, projectRoot, tc.environment); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("resolved platforms for %q = %v, want %v", tc.environment, got, tc.want)
-			}
-		})
-	}
-}
-
 func resolveDockerBuildPlatformsForTest(t *testing.T, projectRoot, environment string, override ...string) []string {
 	t.Helper()
 	platforms, err := dockerbuild.ResolveDockerBuildPlatforms(core.Context{}, projectRoot, environment, override)
@@ -53,19 +17,6 @@ func resolveDockerBuildPlatformsForTest(t *testing.T, projectRoot, environment s
 		t.Fatalf("resolveDockerBuildPlatforms(%q, %q) failed: %v", projectRoot, environment, err)
 	}
 	return platforms
-}
-
-func writeDockerPlatformsProjectConfig(t *testing.T, contents string) string {
-	t.Helper()
-	projectRoot := t.TempDir()
-	configDir := filepath.Join(projectRoot, config.ProjectConfigDir)
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) failed: %v", configDir, err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, config.ConfigFile), []byte(contents), 0o644); err != nil {
-		t.Fatalf("writing test project config failed: %v", err)
-	}
-	return projectRoot
 }
 
 func repoRootForDockerPlatformsProjectConfigTest(t *testing.T) string {

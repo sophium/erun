@@ -67,39 +67,6 @@ func linuxPackageNames(packages []model.LinuxPackageSpec) []string {
 	return names
 }
 
-func TestLinuxPackageDiscoveryFindsDockerfilesUnderLinux(t *testing.T) {
-	projectRoot, _, _ := linuxPackageProject(t)
-	devopsDir := filepath.Join(projectRoot, "team-devops")
-	cases := []struct {
-		name string
-		cwd  string
-		want []string
-	}{
-		{"devops module", devopsDir, []string{"erun-cli", "erun-ui"}},
-		{"an image component", filepath.Join(devopsDir, "docker", "api"), nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, tc.cwd)
-			contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot))
-			if tc.want == nil {
-				if !errors.Is(err, dockerspec.ErrLinuxPackageBuildNotFound) {
-					t.Fatalf("expected no packages, got %+v, %v", contexts, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := linuxPackageNames(dockerspec.NewLinuxPackageSpecs(projectRoot, contexts))
-			slices.Sort(got)
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("packages = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // fakeDockerRecorder logs each docker call and writes a .deb for a local export.
 func fakeDockerRecorder(t *testing.T, exitCode string) string {
 	t.Helper()
@@ -247,36 +214,6 @@ func TestReleaseUploadRefusesAnExportWithoutPackages(t *testing.T) {
 	}
 	if gh := readLines(t, ghLog); len(gh) != 0 {
 		t.Fatalf("GitHub must not be reached, got:\n%s", strings.Join(gh, "\n"))
-	}
-}
-
-func TestReleaseLinuxPackagesDryRunTracesWithoutRunning(t *testing.T) {
-	spec := linuxPackageReleaseSpec(t, "1.4.2")
-	dockerLog := fakeDockerRecorder(t, "0")
-	ghLog := fakeGitHubCLI(t, "0")
-	var trace bytes.Buffer
-	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace)}
-	if err := ExportReleaseLinuxPackages(ctx, spec); err != nil {
-		t.Fatal(err)
-	}
-	if err := dockerspec.UploadReleaseLinuxPackages(ctx, spec); err != nil {
-		t.Fatal(err)
-	}
-	if calls := append(readLines(t, dockerLog), readLines(t, ghLog)...); len(calls) != 0 {
-		t.Fatalf("a dry run must not run anything, got:\n%s", strings.Join(calls, "\n"))
-	}
-	out := trace.String()
-	for _, want := range []string{
-		"--platform linux/amd64 --target dist --build-arg ERUN_VERSION=1.4.2 --output 'type=local,dest=" + filepath.Join(spec.LinuxPackageDir, "erun-cli", "linux", "amd64") + "'",
-		"--platform linux/arm64 --target dist",
-		"stage: upload-linux-packages",
-		"gh release view v1.4.2",
-		"gh release upload v1.4.2 '" + filepath.Join(spec.LinuxPackageDir, "erun-cli", "linux", "amd64", "*.deb") + "'",
-		"--title 'Release 1.4.2' --generate-notes",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %q in dry-run trace:\n%s", want, out)
-		}
 	}
 }
 

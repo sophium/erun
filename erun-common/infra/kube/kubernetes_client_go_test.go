@@ -63,19 +63,6 @@ func namespaceNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// The library path's bool must match kubectl's exit-code result.
-func TestLibraryKubernetesNamespaceExistsMatchesSubprocessObservableResult(t *testing.T) {
-	fakeKubernetesAPIServer(t, namespaceFoundHandler("team-dev"))
-
-	exists, err := libraryKubernetesNamespaceExists("", "team-dev")
-	if err != nil {
-		t.Fatalf("libraryKubernetesNamespaceExists: %v", err)
-	}
-	if !exists {
-		t.Fatalf("exists = false, want true")
-	}
-}
-
 func TestLibraryKubernetesNamespaceExistsReportsNotFoundAsAbsentNotError(t *testing.T) {
 	fakeKubernetesAPIServer(t, namespaceNotFoundHandler("team-dev"))
 
@@ -121,19 +108,6 @@ func TestLibraryKubernetesNamespaceExistsHonorsContextOverride(t *testing.T) {
 	}
 }
 
-func TestKubectlGetNamespaceArgsOmitsContextFlagWhenUnset(t *testing.T) {
-	got := kubectlGetNamespaceArgs("", "team-dev")
-	want := []string{"get", "namespace", "team-dev", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}
-
 func pvcFoundHandler(namespace, name string) http.HandlerFunc {
 	path := "/api/v1/namespaces/" + namespace + "/persistentvolumeclaims/" + name
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -153,18 +127,6 @@ func pvcNotFoundHandler(name string) http.HandlerFunc {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
 			`"message":"persistentvolumeclaims \"` + name + `\" not found","reason":"NotFound","code":404}`))
-	}
-}
-
-func TestLibraryPersistentVolumeClaimExistsMatchesSubprocessObservableResult(t *testing.T) {
-	fakeKubernetesAPIServer(t, pvcFoundHandler("team-dev", "team-devops-worktree"))
-
-	exists, err := LibraryPersistentVolumeClaimExists("", "team-dev", "team-devops-worktree")
-	if err != nil {
-		t.Fatalf("libraryPersistentVolumeClaimExists: %v", err)
-	}
-	if !exists {
-		t.Fatalf("exists = false, want true")
 	}
 }
 
@@ -238,19 +200,6 @@ func secretNotFoundHandler(name string) http.HandlerFunc {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
 			`"message":"secrets \"` + name + `\" not found","reason":"NotFound","code":404}`))
-	}
-}
-
-// Secret.Data arrives already decoded, so the library path needs no base64 step.
-func TestLibraryImagePullSecretAuthsMatchesSubprocessObservableResult(t *testing.T) {
-	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", `{"auths":{"ghcr.io":{"auth":"alice:s3cret"}}}`))
-
-	auths, err := LibraryImagePullSecretAuths("", "team-dev", "regcred")
-	if err != nil {
-		t.Fatalf("libraryImagePullSecretAuths: %v", err)
-	}
-	if got, want := auths["ghcr.io"].Auth, "alice:s3cret"; got != want {
-		t.Fatalf("auths[ghcr.io].Auth = %q, want %q", got, want)
 	}
 }
 

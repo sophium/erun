@@ -236,7 +236,6 @@ deps:
     anyProjectDeps: true
     canUse:
       - github-com-briandowns-spinner
-      - github-com-manifoldco-promptui
       - github-com-spf13-cobra
       - golang-org-x-term
   cmd-orchestrator:

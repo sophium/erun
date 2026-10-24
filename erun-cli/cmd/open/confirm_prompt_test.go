@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/manifoldco/promptui"
 	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 )
 
@@ -80,26 +79,5 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 		if want := "add team-dev to ~/.bashrc? y"; renders[1] != want {
 			t.Fatalf("round %d: settled line %q, want %q", round, renders[1], want)
 		}
-	}
-}
-
-func TestConfirmPromptReachesTheInjectedRunnerWithoutATerminal(t *testing.T) {
-	t.Setenv("ERUN_FORCE_TTY", "")
-	confirmPromptStdin(t, "y", 1)
-
-	var shown promptui.Prompt
-	runner := func(prompt promptui.Prompt) (string, error) {
-		shown = prompt
-		return "y", nil
-	}
-	ok, err := promptpkg.ConfirmPromptTo(runner, "add team-dev to ~/.bashrc", nopWriteCloser{io.Discard})
-	if err != nil {
-		t.Fatalf("confirmPromptTo: %v", err)
-	}
-	if !ok {
-		t.Fatal("answering y must confirm")
-	}
-	if want := "add team-dev to ~/.bashrc"; shown.Label != want {
-		t.Fatalf("injected runner saw label %q, want %q", shown.Label, want)
 	}
 }

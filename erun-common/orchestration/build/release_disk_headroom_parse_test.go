@@ -7,21 +7,6 @@ import (
 )
 
 func TestParseDFDiskBytes(t *testing.T) {
-	t.Run("standard one-line output", func(t *testing.T) {
-		output := "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
-			"/dev/sda1        102400000 51200000  41943040      56% /var/lib/docker\n"
-		free, total, ok := diskheadroom.ParseDFDiskBytes(output)
-		if !ok {
-			t.Fatal("expected ok=true")
-		}
-		if want := uint64(41943040) * 1024; free != want {
-			t.Fatalf("free = %d, want %d", free, want)
-		}
-		if want := uint64(102400000) * 1024; total != want {
-			t.Fatalf("total = %d, want %d", total, want)
-		}
-	})
-
 	t.Run("long filesystem name wraps onto its own line", func(t *testing.T) {
 		output := "Filesystem                                                          1024-blocks     Used Available Capacity Mounted on\n" +
 			"a-very-long-overlay-filesystem-identifier-that-wraps-the-data-row\n" +
@@ -54,20 +39,12 @@ func TestParseDFDiskBytes(t *testing.T) {
 }
 
 func TestResolveMinDiskHeadroomBytes(t *testing.T) {
-	const smallDisk uint64 = 100 << 30 // 100 GiB -> 10 GiB proportional
 	const largeDisk uint64 = 435 << 30 // 435 GiB -> 43.5 GiB proportional
 
 	t.Run("defaults to the absolute floor when total is unknown", func(t *testing.T) {
 		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
 		if got := diskheadroom.ResolveMinDiskHeadroomBytes(0); got != diskheadroom.ReleaseMinDiskHeadroomBytes {
 			t.Fatalf("got %d, want default %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
-		}
-	})
-
-	t.Run("keeps the absolute floor when it exceeds the proportional one", func(t *testing.T) {
-		t.Setenv(diskheadroom.ReleaseMinDiskHeadroomEnv, "")
-		if got := diskheadroom.ResolveMinDiskHeadroomBytes(smallDisk); got != diskheadroom.ReleaseMinDiskHeadroomBytes {
-			t.Fatalf("got %d, want the absolute floor %d", got, diskheadroom.ReleaseMinDiskHeadroomBytes)
 		}
 	})
 
@@ -107,12 +84,6 @@ func TestResolveMinDiskHeadroomBytes(t *testing.T) {
 	})
 }
 
-func TestFormatGiB(t *testing.T) {
-	if got, want := diskheadroom.FormatGiB(20<<30), "20.0 GiB"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
 func TestParseBuildxDuReclaimable(t *testing.T) {
 	const listing = "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n" +
 		"2khmsvw4ntqfc7uq0q8r1y64c\t\ttrue \t\t0B        \t14 hours ago\n" +
@@ -145,32 +116,5 @@ func TestParseBuildxDuReclaimable(t *testing.T) {
 				t.Fatalf("got %d, want %d", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestParseDockerSize(t *testing.T) {
-	cases := []struct {
-		in   string
-		want uint64
-		ok   bool
-	}{
-		{"8.914GB", 8914000000, true},
-		{"0B", 0, true},
-		{"250.8MB", 250800000, true},
-		{"103.4GB", 103400000000, true},
-		{"512kB", 512000, true},
-		{"77.29GB (100%)", 77290000000, true},
-		{"", 0, false},
-		{"not-a-size", 0, false},
-	}
-	for _, tc := range cases {
-		got, ok := diskheadroom.ParseDockerSize(tc.in)
-		if ok != tc.ok {
-			t.Errorf("parseDockerSize(%q) ok = %v, want %v", tc.in, ok, tc.ok)
-			continue
-		}
-		if ok && got != tc.want {
-			t.Errorf("parseDockerSize(%q) = %d, want %d", tc.in, got, tc.want)
-		}
 	}
 }

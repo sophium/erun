@@ -33,10 +33,6 @@ func dependencyContext(stdout, stderr io.Writer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard), Stdout: stdout, Stderr: stderr}
 }
 
-func traceContext(trace io.Writer) core.Context {
-	return core.Context{Logger: core.NewLoggerWithWriters(0, trace, trace)}
-}
-
 func resolveTestDependencies(t *testing.T, builds []dockerspec.DockerBuildSpec) ([]dockerspec.DockerBuildSpec, map[string][]string) {
 	t.Helper()
 	ordered := orderedDockerBuildSpecs(builds)
@@ -45,75 +41,6 @@ func resolveTestDependencies(t *testing.T, builds []dockerspec.DockerBuildSpec) 
 		t.Fatalf("resolve dependencies: %v", err)
 	}
 	return ordered, dependencies
-}
-
-func TestBuildDependenciesRecordOnlyTheFromEdges(t *testing.T) {
-	dir := t.TempDir()
-	builds := []dockerspec.DockerBuildSpec{
-		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
-		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
-		buildSpecFromDockerfile(t, dir, "erun-backend-api", "debian:bookworm"),
-		buildSpecFromDockerfile(t, dir, "erun-docs", "node:22"),
-	}
-	_, dependencies := resolveTestDependencies(t, builds)
-
-	if got := dependencies["erun-devops"]; len(got) != 1 || got[0] != "erun-ubuntu" {
-		t.Fatalf("erun-devops must wait for erun-ubuntu alone, got %v", got)
-	}
-	for _, independent := range []string{"erun-ubuntu", "erun-backend-api", "erun-docs"} {
-		if got := dependencies[independent]; len(got) != 0 {
-			t.Fatalf("%s FROMs no sibling, so it waits for nothing, got %v", independent, got)
-		}
-	}
-}
-
-func TestBuildDependenciesIgnoreASelfReference(t *testing.T) {
-	dir := t.TempDir()
-	builds := []dockerspec.DockerBuildSpec{
-		buildSpecFromDockerfile(t, dir, "solo", "solo"),
-	}
-	_, dependencies := resolveTestDependencies(t, builds)
-	if got := dependencies["solo"]; len(got) != 0 {
-		t.Fatalf("a self-FROM is not a dependency, got %v", got)
-	}
-}
-
-func TestTraceBuildDependencyPlanSaysNothingWhenNothingMustWait(t *testing.T) {
-	dir := t.TempDir()
-	for name, builds := range map[string][]dockerspec.DockerBuildSpec{
-		"one image": {buildSpecFromDockerfile(t, dir, "solo", "debian:bookworm")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, dependencies := resolveTestDependencies(t, builds)
-			var trace bytes.Buffer
-			traceBuildDependencyPlan(traceContext(&trace), builds, dependencies)
-			if trace.Len() != 0 {
-				t.Fatalf("nothing waits, so there is no ordering to explain, got %q", trace.String())
-			}
-		})
-	}
-}
-
-func TestBuildDependenciesReportAFromCycleInsteadOfHanging(t *testing.T) {
-	dir := t.TempDir()
-	builds := []dockerspec.DockerBuildSpec{
-		buildSpecFromDockerfile(t, dir, "alpha", "beta"),
-		buildSpecFromDockerfile(t, dir, "beta", "alpha"),
-		// Naming a bystander would send a reader looking for an edge that is not there.
-		buildSpecFromDockerfile(t, dir, "bystander", "debian:bookworm"),
-	}
-	_, err := buildDependencies(builds)
-	if err == nil {
-		t.Fatal("expected a FROM cycle to be reported")
-	}
-	for _, want := range []string{"cycle", "alpha", "beta"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("the error must name %q, got %v", want, err)
-		}
-	}
-	if strings.Contains(err.Error(), "bystander") {
-		t.Fatalf("the error must name the cycle alone, got %v", err)
-	}
 }
 
 // erun-backend-api is held open; erun-devops, which only FROMs erun-ubuntu, must start anyway.

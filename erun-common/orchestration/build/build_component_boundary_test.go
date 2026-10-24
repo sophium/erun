@@ -1,10 +1,8 @@
 package build
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
@@ -43,40 +41,20 @@ func boundaryTarget(projectRoot string) model.DockerCommandTarget {
 	return model.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
 }
 
-// A `test` stage nothing consumes is pruned by BuildKit, so its tests never run.
-func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
+// The build refusals are integration goldens (build/dry_run_unconsumed_test_stage_is_refused,
+// build/dry_run_from_an_e2e_suite_directory_is_refused); push resolves through its own entry.
+func TestPushResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, unconsumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, componentDir)
 
-	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err == nil {
-		t.Fatal("expected erun build to refuse a Dockerfile whose test stage is never consumed")
-	}
-	for _, want := range []string{filepath.Join(componentDir, "Dockerfile"), `stage named "test" that no later stage consumes`, "COPY --from=test <artifact> <dest>", "FROM test"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal %q does not name %q", err, want)
-		}
-	}
-
 	if _, err := ResolveDockerPushExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
-		t.Fatal("expected erun push to refuse the same Dockerfile")
+		t.Fatal("expected erun push to refuse a Dockerfile whose test stage is never consumed")
 	}
 }
 
-func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
+func TestPushResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
 	projectRoot, _, suiteDir := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, suiteDir)
-
-	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err == nil {
-		t.Fatal("expected erun build to refuse an e2e suite's Dockerfile")
-	}
-	if errors.Is(err, dockerspec.ErrDockerBuildContextNotFound) {
-		t.Fatalf("an e2e suite must be refused with a pointer, not read as no build context: %v", err)
-	}
-	if !strings.Contains(err.Error(), "erun e2e --component console") {
-		t.Fatalf("refusal %q does not point at erun e2e for the suite", err)
-	}
 
 	if _, _, err := ResolveDockerPushSpec(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
 		t.Fatal("expected erun push to refuse an e2e suite's Dockerfile")

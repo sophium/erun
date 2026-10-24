@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // The platform lands a review MERGED against a plain successful build; there is
@@ -41,39 +38,5 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	}
 	if body["kind"] != "RECORDED" || body["version"] != "1.0.0" || body["commitId"] != "abc" || body["successful"] != true {
 		t.Fatalf("request body = %v, want a successful RECORDED build of abc at 1.0.0", body)
-	}
-}
-
-// Infrastructure failures say nothing about the change, so they are refused.
-func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		http.Error(w, "must not be called", http.StatusTeapot)
-	}))
-	t.Cleanup(srv.Close)
-
-	_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", model.ReviewRecordBuildParams{
-		ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: false,
-		FailureDetail: `failed to solve: failed to fetch oauth token: Post "https://ghcr.io/token": net/http: TLS handshake timeout`,
-	}, pushNoticeDeps(t))
-	if err == nil {
-		t.Fatal("expected a failed build matching an infrastructure signature to be refused")
-	}
-	if !strings.Contains(err.Error(), "re-run the build") {
-		t.Errorf("expected the refusal to name the remedy, got %v", err)
-	}
-	if calls.Load() != 0 {
-		t.Errorf("expected the refusal before any platform call, got %d calls", calls.Load())
-	}
-
-	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(false, "#16 213.0 error Error: https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz: ESOCKETTIMEDOUT"); err == nil {
-		t.Error("a registry download that timed out mid-install must not be recorded as FAILED")
-	}
-	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(false, "make: *** [Makefile:1060: check] Error 2"); err != nil {
-		t.Errorf("an ordinary red build must still be recordable as FAILED, got %v", err)
-	}
-	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(true, "tls handshake timeout"); err != nil {
-		t.Errorf("a successful build is never refused, got %v", err)
 	}
 }

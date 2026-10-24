@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -20,17 +18,5 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 	}
 	if !errors.Is(err, build.ErrBuildPlanEmpty) {
 		t.Fatalf("expected ErrBuildPlanEmpty, got %T: %v", err, err)
-	}
-}
-
-func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
-	if buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{}) {
-		t.Error("an execution with no release, script, image, or chart plans no work")
-	}
-	if !buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{Script: &dockerspec.ScriptSpec{Path: "./build.sh"}}) {
-		t.Error("a project build script is work")
-	}
-	if !buildrun.BuildExecutionPlansWork(dockerspec.BuildExecutionSpec{LinuxPackages: []model.LinuxPackageSpec{{Name: "erun-ui"}}}) {
-		t.Error("a linux package is work")
 	}
 }

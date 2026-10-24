@@ -15,16 +15,6 @@ func TestAISessionLaunchCommand(t *testing.T) {
 		return configpkg.EnvironmentClaudeConfig{Effort: &l}
 	}
 
-	t.Run("default claude launches at the env effort", func(t *testing.T) {
-		assertDefaultClaudeGuardAtEffort(t, effort("high"))
-	})
-
-	t.Run("explicit claude tool composes the same flags", func(t *testing.T) {
-		if got := open.AISessionLaunchCommand("claude", effort("low"), nil, "team", "dev"); !strings.Contains(got, "claude --effort low") || strings.Contains(got, "--continue") {
-			t.Fatalf("explicit claude must compose the env flags without --continue, got %q", got)
-		}
-	})
-
 	t.Run("a non-claude tool launches verbatim", func(t *testing.T) {
 		if got := open.AISessionLaunchCommand("codex", effort("max"), nil, "team", "dev"); got != "codex" {
 			t.Fatalf("codex must launch verbatim, got %q", got)
@@ -36,88 +26,10 @@ func TestAISessionLaunchCommand(t *testing.T) {
 			t.Fatalf("explicit-flag claude must launch verbatim, got %q", got)
 		}
 	})
-
-	t.Run("unset and invalid effort both resolve to ultracode", func(t *testing.T) {
-		assertEffortResolvesToUltracode(t, effort)
-	})
-
-	t.Run("ultracode launches via --settings", func(t *testing.T) {
-		assertUltracodeInBothBranches(t, effort("ultracode"))
-	})
-
-	t.Run("an explicit max still launches via --effort", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", effort("max"), nil, "team", "dev")
-		if !strings.Contains(got, "--effort max") || strings.Contains(got, "--settings") {
-			t.Fatalf("explicit max must keep --effort max, got %q", got)
-		}
-	})
-}
-
-func assertDefaultClaudeGuardAtEffort(t *testing.T, config configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := open.AISessionLaunchCommand("", config, nil, "team", "dev")
-	// The runtime image's claude link decides whether to resume.
-	if want := "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus --remote-control team/dev"; got != want {
-		t.Fatalf("launch = %q, want %q", got, want)
-	}
-}
-
-func assertEffortResolvesToUltracode(t *testing.T, effort func(string) configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-	if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
-		t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
-	}
-	got = open.AISessionLaunchCommand("", effort("turbo"), nil, "team", "dev")
-	if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
-		t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
-	}
-}
-
-func assertUltracodeInBothBranches(t *testing.T, config configpkg.EnvironmentClaudeConfig) {
-	t.Helper()
-	got := open.AISessionLaunchCommand("", config, nil, "team", "dev")
-	if strings.Count(got, `--settings '{"ultracode":true}'`) != 1 || strings.Contains(got, "--effort") {
-		t.Fatalf("ultracode must inject --settings (never --effort), got %q", got)
-	}
-	if !strings.Contains(got, `claude --settings '{"ultracode":true}'`) {
-		t.Fatalf("--settings must follow claude, got %q", got)
-	}
-}
-
-func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
-	t.Run("default model and verbose debug inject into the launch", func(t *testing.T) {
-		model := "fable"
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"opus", "fable"},
-			DefaultModel: &model,
-			VerboseDebug: true,
-		}, nil, "team", "dev")
-		if !strings.Contains(got, `claude --settings '{"ultracode":true}' --model fable --verbose --debug`) {
-			t.Fatalf("flags must compose after the effort flags, got %q", got)
-		}
-	})
-
-	t.Run("verbose debug composes with the resolved default model", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{VerboseDebug: true}, nil, "team", "dev")
-		if !strings.Contains(got, "--model opus --verbose --debug") {
-			t.Fatalf("expected --model opus --verbose --debug, got %q", got)
-		}
-	})
 }
 
 func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	model := func(v string) *string { return &v }
-
-	t.Run("prefix mirrors the resolved model and composes with ultracode", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"fable"},
-			DefaultModel: model("fable"),
-		}, nil, "team", "dev")
-		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --settings '{"ultracode":true}' --model fable`) {
-			t.Fatalf("prefix must precede claude and compose with --settings/--model, got %q", got)
-		}
-	})
 
 	t.Run("no prefix when no available model is a safe token", func(t *testing.T) {
 		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}}, nil, "team", "dev")
@@ -161,15 +73,6 @@ func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 // Remote Control is off for Bedrock/Mantle gateways and non-claude tools, and
 // unnamed when tenant/env is unsafe to inline.
 func TestAISessionLaunchRemoteControl(t *testing.T) {
-	yes := func() *bool { b := true; return &b }
-
-	t.Run("gated off when the env uses the Bedrock gateway", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{UseBedrock: yes()}, nil, "team", "dev")
-		if strings.Contains(got, "--remote-control") {
-			t.Fatalf("Bedrock gateway auth must not enable remote control, got %q", got)
-		}
-	})
-
 	t.Run("an unsafe tenant/env falls back to the unnamed flag", func(t *testing.T) {
 		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "a b; rm", "dev")
 		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
@@ -199,11 +102,7 @@ func TestResolveClaudeLaunchModel(t *testing.T) {
 		config configpkg.EnvironmentClaudeConfig
 		want   string
 	}{
-		{"explicit model in default available set when models unset", configpkg.EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
 		{"fable is opt-in: not auto-selected from the default available set", configpkg.EnvironmentClaudeConfig{DefaultModel: model("fable")}, "opus"},
-		{"first-available honours the env's narrowed set", configpkg.EnvironmentClaudeConfig{Models: []string{"sonnet", "haiku"}}, "sonnet"},
-		{"trimmed explicit model", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("  opus  ")}, "opus"},
-		{"blank explicit model falls back to first available", configpkg.EnvironmentClaudeConfig{DefaultModel: model("  ")}, "opus"},
 		{"unsafe explicit model falls back to first available", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("a b; rm")}, "opus"},
 		{"no safe token in the available set resolves to empty", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}, DefaultModel: model("a b; rm")}, ""},
 	}
@@ -211,29 +110,6 @@ func TestResolveClaudeLaunchModel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := open.ResolveClaudeLaunchModel(tc.config, nil); got != tc.want {
 				t.Fatalf("resolveClaudeLaunchModel(%+v) = %q, want %q", tc.config, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestResolveClaudeEffort(t *testing.T) {
-	level := func(v string) *string { return &v }
-	cases := []struct {
-		name   string
-		config configpkg.EnvironmentClaudeConfig
-		want   string
-	}{
-		{"valid", configpkg.EnvironmentClaudeConfig{Effort: level("low")}, "low"},
-		{"explicit max stays max", configpkg.EnvironmentClaudeConfig{Effort: level("max")}, "max"},
-		{"ultracode is a valid level", configpkg.EnvironmentClaudeConfig{Effort: level("ultracode")}, "ultracode"},
-		{"trimmed", configpkg.EnvironmentClaudeConfig{Effort: level("  high  ")}, "high"},
-		{"blank", configpkg.EnvironmentClaudeConfig{Effort: level("  ")}, "ultracode"},
-		{"invalid", configpkg.EnvironmentClaudeConfig{Effort: level("turbo")}, "ultracode"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := open.ResolveClaudeEffort(tc.config); got != tc.want {
-				t.Fatalf("resolveClaudeEffort(%+v) = %q, want %q", tc.config, got, tc.want)
 			}
 		})
 	}

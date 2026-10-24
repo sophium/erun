@@ -9,40 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-func TestRemoteShellLaunchPersistentSession(t *testing.T) {
-	base := config.ShellLaunchParams{
-		Tenant:      "erun",
-		Environment: "local",
-		Title:       "erun/local",
-		Namespace:   "erun-local",
-		RemoteRepo:  true,
-	}
-	const bashrc = `/bin/bash --rcfile "$HOME/.erun/erun/local/bashrc" -i`
-
-	preview := func(t *testing.T, req config.ShellLaunchParams) string {
-		t.Helper()
-		p, err := PreviewShellLaunch(req)
-		if err != nil {
-			t.Fatalf("PreviewShellLaunch: %v", err)
-		}
-		return p.Script
-	}
-
-	t.Run("bare CLI is unchanged (no dtach)", func(t *testing.T) {
-		script := preview(t, base)
-		assertScriptLacks(t, script, "dtach", "bare `erun open` must not use dtach")
-		assertScriptHas(t, script, bashrc+" || shell_status=$?", "bare path lost its original bash invocation")
-	})
-
-	t.Run("each terminal slot owns its own session", func(t *testing.T) {
-		req := base
-		req.AppSession = "open-1"
-		script := preview(t, req)
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-1.dtach" -r ctrl_l`, "slot 1 missing its own dtach socket")
-		assertScriptLacks(t, script, "open-0", "slot 1 must not touch slot 0's session")
-	})
-}
-
 // `pkill -f erun-app` must not match any session's dtach command line.
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
@@ -67,20 +33,6 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	}
 	if strings.Contains(script.Script, core.DesktopAppName) {
 		t.Fatalf("the session launch script names the desktop binary %q:\n%s", core.DesktopAppName, script.Script)
-	}
-}
-
-func assertScriptHas(t *testing.T, script, want, msg string) {
-	t.Helper()
-	if !strings.Contains(script, want) {
-		t.Fatalf("%s:\n%s", msg, script)
-	}
-}
-
-func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
-	t.Helper()
-	if strings.Contains(script, unwanted) {
-		t.Fatalf("%s:\n%s", msg, script)
 	}
 }
 

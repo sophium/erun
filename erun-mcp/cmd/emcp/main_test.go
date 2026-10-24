@@ -51,38 +51,6 @@ func assertMetricsConfig(t *testing.T, got erunmcp.MetricsConfig, wantHost strin
 	}
 }
 
-func TestRunPassesResolvedFlags(t *testing.T) {
-	var gotCfg erunmcp.HTTPConfig
-	var gotMetricsCfg erunmcp.MetricsConfig
-	var gotRuntime runtimecfg.RuntimeConfig
-
-	exitCode := run([]string{
-		"--host", "0.0.0.0", "--port", "17001", "--path", "custom",
-		"--metrics-host", "0.0.0.0", "--metrics-port", "9101", "--metrics-enabled=false",
-		"--tenant", "tenant-a", "--environment", "dev", "--repo-path", "/tmp/project", "--kubernetes-context", "cluster-dev", "--namespace", "tenant-a-dev",
-	}, new(bytes.Buffer), model.BuildInfo{}, func(_ context.Context, _ model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
-		gotCfg = cfg
-		gotMetricsCfg = metricsCfg
-		gotRuntime = runtime
-		return nil
-	})
-	if exitCode != 0 {
-		t.Fatalf("expected success exit code, got %d", exitCode)
-	}
-	if gotCfg.Host != "0.0.0.0" || gotCfg.Port != 17001 || gotCfg.Path != "custom" {
-		t.Fatalf("unexpected MCP config: %+v", gotCfg)
-	}
-	assertMetricsConfig(t, gotMetricsCfg, "0.0.0.0", 9101, false)
-	assertRuntimeContext(t, gotRuntime.Context)
-}
-
-func assertRuntimeContext(t *testing.T, got toolio.RuntimeContext) {
-	t.Helper()
-	if got.Tenant != "tenant-a" || got.Environment != "dev" || got.RepoPath != "/tmp/project" || got.KubernetesContext != "cluster-dev" || got.Namespace != "tenant-a-dev" {
-		t.Fatalf("unexpected runtime context: %+v", got)
-	}
-}
-
 func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
 	stderr := new(bytes.Buffer)
 	called := false

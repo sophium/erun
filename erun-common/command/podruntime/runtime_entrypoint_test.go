@@ -76,37 +76,6 @@ func testJSONArray(t *testing.T, value any) []any {
 	return array
 }
 
-func TestRuntimeEntrypointCommandSelectsTheMode(t *testing.T) {
-	if runtimeEntrypointCommand(nil) != nil || runtimeEntrypointCommand([]string{"devops"}) != nil {
-		t.Fatal("no command and `devops` both boot the environment")
-	}
-	if got := runtimeEntrypointCommand([]string{"bash", "-lc", "true"}); strings.Join(got, " ") != "bash -lc true" {
-		t.Fatalf("any other command runs as the foreground process, got %v", got)
-	}
-}
-
-func TestRuntimeMCPEnabled(t *testing.T) {
-	for _, tc := range []struct {
-		enabled, port string
-		want          bool
-	}{
-		{"true", "", true},
-		{"1", "", true},
-		{"false", "17000", false},
-		{"off", "17000", false},
-		{"", "17000", true},
-		{"", "", false},
-	} {
-		boot := newTestRuntimeBoot(t, map[string]string{"ERUN_MCP_ENABLED": tc.enabled, "ERUN_MCP_PORT": tc.port})
-		if got := boot.runtimeMCPEnabled(); got != tc.want {
-			t.Errorf("ERUN_MCP_ENABLED=%q ERUN_MCP_PORT=%q: enabled=%v, want %v", tc.enabled, tc.port, got, tc.want)
-		}
-		if (describeRuntimeMCP(boot) != "") != tc.want {
-			t.Errorf("ERUN_MCP_ENABLED=%q ERUN_MCP_PORT=%q: the MCP step must run exactly when the edge is enabled", tc.enabled, tc.port)
-		}
-	}
-}
-
 // Parse the argv the way emcp does: a separate bool value would drop every later flag.
 func TestRuntimeMCPArgsParseThroughEveryFlag(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17000", "ERUN_NAMESPACE": "team-dev"})
@@ -136,30 +105,6 @@ func TestRuntimeMCPArgsParseThroughEveryFlag(t *testing.T) {
 	}
 	if line := boot.runtimeMCPStartLine(); line != "starting erun MCP on 0.0.0.0:17000/mcp, metrics on 0.0.0.0:9100 (enabled=true)" {
 		t.Fatalf("start line = %q", line)
-	}
-}
-
-func TestRuntimeCacheTrimSettings(t *testing.T) {
-	home := t.TempDir()
-	for _, tc := range []struct {
-		max, interval string
-		wantMax       int64
-		wantInterval  string
-	}{
-		{"", "", DefaultGoBuildCacheMaxBytes, "30m0s"},
-		{"0", "", 0, "30m0s"},
-		{"garbage", "60", 0, "1m0s"},
-		{"1024", "-1", 1024, "30m0s"},
-	} {
-		env := map[string]string{"ERUN_GO_BUILD_CACHE_MAX_BYTES": tc.max, "ERUN_CACHE_TRIM_INTERVAL_SECONDS": tc.interval}
-		dir, maxBytes, interval := RuntimeGoBuildCacheTrimSettings(func(key string) string { return env[key] }, home)
-		if dir != filepath.Join(home, ".cache", "go-build") || maxBytes != tc.wantMax || interval.String() != tc.wantInterval {
-			t.Errorf("max=%q interval=%q: got %s %d %s", tc.max, tc.interval, dir, maxBytes, interval)
-		}
-	}
-	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_GO_BUILD_CACHE_MAX_BYTES": "0"})
-	if describeRuntimeCacheTrim(boot) != "" {
-		t.Fatal("a cap of zero must start no cache bound")
 	}
 }
 

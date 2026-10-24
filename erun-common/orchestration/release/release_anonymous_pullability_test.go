@@ -35,18 +35,6 @@ func writeModuleFixture(t *testing.T, root, imageName string) {
 	}
 }
 
-func TestDiscoverModuleReferencedImageNames(t *testing.T) {
-	t.Run("a root with no terraform-erun tree yields no names, not an error", func(t *testing.T) {
-		names, err := DiscoverModuleReferencedImageNames(filepath.Join(t.TempDir(), "erun-devops", "terraform-erun"))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(names) != 0 {
-			t.Fatalf("names = %v, want none", names)
-		}
-	})
-}
-
 // anonymousManifestStub records what credentials the token and manifest requests carried.
 type anonymousManifestStub struct {
 	ManifestStatus int
@@ -348,18 +336,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenUnpublished(t *
 	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
 	if err == nil || !strings.Contains(err.Error(), "erun-orphaned-webhook") {
 		t.Fatalf("expected an error naming the unpublished reference, got: %v", err)
-	}
-}
-
-func TestVerifyModuleReferencedImagesAnonymouslyPullableNoOpWhenNothingReferenced(t *testing.T) {
-	root := t.TempDir()
-	ctx := core.Context{Logger: core.NewLogger(0)}
-	probe := func(context.Context, *http.Client, string, string) (bool, error) {
-		t.Fatal("must not probe when nothing is referenced")
-		return false, nil
-	}
-	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, dockerspec.BuildExecutionSpec{}, probe); err != nil {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

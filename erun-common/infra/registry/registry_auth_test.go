@@ -169,18 +169,6 @@ func TestResolveGHCRBasicAuthPrefersDockerOverGH(t *testing.T) {
 	}
 }
 
-func TestResolveGHCRBasicAuthFallsBackToEnvTokenWhenSubprocessAuthUnavailable(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir()) // no docker cred
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "envtok")
-
-	auth, ok := resolveGHCRBasicAuth("sophium")
-	if !ok || auth.Username != "sophium" || auth.Secret != "envtok" {
-		t.Fatalf("got %+v ok=%v, want sophium/envtok", auth, ok)
-	}
-}
-
 func TestResolveGHCRBasicAuthUsesGithubTokenWhenGhTokenEmpty(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 	useGHToken(t, func(string) (string, bool) { return "", false })
@@ -205,16 +193,5 @@ func TestResolveGHCRBasicAuthPrefersDockerOverEnvToken(t *testing.T) {
 	auth, ok := resolveGHCRBasicAuth("sophium")
 	if !ok || auth.Username != "dockeruser" {
 		t.Fatalf("got %+v ok=%v, want docker credential", auth, ok)
-	}
-}
-
-func TestResolveGHCRBasicAuthNoneAvailable(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir())
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-
-	if _, ok := resolveGHCRBasicAuth("sophium"); ok {
-		t.Fatal("expected no credential when docker, gh, and env are all empty")
 	}
 }

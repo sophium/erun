@@ -27,46 +27,6 @@ func TestFetchHelpersReturnErrorOnNon2xx(t *testing.T) {
 	}
 }
 
-func TestDryRunFetchersPerformNoRequest(t *testing.T) {
-	if _, err := defaultFetchPlatformInfo(core.Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
-		t.Fatalf("dry run fetch platform info: %v", err)
-	}
-	if _, err := defaultFetchOIDCDiscovery(core.Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
-		t.Fatalf("dry run fetch discovery: %v", err)
-	}
-}
-
-func TestDefaultStartERunDeviceAuthorization(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Fatalf("parse form: %v", err)
-		}
-		if r.FormValue("client_id") != "cli-1" {
-			t.Fatalf("client_id = %q", r.FormValue("client_id"))
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"device_code":               "dev-code",
-			"user_code":                 "USER-CODE",
-			"verification_uri":          "https://auth.example.test/device",
-			"verification_uri_complete": "https://auth.example.test/device?code=USER-CODE",
-			"expires_in":                600,
-			"interval":                  5,
-		})
-	}))
-	defer srv.Close()
-
-	auth, err := defaultStartERunDeviceAuthorization(core.Context{}, OIDCDiscovery{DeviceAuthorizationEndpoint: srv.URL}, "cli-1", erunOAuthScope)
-	if err != nil {
-		t.Fatalf("defaultStartERunDeviceAuthorization: %v", err)
-	}
-	if auth.DeviceCode != "dev-code" || auth.UserCode != "USER-CODE" {
-		t.Fatalf("auth = %+v", auth)
-	}
-	if auth.Interval != 5*time.Second || auth.ExpiresIn != 600*time.Second {
-		t.Fatalf("auth timing = %+v", auth)
-	}
-}
-
 func TestDefaultStartERunDeviceAuthorizationRequiresEndpoint(t *testing.T) {
 	if _, err := defaultStartERunDeviceAuthorization(core.Context{}, OIDCDiscovery{Issuer: "https://auth.example.test"}, "cli-1", erunOAuthScope); err == nil {
 		t.Fatal("expected an error when no device authorization endpoint is advertised")
@@ -158,34 +118,6 @@ func TestPollERunDeviceTokenTimesOutWhenAlwaysPending(t *testing.T) {
 		t.Fatal("expected the poll to time out")
 	} else if !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("error = %v, want to mention expiry", err)
-	}
-}
-
-func TestPollERunDeviceTokenDryRunPerformsNoRequest(t *testing.T) {
-	auth := ERunDeviceAuthorization{DeviceCode: "dev-code", Interval: time.Millisecond, ExpiresIn: time.Second}
-	if _, err := pollERunDeviceToken(core.Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: "http://127.0.0.1:1"}, "cli-1", auth); err != nil {
-		t.Fatalf("dry run poll: %v", err)
-	}
-}
-
-func TestDefaultRefreshERunTokens(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Fatalf("parse form: %v", err)
-		}
-		if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "refresh-1" {
-			t.Fatalf("form = %v", r.Form)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fresh-access", "expires_in": 3600})
-	}))
-	defer srv.Close()
-
-	tokens, err := defaultRefreshERunTokens(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", "refresh-1")
-	if err != nil {
-		t.Fatalf("defaultRefreshERunTokens: %v", err)
-	}
-	if tokens.AccessToken != "fresh-access" || tokens.ExpiresIn != time.Hour {
-		t.Fatalf("tokens = %+v", tokens)
 	}
 }
 

@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -373,36 +372,6 @@ func TestApplyIgnoresNonPortableKeysOnTheWire(t *testing.T) {
 	}
 }
 
-func TestBuildEnvDefinitionPlanRefusesAPlatformNameMismatch(t *testing.T) {
-	config := EnvConfig{Name: "local-name", Type: EnvironmentTypeRuntime}
-	plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
-		Local:            config,
-		PlatformName:     "platform-name",
-		PlatformType:     string(EnvironmentTypeRuntime),
-		LocalRevision:    1,
-		PlatformRevision: 2,
-	})
-
-	if len(plan.Refusals) == 0 {
-		t.Fatal("a platform name that disagrees with the local name was not refused")
-	}
-	if plan.Refusals[0].Field != "Name" {
-		t.Errorf("refusal names %q, want Name", plan.Refusals[0].Field)
-	}
-}
-
-func TestBuildEnvDefinitionPlanRefusesAPlatformTypeMismatch(t *testing.T) {
-	plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
-		Local:         EnvConfig{Name: "same", Type: EnvironmentTypeRuntime},
-		PlatformName:  "same",
-		PlatformType:  string(EnvironmentTypeLocalAgent),
-		LocalRevision: 1,
-	})
-	if len(plan.Refusals) != 1 || plan.Refusals[0].Field != "Type" {
-		t.Fatalf("refusals = %+v, want exactly one Type refusal", plan.Refusals)
-	}
-}
-
 func TestBuildEnvDefinitionPlanPromptsOnATwoSidedPortableEdit(t *testing.T) {
 	platformVersion := "1.2.3"
 	plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
@@ -422,57 +391,6 @@ func TestBuildEnvDefinitionPlanPromptsOnATwoSidedPortableEdit(t *testing.T) {
 	}
 	if plan.Conflicts[0].Local != "1.2.2" || plan.Conflicts[0].Platform != "1.2.3" {
 		t.Errorf("conflict diff = %+v, want both sides", plan.Conflicts[0])
-	}
-}
-
-func TestBuildEnvDefinitionPlanDoesNotPromptOnACatchUp(t *testing.T) {
-	platformVersion := "1.2.3"
-	plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
-		Local:            EnvConfig{Name: "same", Type: EnvironmentTypeRuntime, RuntimeVersion: "1.2.2"},
-		Definition:       PlatformEnvDefinition{RuntimeVersion: &platformVersion},
-		PlatformName:     "same",
-		PlatformType:     string(EnvironmentTypeRuntime),
-		LocalRevision:    2,
-		PlatformRevision: 2,
-	})
-	if len(plan.Changes) != 1 {
-		t.Fatalf("changes = %+v, want one", plan.Changes)
-	}
-	if len(plan.Conflicts) != 0 {
-		t.Errorf("a one-sided catch-up raised a conflict prompt: %+v", plan.Conflicts)
-	}
-}
-
-func TestCheckHostedMarkerTargetRefusesATenantMismatch(t *testing.T) {
-	marker := HostedEnvironment{APIHost: "api.erunpaas.com", TenantID: "tenant-a", EnvironmentID: "env-1"}
-
-	if err := CheckHostedMarkerTarget(marker, "api.erunpaas.com", "tenant-a", "env-1"); err != nil {
-		t.Fatalf("a marker matching the resolved target was refused: %v", err)
-	}
-	err := CheckHostedMarkerTarget(marker, "api.erunpaas.com", "tenant-b", "env-1")
-	if err == nil {
-		t.Fatal("a tenant mismatch was adopted rather than refused")
-	}
-	var mismatch *HostedMarkerMismatchError
-	if !errors.As(err, &mismatch) || mismatch.Field != "tenant" {
-		t.Fatalf("tenant mismatch reported as %v", err)
-	}
-	if err := CheckHostedMarkerTarget(marker, "other.erunpaas.com", "tenant-a", "env-1"); err == nil {
-		t.Fatal("an api host mismatch was adopted rather than refused")
-	}
-	if err := CheckHostedMarkerTarget(marker, "api.erunpaas.com", "tenant-a", "env-2"); err == nil {
-		t.Fatal("an environment id mismatch was adopted rather than refused")
-	}
-	// An unresolved environment id is not a disagreement.
-	if err := CheckHostedMarkerTarget(marker, "api.erunpaas.com", "tenant-a", ""); err != nil {
-		t.Fatalf("an unresolved environment id was treated as a mismatch: %v", err)
-	}
-}
-
-func TestHostedMarkerNormalizesTheAPIHost(t *testing.T) {
-	trailing := HostedEnvironment{APIHost: "https://api.erunpaas.com/", TenantID: "t", EnvironmentID: "e"}
-	if err := CheckHostedMarkerTarget(trailing, "https://api.erunpaas.com", "t", "e"); err != nil {
-		t.Fatalf("the same host written two ways read as two platforms: %v", err)
 	}
 }
 

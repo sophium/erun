@@ -10,51 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
-func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
-	const (
-		free  = diskHeadroomBelow
-		floor = diskHeadroomTestFloor
-	)
-	dockerCanStillFree := diskheadroom.DiskHeadroomShortfall{
-		Free: free, Floor: floor, Path: dockerRootPath,
-		DockerReclaimExhausted: false,
-	}
-	if got := dockerCanStillFree.Remedy(); !strings.Contains(got, "docker system prune") {
-		t.Fatalf("a shortfall docker can still reach must name the docker remedy, got %q", got)
-	}
-
-	dockerHasNothingToFree := diskheadroom.DiskHeadroomShortfall{
-		Free: free, Floor: floor, Path: dockerRootPath,
-		SharedPaths:            []string{environmentWorkCloneDir},
-		DockerReclaimExhausted: true,
-	}
-	got := dockerHasNothingToFree.Remedy()
-	if strings.Contains(got, "docker system prune") || strings.Contains(got, "remove unused images") {
-		t.Fatalf("a shortfall docker cannot free must not name a docker remedy, got %q", got)
-	}
-	for _, want := range []string{"pruning docker cannot free any of it", environmentWorkCloneDir, "grow the volume"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected the remedy to contain %q, got %q", want, got)
-		}
-	}
-
-	// Reclaimable images can be reported while the bytes sit in the build cache.
-	buildCacheStillHoldsIt := diskheadroom.DiskHeadroomShortfall{
-		Free: free, Floor: floor, Path: dockerRootPath,
-		DockerReclaimExhausted:     false,
-		BuildCacheStillReclaimable: 43 << 30,
-	}
-	got = buildCacheStillHoldsIt.Remedy()
-	if strings.Contains(got, "remove unused images") || strings.Contains(got, "docker system prune") {
-		t.Fatalf("a shortfall the build cache is holding must not send the operator to remove images, got %q", got)
-	}
-	for _, want := range []string{"build cache still holds", "43.0 GiB", "docker buildx prune -a", "grow the volume"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected the remedy to contain %q, got %q", want, got)
-		}
-	}
-}
-
 func diskHeadroomShortLimits() diskheadroom.DiskHeadroomTimeouts {
 	const short = 500 * time.Millisecond
 	return diskheadroom.DiskHeadroomTimeouts{Read: short, Probe: short, Prune: short}

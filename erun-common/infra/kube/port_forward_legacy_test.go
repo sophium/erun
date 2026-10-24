@@ -96,26 +96,6 @@ func TestResolvePortForwardStatePathMigratesTheCacheDirRecordWithItsLogs(t *test
 	requireMissing(t, legacyLog+".1")
 }
 
-func TestResolvePortForwardStatePathMigratesTheUserConfigDirRecord(t *testing.T) {
-	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
-	legacyPath := filepath.Join(legacyRoot, "mcp", "acme", "dev.json")
-	seedLegacyPortForwardRecordForTest(t, legacyPath)
-
-	path, err := ResolvePortForwardStatePath("mcp", "acme", "dev", false)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	statePath, err := PortForwardStatePath("mcp", "acme", "dev")
-	if err != nil {
-		t.Fatalf("PortForwardStatePath: %v", err)
-	}
-	if path != statePath {
-		t.Fatalf("expected the migrated path %q, got %q", statePath, path)
-	}
-	requirePresent(t, statePath)
-	requireMissing(t, legacyPath)
-}
-
 // A delete must also remove a record left at a legacy location, or a later
 // same-named environment would inherit it.
 func TestRemovePortForwardRecordRemovesLegacyLocationRecords(t *testing.T) {

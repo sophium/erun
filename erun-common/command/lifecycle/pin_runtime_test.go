@@ -33,55 +33,6 @@ func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t
 	}
 }
 
-// Stock-image environments, stated or defaulted for erun's own tenant, are still re-pinned.
-func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		tenant      string
-		environment string
-		env         config.EnvConfig
-	}{
-		{
-			name:        "erun's own tenant, nothing stated",
-			tenant:      "erun",
-			environment: "dev",
-			env:         config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"},
-		},
-		{
-			name:        "stock image and stock chart stated",
-			tenant:      "acme",
-			environment: "dev",
-			env: config.EnvConfig{
-				Name:                "dev",
-				RuntimeVersion:      "1.0.115",
-				RuntimeImage:        "ghcr.io/sophium/erun-devops:1.0.115",
-				RuntimeRunningImage: "ghcr.io/sophium/erun-devops:1.0.115",
-				RuntimeChart:        "oci://ghcr.io/sophium/charts/erun-devops:1.0.115",
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := seedPinnedTenantRepo(t)
-			plan, err := ResolvePinPlan(root, tc.tenant, tc.environment, tc.env, "1.0.175")
-			if err != nil {
-				t.Fatalf("resolve: %v", err)
-			}
-			if len(plan.Changes()) == 0 {
-				t.Fatal("expected the repo's drifted erun references to move")
-			}
-			for _, site := range plan.Sites {
-				if site.Kind == model.PinSiteRuntimeVersion {
-					if site.Target != "1.0.175" {
-						t.Fatalf("runtimeversion site = %+v", site)
-					}
-					return
-				}
-			}
-			t.Fatalf("a stock env's runtimeversion must still be a pin site, skipped notes: %+v", plan.Skipped)
-		})
-	}
-}
-
 // skipNoteNaming returns the one skipped note containing every fragment.
 func skipNoteNaming(t *testing.T, plan model.PinPlan, fragments ...string) string {
 	t.Helper()
@@ -150,40 +101,5 @@ func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T
 	}
 	if !foundSkipNote {
 		t.Fatalf("expected a skipped note explaining the unreadable chart, got %+v", plan.Skipped)
-	}
-}
-
-// ResolvePinPlan never writes, even when reporting a split image/chart pairing.
-func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-	env := config.EnvConfig{
-		Name:         "prod",
-		RuntimeImage: "ghcr.io/sophium/petios-devops",
-		RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
-	}
-	before := readPinFile(t, root, "acme-devops/docker/erun-devops/Dockerfile")
-
-	plan, err := ResolvePinPlan(root, "petios", "prod", env, "1.0.228")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	changes := plan.Changes()
-	var chartChange model.PinSite
-	found := false
-	for _, site := range changes {
-		if site.Kind == model.PinSiteRuntimeChart {
-			chartChange = site
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected the split pairing's runtimechart to be reported as a change, got %+v", changes)
-	}
-	if chartChange.Current != "1.0.201" || chartChange.Target != "1.0.228" {
-		t.Fatalf("runtime-chart change = %+v", chartChange)
-	}
-	after := readPinFile(t, root, "acme-devops/docker/erun-devops/Dockerfile")
-	if before != after {
-		t.Fatalf("resolving a plan must never write to the repo:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }

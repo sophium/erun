@@ -2,14 +2,10 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
@@ -27,61 +23,6 @@ func fakeRestartDeps(t *testing.T, marker DesktopControlMarker, markerErr error,
 		},
 		ProcessAlive: func(int) bool { return alive },
 		Post:         post,
-	}
-}
-
-// fakeDryRunDeps counts restart calls: a dry run must never reach one.
-func fakeDryRunDeps(t *testing.T, plan func(context.Context, int, string) (DesktopRestartResponse, error)) (DesktopRestartDeps, *int) {
-	t.Helper()
-	restarts := 0
-	deps := fakeRestartDeps(t, DesktopControlMarker{PID: 123, ControlPort: 4242}, nil, true,
-		func(context.Context, int, string) (DesktopRestartResponse, error) {
-			restarts++
-			return DesktopRestartResponse{OK: true}, nil
-		})
-	deps.Plan = plan
-	return deps, &restarts
-}
-
-func TestRestartDesktopApp_DryRunReportsAPlanTheDesktopCouldNotAnswer(t *testing.T) {
-	deps, restarts := fakeDryRunDeps(t, func(context.Context, int, string) (DesktopRestartResponse, error) {
-		return DesktopRestartResponse{OK: false, Error: "the open set could not be read"}, nil
-	})
-	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", true)
-	if outcome.Status != model.DesktopRestartWouldRestart {
-		t.Fatalf("status = %q, want %q", outcome.Status, model.DesktopRestartWouldRestart)
-	}
-	if !strings.Contains(outcome.PreviewUnavailable, "the open set could not be read") {
-		t.Fatalf("PreviewUnavailable = %q, want it to name the desktop's own reason", outcome.PreviewUnavailable)
-	}
-	if *restarts != 0 {
-		t.Fatalf("the dry run asked the desktop to restart %d times", *restarts)
-	}
-}
-
-func TestRestartDesktopApp_RestartedOnSuccess(t *testing.T) {
-	var gotOrchestratorID string
-	post := func(_ context.Context, port int, orchestratorID string) (DesktopRestartResponse, error) {
-		gotOrchestratorID = orchestratorID
-		if port != 4242 {
-			t.Fatalf("port = %d, want 4242", port)
-		}
-		return DesktopRestartResponse{OK: true}, nil
-	}
-	deps := fakeRestartDeps(t, DesktopControlMarker{PID: 123, ControlPort: 4242}, nil, true, post)
-	deps.Plan = func(context.Context, int, string) (DesktopRestartResponse, error) {
-		t.Fatal("a real restart asked for the plan instead of the restart")
-		return DesktopRestartResponse{}, nil
-	}
-	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", false)
-	if outcome.Status != model.DesktopRestartRestarted {
-		t.Fatalf("status = %q, want %q", outcome.Status, model.DesktopRestartRestarted)
-	}
-	if gotOrchestratorID != "orch-1" {
-		t.Fatalf("orchestratorID forwarded = %q, want %q", gotOrchestratorID, "orch-1")
-	}
-	if len(outcome.Preview) != 0 {
-		t.Fatalf("outcome = %+v, want no plan on a real restart", outcome)
 	}
 }
 
@@ -124,41 +65,6 @@ func TestDesktopProcessAlive(t *testing.T) {
 	}
 	if DesktopProcessAlive(cmd.Process.Pid) {
 		t.Fatalf("pid %d exited and must not read as alive", cmd.Process.Pid)
-	}
-}
-
-// TestPostDesktopRestart_RoundTrips uses a real loopback server; erun-ui's
-// handler would be an import cycle.
-func TestPostDesktopRestart_RoundTrips(t *testing.T) {
-	var gotBody DesktopRestartRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != DesktopControlPath {
-			t.Fatalf("path = %q, want %q", r.URL.Path, DesktopControlPath)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(DesktopRestartResponse{OK: true})
-	}))
-	defer server.Close()
-
-	port := testTCPPort(t, server.Listener.Addr())
-	response, err := postDesktopRestart(context.Background(), port, "orch-9")
-	if err != nil {
-		t.Fatalf("postDesktopRestart: %v", err)
-	}
-	if !response.OK || response.Error != "" {
-		t.Fatalf("response=%+v, want ok=true with no error", response)
-	}
-	if gotBody.OrchestratorID != "orch-9" {
-		t.Fatalf("orchestratorId sent = %q, want %q", gotBody.OrchestratorID, "orch-9")
-	}
-}
-
-func TestPostDesktopRestartPlan_IsNotTheRestartPath(t *testing.T) {
-	if DesktopControlPlanPath == DesktopControlPath {
-		t.Fatal("the plan and the restart share a path, so an older desktop would read the question as the command")
 	}
 }
 

@@ -9,17 +9,14 @@ import (
 	"time"
 
 	activitypkg "github.com/sophium/erun/cmd/activity"
-	"github.com/sophium/erun/cmd/idle"
 	"github.com/sophium/erun/cmd/kubecontext"
-	"github.com/sophium/erun/cmd/list"
-	orchestratorpkg "github.com/sophium/erun/cmd/orchestrator"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
 
 // Every command with a structured form must emit it for --output json, not just for its own --json alias.
+// Commands whose --json form a golden already drives are covered by erun-integration.
 func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	leases := []model.EnvironmentActivityLease{{
@@ -33,26 +30,11 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 		name   string
 		render func(core.Context) error
 	}{
-		{"idle", func(ctx core.Context) error {
-			return idle.WriteIdleResult(ctx, model.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
-		}},
-		{"whip", func(ctx core.Context) error {
-			return orchestratorpkg.WriteWhipReport(ctx, model.WhipReport{
-				DryRun:  true,
-				Results: []model.WhipResult{{Reason: "no candidate"}},
-			}, false)
-		}},
 		{"activity lease list", func(ctx core.Context) error {
 			return activitypkg.WriteActivityLeases(ctx, leases, now, false)
 		}},
 		{"activity sample", func(ctx core.Context) error {
 			return activitypkg.WriteActivitySampleResult(ctx, model.ResidentActivityResult{Busy: true}, false)
-		}},
-		{"activity ai-session status", func(ctx core.Context) error {
-			return activitypkg.WriteAISessionStatuses(commandCarryingOutput(ctx), []model.AISessionStatus{{SessionID: "s1"}}, false)
-		}},
-		{"list", func(ctx core.Context) error {
-			return list.WriteListResult(ctx, lifecycle.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
 		{"context list", func(ctx core.Context) error {
 			return kubecontext.WriteCloudContextList(ctx, model.CloudContextListResult{CloudContexts: []model.CloudContextStatus{{Status: "running"}}})
@@ -96,15 +78,6 @@ func TestEveryJSONFlagIsADeclaredOutputAlias(t *testing.T) {
 	t.Fatalf("commands carry a --json flag without declaring it as an alias of the global --output json: %v\n"+
 		"Add each to erun-cli/cmd/command_tree.go's outputJSONAliasCommands after making --output json reach it.",
 		undeclared)
-}
-
-// commandCarryingOutput adapts render seams that read a Context from the command's flags.
-func commandCarryingOutput(ctx core.Context) *cobra.Command {
-	cmd := &cobra.Command{Use: "status"}
-	cmd.Flags().String("output", string(ctx.Output), "")
-	cmd.SetOut(ctx.Stdout)
-	cmd.SetErr(ctx.Stderr)
-	return cmd
 }
 
 func walkCommandTree(cmd *cobra.Command, fn func(*cobra.Command)) {

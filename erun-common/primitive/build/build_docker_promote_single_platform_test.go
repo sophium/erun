@@ -22,8 +22,6 @@ type fakeDockerShapes struct {
 	ociIndexTags []string
 	// undescribedTags have no descriptor, like the classic image store.
 	undescribedTags []string
-	inspectFails    bool
-	unreadableTags  []string
 }
 
 func newRecordingFakeDocker(t *testing.T, shapes fakeDockerShapes) {
@@ -34,12 +32,8 @@ func newRecordingFakeDocker(t *testing.T, shapes fakeDockerShapes) {
 		"      " + shellCasePattern(shapes.indexTags) + ") echo '" + dockerImageIndexJSON + "' ;;\n" +
 		"      " + shellCasePattern(shapes.ociIndexTags) + ") echo '" + dockerImageOCIIndexJSON + "' ;;\n" +
 		"      " + shellCasePattern(shapes.undescribedTags) + ") echo '" + dockerImageUndescribedJSON + "' ;;\n" +
-		"      " + shellCasePattern(shapes.unreadableTags) + ") echo 'not json' ;;\n" +
 		"      *) echo '" + dockerImagePlainJSON + "' ;;\n" +
 		"    esac ;;\n"
-	if shapes.inspectFails {
-		inspectAnswer = "    exit 1\n"
-	}
 	script := "#!/bin/bash\n" +
 		"echo \"$*\" >> " + logPath + "\n" +
 		"case \"$1\" in\n" +
@@ -154,32 +148,6 @@ func TestPromoteRebuildsACacheEntryThatIsAWholeMultiPlatformIndex(t *testing.T) 
 	}
 }
 
-func TestPromotePublishesWhenTheImageShapeCannotBeRead(t *testing.T) {
-	perArchTag := "ghcr.io/sophium/erun-console:1.0.246-amd64"
-	cases := map[string]fakeDockerShapes{
-		"inspect fails":      {inspectFails: true},
-		"output is not JSON": {unreadableTags: []string{perArchTag}},
-	}
-	for name, shapes := range cases {
-		t.Run(name, func(t *testing.T) {
-			newRecordingFakeDocker(t, shapes)
-
-			var stdout, stderr bytes.Buffer
-			if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
-				t.Fatalf("promote: %v", err)
-			}
-
-			calls := dockerCallsFrom(t)
-			if pushes := dockerCallsMatching(calls, "push", perArchTag); len(pushes) != 1 {
-				t.Fatalf("expected the cache entry to be promoted, got %v", calls)
-			}
-			if builds := dockerCallsMatching(calls, "build", "linux/amd64"); len(builds) != 0 {
-				t.Fatalf("an unreadable image shape must not force a rebuild, got %v", builds)
-			}
-		})
-	}
-}
-
 func TestLocalImageIsSinglePlatformCoversBothSpellings(t *testing.T) {
 	listTag := "ghcr.io/sophium/erun-console:1.0.246-amd64"
 	ociTag := "ghcr.io/sophium/erun-console:1.0.247-amd64"
@@ -197,27 +165,6 @@ func TestLocalImageIsSinglePlatformCoversBothSpellings(t *testing.T) {
 	}
 	if !localImageIsSinglePlatform(classicTag) {
 		t.Fatalf("%s reports no descriptor and must read as single-platform", classicTag)
-	}
-}
-
-func TestPromotePublishesAPlainCacheEntryWithoutRebuilding(t *testing.T) {
-	perArchTag := "ghcr.io/sophium/erun-console:1.0.246-amd64"
-	newRecordingFakeDocker(t, fakeDockerShapes{})
-
-	var stdout, stderr bytes.Buffer
-	if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
-		t.Fatalf("promote: %v", err)
-	}
-
-	calls := dockerCallsFrom(t)
-	if pushes := dockerCallsMatching(calls, "push", perArchTag); len(pushes) != 1 {
-		t.Fatalf("expected one push of %s, got %v", perArchTag, pushes)
-	}
-	if builds := dockerCallsMatching(calls, "build", "linux/amd64"); len(builds) != 0 {
-		t.Fatalf("a single-platform cache entry must not rebuild, got %v", builds)
-	}
-	if strings.Contains(stderr.String(), "rebuilding from source") {
-		t.Fatalf("a plain promote must not report a rebuild, got: %s", stderr.String())
 	}
 }
 

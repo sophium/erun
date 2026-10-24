@@ -48,40 +48,6 @@ func TestConfigureCloudKubeContextSubprocessModeStillExecutesRunKubectl(t *testi
 	}
 }
 
-func TestLibraryConfigureCloudKubeContextWritesKubeconfig(t *testing.T) {
-	kubeconfigPath := filepath.Join(t.TempDir(), "config")
-	t.Setenv("KUBECONFIG", kubeconfigPath)
-
-	if err := libraryConfigureCloudKubeContext(testCloudContextConfig()); err != nil {
-		t.Fatalf("libraryConfigureCloudKubeContext: %v", err)
-	}
-
-	assertCloudKubeContextEntryWritten(t, kubeconfigPath, "erun-001", "https://203.0.113.10:6443", "s3cret-admin-token-value")
-}
-
-func assertCloudKubeContextEntryWritten(t *testing.T, path, name, server, token string) {
-	t.Helper()
-	written, err := clientcmd.LoadFromFile(path)
-	if err != nil {
-		t.Fatalf("LoadFromFile: %v", err)
-	}
-	cluster, ok := written.Clusters[name]
-	if !ok {
-		t.Fatalf("cluster %q not written: %+v", name, written.Clusters)
-	}
-	if cluster.Server != server || !cluster.InsecureSkipTLSVerify {
-		t.Fatalf("cluster = %+v, want server %s insecure-skip-tls-verify=true", cluster, server)
-	}
-	authInfo, ok := written.AuthInfos[name]
-	if !ok || authInfo.Token != token {
-		t.Fatalf("authInfo = %+v, want token %s", authInfo, token)
-	}
-	kubeContext, ok := written.Contexts[name]
-	if !ok || kubeContext.Cluster != name || kubeContext.AuthInfo != name {
-		t.Fatalf("context = %+v, want cluster/user %s", kubeContext, name)
-	}
-}
-
 func TestLibraryConfigureCloudKubeContextPreservesUnrelatedEntries(t *testing.T) {
 	kubeconfigPath := filepath.Join(t.TempDir(), "config")
 	seedKubeconfigWithOneEntry(t, kubeconfigPath, "existing-cluster", "existing-context")

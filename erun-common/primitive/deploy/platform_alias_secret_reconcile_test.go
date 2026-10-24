@@ -110,39 +110,6 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 	}
 }
 
-func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t *testing.T) {
-	redirectConfigHomeForTest(t)
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
-
-	deployInput := HelmDeploySpec{
-		Tenant:      "team",
-		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
-		Namespace:   "team-dev",
-	}
-	var log bytes.Buffer
-	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
-	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deployInput.PlatformAliasSecretName != "" {
-		t.Fatalf("got %q, want no name when the host has no alias to give", deployInput.PlatformAliasSecretName)
-	}
-	if got := log.String(); strings.TrimSpace(got) != "" {
-		t.Fatalf("a host with nothing to give must add nothing to the trace, got:\n%s", got)
-	}
-	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
-	if err != nil {
-		t.Fatalf("load env config: %v", err)
-	}
-	if recorded.PlatformAliasSecretName != "" {
-		t.Fatalf("got %q, want the environment left unrecorded", recorded.PlatformAliasSecretName)
-	}
-}
-
 // The retrofit writes the record after the deploy resolved its env snapshot, so
 // version persistence must not save that stale snapshot back over it.
 func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testing.T) {

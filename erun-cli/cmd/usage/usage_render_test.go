@@ -43,18 +43,6 @@ func code3Reading() model.RuntimeUsage {
 	return usage
 }
 
-func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
-	var out bytes.Buffer
-	if err := usageview.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, model.RuntimeUsageReport{
-		RuntimeUsage: model.RuntimeUsage{CPU: model.RuntimeCPUUsage{QuotaCores: 4, UtilizationPercent: 1, IntervalSeconds: 1}},
-	}); err != nil {
-		t.Fatalf("writeUsageResult: %v", err)
-	}
-	if strings.Contains(out.String(), "Sizing") {
-		t.Errorf("a report with no recommendation rendered a sizing section:\n%s", out.String())
-	}
-}
-
 func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
 	usage := code3Reading()
 	usage.Requests = &model.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}

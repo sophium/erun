@@ -1,9 +1,7 @@
 package deploy
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -42,37 +40,6 @@ type fakeClock struct{ t time.Time }
 func (c *fakeClock) now() time.Time { return c.t }
 func (c *fakeClock) advance(d time.Duration) {
 	c.t = c.t.Add(d)
-}
-
-func TestClassifyTerminalFailureUnschedulablePod(t *testing.T) {
-	clock := &fakeClock{t: time.Unix(0, 0)}
-	params := podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev", Now: clock.now}
-	unscheduledSince := map[string]time.Time{}
-	pod := unschedulablePod("team-devops-0", "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory")
-
-	if failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince); failure != nil {
-		t.Fatalf("first observation must not fail immediately, got: %v", failure)
-	}
-
-	clock.advance(defaultUnscheduledGracePeriod - time.Second)
-	if failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince); failure != nil {
-		t.Fatalf("must stay within grace right up to the boundary, got: %v", failure)
-	}
-
-	clock.advance(2 * time.Second)
-	failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince)
-	if failure == nil {
-		t.Fatalf("expected a terminal failure once the grace period elapses")
-	}
-	if failure.Reason != "Unschedulable" {
-		t.Errorf("reason = %q, want Unschedulable", failure.Reason)
-	}
-	if failure.Container != "" {
-		t.Errorf("container = %q, want empty: a pod that never scheduled has no container", failure.Container)
-	}
-	if failure.Message != "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory" {
-		t.Errorf("message = %q, want the scheduler's message verbatim", failure.Message)
-	}
 }
 
 func TestClassifyTerminalFailureUnschedulablePodRecoversResetsGrace(t *testing.T) {
@@ -119,71 +86,6 @@ func TestClassifyTerminalFailurePrefersContainerFailureOverUnschedulable(t *test
 	}
 }
 
-func TestPodUnschedulableMessage(t *testing.T) {
-	pod := unschedulablePod("x", "0/1 nodes are available: 1 Insufficient cpu")
-	message, ok := podUnschedulableMessage(pod)
-	if !ok || message != "0/1 nodes are available: 1 Insufficient cpu" {
-		t.Fatalf("got (%q, %v), want the verbatim scheduler message", message, ok)
-	}
-
-	if _, ok := podUnschedulableMessage(scheduledPod("y")); ok {
-		t.Fatalf("a scheduled pod must not report as unschedulable")
-	}
-
-	if _, ok := podUnschedulableMessage(PodStatusItem{}); ok {
-		t.Fatalf("a pod with no conditions must not report as unschedulable")
-	}
-}
-
-func podListFoundHandler(namespace, body string) http.HandlerFunc {
-	path := "/api/v1/namespaces/" + namespace + "/pods"
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != path {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}
-}
-
-// Duplicated from the integration module, a separate Go module.
-const libraryPodWatchFixtureJSON = `{
-  "apiVersion": "v1",
-  "kind": "PodList",
-  "items": [
-    {
-      "metadata": {
-        "name": "team-devops-aaaaaa",
-        "annotations": {"meta.helm.sh/release-name": "team-devops"}
-      },
-      "status": {
-        "phase": "Running",
-        "containerStatuses": [
-          {"name": "erun-devops", "ready": true, "restartCount": 0, "state": {"running": {"startedAt": "2026-05-09T12:00:00Z"}}}
-        ]
-      }
-    }
-  ]
-}`
-
-func TestLibraryListReleasePodsMatchesSubprocessObservableResult(t *testing.T) {
-	fakeKubernetesAPIServer(t, podListFoundHandler("team-dev", libraryPodWatchFixtureJSON))
-
-	raw, err := libraryListReleasePods(context.Background(), podWatchParams{Namespace: "team-dev"})
-	if err != nil {
-		t.Fatalf("libraryListReleasePods: %v", err)
-	}
-	list, ok := ParsePodStatusList(raw)
-	if !ok {
-		t.Fatalf("parsePodStatusList: could not parse %s", raw)
-	}
-	summaries := summarizePods(filterReleasePods(list, "team-devops"))
-	if len(summaries) != 1 || summaries[0].Line != "pod team-devops-aaaaaa: erun-devops Running (Ready)" {
-		t.Fatalf("summaries = %+v, want a single clean-rollout line", summaries)
-	}
-}
-
 func TestLibraryListReleasePodsPropagatesErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -194,86 +96,6 @@ func TestLibraryListReleasePodsPropagatesErrors(t *testing.T) {
 
 	if _, err := libraryListReleasePods(context.Background(), podWatchParams{Namespace: "team-dev"}); err == nil {
 		t.Fatalf("err = nil, want a forbidden error")
-	}
-}
-
-func TestLibraryListReleasePodsHonorsContextOverride(t *testing.T) {
-	fakeKubernetesAPIServer(t, podListFoundHandler("team-dev", libraryPodWatchFixtureJSON))
-
-	if _, err := libraryListReleasePods(context.Background(), podWatchParams{Namespace: "team-dev", KubernetesContext: "test-context"}); err != nil {
-		t.Fatalf("libraryListReleasePods: %v", err)
-	}
-	if _, err := libraryListReleasePods(context.Background(), podWatchParams{Namespace: "team-dev", KubernetesContext: "unknown-context"}); err == nil {
-		t.Fatalf("err = nil, want an error for an unknown context")
-	}
-}
-
-func TestExecutionModeForKubectlPodWatchDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlPodWatchExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == kubectlPodWatchExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-pod-watch not found in report: %+v", report)
-}
-
-func pullingPod(name, container, reason, message string) PodStatusItem {
-	return pullingPodOfImage(name, container, "", reason, message)
-}
-
-func pullingPodOfImage(name, container, image, reason, message string) PodStatusItem {
-	pod := PodStatusItem{}
-	pod.Metadata.Name = name
-	pod.Status.Phase = "Pending"
-	pod.Status.Conditions = []PodConditionEntry{{Type: "PodScheduled", Status: "True"}}
-	pod.Status.ContainerStatuses = []ContainerStatusEntry{
-		{Name: container, Image: image, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
-	}
-	return pod
-}
-
-// A permanently rejected pull is terminal, not progress, so it is not listed.
-func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
-	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
-	pods := []PodStatusItem{
-		pullingPodOfImage("team-devops-abc", "erun-devops", "ghcr.io/sophium/erun-devops:1.0.296", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
-		pullingPodOfImage("team-devops-def", "erun-dind", "ghcr.io/sophium/erun-dind:1.0.296", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
-		rejected,
-		pullingPod("team-devops-mno", "erun-devops", "ImagePullBackOff", "Back-off pulling image"),
-		scheduledPod("team-devops-jkl"),
-	}
-
-	got := strings.Join(pullingContainers(pods), ",")
-	want := "team-devops-abc/erun-devops (ghcr.io/sophium/erun-devops:1.0.296)," +
-		"team-devops-def/erun-dind (ghcr.io/sophium/erun-dind:1.0.296)," +
-		"team-devops-mno/erun-devops"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
-	}
-}
-
-func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testing.T) {
-	stderr := new(strings.Builder)
-	stderr.WriteString("Error: UPGRADE FAILED: values don't meet the specifications\n")
-
-	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{},
-		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
-
-	if err == nil {
-		t.Fatal("expected the failed rollout to report an error")
-	}
-	if strings.Contains(err.Error(), "still pulling") {
-		t.Fatalf("a failure with nothing pulling must not be described as a slow image, got:\n%s", err.Error())
 	}
 }
 

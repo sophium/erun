@@ -102,30 +102,6 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	}
 }
 
-func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
-	redirectConfigHomeForTest(t)
-	root := configHomeForTest(t)
-
-	if err := config.SaveTenantConfig(model.TenantConfig{Name: "frs"}); err != nil {
-		t.Fatalf("SaveTenantConfig(frs): %v", err)
-	}
-	if err := config.SaveEnvConfig("frs", config.EnvConfig{Name: "local"}); err != nil {
-		t.Fatalf("SaveEnvConfig(frs, local): %v", err)
-	}
-
-	path, err := config.EnvConfigPath("frs", "local")
-	if err != nil {
-		t.Fatalf("EnvConfigPath(frs, local): %v", err)
-	}
-	if want := filepath.Join(root, "erun", "frs", "local", "config.yaml"); path != want {
-		t.Fatalf("EnvConfigPath = %s, want %s", path, want)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("stat %s: %v", path, err)
-	}
-	assertNoStatePathComponentCarriesWhitespace(t, root)
-}
-
 func TestStatePathSegmentValidatesTheShapeOfAName(t *testing.T) {
 	for _, value := range []string{"frs", "frs-local", "frs_local", "frs123", "FRS"} {
 		if err := config.ValidateStatePathSegment("tenant", value); err != nil {

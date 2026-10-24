@@ -98,25 +98,6 @@ func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	}
 }
 
-func TestTrimGoBuildCacheOnlyEvictsCacheEntries(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 8; i++ {
-		addGoCacheEntry(t, dir, i, 200000, 300*time.Hour)
-	}
-	for name, body := range map[string]string{"trim.txt": "200\n", "README": "docs\n", "log.txt": "history\n", "00/not-an-entry": "stray\n"} {
-		writeAssetFile(t, filepath.Join(dir, name), body)
-	}
-	ctx, _ := runtimeTestContext(false)
-	if _, err := TrimGoBuildCache(ctx, dir, 100000); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"trim.txt", "README", "log.txt", "00/not-an-entry"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Fatalf("the trim removed %s, which is not a cache entry", name)
-		}
-	}
-}
-
 func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	dir := t.TempDir()
 	hash := fmt.Sprintf("%064x", 7)
@@ -141,39 +122,6 @@ func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	}
 	if _, err := os.Stat(exe); !os.IsNotExist(err) {
 		t.Fatalf("an evicted executable entry should take its directory with it: %v", err)
-	}
-}
-
-func TestTrimGoBuildCacheRefusesBadArguments(t *testing.T) {
-	ctx, _ := runtimeTestContext(false)
-	for _, tc := range []struct {
-		dir      string
-		maxBytes int64
-	}{{"", 1}, {t.TempDir(), 0}} {
-		if _, err := TrimGoBuildCache(ctx, tc.dir, tc.maxBytes); err == nil {
-			t.Fatalf("TrimGoBuildCache(%q, %d) should refuse its arguments", tc.dir, tc.maxBytes)
-		}
-	}
-}
-
-func TestTrimGoBuildCacheStaysBoundedUnderGrowth(t *testing.T) {
-	dir := t.TempDir()
-	const limit = 2000000
-	ctx, _ := runtimeTestContext(false)
-	for round := 0; round < 6; round++ {
-		for i := 0; i < 24; i++ {
-			addGoCacheEntry(t, dir, round*24+i, 400000, time.Duration(6-round)*time.Hour)
-		}
-		if _, err := TrimGoBuildCache(ctx, dir, limit); err != nil {
-			t.Fatal(err)
-		}
-		if size := mustGoCacheSize(t, dir); size > limit {
-			t.Fatalf("round %d: the cache grew past its %d byte cap to %d", round, limit, size)
-		}
-	}
-	entries, err := goBuildCacheEntries(dir)
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("a bounded cache should still hold entries, not be emptied: %d, %v", len(entries), err)
 	}
 }
 

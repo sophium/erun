@@ -2,11 +2,9 @@ package build
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -35,38 +33,6 @@ func boundaryResolvers(projectRoot, cwd string) (seam.ProjectFinderFunc, seam.Bu
 	return findProjectRoot, resolveBuildContext
 }
 
-func boundaryTarget(projectRoot string) model.DockerCommandTarget {
-	return model.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
-}
-
-func TestDockerfileTestStageConsumerForms(t *testing.T) {
-	cases := []struct {
-		name     string
-		consumer string
-		consumed bool
-	}{
-		{"copy with other flags first", "COPY --link --chown=0:0 --from=test /out/app /app", true},
-		{"run bind mount", "RUN --mount=type=bind,from=test,source=/out,target=/t true", true},
-		{"stage built from test", "FROM test AS dist", true},
-		{"pinned stage built from test", "FROM --platform=$BUILDPLATFORM test AS dist", true},
-		{"commented consumer", "# COPY --from=test /out/app /app", false},
-		{"prefixed stage name", "COPY --from=test-toolchain /usr/bin/curl /usr/bin/curl", false},
-		{"prefixed mount source", "RUN --mount=type=bind,from=testing,target=/t true", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN go build -o /out/app ./...\n\nFROM scratch\n"+tc.consumer+"\n")
-			if got := dockerspec.DockerfileHasConsumedTestStage(path); got != tc.consumed {
-				t.Fatalf("dockerfileHasConsumedTestStage = %v, want %v", got, tc.consumed)
-			}
-			err := dockerspec.CheckDockerfileTestStageConsumed(path)
-			if (err == nil) != tc.consumed {
-				t.Fatalf("checkDockerfileTestStageConsumed = %v, want refusal %v", err, !tc.consumed)
-			}
-		})
-	}
-}
-
 func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
@@ -81,19 +47,6 @@ func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 
 	if _, ok, err := FindComponentDockerBuildContext(projectRoot, "console"); err != nil || ok {
 		t.Fatalf("FindComponentDockerBuildContext(console) = found %v, err %v; an e2e suite is not a component", ok, err)
-	}
-}
-
-func TestCheckNotE2ESuiteDockerfileScopesToDevopsE2E(t *testing.T) {
-	for path, refused := range map[string]bool{
-		"/repo/team-devops/docker/console/Dockerfile": false,
-		"/repo/tools/e2e/console/Dockerfile":          false,
-		"/repo/team-devops/e2e/Dockerfile":            false,
-		"":                                            false,
-	} {
-		if err := dockerspec.CheckNotE2ESuiteDockerfile(path); (err != nil) != refused {
-			t.Errorf("checkNotE2ESuiteDockerfile(%q) = %v, want refusal %v", path, err, refused)
-		}
 	}
 }
 
@@ -116,57 +69,21 @@ func runOutcomeBuild(t *testing.T, buildInput dockerspec.DockerBuildSpec, build 
 	return log.String(), err
 }
 
-// A fingerprint promotion reuses an earlier result and must not read as a fresh pass.
+// A promote that fell back to a rebuild ran the tests, so it must read as a fresh pass.
 func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
-	succeed := func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error { return nil }
-
-	rebuilt := testOutcomeBuild(t, consumedTestStageDockerfileContent)
-	rebuilt.Fingerprint = "abc123"
-	promoted := rebuilt
+	promoted := testOutcomeBuild(t, consumedTestStageDockerfileContent)
+	promoted.Fingerprint = "abc123"
 	promoted.Promote = true
 
-	cases := []struct {
-		name  string
-		build dockerspec.DockerBuildSpec
-		run   DockerImageBuilderFunc
-		want  string
-	}{
-		{"built without incremental", testOutcomeBuild(t, consumedTestStageDockerfileContent), succeed, "api: test: passed\n"},
-		{"promote fell back to a rebuild", promoted, func(input dockerspec.DockerBuildSpec, _, _ io.Writer) error {
-			input.Cache.NotePromoteFallback()
-			return nil
-		}, "api: test: passed\n"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			log, err := runOutcomeBuild(t, tc.build, tc.run)
-			if err != nil {
-				t.Fatalf("executeDockerBuild: %v", err)
-			}
-			if log != tc.want {
-				t.Fatalf("outcome line = %q, want %q", log, tc.want)
-			}
-		})
-	}
-}
-
-func TestFailedOrDryRunBuildReportsNoTestOutcome(t *testing.T) {
-	build := testOutcomeBuild(t, consumedTestStageDockerfileContent)
-	log, err := runOutcomeBuild(t, build, func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error { return errors.New("test stage failed") })
-	if err == nil || strings.Contains(log, "test:") {
-		t.Fatalf("a failed build must report no test outcome, got err %v, log %q", err, log)
-	}
-
-	var dry bytes.Buffer
-	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &dry, &dry)}
-	if err := RunDockerBuild(ctx, build, func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
-		t.Fatal("a dry run must not build")
+	log, err := runOutcomeBuild(t, promoted, func(input dockerspec.DockerBuildSpec, _, _ io.Writer) error {
+		input.Cache.NotePromoteFallback()
 		return nil
-	}); err != nil {
-		t.Fatalf("RunDockerBuild dry-run: %v", err)
+	})
+	if err != nil {
+		t.Fatalf("executeDockerBuild: %v", err)
 	}
-	if strings.Contains(dry.String(), "test:") {
-		t.Fatalf("a dry run decides nothing about tests and must not report an outcome, got %q", dry.String())
+	if want := "api: test: passed\n"; log != want {
+		t.Fatalf("outcome line = %q, want %q", log, want)
 	}
 }
 

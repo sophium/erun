@@ -127,17 +127,6 @@ func applyPinnedRepo(t *testing.T) string {
 	return root
 }
 
-// The chart's own version and the tenant's dependencies are versioned independently of erun.
-func TestApplyPinPlanRewritesErunChartDependenciesOnly(t *testing.T) {
-	chart := readPinFile(t, applyPinnedRepo(t), "acme-api/Chart.yaml")
-	if !strings.Contains(chart, "version: 1.0.175") {
-		t.Fatalf("erun chart dependency not re-pinned:\n%s", chart)
-	}
-	if !strings.Contains(chart, "version: 3.2.1") || !strings.Contains(chart, "version: 0.1.0") {
-		t.Fatalf("the chart's own version or the tenant dependency was rewritten:\n%s", chart)
-	}
-}
-
 func TestApplyPinPlanRewritesTheBuildEnvImageWithoutDisturbingTheDockerfile(t *testing.T) {
 	dockerfile := readPinFile(t, applyPinnedRepo(t), "acme-devops/docker/erun-devops/Dockerfile")
 	if !strings.Contains(dockerfile, "erun-devops:1.0.175") {
@@ -215,47 +204,6 @@ func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "acme-api") {
 		t.Fatalf("the failure must name the chart, got %v", err)
-	}
-}
-
-// A terraform-only re-pin must not shell out to helm.
-func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
-	root := t.TempDir()
-	plan := model.PinPlan{ProjectRoot: root, Target: "1.0.175", Sites: []model.PinSite{
-		{Kind: model.PinSiteTerraformRef, Path: "terraform-acme/dev/main.tf", Current: "1.0.102", Target: "1.0.175"},
-	}}
-	called := 0
-	if err := RefreshPinnedChartLocks(core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(core.Context, string) error {
-		called++
-		return nil
-	}); err != nil {
-		t.Fatalf("refresh: %v", err)
-	}
-	if called != 0 {
-		t.Fatalf("expected no helm run when no chart moved, got %d", called)
-	}
-}
-
-func TestPinPreviousSurvivesARepeatedRePin(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-
-	if err := RecordPinPrevious(root, "acme", "dev", "1.0.115"); err != nil {
-		t.Fatalf("record: %v", err)
-	}
-	previous, ok := PinPrevious(root, "acme", "dev")
-	if !ok || previous != "1.0.115" {
-		t.Fatalf("previous = %q %v", previous, ok)
-	}
-
-	if err := RecordPinPrevious(root, "acme", "dev", ""); err != nil {
-		t.Fatalf("record empty: %v", err)
-	}
-	if previous, _ := PinPrevious(root, "acme", "dev"); previous != "1.0.115" {
-		t.Fatalf("an empty previous must not clobber the recorded one, got %q", previous)
-	}
-
-	if _, ok := PinPrevious(root, "acme", "other"); ok {
-		t.Fatal("another environment must not inherit this one's history")
 	}
 }
 

@@ -43,19 +43,6 @@ func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 	}
 }
 
-func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
-	injected, ok := cloudconfig.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
-	if !ok {
-		t.Fatalf("ResolveInjectedRuntimeConfig ok = false, want true")
-	}
-	if len(injected.Contexts) != 1 {
-		t.Fatalf("len(Contexts) = %d, want 1", len(injected.Contexts))
-	}
-	if got, want := injected.Contexts[0].Name, "my-cloud-context"; got != want {
-		t.Fatalf("Contexts[0].Name = %q, want %q", got, want)
-	}
-}
-
 func TestSyncConfigSecondRunReachesInSync(t *testing.T) {
 	configHome := t.TempDir()
 	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""})

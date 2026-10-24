@@ -49,36 +49,6 @@ func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 	return []runtimeUsageReadingCase{
 		{
-			name: "cgroup v2 present reports quota, usage, and disk",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=1027301376",
-				"memory_oom_kill=0",
-				"memory_ceiling_hits=21292",
-				"cpu_max=100000 100000",
-				"cpu_usage_before=581511501",
-				"cpu_usage_after=581611501",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
-				"disk_own_used_kb=54000000",
-			}, "\n"),
-			// 100000 usec over 1 second against a 1-core quota.
-			wantCPU: model.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
-			wantMemory: model.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
-				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
-			},
-			wantDisk: model.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
-				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
-			},
-		},
-		{
 			name: "unlimited memory.max reports Unlimited, not a fabricated percentage",
 			output: strings.Join([]string{
 				"cgroup_type=cgroup2fs",

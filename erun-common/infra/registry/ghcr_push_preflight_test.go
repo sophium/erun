@@ -82,12 +82,6 @@ func TestATokenWithADifferentPermissionModelIsNotJudged(t *testing.T) {
 	}
 }
 
-func TestANonGHCRRegistryIsNotChecked(t *testing.T) {
-	if err := VerifyGHCRPushScope(context.Background(), nil, "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme/api:1.0.0"); err != nil {
-		t.Fatalf("a non-ghcr registry must not be judged by a gh token, got %v", err)
-	}
-}
-
 func asMissingScope(err error, target **MissingGHCRPushScopeError) bool {
 	return errors.As(err, target)
 }

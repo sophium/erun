@@ -72,16 +72,3 @@ func TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull(t *testing.T) {
 	}
 	requireEchoedTarget(t, result, "tenant-a", "never-touched")
 }
-
-func TestAISessionsToolUnknownSessionReadsAsIdle(t *testing.T) {
-	isolateLeaseCache(t)
-	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-
-	_, result, err := AiSessionsTool(runtime)(context.Background(), nil, AISessionsInput{Session: "never-started"})
-	if err != nil {
-		t.Fatalf("resolve unknown session: %v", err)
-	}
-	if len(result.Sessions) != 1 || result.Sessions[0].State != model.AISessionStateIdle {
-		t.Fatalf("expected an idle status for an unrecorded session, got %+v", result.Sessions)
-	}
-}

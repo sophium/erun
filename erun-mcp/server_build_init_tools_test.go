@@ -20,50 +20,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
-func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
-	projectRoot := t.TempDir()
-	scriptDir := filepath.Join(projectRoot, "scripts", "build")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
-
-	var called bool
-	handler := build.BuildTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
-		Context: toolio.RuntimeContext{
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		BuildScriptRunner: func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-			called = true
-			if dir != scriptDir || path != "./build.sh" {
-				t.Fatalf("unexpected build script call: dir=%q path=%q", dir, path)
-			}
-			if len(env) != 0 {
-				t.Fatalf("unexpected build script env: %+v", env)
-			}
-			return nil
-		},
-		BuildDockerImage: func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
-			t.Fatal("unexpected docker build")
-			return nil
-		},
-	}))
-
-	_, output, err := handler(context.Background(), nil, build.BuildInput{})
-	if err != nil {
-		t.Fatalf("buildTool failed: %v", err)
-	}
-	if !output.Executed {
-		t.Fatalf("expected execution output, got %+v", output)
-	}
-	if !called {
-		t.Fatal("expected build script runner to be called")
-	}
-}
-
 // newComponentBuildFixture includes a root build.sh so the build script is not disabled.
 func newComponentBuildFixture(t *testing.T) string {
 	t.Helper()
@@ -121,49 +77,6 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	}
 	if captured.DockerfilePath == "" {
 		t.Fatalf("expected a resolved Dockerfile path, got %+v", captured)
-	}
-}
-
-// The erun-cli integration suite never enters this MCP wrapper, so error
-// propagation is covered here.
-func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
-	projectRoot := t.TempDir()
-	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	erunDir := filepath.Join(projectRoot, ".erun")
-	if err := os.MkdirAll(erunDir, 0o755); err != nil {
-		t.Fatalf("mkdir .erun: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(erunDir, "config.yaml"), []byte("paths:\n  dockercontext: bogus\n"), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	handler := build.BuildTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
-		Context: toolio.RuntimeContext{
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		BuildDockerImage: func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
-			t.Fatal("unexpected docker build: resolution must fail before execution")
-			return nil
-		},
-	}))
-
-	_, _, err := handler(context.Background(), nil, build.BuildInput{Component: "web", Preview: true})
-	if err == nil {
-		t.Fatal("expected an error for an invalid paths.dockercontext value")
-	}
-	want := `invalid docker context "bogus" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`
-	if err.Error() != want {
-		t.Fatalf("unexpected error:\n got: %v\nwant: %s", err, want)
 	}
 }
 

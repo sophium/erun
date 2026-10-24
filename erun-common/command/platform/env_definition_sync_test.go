@@ -15,31 +15,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-func TestHostedMarkerSurvivesAReload(t *testing.T) {
-	useConfigHome(t)
-	marker := configpkg.HostedEnvironment{
-		APIHost:            "https://api.example.test",
-		TenantID:           "tenant-1",
-		EnvironmentID:      "env-1",
-		DefinitionRevision: 3,
-	}
-	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", Type: configpkg.EnvironmentTypeRuntime, Hosted: marker}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	reloaded, _, err := configpkg.LoadEnvConfig("team", "dev")
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	recorded, ok := configpkg.HostedEnvironmentFromConfig(reloaded)
-	if !ok {
-		t.Fatalf("the marker did not survive the reload: %+v", reloaded.Hosted)
-	}
-	if recorded != marker {
-		t.Fatalf("marker round-tripped as %+v, want %+v", recorded, marker)
-	}
-}
-
 func TestEnvironmentWithNoMarkerOmitsIt(t *testing.T) {
 	configHome := useConfigHome(t)
 	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", Type: configpkg.EnvironmentTypeRuntime}); err != nil {

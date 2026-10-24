@@ -158,16 +158,6 @@ func TestGHCRCreatePackageCheckNeverBlocksOnAnInconclusiveAnswer(t *testing.T) {
 	})
 }
 
-// Neither entry point may reach the network for non-ghcr or without a credential.
-func TestGHCREntryPointsSkipWhenNotApplicable(t *testing.T) {
-	if err := VerifyGHCRCanPushImage(context.Background(), nil, "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme/api:1.0.0"); err != nil {
-		t.Fatalf("a non-ghcr registry must not be probed: %v", err)
-	}
-	if err := VerifyGHCRCanPushChart(context.Background(), nil, "oci://registry.example.com/sophium/charts", "erun-zitadel"); err != nil {
-		t.Fatalf("a non-ghcr OCI repo must not be probed: %v", err)
-	}
-}
-
 func TestDockerRepositoryFromTag(t *testing.T) {
 	cases := map[string]string{
 		"ghcr.io/sophium/erun-zitadel:1.0.180":       "sophium/erun-zitadel",

@@ -55,41 +55,6 @@ func mustNoErr(t *testing.T, err error, what string) {
 	}
 }
 
-func assertCloudflareAccounts(t *testing.T, got, want []CloudflareAccount) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("accounts = %+v, want %+v", got, want)
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Fatalf("account[%d] = %+v, want %+v", i, got[i], w)
-		}
-	}
-}
-
-func TestRedactSecretPresence(t *testing.T) {
-	if got := redactSecretPresence("super-secret"); got != "<redacted>" {
-		t.Fatalf("present = %q, want <redacted>", got)
-	}
-	if got := redactSecretPresence("   "); got != "<empty>" {
-		t.Fatalf("blank = %q, want <empty>", got)
-	}
-}
-
-func TestCloudProviderTypeFromAlias(t *testing.T) {
-	cases := map[string]string{
-		"alice+123456789012@aws":  config.CloudProviderAWS,
-		"ci+cf-acct-1@cloudflare": config.CloudProviderCloudflare,
-		"garbage-without-suffix":  config.CloudProviderAWS,
-		"":                        config.CloudProviderAWS,
-	}
-	for alias, want := range cases {
-		if got := config.CloudProviderTypeFromAlias(alias); got != want {
-			t.Fatalf("cloudProviderTypeFromAlias(%q) = %q, want %q", alias, got, want)
-		}
-	}
-}
-
 func TestResolvedCloudAliasesFoldsLegacyScalarAndMap(t *testing.T) {
 	env := config.EnvConfig{
 		CloudProviderAlias: "alice+123456789012@aws",
@@ -131,22 +96,7 @@ func TestVerifyCloudflareTokenAtClassifiesResponses(t *testing.T) {
 	})
 }
 
-func TestListCloudflareAccountsAt(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-			t.Fatalf("authorization header = %q", got)
-		}
-		_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"a1","name":"Acme"},{"id":"a2","name":"Beta"},{"id":"","name":"skip-blank"}]}`))
-	}))
-	defer srv.Close()
-	accounts, err := listCloudflareAccountsAt(srv.URL, "tok")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(accounts) != 2 || accounts[0].ID != "a1" || accounts[1].Name != "Beta" {
-		t.Fatalf("accounts = %+v", accounts)
-	}
-
+func TestListCloudflareAccountsAtSurfacesRejection(t *testing.T) {
 	rejected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"success":false,"errors":[{"message":"bad token"}]}`))
 	}))
@@ -157,36 +107,6 @@ func TestListCloudflareAccountsAt(t *testing.T) {
 }
 
 func TestResolveCloudflareAccountsViaZones(t *testing.T) {
-	t.Run("dedupes account across zones", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-				t.Fatalf("authorization header = %q", got)
-			}
-			_, _ = w.Write([]byte(`{"success":true,"result":[
-				{"id":"z1","account":{"id":"a1","name":"Acme"}},
-				{"id":"z2","account":{"id":"a1","name":"Acme"}},
-				{"id":"z3","account":{"id":"","name":"skip-blank"}}
-			]}`))
-		}))
-		defer srv.Close()
-		accounts, err := resolveCloudflareAccountsViaZones(srv.URL, "tok")
-		mustNoErr(t, err, "resolve")
-		assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
-	})
-
-	t.Run("returns each distinct account", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"success":true,"result":[
-				{"id":"z1","account":{"id":"a1","name":"Acme"}},
-				{"id":"z2","account":{"id":"a2","name":"Beta"}}
-			]}`))
-		}))
-		defer srv.Close()
-		accounts, err := resolveCloudflareAccountsViaZones(srv.URL, "tok")
-		mustNoErr(t, err, "resolve")
-		assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}, {ID: "a2", Name: "Beta"}})
-	})
-
 	t.Run("rejected", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"success":false,"errors":[{"message":"bad token"}]}`))

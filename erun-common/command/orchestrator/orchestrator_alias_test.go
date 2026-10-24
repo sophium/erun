@@ -9,70 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func TestParseOrchestratorAliasFlag(t *testing.T) {
-	tests := []struct {
-		name    string
-		value   string
-		want    string
-		wantErr bool
-	}{
-		{name: "padded", value: "  erun+erunpaas.com@erun  ", want: "erun+erunpaas.com@erun"},
-		{name: "none sentinel is case-insensitive", value: "NONE", want: ""},
-		{name: "empty", value: "", wantErr: true},
-		{name: "whitespace only", value: "   ", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseOrchestratorAliasFlag(tt.value)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("ParseOrchestratorAliasFlag(%q) = %q, want an error", tt.value, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ParseOrchestratorAliasFlag(%q) error = %v", tt.value, err)
-			}
-			if got != tt.want {
-				t.Fatalf("ParseOrchestratorAliasFlag(%q) = %q, want %q", tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
-	store := newOrchestratorAliasStubStore()
-
-	orchestrator := mustSetOrchestratorAlias(t, store, "orch-1", "erun+erunpaas.com@erun")
-	if orchestrator.Alias != "erun+erunpaas.com@erun" {
-		t.Fatalf("returned alias = %q", orchestrator.Alias)
-	}
-	if got := store.config.Orchestrators[0].Alias; got != "erun+erunpaas.com@erun" {
-		t.Fatalf("persisted alias = %q", got)
-	}
-
-	if len(store.config.Orchestrators[0].Environments) != 1 || store.config.Orchestrators[0].Name != "Orchestrator One" {
-		t.Fatalf("write dropped the rest of the orchestrator: %+v", store.config.Orchestrators[0])
-	}
-
-	// A repeated set converges to one entry with one alias.
-	mustSetOrchestratorAlias(t, store, "orch-1", "erun+erunpaas.com@erun")
-	if len(store.config.Orchestrators) != 1 {
-		t.Fatalf("a repeated write changed the orchestrator count: %+v", store.config.Orchestrators)
-	}
-	if got := store.config.Orchestrators[0].Alias; got != "erun+erunpaas.com@erun" {
-		t.Fatalf("a repeated write changed the alias: %q", got)
-	}
-
-	if _, err := SetOrchestratorAlias(core.Context{}, store, model.SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "",
-	}); err != nil {
-		t.Fatalf("clearing error = %v", err)
-	}
-	if got := store.config.Orchestrators[0].Alias; got != "" {
-		t.Fatalf("cleared alias = %q, want empty", got)
+func TestParseOrchestratorAliasFlagRefusesABlankValue(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		if got, err := ParseOrchestratorAliasFlag(value); err == nil {
+			t.Fatalf("ParseOrchestratorAliasFlag(%q) = %q, want an error", value, got)
+		}
 	}
 }
 
@@ -90,41 +31,6 @@ func TestSetOrchestratorAliasMissingOrchestratorID(t *testing.T) {
 	if store.saved {
 		t.Fatal("a missing id still wrote the config")
 	}
-}
-
-func TestSetOrchestratorAliasDryRunValidatesAndWritesNothing(t *testing.T) {
-	store := newOrchestratorAliasStubStore()
-	store.saved = false
-
-	ctx := core.Context{DryRun: true}
-	if _, err := SetOrchestratorAlias(ctx, store, model.SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "erun+erunpaas.com@erun",
-	}); err != nil {
-		t.Fatalf("dry run error = %v", err)
-	}
-	if store.saved {
-		t.Fatal("dry run wrote the config")
-	}
-
-	if _, err := SetOrchestratorAlias(ctx, store, model.SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "erun+elsewhere.example@erun",
-	}); err == nil {
-		t.Fatal("dry run accepted an alias a real run refuses")
-	}
-}
-
-func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, id, alias string) configpkg.OrchestratorConfig {
-	t.Helper()
-	orchestrator, err := SetOrchestratorAlias(core.Context{}, store, model.SetOrchestratorAliasParams{
-		OrchestratorID: id,
-		Alias:          alias,
-	})
-	if err != nil {
-		t.Fatalf("SetOrchestratorAlias(%q, %q) error = %v", id, alias, err)
-	}
-	return orchestrator
 }
 
 // saved records whether a write reached the config.

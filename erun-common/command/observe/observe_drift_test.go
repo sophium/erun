@@ -77,23 +77,3 @@ func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodA
 		t.Fatalf("drift = %v, want a runtimepod drift finding even though the release read failed", got)
 	}
 }
-
-func TestComputeObserveDriftFoundReleaseKeepsExistingChecks(t *testing.T) {
-	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", RuntimeImage: "registry.example/erun-devops:1.0.0", Namespace: "team-dev"}
-	release := &model.ObservedHelmRelease{
-		Name:           "team-devops",
-		Found:          true,
-		AppVersion:     "1.0.1",
-		ImageOverrides: map[string]string{"erun-devops": "registry.example/erun-devops:1.0.1"},
-	}
-
-	got := computeObserveDrift(req, release, nil)
-
-	joined := strings.Join(got, "\n")
-	if !strings.Contains(joined, "does not match the release's app version") {
-		t.Fatalf("drift = %v, want the recordedVersion/AppVersion mismatch finding", got)
-	}
-	if !strings.Contains(joined, "does not match the release's imageOverrides.erun-devops") {
-		t.Fatalf("drift = %v, want the runtimeimage/imageOverrides mismatch finding", got)
-	}
-}

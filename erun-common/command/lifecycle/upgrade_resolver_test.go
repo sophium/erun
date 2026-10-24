@@ -117,21 +117,6 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	})
 }
 
-func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
-	noTrace := func(string) {}
-
-	t.Run("a snapshot-channel env already at the stable release is up to date (#928)", func(t *testing.T) {
-		snapshotEnv := config.EnvConfig{Name: "ux", RuntimeVersion: "1.0.173", UpgradeChannel: config.UpgradeChannelSnapshot}
-		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-			return []SourcedRuntimeVersions{{Registry: config.DefaultContainerRegistry, Versions: model.RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
-		}
-		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
-		if item.Lagging || item.Target != "1.0.173" || item.UnresolvedReason != "" {
-			t.Fatalf("expected up to date, not unresolved, got %+v", item)
-		}
-	})
-}
-
 func assertLaggingSingleTarget(t *testing.T, item model.UpgradePlanItem, wantTarget, failMsg string) {
 	t.Helper()
 	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {

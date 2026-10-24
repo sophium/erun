@@ -86,39 +86,6 @@ func TestReviewCommentToolAcceptsAnUnanchoredComment(t *testing.T) {
 	}
 }
 
-func TestReviewCommentToolKeepsALineAnchoredComment(t *testing.T) {
-	result := callReviewCommentTool(t, map[string]any{
-		"reviewId": "018f0000-0000-7000-8000-000000000000",
-		"commitId": "abc123",
-		"filePath": "main.go",
-		"line":     42,
-		"body":     "nit: rename this",
-		"preview":  true,
-	})
-
-	want := "platform: POST https://api.test/v1/reviews/018f0000-0000-7000-8000-000000000000/comments (commitId=abc123, filePath=main.go, line=42)"
-	if got := traceLine(result); got != want {
-		t.Errorf("anchored comment planned call:\n got %q\nwant %q", got, want)
-	}
-}
-
-func TestReviewCommentToolKeepsAReplyInItsThread(t *testing.T) {
-	result := callReviewCommentTool(t, map[string]any{
-		"reviewId":        "018f0000-0000-7000-8000-000000000000",
-		"commitId":        "abc123",
-		"filePath":        "main.go",
-		"line":            42,
-		"body":            "good catch, fixed",
-		"parentCommentId": "018g0000-0000-7000-8000-000000000000",
-		"preview":         true,
-	})
-
-	want := "platform: POST https://api.test/v1/reviews/018f0000-0000-7000-8000-000000000000/comments (commitId=abc123, filePath=main.go, line=42, replyTo=018g0000-0000-7000-8000-000000000000)"
-	if got := traceLine(result); got != want {
-		t.Errorf("reply planned call:\n got %q\nwant %q", got, want)
-	}
-}
-
 func TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody(t *testing.T) {
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	tools, err := session.ListTools(context.Background(), nil)

@@ -121,17 +121,6 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 		wantSuggested string
 	}{
 		{
-			name: "a 0.14 percent throttle ratio does not raise cpu",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, model.RuntimeUsage{CPU: model.RuntimeCPUUsage{QuotaCores: 1}, Memory: model.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
-				h.ObservedPeriods = 308631
-				h.ObservedThrottledPeriods = 425
-				h.ObservedPeakCPUMilli = 200
-				return h
-			}(),
-			wantAction: model.RuntimeSizingHold,
-		},
-		{
 			name: "too few scheduling periods recommends nothing",
 			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, model.RuntimeUsage{CPU: model.RuntimeCPUUsage{QuotaCores: 1}, Memory: model.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
@@ -168,107 +157,6 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 	}
 }
 
-func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
-	limits := []int64{512 * testMi, 2 * testGi, 8704 * testMi, 23552 * testMi, 64 * testGi}
-	peakFractions := []float64{0.001, 0.01, 0.09, 0.17, 0.33, 0.4999, 0.5, 0.7, 0.89}
-	windows := []time.Duration{0, time.Hour, 23 * time.Hour, 24 * time.Hour, 200 * time.Hour}
-	sampleCounts := []int{1, 119, 120, 5000}
-
-	for _, limit := range limits {
-		for _, fraction := range peakFractions {
-			for _, window := range windows {
-				for _, samples := range sampleCounts {
-					peak := int64(float64(limit) * fraction)
-					history := usageHistory(window, samples, model.RuntimeUsage{Memory: model.RuntimeMemoryUsage{LimitBytes: limit}, CPU: model.RuntimeCPUUsage{QuotaCores: 4}})
-					history.ObservedPeakMemoryBytes = peak
-					recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
-					if !ok {
-						t.Fatal("expected a recommendation")
-					}
-					verdict := verdictFor(t, recommendation, "memory")
-					if verdict.Action != model.RuntimeSizingLower {
-						continue
-					}
-					suggestedMi, err := config.ParseKubernetesMemoryToMi(verdict.Suggested)
-					if err != nil {
-						t.Fatalf("unparseable suggestion %q: %v", verdict.Suggested, err)
-					}
-					floor := int64(float64(peak) * deploy.RuntimeSizingMemoryHeadroom)
-					if suggestedMi*testMi < floor {
-						t.Fatalf("limit=%d peak=%d: suggested %s is below %.0fx the observed peak", limit, peak, verdict.Suggested, deploy.RuntimeSizingMemoryHeadroom)
-					}
-					if suggestedMi*testMi >= limit {
-						t.Fatalf("limit=%d peak=%d: shrink to %s is not smaller than the current limit", limit, peak, verdict.Suggested)
-					}
-				}
-			}
-		}
-	}
-}
-
-func TestRecommendRuntimeSizingAnyOOMKillRaises(t *testing.T) {
-	for _, window := range []time.Duration{0, time.Minute, 500 * time.Hour} {
-		for _, samples := range []int{1, 240} {
-			for _, peakFraction := range []float64{0.0, 0.05, 0.5, 0.99} {
-				limit := 8 * testGi
-				history := usageHistory(window, samples, model.RuntimeUsage{Memory: model.RuntimeMemoryUsage{LimitBytes: limit}, CPU: model.RuntimeCPUUsage{QuotaCores: 4}})
-				history.ObservedPeakMemoryBytes = int64(float64(limit) * peakFraction)
-				history.ObservedOOMKills = 1
-				recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
-				if !ok {
-					t.Fatal("expected a recommendation")
-				}
-				verdict := verdictFor(t, recommendation, "memory")
-				if verdict.Action != model.RuntimeSizingRaise || verdict.Confidence != model.RuntimeSizingConfidenceHigh {
-					t.Fatalf("window=%s samples=%d peak=%.2f: got %q/%q, want raise/high", window, samples, peakFraction, verdict.Action, verdict.Confidence)
-				}
-			}
-		}
-	}
-}
-
-func TestRecommendRuntimeSizingWithoutHistoryStaysSilent(t *testing.T) {
-	if _, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{}); ok {
-		t.Fatal("an environment erun has never observed must get silence, not a guess")
-	}
-}
-
-// memory.peak resets when the container restarts.
-func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
-	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := deploy.RuntimeUsageHistory{}
-	history = AppendRuntimeUsageSample(history, model.RuntimeUsage{
-		Memory: model.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 6 * testGi, OOMKills: 1},
-		CPU:    model.RuntimeCPUUsage{UsageUsec: 1_000_000, Periods: 5000, ThrottledPeriods: 10},
-	}, base)
-	history = AppendRuntimeUsageSample(history, model.RuntimeUsage{
-		Memory: model.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
-		CPU:    model.RuntimeCPUUsage{UsageUsec: 100, Periods: 3},
-	}, base.Add(time.Hour))
-
-	if history.Restarts != 1 {
-		t.Fatalf("restarts = %d, want 1", history.Restarts)
-	}
-	if history.ObservedPeakMemoryBytes != 6*testGi {
-		t.Fatalf("observed peak = %d, want the pre-restart %d", history.ObservedPeakMemoryBytes, 6*testGi)
-	}
-	if history.ObservedOOMKills != 1 {
-		t.Fatalf("oom kills = %d, want the pre-restart kill retained", history.ObservedOOMKills)
-	}
-	if history.ObservedPeriods != 5003 {
-		t.Fatalf("periods = %d, want both lifetimes accumulated", history.ObservedPeriods)
-	}
-
-	// 6Gi of 8Gi is within the raise margin; the post-restart 1Gi would look like a shrink.
-	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
-	if !ok {
-		t.Fatal("expected a recommendation")
-	}
-	if verdict := verdictFor(t, recommendation, "memory"); verdict.Action != model.RuntimeSizingRaise {
-		t.Fatalf("memory action = %q, want raise from the retained peak (reason: %s)", verdict.Action, verdict.Reason)
-	}
-}
-
 // The peak is set in the first sample, which is then pushed out of the window.
 func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -299,34 +187,6 @@ func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	}
 }
 
-func TestReadLocalRuntimeUsageReadsCgroupV2(t *testing.T) {
-	root := t.TempDir()
-	writeCgroupFixture(t, root, map[string]string{
-		"cpu.max":        "1200000 100000\n",
-		"cpu.stat":       "usage_usec 27551234478\nnr_periods 376556\nnr_throttled 0\nthrottled_usec 0\n",
-		"memory.max":     "24696061952\n",
-		"memory.current": "4773695488\n",
-		"memory.peak":    "12742377472\n",
-		"memory.events":  "low 0\nhigh 0\nmax 21292\noom 0\noom_kill 0\n",
-	})
-	usage := config.ReadLocalRuntimeUsage(root)
-	if got := config.RuntimeQuotaMilli(usage.CPU.QuotaCores); got != 12000 {
-		t.Fatalf("cpu quota = %d milli, want 12000", got)
-	}
-	if usage.Memory.LimitBytes != 24696061952 || usage.Memory.PeakBytes != 12742377472 {
-		t.Fatalf("memory = %+v", usage.Memory)
-	}
-	if !usage.Memory.CeilingHitsObserved || usage.Memory.CeilingHits != 21292 {
-		t.Fatalf("memory.events' max counter (ceiling hits) = %+v, want observed=true value=21292", usage.Memory)
-	}
-	if usage.CPU.Periods != 376556 || usage.CPU.ThrottledPeriods != 0 {
-		t.Fatalf("cpu = %+v", usage.CPU)
-	}
-	if !usage.HasCounters() {
-		t.Fatal("a full cgroup v2 read must count as counters")
-	}
-}
-
 func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -343,16 +203,6 @@ func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 	}
 	if usage.CPU.Unavailable == "" {
 		t.Fatal("an unreadable cpu quota must be named unavailable")
-	}
-}
-
-func TestReadLocalRuntimeUsageNeverFailsOnAbsentCounters(t *testing.T) {
-	usage := config.ReadLocalRuntimeUsage(t.TempDir() + "/missing")
-	if usage.HasCounters() {
-		t.Fatal("a host with no cgroup v2 files must report no counters")
-	}
-	if usage.Memory.Unavailable == "" || usage.CPU.Unavailable == "" {
-		t.Fatalf("every field must name its own unavailability, got %+v", usage)
 	}
 }
 

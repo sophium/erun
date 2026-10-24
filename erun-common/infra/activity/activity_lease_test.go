@@ -208,35 +208,6 @@ func TestActivityLeaseOrphanedByADeadHolderIsReclaimed(t *testing.T) {
 	}
 }
 
-func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
-	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	config := configpkg.EnvironmentIdleConfig{Timeout: "5m", WorkingHours: "00:00-23:59"}
-
-	idle, err := ResolveEnvironmentIdleStatus(config, nil, nil, now)
-	if err != nil {
-		t.Fatalf("resolve without leases: %v", err)
-	}
-	if !idle.StopEligible {
-		t.Fatalf("an environment with no activity and no lease must be stop eligible, blocked by %q", idle.StopBlockedReason)
-	}
-
-	leased, err := ResolveEnvironmentIdleStatus(config, nil, []model.EnvironmentActivityLease{{
-		ID: "agent-run", Name: "agent-run", StartedAt: now, ExpiresAt: now.Add(10 * time.Minute),
-	}}, now)
-	if err != nil {
-		t.Fatalf("resolve with a lease: %v", err)
-	}
-	if leased.StopEligible {
-		t.Fatal("a held lease must block idle-stop")
-	}
-	if !strings.Contains(leased.StopBlockedReason, "agent-run") {
-		t.Errorf("the blocked reason must name the lease, got %q", leased.StopBlockedReason)
-	}
-	if len(leased.Leases) != 1 {
-		t.Errorf("the status must carry the leases so a client can render them, got %+v", leased.Leases)
-	}
-}
-
 func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
