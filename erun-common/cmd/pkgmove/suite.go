@@ -26,11 +26,10 @@ var (
 	timingSeam      = regexp.MustCompile(`\bTimingRecordDirEnv\s*=\s*"([^"]+)"`)
 )
 
-// writeSuiteMains gives every package the split created that has tests but
-// no TestMain one generated from suite_main_test.go.tmpl, so its tests are
-// isolated from the machine as the root package's are. It only runs where the
-// timing seam the suite redirects is known: named by timingEnv, or declared by
-// the module's own base/core.
+// writeSuiteMains gives every package that has tests but no TestMain one
+// generated from suite_main_test.go.tmpl. It only runs where the timing seam
+// the suite redirects is known: named by timingEnv, or declared by the
+// module's own base/core.
 func writeSuiteMains(rootDir, timingEnv string) (int, error) {
 	if timingEnv == "" {
 		timingEnv = timingSeamValue(filepath.Join(rootDir, filepath.FromSlash(coreDir)))
