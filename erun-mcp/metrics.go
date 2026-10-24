@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // The runtime pod's Prometheus exposition listener, documented at
@@ -56,135 +55,38 @@ func normalizeMetricsConfig(cfg MetricsConfig) (MetricsConfig, error) {
 	return cfg, nil
 }
 
-// metricsRecorder owns the five series metrics-spec.md documents plus the
-// in-process counter the traffic-window gauge samples from. Every method has
-// a nil-receiver no-op so callers (guardTool, the HTTP middleware, the
-// tickers) never need a "is metrics enabled" branch of their own.
-type metricsRecorder struct {
-	registry *prometheus.Registry
-
-	idleEligibility      prometheus.Gauge
-	terminalInputSeconds prometheus.Gauge
-	trafficWindowBytes   prometheus.Gauge
-	mcpCallsTotal        *prometheus.CounterVec
-	auditEventsTotal     *prometheus.CounterVec
-
-	mcpBytesSeen atomic.Int64
-}
-
-func newMetricsRecorder(tenant, environment string) *metricsRecorder {
+func newMetricsRecorder(tenant, environment string) *shared.MetricsRecorder {
 	labels := prometheus.Labels{"tenant": tenant, "environment": environment}
-	r := &metricsRecorder{registry: prometheus.NewRegistry()}
+	r := &shared.MetricsRecorder{Registry: prometheus.NewRegistry()}
 
-	r.idleEligibility = prometheus.NewGauge(prometheus.GaugeOpts{
+	r.IdleEligibility = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "erun_idle_eligibility",
 		Help:        "Whether the environment is currently eligible for idle-stop: 1 eligible, 0 not.",
 		ConstLabels: labels,
 	})
-	r.terminalInputSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
+	r.TerminalInputSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "erun_terminal_input_seconds_since_last",
 		Help:        "Seconds since the last SSH terminal input was observed; 0 if none has been observed yet.",
 		ConstLabels: labels,
 	})
-	r.trafficWindowBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+	r.TrafficWindowBytes = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "erun_traffic_window_bytes",
 		Help:        "Bytes observed at the SSH and MCP sockets during the last completed sampling window.",
 		ConstLabels: labels,
 	})
-	r.mcpCallsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+	r.McpCallsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "erun_mcp_calls_total",
 		Help:        "Total MCP tool calls handled by this pod's MCP edge, by tool and result.",
 		ConstLabels: labels,
 	}, []string{"tool", "result"})
-	r.auditEventsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+	r.AuditEventsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "erun_audit_events_total",
 		Help:        "Total audited actions recorded in this pod, by action, actor kind, and result.",
 		ConstLabels: labels,
 	}, []string{"action", "actor_kind", "result"})
 
-	r.registry.MustRegister(r.idleEligibility, r.terminalInputSeconds, r.trafficWindowBytes, r.mcpCallsTotal, r.auditEventsTotal)
+	r.Registry.MustRegister(r.IdleEligibility, r.TerminalInputSeconds, r.TrafficWindowBytes, r.McpCallsTotal, r.AuditEventsTotal)
 	return r
-}
-
-func (r *metricsRecorder) recordMCPCall(tool, result string) {
-	if r == nil {
-		return
-	}
-	r.mcpCallsTotal.WithLabelValues(tool, result).Inc()
-}
-
-func (r *metricsRecorder) recordAuditEvent(action, actorKind, result string) {
-	if r == nil {
-		return
-	}
-	r.auditEventsTotal.WithLabelValues(action, actorKind, result).Inc()
-}
-
-func (r *metricsRecorder) setIdleEligibility(eligible bool) {
-	if r == nil {
-		return
-	}
-	value := 0.0
-	if eligible {
-		value = 1
-	}
-	r.idleEligibility.Set(value)
-}
-
-func (r *metricsRecorder) setTerminalInputSecondsSinceLast(seconds float64) {
-	if r == nil {
-		return
-	}
-	r.terminalInputSeconds.Set(seconds)
-}
-
-func (r *metricsRecorder) setTrafficWindowBytes(bytes int64) {
-	if r == nil {
-		return
-	}
-	r.trafficWindowBytes.Set(float64(bytes))
-}
-
-func (r *metricsRecorder) addMCPBytes(n int64) {
-	if r == nil || n <= 0 {
-		return
-	}
-	r.mcpBytesSeen.Add(n)
-}
-
-// mcpCallResultLabel derives the `result` label from a tool handler's own
-// outcome. err is authoritative for "error". Absent an error, most delivery
-// tools (build, push, deploy, doctor, pin, terraform, ...) return a
-// CommandOutput-shaped struct whose Executed field is already the tool's own
-// preview/dry-run signal (runRuntimeCommand sets it false under DryRun); a
-// read-only tool with no such field (idle, list, version, usage) has no
-// preview concept, so it is always "success" once err is nil.
-func mcpCallResultLabel(out any, err error) string {
-	if err != nil {
-		return "error"
-	}
-	if executed, ok := commandOutputExecuted(out); ok && !executed {
-		return "dry_run"
-	}
-	return "success"
-}
-
-func commandOutputExecuted(out any) (executed bool, ok bool) {
-	value := reflect.ValueOf(out)
-	if value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return false, false
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return false, false
-	}
-	field := value.FieldByName("Executed")
-	if !field.IsValid() || field.Kind() != reflect.Bool {
-		return false, false
-	}
-	return field.Bool(), true
 }
 
 // byteCountingResponseWriter measures the response half of an MCP HTTP call
@@ -213,7 +115,7 @@ func (w *byteCountingResponseWriter) Flush() {
 // the activity snapshot the ssh-proxy already maintains). An idle probe is
 // excluded for the same reason activityHTTPMiddleware excludes it: it is
 // synthetic polling, not traffic that should ever read as the env being busy.
-func trafficMeteringMiddleware(recorder *metricsRecorder, next http.Handler) http.Handler {
+func trafficMeteringMiddleware(recorder *shared.MetricsRecorder, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if recorder == nil || req.Header.Get(mcp.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
@@ -225,7 +127,7 @@ func trafficMeteringMiddleware(recorder *metricsRecorder, next http.Handler) htt
 		if requestBytes < 0 {
 			requestBytes = 0
 		}
-		recorder.addMCPBytes(requestBytes + counting.bytes)
+		recorder.AddMCPBytes(requestBytes + counting.bytes)
 	})
 }
 
@@ -235,7 +137,7 @@ func trafficMeteringMiddleware(recorder *metricsRecorder, next http.Handler) htt
 // direct caller could) just waits for cancellation without binding a port —
 // the tickers that feed the registry still run, so re-enabling later needs no
 // restart of the rest of the process.
-func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *metricsRecorder) error {
+func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.MetricsRecorder) error {
 	cfg, err := normalizeMetricsConfig(cfg)
 	if err != nil {
 		return err
@@ -246,7 +148,7 @@ func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *metricsRec
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(DefaultMetricsPath, promhttp.HandlerFor(recorder.registry, promhttp.HandlerOpts{}))
+	mux.Handle(DefaultMetricsPath, promhttp.HandlerFor(recorder.Registry, promhttp.HandlerOpts{}))
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
@@ -275,7 +177,7 @@ func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *metricsRec
 // ResolveStoredEnvironmentIdleStatus), so the gauges can never disagree with
 // what an agent calling `idle` sees. It samples once immediately so a scrape
 // right after boot does not read a zero-value gauge as "eligible"/"just typed".
-func startIdleMetricsTicker(ctx context.Context, runtime RuntimeConfig, recorder *metricsRecorder) {
+func startIdleMetricsTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
 	if recorder == nil {
 		return
 	}
@@ -292,7 +194,7 @@ func startIdleMetricsTicker(ctx context.Context, runtime RuntimeConfig, recorder
 	}
 }
 
-func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
+func sampleIdleMetrics(runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
 	tenant := strings.TrimSpace(runtime.Context.Tenant)
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	if tenant == "" || environment == "" {
@@ -306,8 +208,8 @@ func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
 		// (e.g. env config not yet written at pod boot).
 		return
 	}
-	recorder.setIdleEligibility(status.StopEligible)
-	recorder.setTerminalInputSecondsSinceLast(secondsSinceLastTerminalInput(status, now))
+	recorder.SetIdleEligibility(status.StopEligible)
+	recorder.SetTerminalInputSecondsSinceLast(secondsSinceLastTerminalInput(status, now))
 }
 
 // terminalInputActivityKinds mirrors idle-policy.md's `last_terminal_input`
@@ -347,7 +249,7 @@ func secondsSinceLastTerminalInput(status activitypkg.EnvironmentIdleStatus, now
 // counter (fed by trafficMeteringMiddleware). Each reported value is the
 // last *completed* window, not a window still accumulating — a gauge sampled
 // mid-window would read low simply because a scrape landed early in it.
-func startTrafficWindowTicker(ctx context.Context, runtime RuntimeConfig, recorder *metricsRecorder) {
+func startTrafficWindowTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
 	if recorder == nil {
 		return
 	}
@@ -364,7 +266,7 @@ func startTrafficWindowTicker(ctx context.Context, runtime RuntimeConfig, record
 	}
 }
 
-func sampleTrafficWindow(runtime RuntimeConfig, recorder *metricsRecorder, lastSSHBytes, lastMCPBytes int64) (int64, int64) {
+func sampleTrafficWindow(runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder, lastSSHBytes, lastMCPBytes int64) (int64, int64) {
 	tenant := strings.TrimSpace(runtime.Context.Tenant)
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	sshBytes := lastSSHBytes
@@ -373,10 +275,10 @@ func sampleTrafficWindow(runtime RuntimeConfig, recorder *metricsRecorder, lastS
 			sshBytes = activity[config.ActivityKindSSH].Bytes
 		}
 	}
-	mcpBytes := recorder.mcpBytesSeen.Load()
+	mcpBytes := recorder.McpBytesSeen.Load()
 
 	windowBytes := deltaSinceLastSample(sshBytes, lastSSHBytes) + deltaSinceLastSample(mcpBytes, lastMCPBytes)
-	recorder.setTrafficWindowBytes(windowBytes)
+	recorder.SetTrafficWindowBytes(windowBytes)
 	return sshBytes, mcpBytes
 }
 

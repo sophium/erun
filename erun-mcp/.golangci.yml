@@ -21,7 +21,24 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - depguard
   settings:
+    depguard:
+      rules:
+        tools:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/*/*.go", "!**/erun-mcp/tools/shared/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-mcp/tools/shared$
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: an erun-mcp tool package may import tools/shared, never the server package or another tool group
+        shared:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/shared/*.go"]
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: tools/shared sits below every tool group and imports none of them
     funlen:
       lines: 100
       statements: 50

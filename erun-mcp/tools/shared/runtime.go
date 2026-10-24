@@ -1,0 +1,305 @@
+package shared
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/mergequeue"
+	"github.com/sophium/erun/erun-common/command/review"
+	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/push"
+	"github.com/sophium/erun/erun-common/primitive/shared"
+)
+
+type RuntimeContext struct {
+	Tenant            string `json:"tenant,omitempty"`
+	Environment       string `json:"environment,omitempty"`
+	RepoPath          string `json:"repoPath,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	Namespace         string `json:"namespace,omitempty"`
+}
+
+type RuntimeStore interface {
+	setup.BootstrapStore
+	lifecycle.ListStore
+	shared.DockerStore
+	deploy.DeployStore
+}
+
+type RuntimeConfig struct {
+	Context                        RuntimeContext
+	Store                          RuntimeStore
+	BuildScriptRunner              build.BuildScriptRunnerFunc
+	BuildDockerImage               build.DockerImageBuilderFunc
+	PushDockerImage                shared.DockerImagePusherFunc
+	DeployHelmChart                deploy.HelmChartDeployerFunc
+	EnsureKubernetesNamespace      deploy.NamespaceEnsurerFunc
+	DeleteKubernetesNamespace      lifecycle.NamespaceDeleterFunc
+	WaitForRemoteRuntime           setup.RemoteRuntimeWaitFunc
+	RunRemoteCommand               kube.RemoteCommandRunnerFunc
+	ResolveRuntimeRegistryVersions registry.RuntimeRegistryVersionResolverFunc
+}
+
+type CommandOutput struct {
+	Executed         bool                    `json:"executed"`
+	WorkingDirectory string                  `json:"workingDirectory,omitempty"`
+	Trace            []string                `json:"trace,omitempty"`
+	Stdout           string                  `json:"stdout,omitempty"`
+	Stderr           string                  `json:"stderr,omitempty"`
+	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
+	// Build lets an Agent capture the minted version and thread it into `push`
+	// / `deploy`, since MCP composes the pure primitives itself.
+	Build *core.BuildResult `json:"build,omitempty"`
+	// Pin carries the resolved re-pin plan so a caller sees every reference that
+	// moved without diffing the tree afterwards.
+	Pin *PinOutput `json:"pin,omitempty"`
+	// Write carries what a `write` call actually wrote.
+	Write *gitx.WriteWorkingTreeFileResult `json:"write,omitempty"`
+	// Commit carries what a `commit` call actually committed.
+	Commit *gitx.CommitWorkingTreeResult `json:"commit,omitempty"`
+	// Push carries what a `push` call actually pushed.
+	Push *gitx.PushWorkingTreeBranchResult `json:"push,omitempty"`
+	// Merge carries what an `exec_merge` call actually merged.
+	Merge *mergequeue.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
+	// GateMerge carries what an `exec_gate-merge` call actually squash-merged.
+	GateMerge *mergequeue.GateMergeWorkingTreeResult `json:"gateMerge,omitempty"`
+	// ReportCommitStatus carries what an `exec_report-commit-status` call
+	// actually reported.
+	ReportCommitStatus *review.ReportCommitStatusResult `json:"reportCommitStatus,omitempty"`
+	// ClosePullRequest carries what an `exec_close-pr` call actually did.
+	ClosePullRequest *review.ClosePullRequestResult `json:"closePullRequest,omitempty"`
+	// Spec carries the resolved release plan `release` publishes.
+	Spec *shared.ReleaseSpec `json:"spec,omitempty"`
+	// Interaction carries a structured question `init` needs answered in a
+	// follow-up call, when it cannot resolve one from the input given.
+	Interaction *setup.BootstrapInitInteraction `json:"interaction,omitempty"`
+}
+
+var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func RuntimeRepoPath(runtime RuntimeContext) (string, error) {
+	if repoPath := strings.TrimSpace(runtime.RepoPath); repoPath != "" {
+		return repoPath, nil
+	}
+	return os.Getwd()
+}
+
+func captureCommandOutput(log io.Writer, work func(stdout, stderr io.Writer) error) (string, string, error) {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	err := work(MirrorToJobLog(stdout, log), MirrorToJobLog(stderr, log))
+	return stdout.String(), stderr.String(), err
+}
+
+// MirrorToJobLog sends what the work writes to both the buffer this call
+// returns inline and, for a backgrounded call, the job's own log as it is
+// produced. A caller polling exec_job_output would otherwise see nothing until
+// the work finished, and a failed background job would leave nothing but an
+// exit code behind. A synchronous call passes io.Discard and pays a no-op.
+func MirrorToJobLog(capture, log io.Writer) io.Writer {
+	if log == nil || log == io.Discard {
+		return capture
+	}
+	return io.MultiWriter(capture, log)
+}
+
+func RuntimePushFunc(runtime RuntimeConfig) build.DockerPushFunc {
+	return func(ctx core.Context, pushInput shared.DockerPushSpec) error {
+		return push.RunDockerPush(ctx, pushInput, runtime.PushDockerImage)
+	}
+}
+
+func RunCommandOutput(ctx core.Context, workDir string, traceOutput *bytes.Buffer, log io.Writer, run func(core.Context) error) (CommandOutput, error) {
+	if ctx.DryRun {
+		if err := run(ctx); err != nil {
+			return CommandOutput{}, err
+		}
+		return CommandOutput{
+			Executed:         false,
+			WorkingDirectory: workDir,
+			Trace:            NormalizeTraceLines(traceOutput.String()),
+		}, nil
+	}
+
+	stdout, stderr, err := captureCommandOutput(log, func(stdout, stderr io.Writer) error {
+		runCtx := ctx
+		runCtx.Stdout = stdout
+		runCtx.Stderr = stderr
+		return run(runCtx)
+	})
+	if err != nil {
+		return CommandOutput{
+			Executed:         true,
+			WorkingDirectory: workDir,
+			Trace:            NormalizeTraceLines(traceOutput.String()),
+			Stdout:           stdout,
+			Stderr:           stderr,
+		}, err
+	}
+	return CommandOutput{
+		Executed:         true,
+		WorkingDirectory: workDir,
+		Trace:            NormalizeTraceLines(traceOutput.String()),
+		Stdout:           stdout,
+		Stderr:           stderr,
+	}, nil
+}
+
+// RunRuntimeCommand runs one tool's work and captures it. log is the
+// background job's own log for a call started through runJobEnvelope with wait
+// false, and nil (or io.Discard) for a synchronous call that returns
+// everything inline; the trace and the work's own stdout/stderr are mirrored
+// into it as they are produced.
+func RunRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log io.Writer, run func(core.Context, string) error) (CommandOutput, error) {
+	traceOutput := new(bytes.Buffer)
+	traceSink := MirrorToJobLog(traceOutput, log)
+	ctx := RuntimeCallContext(preview, verbosity, nil, traceSink, traceSink)
+	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
+	// Surfaces agent-driven operations in the desktop's Diagnostics console,
+	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
+	// version) deliberately bypass runRuntimeCommand so probe polls cannot
+	// flood the trace log.
+	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
+	defer closeEnvTrace()
+
+	workDir, err := RuntimeRepoPath(runtime.Context)
+	if err != nil {
+		return CommandOutput{}, err
+	}
+
+	output, err := RunCommandOutput(ctx, workDir, traceOutput, log, func(runCtx core.Context) error {
+		return run(runCtx, workDir)
+	})
+	return output, err
+}
+
+func RuntimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, string, error) {
+	repoPath := strings.TrimSpace(runtime.RepoPath)
+	if repoPath != "" {
+		return FirstNonEmpty(strings.TrimSpace(runtime.Tenant), filepath.Base(repoPath)), filepath.Clean(repoPath), nil
+	}
+	return config.FindProjectRootFromDir(workDir)
+}
+
+// ResolveLocalTarget resolves the tenant/environment a tool acts on, and refuses
+// a target this server cannot reach. An MCP server serves exactly one
+// environment: its tools run in this pod, against this pod's repo and this pod's
+// erun binary, so an explicit tenant/environment naming a DIFFERENT environment
+// can never be honoured. Accepting one and acting locally anyway is worse than
+// refusing it, because the result then asserts a target the work never reached
+// and the caller is left holding written evidence that it worked (#1195).
+func ResolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
+	resolvedTenant, resolvedEnvironment, err := matchOrDefaultLocalTarget(
+		strings.TrimSpace(runtime.Context.Tenant), strings.TrimSpace(runtime.Context.Environment),
+		tenant, environment,
+	)
+	if err != nil {
+		return "", "", err
+	}
+	if resolvedTenant == "" || resolvedEnvironment == "" {
+		return "", "", ErrMissingLocalTarget(resolvedTenant == "", resolvedEnvironment == "")
+	}
+	return resolvedTenant, resolvedEnvironment, nil
+}
+
+// matchOrDefaultLocalTarget is the refusal check shared by resolveLocalTarget
+// and scopedTenantEnv: a caller-supplied tenant/environment that names a
+// different environment than this server's own is refused, naming both the
+// server's own scope and the requested one, and pointing at the remedy --
+// call that environment's own MCP edge -- rather than silently substituting
+// the local environment for the requested one. A field left empty by the
+// caller defaults to the server's own identity rather than being required;
+// resolveLocalTarget layers the "both must resolve" requirement on top of
+// that, scopedTenantEnv does not, since some of its callers have no
+// tenant/environment work to do at all.
+func matchOrDefaultLocalTarget(serverTenant, serverEnvironment, requestedTenant, requestedEnvironment string) (tenant, environment string, err error) {
+	requestedTenant = strings.TrimSpace(requestedTenant)
+	requestedEnvironment = strings.TrimSpace(requestedEnvironment)
+	tenantMismatch := requestedTenant != "" && serverTenant != "" && requestedTenant != serverTenant
+	environmentMismatch := requestedEnvironment != "" && serverEnvironment != "" && requestedEnvironment != serverEnvironment
+	if tenantMismatch || environmentMismatch {
+		return "", "", fmt.Errorf(
+			"this MCP server serves %s/%s and runs every tool there, so it cannot act on %s/%s: call that environment's own MCP edge instead",
+			serverTenant, serverEnvironment,
+			FirstNonEmpty(requestedTenant, serverTenant), FirstNonEmpty(requestedEnvironment, serverEnvironment),
+		)
+	}
+	return FirstNonEmpty(requestedTenant, serverTenant), FirstNonEmpty(requestedEnvironment, serverEnvironment), nil
+}
+
+// ErrMissingLocalTarget names exactly what is missing (tenant, environment,
+// or both) and what the caller can do about it, instead of the bare "tenant
+// and environment are required" dead end this replaced: that message named
+// no operation, no subject, and no recovery.
+func ErrMissingLocalTarget(missingTenant, missingEnvironment bool) error {
+	var missing []string
+	if missingTenant {
+		missing = append(missing, "tenant")
+	}
+	if missingEnvironment {
+		missing = append(missing, "environment")
+	}
+	what := strings.Join(missing, "/")
+	return fmt.Errorf(
+		"%s not resolved: this MCP server was not started bound to a %s, and the call did not supply %s either -- pass %s explicitly in the call, or run this edge for an environment that has it configured",
+		what, what, what, strings.Join(missing, " and "),
+	)
+}
+
+func FirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func RuntimeCallContext(preview bool, verbosity int, stdin io.Reader, stdout, stderr io.Writer) core.Context {
+	if preview && verbosity < core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
+	}
+	if verbosity > core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
+	}
+	return core.Context{
+		Logger:    core.NewLoggerWithWriters(verbosity, stderr, stderr),
+		Verbosity: verbosity,
+		DryRun:    preview,
+		Stdin:     stdin,
+		Stdout:    stdout,
+		Stderr:    stderr,
+	}
+}
+
+func NormalizeTraceLines(values ...string) []string {
+	lines := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, line := range strings.Split(value, "\n") {
+			line = strings.TrimSpace(ansiRegexp.ReplaceAllString(line, ""))
+			if line == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return lines
+}

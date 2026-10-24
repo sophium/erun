@@ -22,7 +22,7 @@ export interface OperateArgsInput {
 }
 
 // buildOperateArgs assembles exactly the input each tool's own schema
-// declares (erun-mcp/deploy.go's DeployInput, context.go's
+// declares (erun-mcp/tools/deploy/deploy.go's DeployInput, context.go's
 // ContextActionInput/ContextStartInput, resize.go's ResizeInput) -- an
 // unrelated field (e.g. `force` for context_stop, which stopCloudContext
 // never reads) is left off rather than sent and ignored.

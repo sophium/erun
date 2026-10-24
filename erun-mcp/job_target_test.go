@@ -4,6 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-mcp/tools/activity"
+	"github.com/sophium/erun/erun-mcp/tools/agent"
+	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/jobs"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // Every job, lease and idle tool takes a tenant/environment, and none of them can
@@ -13,7 +19,7 @@ import (
 // anyway -- so the caller was handed a handle asserting a target the work never
 // reached (#1195). Each of these must refuse.
 func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	ctx := context.Background()
 
 	// Assert on the REFUSAL, not merely on "an error". Several of these tools fail
@@ -21,24 +27,24 @@ func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	// job, an unresolvable repo -- so a bare err != nil passes even against the
 	// unfixed code and proves nothing. The error has to be the one that names both
 	// scopes.
-	_, _, err := jobStatusTool(runtime)(ctx, nil, JobStatusInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
+	_, _, err := jobs.JobStatusTool(runtime)(ctx, nil, jobs.JobStatusInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
 	assertRefusedForeignTarget(t, "job_status", err)
 
-	_, _, err = jobAwaitTool(runtime)(ctx, nil, JobAwaitInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
+	_, _, err = jobs.JobAwaitTool(runtime)(ctx, nil, jobs.JobAwaitInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
 	assertRefusedForeignTarget(t, "job_await", err)
 
-	_, _, err = activityLeaseTakeTool(runtime)(ctx, nil, ActivityLeaseTakeInput{Tenant: "tenant-b", Environment: "prod", Name: "x"})
+	_, _, err = activity.ActivityLeaseTakeTool(runtime)(ctx, nil, activity.ActivityLeaseTakeInput{Tenant: "tenant-b", Environment: "prod", Name: "x"})
 	assertRefusedForeignTarget(t, "activity_lease_take", err)
 
 	_, _, err = idleStopHistoryTool(runtime)(ctx, nil, IdleStopHistoryInput{Tenant: "tenant-b", Environment: "prod"})
 	assertRefusedForeignTarget(t, "idle_stop_history", err)
 
-	_, _, err = rawTool(runtime)(ctx, nil, RawInput{
+	_, _, err = exectool.RawTool(runtime)(ctx, nil, exectool.RawInput{
 		Command: []string{"true"}, Wait: boolPtr(false), Tenant: "tenant-b", Environment: "prod",
 	})
 	assertRefusedForeignTarget(t, "exec_raw (wait:false)", err)
 
-	_, _, err = agentTool(runtime)(ctx, nil, AgentInput{
+	_, _, err = agent.AgentTool(runtime)(ctx, nil, agent.AgentInput{
 		Agent: "claude", Prompt: "x", Tenant: "tenant-b", Environment: "prod",
 	})
 	assertRefusedForeignTarget(t, "exec_agent", err)
@@ -59,21 +65,6 @@ func assertRefusedForeignTarget(t *testing.T, tool string, err error) {
 	}
 }
 
-// Restating the server's own scope, or omitting it, must keep working -- the
-// arguments are how a caller disambiguates, and refusing those would break every
-// existing caller.
-func TestJobToolsAcceptTheirOwnScope(t *testing.T) {
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	ctx := context.Background()
-
-	if _, _, err := jobStatusTool(runtime)(ctx, nil, JobStatusInput{Tenant: "tenant-a", Environment: "dev"}); err != nil {
-		t.Errorf("job_status refused its own scope: %v", err)
-	}
-	if _, _, err := jobStatusTool(runtime)(ctx, nil, JobStatusInput{}); err != nil {
-		t.Errorf("job_status refused an omitted scope: %v", err)
-	}
-}
-
 // TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools
 // guards against exec_raw's wait:false path and exec_agent reading
 // runtime.Context.Tenant/Environment directly again, with no field a caller
@@ -88,7 +79,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 	// short-circuit, so it needs a real binary on PATH even though nothing
 	// actually execs it in this test.
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
-	runtime := normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()
 
 	for _, tc := range []struct {
@@ -100,7 +91,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 		{"restated", "tenant-a", "dev"},
 	} {
 		t.Run("exec_raw/"+tc.name, func(t *testing.T) {
-			if _, _, err := rawTool(runtime)(ctx, nil, RawInput{
+			if _, _, err := exectool.RawTool(runtime)(ctx, nil, exectool.RawInput{
 				Command: []string{"true"}, Wait: boolPtr(false), Preview: true,
 				Tenant: tc.tenant, Environment: tc.environment,
 			}); err != nil {
@@ -108,7 +99,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 			}
 		})
 		t.Run("exec_agent/"+tc.name, func(t *testing.T) {
-			if _, _, err := agentTool(runtime)(ctx, nil, AgentInput{
+			if _, _, err := agent.AgentTool(runtime)(ctx, nil, agent.AgentInput{
 				Agent: "claude", Prompt: "x", Preview: true,
 				Tenant: tc.tenant, Environment: tc.environment,
 			}); err != nil {

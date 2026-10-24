@@ -8,6 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-mcp/tools/platform"
+	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // The MCP platform tools resolve their alias through the same shared resolver
@@ -16,8 +18,8 @@ import (
 // the CLI's flag is not something an MCP caller can act on.
 func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) string {
 	t.Helper()
-	runtime := RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
-	_, _, err := platformEnvListTool(runtime)(context.Background(), nil, PlatformEnvListInput{})
+	runtime := sharedpkg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
+	_, _, err := platform.PlatformEnvListTool(runtime)(context.Background(), nil, platform.PlatformEnvListInput{})
 	if err == nil {
 		t.Fatal("expected the unresolvable-alias error, got none")
 	}

@@ -11,6 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
 
 // TestUsageToolCarriesTheStandingSizingRecommendation covers the fix for the
@@ -25,12 +27,12 @@ func TestUsageToolCarriesTheStandingSizingRecommendation(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 	seedUsageHistoryForTest(t, "tenant-a", "dev")
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 
-	_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+	_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})
 	if err != nil {
 		t.Fatalf("usageTool returned err: %v", err)
 	}
@@ -53,12 +55,12 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 
-	_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+	_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})
 	if err != nil {
 		t.Fatalf("usageTool returned err: %v", err)
 	}
@@ -107,11 +109,11 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 	seedUsageHistoryForTest(t, "tenant-a", "dev")
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
-	_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+	_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})
 	if err != nil {
 		t.Fatalf("usageTool returned err: %v", err)
 	}
@@ -122,14 +124,14 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 	carried := output.Sizing != nil
 	if !carried {
 		t.Fatalf("usageSizingSurfaces claims %q carries the standing sizing recommendation, but driving the tool over retained history returned none; remove it from that list and say so in the description",
-			usageSizingSurfaces[0])
+			usage.UsageSizingSurfaces[0])
 	}
 
 	// The prose half: the description is built from that list, not typed
 	// beside it, so the claim cannot be restated wrongly in one place and
 	// correctly in the other.
 	description := usageToolDescriptionForTest(t)
-	claim := UsageSizingClaim()
+	claim := usage.UsageSizingClaim()
 	if !strings.Contains(description, claim) {
 		t.Errorf("usage tool description does not carry the claim generated from usageSizingSurfaces, so its text and the surfaces it names can drift apart.\nwant substring:\n%s\ngot:\n%s", claim, description)
 	}
@@ -185,11 +187,11 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runtime := RuntimeConfig{
-				Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+			runtime := shared.RuntimeConfig{
+				Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 				Store:   usageTestStoreOfType("tenant-a", "dev", tc.envType, t.TempDir()),
 			}
-			_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+			_, output, err := usage.UsageTool(runtime)(context.Background(), nil, usage.UsageInput{Preview: true})
 			if err != nil {
 				t.Fatalf("usageTool returned err: %v", err)
 			}

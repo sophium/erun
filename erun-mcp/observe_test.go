@@ -9,6 +9,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // The observe tool published `drift` in its outputSchema while no surface
@@ -77,8 +78,8 @@ func TestObserveToolRequiresTheDriftProperty(t *testing.T) {
 // goldens); what this pins is that the key itself is never dropped at the MCP
 // boundary.
 func TestObserveToolReturnsTheDriftKey(t *testing.T) {
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		// The module's shared local-target store fixture, which resolves the
 		// one environment this server would be scoped to.
 		Store: usageTestStore("tenant-a", "dev"),

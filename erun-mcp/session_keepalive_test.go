@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // sessionTestTimeout is small enough that a test outlives it in seconds. Every
@@ -23,14 +24,14 @@ const sessionTestTimeout = 2 * time.Second
 // enough to observe.
 func sessionTestEdge(t *testing.T) *httptest.Server {
 	t.Helper()
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	previousTimeout := mcpSessionTimeout
 	mcpSessionTimeout = sessionTestTimeout
 	t.Cleanup(func() { mcpSessionTimeout = previousTimeout })
 
-	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, RuntimeConfig{}, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, shared.RuntimeConfig{}, nil))
 	t.Cleanup(server.Close)
 	return server
 }

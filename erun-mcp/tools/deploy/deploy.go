@@ -1,0 +1,100 @@
+package deploy
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
+	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
+)
+
+var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
+
+type DeployInput struct {
+	Component    string   `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
+	Components   []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns); ignored when component is set"`
+	Version      string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
+	RuntimeImage string   `json:"runtime_image,omitempty" jsonschema:"install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to version, even when the env has a repo-local runtime chart; use it to bootstrap an env on the canonical ERun base image before its own image is built"`
+	RuntimeChart string   `json:"runtime_chart,omitempty" jsonschema:"install this runtime chart, as an OCI reference that may carry its own version; states the chart as its own coordinate instead of deriving it from version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart"`
+	Force        bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
+	Timeout      string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
+	Preview      bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity    int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	// MCP auth is sticky: omitting both inputs keeps whatever the env recorded, so
+	// a plain version bump can never leave the edge unauthenticated by accident.
+	MCPAuthPublicKey string `json:"mcp_auth_public_key,omitempty" jsonschema:"path to a PEM public key the env's MCP edge must accept bearer tokens signed by; recorded on the env so later redeploys keep authenticating. Omit to reuse the recorded key"`
+	NoMCPAuth        bool   `json:"no_mcp_auth,omitempty" jsonschema:"when true, deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission"`
+	// MaxCPU/MaxMemory/MaxStorage cap the environment's namespace with a
+	// Kubernetes ResourceQuota+LimitRange for this deploy; all three must be set
+	// together (eruncommon.ValidateNamespaceResourceQuota), or none.
+	MaxCPU     string `json:"max_cpu,omitempty" jsonschema:"Kubernetes CPU quantity (e.g. 4) capping the environment's namespace via a ResourceQuota+LimitRange; requires max_memory and max_storage too. Omit all three to use the env's saved namespace quota, if any"`
+	MaxMemory  string `json:"max_memory,omitempty" jsonschema:"Kubernetes memory quantity (e.g. 8Gi) capping the environment's namespace; requires max_cpu and max_storage too"`
+	MaxStorage string `json:"max_storage,omitempty" jsonschema:"Kubernetes storage quantity (e.g. 80Gi) capping the environment's namespace; requires max_cpu and max_memory too"`
+	sharedpkg.JobEnvelopeInput
+}
+
+func DeployTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DeployInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
+		if strings.TrimSpace(input.Version) == "" {
+			return nil, sharedpkg.JobEnvelopeOutput{}, errMissingDeployVersion
+		}
+		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
+			findProjectRoot := func() (string, string, error) {
+				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
+			}
+			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+				return shared.DockerBuildContextAtDir(workDir)
+			}
+			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+				return deploy.KubernetesDeployContextAtDir(workDir), nil
+			}
+
+			target := deploy.DeployTarget{
+				Tenant:               strings.TrimSpace(runtime.Context.Tenant),
+				Environment:          strings.TrimSpace(runtime.Context.Environment),
+				RepoPath:             workDir,
+				VersionOverride:      strings.TrimSpace(input.Version),
+				RuntimeImageOverride: strings.TrimSpace(input.RuntimeImage),
+				RuntimeChartOverride: strings.TrimSpace(input.RuntimeChart),
+				Components:           input.Components,
+				Force:                input.Force,
+				RolloutTimeout:       strings.TrimSpace(input.Timeout),
+				MCPAuthPublicKeyPath: strings.TrimSpace(input.MCPAuthPublicKey),
+				DisableMCPAuth:       input.NoMCPAuth,
+				NamespaceQuotaOverride: config.NamespaceResourceQuota{
+					CPU:     strings.TrimSpace(input.MaxCPU),
+					Memory:  strings.TrimSpace(input.MaxMemory),
+					Storage: strings.TrimSpace(input.MaxStorage),
+				},
+			}
+
+			component := strings.TrimSpace(input.Component)
+			if component != "" {
+				execution, err := deploy.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
+				if err != nil {
+					return err
+				}
+				if err := deploy.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
+					return err
+				}
+				return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, []deploy.DeploySpec{execution}, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+			}
+
+			executions, err := deploy.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			if err != nil {
+				return err
+			}
+			if err := deploy.RunDeploySpecs(runCtx, executions, runtime.DeployHelmChart); err != nil {
+				return err
+			}
+			return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+		})
+		envelope, err := sharedpkg.RunJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
+		return nil, envelope, err
+	}
+}

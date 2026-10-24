@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // TestIdleStopRecordToolWritesHostManualEntry covers the desktop Stop
@@ -18,7 +19,7 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := idleStopRecordTool(runtime)
 
 	_, result, err := handler(context.Background(), nil, IdleStopRecordInput{
@@ -75,7 +76,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 		t.Fatalf("SaveEnvironmentStopPending: %v", err)
 	}
 
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := idleStopRecordTool(runtime)
 
 	if _, _, err := handler(context.Background(), nil, IdleStopRecordInput{
@@ -112,7 +113,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 // the desktop calling the tool before it has resolved an env target.
 func TestIdleStopRecordToolRequiresTenantAndEnvironment(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	handler := idleStopRecordTool(RuntimeConfig{})
+	handler := idleStopRecordTool(shared.RuntimeConfig{})
 	if _, _, err := handler(context.Background(), nil, IdleStopRecordInput{}); err == nil {
 		t.Fatal("expected error when tenant and environment are both empty")
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // previewAdvertisedInSchema reads the property out of the schema a client
@@ -34,7 +35,7 @@ func previewAdvertisedInSchema(t *testing.T, tool *mcp.Tool) bool {
 // previewAdvertisedInDescription reports whether the description carries the
 // sentence, matching how a reader scans for it: as the closing claim.
 func previewAdvertisedInDescription(tool *mcp.Tool) bool {
-	return strings.HasSuffix(strings.TrimSpace(tool.Description), previewAdvertised)
+	return strings.HasSuffix(strings.TrimSpace(tool.Description), shared.PreviewAdvertised)
 }
 
 // TestPreviewIsAdvertisedExactlyWhereItIsAccepted pins the biconditional over
@@ -100,21 +101,21 @@ type noPreview struct {
 // registered surface happens to look like on a given day.
 func TestAdvertisePreviewFollowsTheInputType(t *testing.T) {
 	declared := &mcp.Tool{Name: "declared", Description: "Does a thing."}
-	advertisePreview[struct {
+	shared.AdvertisePreview[struct {
 		Preview bool `json:"preview,omitempty"`
 	}](declared)
 
 	promoted := &mcp.Tool{Name: "promoted", Description: "Does a thing."}
-	advertisePreview[promotedPreview](promoted)
+	shared.AdvertisePreview[promotedPreview](promoted)
 
 	absent := &mcp.Tool{Name: "absent", Description: "Does a thing."}
-	advertisePreview[noPreview](absent)
+	shared.AdvertisePreview[noPreview](absent)
 
 	for _, tool := range []*mcp.Tool{declared, promoted} {
 		if !previewAdvertisedInDescription(tool) {
 			t.Errorf("%s: accepts preview but the description does not say so: %q", tool.Name, tool.Description)
 		}
-		if n := strings.Count(tool.Description, previewAdvertised); n != 1 {
+		if n := strings.Count(tool.Description, shared.PreviewAdvertised); n != 1 {
 			t.Errorf("%s: sentence appears %d times, want 1: %q", tool.Name, n, tool.Description)
 		}
 	}
@@ -125,8 +126,8 @@ func TestAdvertisePreviewFollowsTheInputType(t *testing.T) {
 
 	// Registering the same tool again must not accumulate the sentence; a
 	// caller reads the same description whether it was set once or corrected.
-	advertisePreview[promotedPreview](promoted)
-	if n := strings.Count(promoted.Description, previewAdvertised); n != 1 {
+	shared.AdvertisePreview[promotedPreview](promoted)
+	if n := strings.Count(promoted.Description, shared.PreviewAdvertised); n != 1 {
 		t.Errorf("promoted: re-registering produced the sentence %d times: %q", n, promoted.Description)
 	}
 }
@@ -135,7 +136,7 @@ func TestAdvertisePreviewFollowsTheInputType(t *testing.T) {
 // No registered tool trips it, which is the point of the guard and also why it
 // would otherwise be a branch no test ever executes.
 func TestAdvertisePreviewRefusesAFalseClaim(t *testing.T) {
-	tool := &mcp.Tool{Name: "synthetic", Description: "Does a thing. " + previewAdvertised}
+	tool := &mcp.Tool{Name: "synthetic", Description: "Does a thing. " + shared.PreviewAdvertised}
 
 	defer func() {
 		if recover() == nil {
@@ -143,7 +144,7 @@ func TestAdvertisePreviewRefusesAFalseClaim(t *testing.T) {
 		}
 	}()
 
-	advertisePreview[noPreview](tool)
+	shared.AdvertisePreview[noPreview](tool)
 }
 
 // TestDestructiveToolsAdvertisePreview names the tools whose silence cost the

@@ -7,6 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/upgrade"
 )
 
 // TestUpgradeToolPreviewResolvesPlan verifies the upgrade preview path resolves
@@ -14,8 +16,8 @@ import (
 func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 	t.Setenv(lifecycle.UpgradeVersionsOverrideEnv, "stable=3.0.0")
 	projectRoot := t.TempDir()
-	handler := upgradeTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
+	handler := upgrade.UpgradeTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
 		Store: listToolStore{
 			toolConfig:    config.ERunConfig{DefaultTenant: "tenant-a"},
 			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
@@ -25,7 +27,7 @@ func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 		},
 	}))
 
-	_, output, err := handler(context.Background(), nil, UpgradeInput{Preview: true})
+	_, output, err := handler(context.Background(), nil, upgrade.UpgradeInput{Preview: true})
 	if err != nil {
 		t.Fatalf("upgradeTool preview failed: %v", err)
 	}

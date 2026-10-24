@@ -7,6 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	cloudpkg "github.com/sophium/erun/erun-mcp/tools/cloud"
+	"github.com/sophium/erun/erun-mcp/tools/kubecontext"
 )
 
 // unconfiguredStore is the state the reported defect is about: a store that
@@ -44,8 +46,8 @@ func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
 		value any
 		field string
 	}{
-		{"cloud_list", CloudListResult{CloudProviders: providers}, "cloudProviders"},
-		{"context_list", ContextListResult{CloudContexts: contexts.CloudContexts}, "cloudContexts"},
+		{"cloud_list", cloudpkg.CloudListResult{CloudProviders: providers}, "cloudProviders"},
+		{"context_list", kubecontext.ContextListResult{CloudContexts: contexts.CloudContexts}, "cloudContexts"},
 	}
 
 	for _, tc := range cases {

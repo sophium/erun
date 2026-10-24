@@ -10,6 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-mcp/tools/pin"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 func writePinTestFile(t *testing.T, path, body string) {
@@ -27,15 +29,15 @@ func writePinTestFile(t *testing.T, path, body string) {
 // running in (its own cwd, a pod home directory). Unlike the CLI, there is no
 // cwd fallback here at all -- an MCP caller has no cwd to be inside of.
 func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "prod"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.100"},
 			},
 		},
 	}
-	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Version: "1.0.175"})
+	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Version: "1.0.175"})
 	if err == nil {
 		t.Fatalf("expected a refusal, got %+v", output)
 	}
@@ -54,15 +56,15 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	if err := lifecycle.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "prod"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
 			},
 		},
 	}
-	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Revert: true, ProjectRoot: root})
+	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Revert: true, ProjectRoot: root})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
@@ -75,11 +77,11 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 // plan proceeded anyway. This must refuse instead, the same way every other
 // mutating tool in this module already refuses via resolveLocalTarget.
 func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{RepoPath: t.TempDir()},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: t.TempDir()},
 		Store:   listToolStore{},
 	}
-	_, _, err := pinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Version: "1.0.175"})
+	_, _, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Version: "1.0.175"})
 	if err == nil {
 		t.Fatal("expected a refusal when neither the server nor the caller names a tenant/environment")
 	}
@@ -112,15 +114,15 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: frsRoot},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: frsRoot},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
 			},
 		},
 	}
-	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Revert: true})
+	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Revert: true})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
@@ -147,14 +149,14 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 			},
 		},
 	}
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
 		Store:   store,
 		ResolveRuntimeRegistryVersions: func(context.Context) (registry.RuntimeRegistryVersions, error) {
 			return registry.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
 		},
 	}
-	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Version: "1.0.228"})
+	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Version: "1.0.228"})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
@@ -173,7 +175,7 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	}
 }
 
-func assertPlanScopedToFrsOnly(t *testing.T, output JobEnvelopeOutput, frsRoot string) {
+func assertPlanScopedToFrsOnly(t *testing.T, output shared.JobEnvelopeOutput, frsRoot string) {
 	t.Helper()
 	if output.Pin == nil {
 		t.Fatal("expected a resolved plan")
