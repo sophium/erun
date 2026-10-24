@@ -7,7 +7,6 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/setup"
@@ -377,7 +376,7 @@ func TenantSelectionUnavailable() bool {
 	return !shared.StdinIsTerminal() && !tenantPromptHasAnswer()
 }
 
-func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
+func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) (setup.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)
@@ -392,17 +391,17 @@ func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) 
 	_, result, err := run(prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
-			return common.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
+			return setup.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return common.TenantSelectionResult{}, nil
+			return setup.TenantSelectionResult{}, nil
 		}
-		return common.TenantSelectionResult{}, err
+		return setup.TenantSelectionResult{}, err
 	}
 
 	if result == initializeCurrentProjectOption {
-		return common.TenantSelectionResult{Initialize: true}, nil
+		return setup.TenantSelectionResult{Initialize: true}, nil
 	}
 
-	return common.TenantSelectionResult{Tenant: result}, nil
+	return setup.TenantSelectionResult{Tenant: result}, nil
 }

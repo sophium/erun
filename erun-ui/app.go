@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -52,7 +51,7 @@ const (
 )
 
 type erunUIStore interface {
-	eruncommon.ListStore
+	lifecycle.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(config.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error

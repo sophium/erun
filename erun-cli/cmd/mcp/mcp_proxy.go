@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
@@ -120,7 +120,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.Ope
 				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),
 				DryRun: call.Preview,
 			}
-			out, err := common.UploadRuntimeInput(toolCtx, req, common.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, common.RunRemoteCommandWithStdin)
+			out, err := inputs.UploadRuntimeInput(toolCtx, req, inputs.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, inputs.RunRemoteCommandWithStdin)
 			if err != nil {
 				return "", err
 			}

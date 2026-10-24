@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // EnvironmentService is one Service in an environment's namespace as the
@@ -17,9 +17,9 @@ import (
 // listing was of exposures, so choosing something to expose meant already
 // knowing its name.
 type EnvironmentService struct {
-	Name  string                           `json:"name"`
-	Type  string                           `json:"type,omitempty"`
-	Ports []eruncommon.ObservedServicePort `json:"ports,omitempty"`
+	Name  string                              `json:"name"`
+	Type  string                              `json:"type,omitempty"`
+	Ports []orchestration.ObservedServicePort `json:"ports,omitempty"`
 	// Exposure is set when an erun-expose Ingress already fronts this Service,
 	// so a caller can offer "open" rather than "expose" for it.
 	Exposure *ServiceExposure `json:"exposure,omitempty"`
@@ -59,8 +59,8 @@ var ErrListEnvironmentServicesForbidden = errors.New("list environment services:
 // Context -- it is the desktop's call, and the desktop has no trace to emit.
 func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) (EnvironmentServiceList, error) {
 	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
-	ctx.TraceCommand("", "kubectl", eruncommon.ObserveGetArgs(req, "service")...)
-	ctx.TraceCommand("", "kubectl", eruncommon.ObserveGetArgs(req, "ingress")...)
+	ctx.TraceCommand("", "kubectl", orchestration.ObserveGetArgs(req, "service")...)
+	ctx.TraceCommand("", "kubectl", orchestration.ObserveGetArgs(req, "ingress")...)
 	ctx.Trace("services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention")
 	if ctx.DryRun {
 		return result, nil
@@ -78,16 +78,16 @@ func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) 
 // get`s, so this is safe to grant to a caller that must never be handed
 // `erun exec raw`.
 func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService, error) {
-	services, err := eruncommon.FetchObservedServices(eruncommon.ObserveGetArgs(req, "service"))
+	services, err := orchestration.FetchObservedServices(orchestration.ObserveGetArgs(req, "service"))
 	if err != nil {
-		if eruncommon.IsForbiddenKubectlError(err) {
+		if orchestration.IsForbiddenKubectlError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
 	}
-	ingresses, err := eruncommon.FetchObservedIngresses(eruncommon.ObserveGetArgs(req, "ingress"))
+	ingresses, err := orchestration.FetchObservedIngresses(orchestration.ObserveGetArgs(req, "ingress"))
 	if err != nil {
-		if eruncommon.IsForbiddenKubectlError(err) {
+		if orchestration.IsForbiddenKubectlError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
@@ -101,7 +101,7 @@ func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService
 // repo-native chart breaks, and re-deriving it here would reproduce that bug
 // in the list. Split out as a pure function so the matching is testable
 // without a cluster.
-func mergeServicesWithExposures(services []eruncommon.ObservedService, ingresses []eruncommon.ObservedIngress) []EnvironmentService {
+func mergeServicesWithExposures(services []orchestration.ObservedService, ingresses []orchestration.ObservedIngress) []EnvironmentService {
 	exposures := exposuresByBackendService(ingresses)
 	out := make([]EnvironmentService, 0, len(services))
 	for _, service := range services {
@@ -114,11 +114,11 @@ func mergeServicesWithExposures(services []eruncommon.ObservedService, ingresses
 	return out
 }
 
-func exposuresByBackendService(ingresses []eruncommon.ObservedIngress) map[string]ServiceExposure {
-	tlsSecretByHost := eruncommon.TlsSecretsByHost(ingresses)
+func exposuresByBackendService(ingresses []orchestration.ObservedIngress) map[string]ServiceExposure {
+	tlsSecretByHost := orchestration.TlsSecretsByHost(ingresses)
 	byService := make(map[string]ServiceExposure, len(ingresses))
 	for _, ing := range ingresses {
-		label, ok := strings.CutPrefix(ing.Name, eruncommon.ExposeIngressNamePrefix)
+		label, ok := strings.CutPrefix(ing.Name, orchestration.ExposeIngressNamePrefix)
 		if !ok || label == "" || len(ing.Hosts) == 0 {
 			continue
 		}

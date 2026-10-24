@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/spf13/cobra"
 )
 
@@ -43,12 +43,12 @@ func TestAISessionHookVerbIsWhatTheInstalledSettingsAddress(t *testing.T) {
 	root := activityCommandTree()
 	// Find takes the args after the root's own name, so the leading "erun" is
 	// the one part of the installed path the tree does not resolve.
-	verb, _, err := root.Find(strings.Fields(common.AISessionHookVerbPath)[1:])
+	verb, _, err := root.Find(strings.Fields(orchestration.AISessionHookVerbPath)[1:])
 	if err != nil {
-		t.Fatalf("resolve %q in the command tree: %v", common.AISessionHookVerbPath, err)
+		t.Fatalf("resolve %q in the command tree: %v", orchestration.AISessionHookVerbPath, err)
 	}
-	if got := verb.CommandPath(); got != common.AISessionHookVerbPath {
-		t.Fatalf("the installed hook command addresses %q, which resolves to %q", common.AISessionHookVerbPath, got)
+	if got := verb.CommandPath(); got != orchestration.AISessionHookVerbPath {
+		t.Fatalf("the installed hook command addresses %q, which resolves to %q", orchestration.AISessionHookVerbPath, got)
 	}
 	for _, flag := range []string{"event", "tool", "tenant", "environment"} {
 		if verb.Flags().Lookup(flag) == nil {
@@ -81,7 +81,7 @@ func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 		model.AISessionEventExit:      model.AISessionStateExited,
 	}
 
-	for i, binding := range common.AISessionHookBindings() {
+	for i, binding := range orchestration.AISessionHookBindings() {
 		sessionID := fmt.Sprintf("0d5b1e0a-6f2b-4a0e-9a1f-2b1f8d3c4e%02d", i)
 		t.Run(binding.ToolEvent, func(t *testing.T) {
 			err := runAISessionHook(t, sessionID, binding.ModelEvent)

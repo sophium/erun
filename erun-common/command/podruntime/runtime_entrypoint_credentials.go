@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
 )
@@ -114,7 +114,7 @@ func describeRuntimePlatformAlias(boot runtimeBoot) string {
 	if _, err := os.Stat(boot.platformAliasEntryPath()); err != nil {
 		return ""
 	}
-	return "add the platform alias in " + boot.platformAliasDir + " to " + eruncommon.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
+	return "add the platform alias in " + boot.platformAliasDir + " to " + orchestration.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
 }
 
 // syncRuntimePlatformAlias seeds the pod's own erun cloud config from the Secret
@@ -130,20 +130,20 @@ func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSuperv
 		return err
 	}
 	configHome := boot.configHome()
-	root, _, err := eruncommon.LoadRuntimeRootConfigForSync(configHome)
+	root, _, err := orchestration.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = config.ERunConfig{}
 	}
 	changed := false
 	for _, provider := range providers {
-		if _, found := eruncommon.FindCloudProvider(root.CloudProviders, provider.Alias); found {
+		if _, found := orchestration.FindCloudProvider(root.CloudProviders, provider.Alias); found {
 			continue
 		}
 		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
 		changed = true
 	}
 	if changed {
-		if err := writeRuntimeBootYAML(eruncommon.RuntimeRootConfigPath(configHome), root); err != nil {
+		if err := writeRuntimeBootYAML(orchestration.RuntimeRootConfigPath(configHome), root); err != nil {
 			return err
 		}
 	}

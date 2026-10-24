@@ -3,7 +3,7 @@ package expose
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // TestParseObservedServicesSortsAndKeepsPorts pins what the picker reads: a
@@ -11,11 +11,11 @@ import (
 // port, since a multi-port Service is exactly the case where the caller has to
 // choose one.
 func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
-	var list eruncommon.ServiceList
-	list.Items = append(list.Items, eruncommon.ServiceItem{})
+	var list orchestration.ServiceList
+	list.Items = append(list.Items, orchestration.ServiceItem{})
 	list.Items[0].Metadata.Name = "web"
 	list.Items[0].Spec.Type = "ClusterIP"
-	list.Items = append(list.Items, eruncommon.ServiceItem{})
+	list.Items = append(list.Items, orchestration.ServiceItem{})
 	list.Items[1].Metadata.Name = "api"
 	list.Items[1].Spec.Type = "ClusterIP"
 	list.Items[1].Spec.Ports = append(list.Items[1].Spec.Ports, struct {
@@ -28,7 +28,7 @@ func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 		Protocol string `json:"protocol"`
 	}{Name: "metrics", Port: 9090, Protocol: "TCP"})
 
-	services := eruncommon.ParseObservedServices(list)
+	services := orchestration.ParseObservedServices(list)
 	if len(services) != 2 || services[0].Name != "api" || services[1].Name != "web" {
 		t.Fatalf("services = %+v, want api before web", services)
 	}
@@ -42,16 +42,16 @@ func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 // the chart is the repo's own, and matching on the label would leave a service
 // that IS exposed looking unexposed (and offer to expose it again).
 func TestMergeServicesWithExposuresMatchesOnTheIngressBackend(t *testing.T) {
-	services := []eruncommon.ObservedService{
-		{Name: "validation-agent-backend-api", Ports: []eruncommon.ObservedServicePort{{Port: 8000}}},
-		{Name: "frs-api", Ports: []eruncommon.ObservedServicePort{{Port: 80}}},
+	services := []orchestration.ObservedService{
+		{Name: "validation-agent-backend-api", Ports: []orchestration.ObservedServicePort{{Port: 8000}}},
+		{Name: "frs-api", Ports: []orchestration.ObservedServicePort{{Port: 80}}},
 	}
-	ingresses := []eruncommon.ObservedIngress{
+	ingresses := []orchestration.ObservedIngress{
 		{
 			Name:     "expose-validator",
 			Hosts:    []string{"validator.frs-dev.services.example.com"},
-			TLS:      []eruncommon.ObservedIngressTLS{{Hosts: []string{"validator.frs-dev.services.example.com"}, SecretName: "frs-dev-wildcard-tls"}},
-			Backends: []eruncommon.ObservedIngressBackend{{Service: "validation-agent-backend-api", Port: 8000}},
+			TLS:      []orchestration.ObservedIngressTLS{{Hosts: []string{"validator.frs-dev.services.example.com"}, SecretName: "frs-dev-wildcard-tls"}},
+			Backends: []orchestration.ObservedIngressBackend{{Service: "validation-agent-backend-api", Port: 8000}},
 		},
 		// A non-expose Ingress the repo's own chart rendered must not be read as
 		// an erun exposure.
@@ -77,11 +77,11 @@ func TestMergeServicesWithExposuresMatchesOnTheIngressBackend(t *testing.T) {
 // never as the scheme someone asked for.
 func TestMergeServicesWithExposuresReportsHTTPWithoutTLS(t *testing.T) {
 	merged := mergeServicesWithExposures(
-		[]eruncommon.ObservedService{{Name: "frs-api"}},
-		[]eruncommon.ObservedIngress{{
+		[]orchestration.ObservedService{{Name: "frs-api"}},
+		[]orchestration.ObservedIngress{{
 			Name:     "expose-api",
 			Hosts:    []string{"api.frs-dev.services.example.com"},
-			Backends: []eruncommon.ObservedIngressBackend{{Service: "frs-api", Port: 80}},
+			Backends: []orchestration.ObservedIngressBackend{{Service: "frs-api", Port: 80}},
 		}},
 	)
 	if merged[0].Exposure == nil || merged[0].Exposure.Scheme != "http" {

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -248,7 +247,7 @@ func RunReviewUnresolve(ctx core.Context, store config.CloudReadStore, alias, re
 // they are standing in, so a tenant serving more than one repository can tell
 // whose review this is.
 func RunReviewCreate(ctx core.Context, store config.CloudReadStore, alias string, params platformclient.PlatformCreateReviewParams, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
-	repository, err := eruncommon.ResolveReviewRepository(ctx, params.Repository, "review create")
+	repository, err := ResolveReviewRepository(ctx, params.Repository, "review create")
 	if err != nil {
 		return platformclient.PlatformReview{}, err
 	}
@@ -544,7 +543,7 @@ func resolveMergeQueueRepository(ctx core.Context, params platformclient.Platfor
 	remote := strings.TrimSpace(params.Repository)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
-		origin, err := eruncommon.OriginRemoteURL()
+		origin, err := OriginRemoteURL()
 		if err != nil {
 			// Not fatal here, unlike opening a review: the platform still
 			// answers, and refuses a promotion the repository cannot be

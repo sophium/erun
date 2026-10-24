@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func TestHostOpenCommandPerOS(t *testing.T) {
@@ -128,7 +128,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, eruncommon.DefaultRuntimeOutputsDir+"/erun-app.exe")
+	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, orchestration.DefaultRuntimeOutputsDir+"/erun-app.exe")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "artifact" {
 		t.Fatalf("expected kind artifact, got %+v", resolution)

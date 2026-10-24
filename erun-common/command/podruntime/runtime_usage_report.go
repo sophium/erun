@@ -1,8 +1,8 @@
 package podruntime
 
 import (
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -38,7 +38,7 @@ type RuntimeUsageReport struct {
 // not fail over its own bookkeeping.
 func ResolveRuntimeUsageReport(tenant string, env config.EnvConfig, usage config.RuntimeUsage) RuntimeUsageReport {
 	report := RuntimeUsageReport{RuntimeUsage: usage}
-	history, err := eruncommon.LoadRuntimeUsageHistory(tenant, env.Name)
+	history, err := orchestration.LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return report
 	}

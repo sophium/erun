@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -42,7 +42,7 @@ type BootstrapStore interface {
 
 type (
 	WorkDirFunc            func() (string, error)
-	SelectTenantFunc       func([]configpkg.TenantConfig) (eruncommon.TenantSelectionResult, error)
+	SelectTenantFunc       func([]configpkg.TenantConfig) (TenantSelectionResult, error)
 	PromptValueFunc        func(string) (string, error)
 	ProjectConfigSaverFunc func(string, configpkg.ProjectConfig) error
 	RemoteRuntimeWaitFunc  func(configpkg.ShellLaunchParams) error
@@ -132,7 +132,7 @@ type BootstrapInitDependencies struct {
 }
 
 // HostedRegistryProbeFunc reports the hosted registry's current availability.
-type HostedRegistryProbeFunc func(context.Context) eruncommon.HostedRegistryStatus
+type HostedRegistryProbeFunc func(context.Context) orchestration.HostedRegistryStatus
 
 type BootstrapRunner struct {
 	BootstrapInitDependencies
@@ -1230,7 +1230,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 	if s.params.Bootstrap {
 		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + configpkg.DevopsComponentName + " chart")
 	}
-	return s.runner.writeRemoteInitMarker(req, eruncommon.RemoteInitMarker{
+	return s.runner.writeRemoteInitMarker(req, orchestration.RemoteInitMarker{
 		Tenant:             s.tenant,
 		Environment:        s.envName,
 		ProjectRoot:        projectRoot,
@@ -1645,12 +1645,12 @@ func tenantNameList(tenants []configpkg.TenantConfig) []string {
 	return names
 }
 
-func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants []configpkg.TenantConfig) (eruncommon.TenantSelectionResult, error) {
+func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants []configpkg.TenantConfig) (TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
-		return eruncommon.TenantSelectionResult{Initialize: true}, nil
+		return TenantSelectionResult{Initialize: true}, nil
 	}
 	if params.SelectedTenant != "" {
-		return eruncommon.TenantSelectionResult{Tenant: params.SelectedTenant}, nil
+		return TenantSelectionResult{Tenant: params.SelectedTenant}, nil
 	}
 	if s.SelectTenant == nil {
 		options := make([]string, 0, len(tenants)+1)
@@ -1658,7 +1658,7 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 			options = append(options, tenant.Name)
 		}
 		options = append(options, configpkg.InitializeCurrentProject)
-		return eruncommon.TenantSelectionResult{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
+		return TenantSelectionResult{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
 			Type:    BootstrapInitInteractionSelectTenant,
 			Label:   "Select tenant",
 			Options: options,
@@ -1669,19 +1669,19 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 		// and read EOF. A sole tenant is the option an empty line already
 		// takes, so it needs no answer; a real choice does.
 		if len(tenants) == 1 {
-			return eruncommon.TenantSelectionResult{Tenant: tenants[0].Name}, nil
+			return TenantSelectionResult{Tenant: tenants[0].Name}, nil
 		}
-		return eruncommon.TenantSelectionResult{}, TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
+		return TenantSelectionResult{}, TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
 	}
 	selection, err := s.SelectTenant(tenants)
 	if err != nil {
-		return eruncommon.TenantSelectionResult{}, err
+		return TenantSelectionResult{}, err
 	}
 	if selection.Initialize {
 		return selection, nil
 	}
 	if selection.Tenant == "" {
-		return eruncommon.TenantSelectionResult{}, ErrTenantSelectionCancelled
+		return TenantSelectionResult{}, ErrTenantSelectionCancelled
 	}
 	return selection, nil
 }
@@ -1749,12 +1749,19 @@ type projectContext struct {
 
 // probeHostedRegistry runs the availability probe the hosted-registry choice is
 // gated on, defaulting to the real one when no dependency was injected.
-func (s BootstrapRunner) probeHostedRegistry() eruncommon.HostedRegistryStatus {
+func (s BootstrapRunner) probeHostedRegistry() orchestration.HostedRegistryStatus {
 	probe := s.ProbeHostedRegistry
 	if probe == nil {
-		probe = func(ctx context.Context) eruncommon.HostedRegistryStatus {
-			return eruncommon.ProbeHostedRegistry(ctx, nil)
+		probe = func(ctx context.Context) orchestration.HostedRegistryStatus {
+			return orchestration.ProbeHostedRegistry(ctx, nil)
 		}
 	}
 	return probe(context.Background())
 }
+
+type (
+	TenantSelectionResult struct {
+		Tenant     string
+		Initialize bool
+	}
+)

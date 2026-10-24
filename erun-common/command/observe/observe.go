@@ -3,9 +3,9 @@ package observe
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // ObserveParams configures which named Secrets to check for key presence.
@@ -26,21 +26,21 @@ type ObserveSecretCheck struct {
 // snapshot an orchestrator can act on without composing kubectl or helm by
 // hand.
 type ObserveResult struct {
-	Tenant         string                       `json:"tenant"`
-	Environment    string                       `json:"environment"`
-	Namespace      string                       `json:"namespace"`
-	Pods           []ObservedPod                `json:"pods"`
-	ResourceQuotas []ObservedResourceQuota      `json:"resourceQuotas"`
-	LimitRanges    []ObservedLimitRange         `json:"limitRanges"`
-	Ingresses      []eruncommon.ObservedIngress `json:"ingresses"`
+	Tenant         string                          `json:"tenant"`
+	Environment    string                          `json:"environment"`
+	Namespace      string                          `json:"namespace"`
+	Pods           []ObservedPod                   `json:"pods"`
+	ResourceQuotas []ObservedResourceQuota         `json:"resourceQuotas"`
+	LimitRanges    []ObservedLimitRange            `json:"limitRanges"`
+	Ingresses      []orchestration.ObservedIngress `json:"ingresses"`
 	// Services is what the namespace actually runs, which is the list a
 	// developer picks from when choosing something to expose.
-	Services     []eruncommon.ObservedService     `json:"services"`
-	Certificates []eruncommon.ObservedCertificate `json:"certificates"`
-	Secrets      []ObservedSecretCheck            `json:"secrets,omitempty"`
+	Services     []orchestration.ObservedService     `json:"services"`
+	Certificates []orchestration.ObservedCertificate `json:"certificates"`
+	Secrets      []ObservedSecretCheck               `json:"secrets,omitempty"`
 	// HelmRelease is the runtime release's own record of what should be
 	// running. Nil in dry-run, where nothing was read yet.
-	HelmRelease *eruncommon.ObservedHelmRelease `json:"helmRelease,omitempty"`
+	HelmRelease *orchestration.ObservedHelmRelease `json:"helmRelease,omitempty"`
 	// Drift names every disagreement found between the live release, the
 	// running pods, and what the env config records — the pre-deploy
 	// live-vs-plan diff an orchestrator must do before any env-shaping
@@ -65,15 +65,15 @@ type ObserveResult struct {
 func RunObservation(ctx core.Context, req config.ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
 	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
-	podArgs := eruncommon.ObserveGetArgs(req, "pods")
-	quotaArgs := eruncommon.ObserveGetArgs(req, "resourcequota")
-	limitArgs := eruncommon.ObserveGetArgs(req, "limitrange")
-	ingressArgs := eruncommon.ObserveGetArgs(req, "ingress")
-	serviceArgs := eruncommon.ObserveGetArgs(req, "service")
-	certArgs := eruncommon.ObserveGetArgs(req, "certificates.cert-manager.io")
+	podArgs := orchestration.ObserveGetArgs(req, "pods")
+	quotaArgs := orchestration.ObserveGetArgs(req, "resourcequota")
+	limitArgs := orchestration.ObserveGetArgs(req, "limitrange")
+	ingressArgs := orchestration.ObserveGetArgs(req, "ingress")
+	serviceArgs := orchestration.ObserveGetArgs(req, "service")
+	certArgs := orchestration.ObserveGetArgs(req, "certificates.cert-manager.io")
 	releaseName := config.RuntimeReleaseName(req.Tenant)
-	helmArgs := eruncommon.ObserveHelmStatusArgs(req)
-	helmListArgs := eruncommon.ObserveHelmListArgs(req, releaseName)
+	helmArgs := orchestration.ObserveHelmStatusArgs(req)
+	helmListArgs := orchestration.ObserveHelmListArgs(req, releaseName)
 
 	ctx.TraceCommand("", "kubectl", podArgs...)
 	ctx.TraceCommand("", "kubectl", quotaArgs...)
@@ -87,7 +87,7 @@ func RunObservation(ctx core.Context, req config.ShellLaunchParams, params Obser
 
 	secretArgs := make([][]string, len(params.Secrets))
 	for i, check := range params.Secrets {
-		secretArgs[i] = eruncommon.ObserveGetArgs(req, "secret", check.Name)
+		secretArgs[i] = orchestration.ObserveGetArgs(req, "secret", check.Name)
 		ctx.TraceCommand("", "kubectl", secretArgs[i]...)
 	}
 
@@ -109,20 +109,20 @@ func RunObservation(ctx core.Context, req config.ShellLaunchParams, params Obser
 	// two fetchers are shared with the services listing and expose's own reads,
 	// so neither can carry "observe:" as its own prefix. The message is
 	// unchanged -- "observe: " then "get ingress: ...", exactly as before.
-	if result.Ingresses, err = eruncommon.FetchObservedIngresses(ingressArgs); err != nil {
+	if result.Ingresses, err = orchestration.FetchObservedIngresses(ingressArgs); err != nil {
 		return ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
-	if result.Services, err = eruncommon.FetchObservedServices(serviceArgs); err != nil {
+	if result.Services, err = orchestration.FetchObservedServices(serviceArgs); err != nil {
 		return ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
-	if result.Certificates, err = eruncommon.FetchObservedCertificates(ctx, req, certArgs); err != nil {
+	if result.Certificates, err = orchestration.FetchObservedCertificates(ctx, req, certArgs); err != nil {
 		return ObserveResult{}, err
 	}
 	for i, check := range params.Secrets {
 		result.Secrets = append(result.Secrets, fetchObservedSecretCheck(secretArgs[i], check))
 	}
 
-	result.HelmRelease = eruncommon.FetchObservedHelmRelease(helmArgs, helmListArgs, releaseName, req.Namespace)
+	result.HelmRelease = orchestration.FetchObservedHelmRelease(helmArgs, helmListArgs, releaseName, req.Namespace)
 	result.Drift = computeObserveDrift(req, result.HelmRelease, result.Pods)
 
 	return result, nil

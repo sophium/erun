@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -39,7 +39,7 @@ func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFi
 				return fmt.Errorf("publish requires a version: pass --version <version> produced by `erun build`/`erun push`")
 			}
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
+			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
 			defer closeEnvTrace()
 			return orchestration.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},

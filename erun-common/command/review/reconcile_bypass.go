@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // reconcile_bypass.go implements the read half of the recorded decision on
@@ -190,7 +191,7 @@ func resolveGitHubRepoFromRemoteOrOrigin(ctx core.Context, remoteURL, traceLabel
 	remote := strings.TrimSpace(remoteURL)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no --remote-url given; reading origin from the current checkout")
-		remote, err = eruncommon.OriginRemoteURL()
+		remote, err = OriginRemoteURL()
 		if err != nil {
 			ctx.Trace(traceLabel + ": remote-url resolution failed: " + err.Error())
 			return "", "", err
@@ -669,4 +670,18 @@ func (index *releaseTagIndex) tagPointingAt(commits []string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func OriginRemoteURL() (string, error) {
+	stdout := new(strings.Builder)
+	stderr := new(strings.Builder)
+	if err := gitx.GitCommandRunner("", AsWriter(stdout), AsWriter(stderr), "remote", "get-url", "origin"); err != nil {
+		return "", fmt.Errorf("remote-url is required: no --remote-url given and reading origin failed: %w%s",
+			err, orchestration.FormatGitCommandStderr(stderr.String()))
+	}
+	remote := strings.TrimSpace(stdout.String())
+	if remote == "" {
+		return "", fmt.Errorf("remote-url is required: the current checkout has no origin remote")
+	}
+	return remote, nil
 }

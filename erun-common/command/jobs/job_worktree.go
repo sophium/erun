@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -296,7 +296,7 @@ func gitOperationInProgress(gitDir string) bool {
 // or single-branch fetch), which is a real layout this repository's own lanes
 // use.
 func environmentJobWorktreeIsProtectedBranch(ctx core.Context, dir, branch string) bool {
-	if def, ok := eruncommon.GitRemoteDefaultBranch(ctx, dir, "origin"); ok {
+	if def, ok := orchestration.GitRemoteDefaultBranch(ctx, dir, "origin"); ok {
 		return branch == def
 	}
 	switch branch {

@@ -9,10 +9,10 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -125,7 +125,7 @@ func runDoctorCommand(ctx core.Context, resolveOpen func(sharedpkg.OpenParams) (
 	if err != nil {
 		return err
 	}
-	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 
 	// The desktop pipes `erun doctor` into its shared Local shell, which never

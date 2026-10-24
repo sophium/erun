@@ -120,3 +120,19 @@ func TestPlainBuildRefusesAPackageWithNothingToRun(t *testing.T) {
 		t.Fatalf("expected the package without a test or build stage to be refused, got %v", err)
 	}
 }
+
+func fakeDockerRecorder(t *testing.T, exitCode string) string {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	stub := writeExecutableScript(t, strings.Join([]string{
+		`echo "$*" >> '` + logPath + `'`,
+		`for arg in "$@"; do`,
+		`  case "$arg" in`,
+		`    type=local,dest=*) dest="${arg#type=local,dest=}"; mkdir -p "$dest/usr/share"; : > "$dest/pkg_$(basename "$dest").deb"; : > "$dest/usr/share/cached.deb" ;;`,
+		`  esac`,
+		`done`,
+		`exit ` + exitCode,
+	}, "\n"))
+	t.Setenv("ERUN_DOCKER_BIN", stub)
+	return logPath
+}

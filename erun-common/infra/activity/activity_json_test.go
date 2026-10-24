@@ -31,7 +31,7 @@ func TestIdleJSONOmitsTimestampsThatWereNeverSet(t *testing.T) {
 	seen := time.Date(2026, 9, 22, 10, 30, 0, 0, time.UTC)
 	status := EnvironmentIdleStatus{
 		Policy:   config.EnvironmentIdlePolicy{Timeout: time.Hour},
-		Markers:  []EnvironmentIdleMarker{NeverTouchedIdleMarker("ssh")},
+		Markers:  []EnvironmentIdleMarker{neverTouchedIdleMarker("ssh")},
 		Activity: map[string]EnvironmentActivitySnapshot{"ssh": {}},
 	}
 
@@ -88,10 +88,10 @@ func TestAISessionJSONFollowsTheSameNeverSetRule(t *testing.T) {
 	}
 }
 
-// NeverTouchedIdleMarker builds the marker `erun idle` reports for an activity
+// neverTouchedIdleMarker builds the marker `erun idle` reports for an activity
 // kind that has never been recorded: every timestamp behind it is the zero
 // time, which is exactly the state the zero-instant leak made unreadable.
-func NeverTouchedIdleMarker(name string) EnvironmentIdleMarker {
+func neverTouchedIdleMarker(name string) EnvironmentIdleMarker {
 	return EnvironmentIdleMarker{
 		Name:         name,
 		Idle:         true,

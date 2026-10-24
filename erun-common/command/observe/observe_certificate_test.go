@@ -3,33 +3,33 @@ package observe
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
-func readyCertificate(name string) eruncommon.CertificateItem {
-	item := eruncommon.CertificateItem{}
+func readyCertificate(name string) orchestration.CertificateItem {
+	item := orchestration.CertificateItem{}
 	item.Metadata.Name = name
-	item.Status.Conditions = []eruncommon.CertManagerCondition{{Type: "Ready", Status: "True"}}
+	item.Status.Conditions = []orchestration.CertManagerCondition{{Type: "Ready", Status: "True"}}
 	return item
 }
 
-func notReadyCertificate(name, reason, message string) eruncommon.CertificateItem {
-	item := eruncommon.CertificateItem{}
+func notReadyCertificate(name, reason, message string) orchestration.CertificateItem {
+	item := orchestration.CertificateItem{}
 	item.Metadata.Name = name
-	item.Status.Conditions = []eruncommon.CertManagerCondition{{Type: "Ready", Status: "False", Reason: reason, Message: message}}
+	item.Status.Conditions = []orchestration.CertManagerCondition{{Type: "Ready", Status: "False", Reason: reason, Message: message}}
 	return item
 }
 
-func certificateRequestFor(name, certificateName, createdAt string) eruncommon.OwnedResourceItem {
-	item := eruncommon.OwnedResourceItem{}
+func certificateRequestFor(name, certificateName, createdAt string) orchestration.OwnedResourceItem {
+	item := orchestration.OwnedResourceItem{}
 	item.Metadata.Name = name
 	item.Metadata.CreationTimestamp = createdAt
 	item.Metadata.Labels = map[string]string{"cert-manager.io/certificate-name": certificateName}
 	return item
 }
 
-func orderOwnedBy(name, certificateRequestName, state, reason string) eruncommon.OwnedResourceItem {
-	item := eruncommon.OwnedResourceItem{}
+func orderOwnedBy(name, certificateRequestName, state, reason string) orchestration.OwnedResourceItem {
+	item := orchestration.OwnedResourceItem{}
 	item.Metadata.Name = name
 	item.Metadata.OwnerReferences = []struct {
 		Kind string `json:"kind"`
@@ -40,8 +40,8 @@ func orderOwnedBy(name, certificateRequestName, state, reason string) eruncommon
 	return item
 }
 
-func challengeOwnedBy(name, orderName, challengeType, dnsName, state, reason string) eruncommon.OwnedResourceItem {
-	item := eruncommon.OwnedResourceItem{}
+func challengeOwnedBy(name, orderName, challengeType, dnsName, state, reason string) orchestration.OwnedResourceItem {
+	item := orchestration.OwnedResourceItem{}
 	item.Metadata.Name = name
 	item.Metadata.OwnerReferences = []struct {
 		Kind string `json:"kind"`
@@ -59,15 +59,15 @@ func challengeOwnedBy(name, orderName, challengeType, dnsName, state, reason str
 // RBAC denial reports that denial directly, without the caller composing the
 // Certificate -> CertificateRequest -> Order -> Challenge walk itself.
 func TestBuildObservedCertificatesWalksToChallengeReason(t *testing.T) {
-	certs := []eruncommon.CertificateItem{notReadyCertificate("wildcard", "Issuing", "Issuing certificate as Secret does not exist")}
-	requests := []eruncommon.OwnedResourceItem{certificateRequestFor("wildcard-abc123", "wildcard", "2024-01-01T00:00:00Z")}
-	orders := []eruncommon.OwnedResourceItem{orderOwnedBy("wildcard-order-1", "wildcard-abc123", "pending", "")}
-	challenges := []eruncommon.OwnedResourceItem{
+	certs := []orchestration.CertificateItem{notReadyCertificate("wildcard", "Issuing", "Issuing certificate as Secret does not exist")}
+	requests := []orchestration.OwnedResourceItem{certificateRequestFor("wildcard-abc123", "wildcard", "2024-01-01T00:00:00Z")}
+	orders := []orchestration.OwnedResourceItem{orderOwnedBy("wildcard-order-1", "wildcard-abc123", "pending", "")}
+	challenges := []orchestration.OwnedResourceItem{
 		challengeOwnedBy("wildcard-challenge-1", "wildcard-order-1", "DNS-01", "example.services.test",
 			"invalid", `unable to create webhook solver: RBAC denied: solvers.acme.cert-manager.io is forbidden: User "system:serviceaccount:default:cert-manager" cannot create resource "challenges" in API group "acme.cert-manager.io"`),
 	}
 
-	observed := eruncommon.BuildObservedCertificates(certs, requests, orders, challenges)
+	observed := orchestration.BuildObservedCertificates(certs, requests, orders, challenges)
 
 	if len(observed) != 1 {
 		t.Fatalf("expected 1 observed certificate, got %d", len(observed))
@@ -93,13 +93,13 @@ func TestBuildObservedCertificatesWalksToChallengeReason(t *testing.T) {
 }
 
 func TestBuildObservedCertificatesReadyCertificateSkipsWalk(t *testing.T) {
-	certs := []eruncommon.CertificateItem{readyCertificate("wildcard")}
+	certs := []orchestration.CertificateItem{readyCertificate("wildcard")}
 	// A ready certificate must never walk the chain, even when stale
 	// CertificateRequest/Order/Challenge objects for it still exist.
-	requests := []eruncommon.OwnedResourceItem{certificateRequestFor("wildcard-old", "wildcard", "2024-01-01T00:00:00Z")}
-	orders := []eruncommon.OwnedResourceItem{orderOwnedBy("wildcard-order-old", "wildcard-old", "valid", "")}
+	requests := []orchestration.OwnedResourceItem{certificateRequestFor("wildcard-old", "wildcard", "2024-01-01T00:00:00Z")}
+	orders := []orchestration.OwnedResourceItem{orderOwnedBy("wildcard-order-old", "wildcard-old", "valid", "")}
 
-	observed := eruncommon.BuildObservedCertificates(certs, requests, orders, nil)
+	observed := orchestration.BuildObservedCertificates(certs, requests, orders, nil)
 
 	if len(observed) != 1 {
 		t.Fatalf("expected 1 observed certificate, got %d", len(observed))
@@ -116,13 +116,13 @@ func TestBuildObservedCertificatesReadyCertificateSkipsWalk(t *testing.T) {
 // has been reissued: multiple CertificateRequests carry its label, and only
 // the latest one's Order/Challenge chain is the live one worth walking.
 func TestLatestCertificateRequestNamePicksMostRecent(t *testing.T) {
-	requests := []eruncommon.OwnedResourceItem{
+	requests := []orchestration.OwnedResourceItem{
 		certificateRequestFor("wildcard-old", "wildcard", "2024-01-01T00:00:00Z"),
 		certificateRequestFor("wildcard-new", "wildcard", "2024-06-01T00:00:00Z"),
 		certificateRequestFor("other-cert-request", "other", "2025-01-01T00:00:00Z"),
 	}
 
-	name, ok := eruncommon.LatestCertificateRequestName(requests, "wildcard")
+	name, ok := orchestration.LatestCertificateRequestName(requests, "wildcard")
 	if !ok {
 		t.Fatalf("expected a certificate request to be found")
 	}
@@ -132,9 +132,9 @@ func TestLatestCertificateRequestNamePicksMostRecent(t *testing.T) {
 }
 
 func TestBuildObservedCertificatesNoMatchingRequestReportsNoOrders(t *testing.T) {
-	certs := []eruncommon.CertificateItem{notReadyCertificate("wildcard", "DoesNotExist", "")}
+	certs := []orchestration.CertificateItem{notReadyCertificate("wildcard", "DoesNotExist", "")}
 
-	observed := eruncommon.BuildObservedCertificates(certs, nil, nil, nil)
+	observed := orchestration.BuildObservedCertificates(certs, nil, nil, nil)
 
 	if len(observed) != 1 {
 		t.Fatalf("expected 1 observed certificate, got %d", len(observed))

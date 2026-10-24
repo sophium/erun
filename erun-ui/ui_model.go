@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -43,13 +43,13 @@ type uiEnvironment struct {
 	// eruncommon.ListEnvironmentResult's own fields of the same name -- see
 	// erun-common/runtime_version_line.go and erun-common/list.go. The
 	// environment hover card is the only consumer today.
-	RuntimeVersionLine       *deploy.RuntimeVersionLine                 `json:"runtimeVersionLine,omitempty"`
-	ErunVersion              *deploy.ErunVersion                        `json:"erunVersion,omitempty"`
-	RuntimeImageLineMismatch *eruncommon.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
-	KubernetesContext        string                                     `json:"kubernetesContext,omitempty"`
-	IsActive                 bool                                       `json:"isActive,omitempty"`
-	SSHDEnabled              bool                                       `json:"sshdEnabled,omitempty"`
-	AutoStart                *bool                                      `json:"autoStart,omitempty"`
+	RuntimeVersionLine       *deploy.RuntimeVersionLine                `json:"runtimeVersionLine,omitempty"`
+	ErunVersion              *deploy.ErunVersion                       `json:"erunVersion,omitempty"`
+	RuntimeImageLineMismatch *lifecycle.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	KubernetesContext        string                                    `json:"kubernetesContext,omitempty"`
+	IsActive                 bool                                      `json:"isActive,omitempty"`
+	SSHDEnabled              bool                                      `json:"sshdEnabled,omitempty"`
+	AutoStart                *bool                                     `json:"autoStart,omitempty"`
 	// Activity is the environment-activity poller's last observation for this
 	// env, if any. The poller only emits a Wails event on a transition, so a
 	// Redux store that resets without the Go process restarting (e.g. the

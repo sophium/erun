@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func relayTestSettings(t *testing.T, env map[string]string, existing string) (map[string]any, string) {
@@ -143,12 +143,12 @@ func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 		t.Fatalf("unexpected permission settings: %v", settings)
 	}
 	hooks := settings["hooks"].(map[string]any)
-	for _, binding := range eruncommon.AISessionHookBindings() {
+	for _, binding := range orchestration.AISessionHookBindings() {
 		ours := runtimeAISessionHookCommands(hooks[binding.ToolEvent].([]any))
 		if len(ours) != 1 {
 			t.Fatalf("%s should carry exactly one AI-session report, got %d", binding.ToolEvent, len(ours))
 		}
-		if !strings.Contains(ours[0], eruncommon.AISessionHookVerbPath+" --event "+string(binding.ModelEvent)+" --tool claude") {
+		if !strings.Contains(ours[0], orchestration.AISessionHookVerbPath+" --event "+string(binding.ModelEvent)+" --tool claude") {
 			t.Fatalf("%s should report %s, got %q", binding.ToolEvent, binding.ModelEvent, ours[0])
 		}
 	}

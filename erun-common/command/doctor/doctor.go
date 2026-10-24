@@ -3,10 +3,10 @@ package doctor
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 type (
@@ -67,7 +67,7 @@ func DoctorActionDescription(action DoctorAction) string {
 // came from; an environment with no daemon holding build images refuses with
 // DoctorDockerDaemonUnavailableError rather than reading whatever daemon
 // happens to be reachable.
-func RunDoctorInspection(ctx core.Context, runner eruncommon.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
+func RunDoctorInspection(ctx core.Context, runner orchestration.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -84,7 +84,7 @@ func RunDoctorInspection(ctx core.Context, runner eruncommon.RuntimeContainerCom
 // the daemon beside the output so the caller can name it, and the store
 // readings taken around the prune so a prune that freed nothing can be reported
 // as that instead of as a success.
-func RunDoctorAction(ctx core.Context, runner eruncommon.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+func RunDoctorAction(ctx core.Context, runner orchestration.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}

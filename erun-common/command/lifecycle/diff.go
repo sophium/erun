@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 type DiffResult struct {
@@ -112,7 +112,7 @@ func NormalizeDiffTarget(target string) string {
 func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	switch NormalizeDiffTarget(target) {
 	case DiffTargetERun:
-		return eruncommon.ContributeClonePath(homeDir)
+		return orchestration.ContributeClonePath(homeDir)
 	default:
 		return strings.TrimSpace(envRoot), nil
 	}
@@ -140,7 +140,7 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffR
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, currentScopeGitDiffArgs(gitDiffHeadFound(projectRoot, runGit))...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, orchestration.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
 		return DiffResult{}, err
@@ -185,7 +185,7 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit g
 	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit, gitDiffHeadFound(projectRoot, runGit))
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, diffArgs...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, orchestration.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
 		return DiffResult{}, err
@@ -346,7 +346,7 @@ func gitOutput(projectRoot string, runGit gitx.GitCommandRunnerFunc, args ...str
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, args...); err != nil {
-		return "", fmt.Errorf("%w%s", err, eruncommon.FormatGitCommandStderr(stderr.String()))
+		return "", fmt.Errorf("%w%s", err, orchestration.FormatGitCommandStderr(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
@@ -378,7 +378,7 @@ func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit gi
 	untrackedOutput := new(bytes.Buffer)
 	untrackedStderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, untrackedOutput, untrackedStderr, "ls-files", "--others", "--exclude-standard", "-z"); err != nil {
-		return fmt.Errorf("git ls-files: %w%s", err, eruncommon.FormatGitCommandStderr(untrackedStderr.String()))
+		return fmt.Errorf("git ls-files: %w%s", err, orchestration.FormatGitCommandStderr(untrackedStderr.String()))
 	}
 	for _, file := range splitNULTerminated(untrackedOutput.String()) {
 		file = strings.TrimSpace(file)
@@ -389,7 +389,7 @@ func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit gi
 		fileStderr := new(bytes.Buffer)
 		err := runGit(projectRoot, fileDiff, fileStderr, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file)
 		if err != nil && fileDiff.Len() == 0 {
-			return fmt.Errorf("git diff untracked %s: %w%s", file, err, eruncommon.FormatGitCommandStderr(fileStderr.String()))
+			return fmt.Errorf("git diff untracked %s: %w%s", file, err, orchestration.FormatGitCommandStderr(fileStderr.String()))
 		}
 		appendRawDiff(rawDiff, fileDiff.String())
 	}

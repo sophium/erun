@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // The runtime pod relays the routing values the chart injects into Claude Code's
@@ -103,7 +103,7 @@ func relayRuntimeClaudeSettings(env func(string) string, settingsPath string) er
 
 func newClaudeSettingsRelay(env func(string) string, settings map[string]any, recordPath string) *claudeSettingsRelay {
 	relay := &claudeSettingsRelay{env: env, settings: settings, ownedEnv: map[string]bool{}, relayedNow: claudeRelayRecord{Env: []string{}}}
-	relay.region = eruncommon.FirstNonEmptyString(relay.get("AWS_REGION"), relay.get("ERUN_CLOUD_REGION"))
+	relay.region = orchestration.FirstNonEmptyString(relay.get("AWS_REGION"), relay.get("ERUN_CLOUD_REGION"))
 	provider := relay.get("ERUN_CLOUD_PROVIDER")
 	if provider == "" && strings.HasSuffix(relay.get("ERUN_CLOUD_PROVIDER_ALIAS"), "@aws") {
 		provider = "aws"
@@ -154,9 +154,9 @@ func (r *claudeSettingsRelay) apply() {
 	env := runtimeJSONObject(r.settings, "env")
 	r.applyUseFlags(env)
 	r.sync(env, "AWS_REGION", r.region)
-	r.sync(env, "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", eruncommon.FirstNonEmptyString(r.get("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION"), r.region))
-	r.sync(env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS", eruncommon.FirstNonEmptyString(r.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS"), "32000"))
-	r.sync(env, "MAX_THINKING_TOKENS", eruncommon.FirstNonEmptyString(r.get("MAX_THINKING_TOKENS"), "1024"))
+	r.sync(env, "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", orchestration.FirstNonEmptyString(r.get("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION"), r.region))
+	r.sync(env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS", orchestration.FirstNonEmptyString(r.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS"), "32000"))
+	r.sync(env, "MAX_THINKING_TOKENS", orchestration.FirstNonEmptyString(r.get("MAX_THINKING_TOKENS"), "1024"))
 	for _, name := range claudeRelayedPassthroughNames {
 		r.sync(env, name, r.get(name))
 	}
@@ -236,7 +236,7 @@ func installRuntimeClaudeSessionSettings(settings map[string]any) {
 	runtimeJSONObject(settings, "permissions")["defaultMode"] = "bypassPermissions"
 	settings["skipDangerousModePermissionPrompt"] = true
 	hooks := runtimeJSONObject(settings, "hooks")
-	for _, binding := range eruncommon.AISessionHookBindings() {
+	for _, binding := range orchestration.AISessionHookBindings() {
 		current, _ := hooks[binding.ToolEvent].([]any)
 		blocks := make([]any, 0, len(current)+1)
 		for _, block := range current {
@@ -254,7 +254,7 @@ func installRuntimeClaudeSessionSettings(settings map[string]any) {
 // forks nothing on every turn boundary; nothing it prints or exits with reaches
 // the turn.
 func runtimeAISessionHookCommand(event model.AISessionEventKind) string {
-	return `if [ -n "${ERUN_TENANT}" ] && [ -n "${ERUN_ENVIRONMENT}" ]; then ` + eruncommon.AISessionHookVerbPath + " --event " + string(event) + " --tool claude >/dev/null 2>&1 || true; fi"
+	return `if [ -n "${ERUN_TENANT}" ] && [ -n "${ERUN_ENVIRONMENT}" ]; then ` + orchestration.AISessionHookVerbPath + " --event " + string(event) + " --tool claude >/dev/null 2>&1 || true; fi"
 }
 
 func isRuntimeAISessionHookBlock(block any) bool {

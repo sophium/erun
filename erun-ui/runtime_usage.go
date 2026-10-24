@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -83,7 +83,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 // bounded ctx above. erun-common's own RunRuntimeContainerCommand has no
 // timeout, since a CLI or MCP call is fine waiting on a real terminal; a UI
 // probe on a refresh button is not.
-func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandRunnerFunc {
+func runtimeUsageRunner(ctx context.Context) orchestration.RuntimeContainerCommandRunnerFunc {
 	return func(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
 		if kubernetesContext := strings.TrimSpace(req.KubernetesContext); kubernetesContext != "" {

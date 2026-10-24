@@ -149,10 +149,9 @@ linters:
             - github.com/sophium/erun/erun-common/infra/
             - github.com/sophium/erun/erun-common/primitive/
             - github.com/sophium/erun/erun-common/orchestration$
-            - github.com/sophium/erun/erun-common$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: a command package may import base/*, infra/*, primitive/*, orchestration and the root package, never another command package
+              desc: a command package may import base/*, infra/*, primitive/* and orchestration, never another command package
         primitive-shared:
           list-mode: lax
           files: ["**/erun-common/primitive/shared/*.go"]

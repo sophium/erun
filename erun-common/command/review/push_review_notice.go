@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // push_review_notice.go makes one silent state visible at the moment it is
@@ -142,7 +142,7 @@ func branchHasLiveReview(reviews []platformclient.PlatformReview, branch string)
 // the fallback only fires when the symref is genuinely unavailable.
 func pushedBranchIsReviewTarget(ctx core.Context, projectRoot, remote, branch string) bool {
 	if strings.TrimSpace(projectRoot) != "" {
-		if defaultBranch, ok := eruncommon.GitRemoteDefaultBranch(ctx, projectRoot, remote); ok {
+		if defaultBranch, ok := orchestration.GitRemoteDefaultBranch(ctx, projectRoot, remote); ok {
 			return branch == defaultBranch
 		}
 	}

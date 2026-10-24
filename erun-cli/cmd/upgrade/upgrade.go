@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -107,7 +107,7 @@ func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target lifecycle.
 	// attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
-		ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
+		ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
 		defer closeEnvTrace()
 	}
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",

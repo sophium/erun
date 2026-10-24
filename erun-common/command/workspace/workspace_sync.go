@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // Workspace sync mirrors a remote-agent environment's pod worktree onto the
@@ -94,7 +94,7 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 		pass.deleteErr = err
 		return WorkspaceSyncResult{}, err
 	}
-	artifacts, signing, err := syncOutputsArtifacts(ctx, params.HostAlias, eruncommon.DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir))
+	artifacts, signing, err := syncOutputsArtifacts(ctx, params.HostAlias, orchestration.DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir))
 	pass.signed = signing.Signed
 	pass.signNote = signing.Note
 	if err != nil {
@@ -142,8 +142,8 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // `makeArtifactsWritable` applies before the re-extract restores it — an operator
 // invoking it directly from a shell during that window saw "permission denied"
 // on an otherwise-correct binary.
-func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, eruncommon.HostArtifactSigningSummary, error) {
-	var signing eruncommon.HostArtifactSigningSummary
+func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, orchestration.HostArtifactSigningSummary, error) {
+	var signing orchestration.HostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
 	if err != nil {
 		return 0, signing, err
@@ -178,7 +178,7 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		// The mirror is where a darwin artifact cross-built in the Linux pod first
 		// becomes a file the operator can run, so it is where the signature macOS
 		// demands has to come from. Sign while the files are still writable.
-		signing = eruncommon.SignHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
+		signing = orchestration.SignHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
 		if err := markArtifactsReadOnly(artifactsLocal, toFetch); err != nil {
 			return 0, signing, err
 		}

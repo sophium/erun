@@ -1,7 +1,7 @@
 package orchestrator
 
 import (
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -27,6 +27,6 @@ func OrchestratorSessionEnvVars() []string {
 	return []string{
 		shared.OrchestratorIDEnvVar,
 		DesktopSessionEnvVar,
-		eruncommon.RuntimeOutputsDirEnvVar,
+		orchestration.RuntimeOutputsDirEnvVar,
 	}
 }

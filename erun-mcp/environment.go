@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 type EnvironmentInput struct {
@@ -24,17 +24,17 @@ type EnvironmentInput struct {
 // here (that needs the operator's own AWS credentials, which do not reach
 // inside this pod), so a managed-cloud environment reports state "unknown"
 // rather than guessing from a status this package never persists.
-func environmentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, EnvironmentInput) (*mcp.CallToolResult, eruncommon.EnvironmentReadModel, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input EnvironmentInput) (*mcp.CallToolResult, eruncommon.EnvironmentReadModel, error) {
+func environmentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.EnvironmentReadModel{}, err
+			return nil, lifecycle.EnvironmentReadModel{}, err
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, 0, nil, &traceOutput, &traceOutput)
-		model, err := eruncommon.ResolveEnvironmentReadModel(ctx, runtime.Store, tenant, environment, time.Now())
+		model, err := lifecycle.ResolveEnvironmentReadModel(ctx, runtime.Store, tenant, environment, time.Now())
 		if err != nil {
-			return nil, eruncommon.EnvironmentReadModel{}, err
+			return nil, lifecycle.EnvironmentReadModel{}, err
 		}
 		return nil, model, nil
 	}

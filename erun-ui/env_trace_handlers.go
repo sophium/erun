@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -70,7 +70,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 // real read failures return an issue string, so a failed host read never
 // blanks the pod vantage point.
 func hostEnvTraceTail(result config.OpenResult) (string, string) {
-	path, err := eruncommon.EnvTraceLogPath(result.Tenant, result.Environment)
+	path, err := e2e.EnvTraceLogPath(result.Tenant, result.Environment)
 	if err != nil {
 		return "", err.Error()
 	}

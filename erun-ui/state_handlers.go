@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -304,7 +303,7 @@ func mcpEndpointForOpenResult(result config.OpenResult) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
 }
 
-func mcpEndpointForListEnvironment(environment eruncommon.ListEnvironmentResult) string {
+func mcpEndpointForListEnvironment(environment lifecycle.ListEnvironmentResult) string {
 	port := environment.LocalPorts.MCP
 	if port <= 0 {
 		return ""

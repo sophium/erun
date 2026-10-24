@@ -9,10 +9,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
@@ -49,7 +49,7 @@ func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
 }
 
 func loadHostedRegistry(ctx context.Context) uiHostedRegistryStatus {
-	status := eruncommon.ProbeHostedRegistry(ctx, nil)
+	status := orchestration.ProbeHostedRegistry(ctx, nil)
 	return uiHostedRegistryStatus{
 		Host:      status.Host,
 		Available: status.Available,

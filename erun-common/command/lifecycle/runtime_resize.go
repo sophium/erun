@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
@@ -457,7 +456,7 @@ func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params R
 	}
 	tenant, environment := target.Tenant, target.Environment
 
-	recommendation := eruncommon.EnvironmentRuntimeSizing(tenant, target.EnvConfig)
+	recommendation := EnvironmentRuntimeSizing(tenant, target.EnvConfig)
 	traceRuntimeSizingRecommendation(ctx, tenant, environment, recommendation)
 	plan, err := ResolveRuntimeResizePlan(tenant, environment, target.EnvConfig.RuntimePod, target.EnvConfig.RuntimeDindPod, target.EnvConfig.NamespaceQuota, params.Input, recommendation)
 	if err != nil {

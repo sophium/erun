@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/observe"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func writeObserveResult(ctx core.Context, result observe.ObserveResult) error {
@@ -101,7 +101,7 @@ func writeObserveLimitRanges(ctx core.Context, limitRanges []observe.ObservedLim
 // writeObserveServices lists what the namespace runs, with the port an Ingress
 // would route to. Services come before Ingresses because that is the order the
 // question is asked in: what is running, then what is published.
-func writeObserveServices(ctx core.Context, services []common.ObservedService) error {
+func writeObserveServices(ctx core.Context, services []orchestration.ObservedService) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(services)); err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func writeObserveServices(ctx core.Context, services []common.ObservedService) e
 	return nil
 }
 
-func writeObserveIngresses(ctx core.Context, ingresses []common.ObservedIngress) error {
+func writeObserveIngresses(ctx core.Context, ingresses []orchestration.ObservedIngress) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Ingresses (%d):\n", len(ingresses)); err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func writeObserveIngresses(ctx core.Context, ingresses []common.ObservedIngress)
 	return nil
 }
 
-func writeObserveCertificates(ctx core.Context, certificates []common.ObservedCertificate) error {
+func writeObserveCertificates(ctx core.Context, certificates []orchestration.ObservedCertificate) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Certificates (%d):\n", len(certificates)); err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func writeObserveCertificates(ctx core.Context, certificates []common.ObservedCe
 	return nil
 }
 
-func writeObserveCertificateOrders(ctx core.Context, orders []common.ObservedCertificateOrder) error {
+func writeObserveCertificateOrders(ctx core.Context, orders []orchestration.ObservedCertificateOrder) error {
 	for _, order := range orders {
 		if _, err := fmt.Fprintf(ctx.Stdout, "    order %s: state %s, reason %s\n", order.Name, shared.ValueOrNone(order.State), shared.ValueOrNone(order.Reason)); err != nil {
 			return err
@@ -203,7 +203,7 @@ func writeObserveSecrets(ctx core.Context, secrets []observe.ObservedSecretCheck
 	return nil
 }
 
-func writeObserveHelmRelease(ctx core.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmRelease(ctx core.Context, release *orchestration.ObservedHelmRelease) error {
 	if release == nil {
 		return nil
 	}
@@ -223,7 +223,7 @@ func writeObserveHelmRelease(ctx core.Context, release *common.ObservedHelmRelea
 // writeObserveHelmReleaseNotFound distinguishes a confirmed absence (no
 // Error) from a read that failed (Error set): a caller must never see the
 // same "nothing here" line for both.
-func writeObserveHelmReleaseNotFound(ctx core.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmReleaseNotFound(ctx core.Context, release *orchestration.ObservedHelmRelease) error {
 	if release.Error != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)
 		return err
@@ -232,7 +232,7 @@ func writeObserveHelmReleaseNotFound(ctx core.Context, release *common.ObservedH
 	return err
 }
 
-func writeObserveHelmReleaseDetails(ctx core.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmReleaseDetails(ctx core.Context, release *orchestration.ObservedHelmRelease) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
 		release.Name, release.Revision, shared.ValueOrNone(release.Status), shared.ValueOrNone(release.Chart), shared.ValueOrNone(release.ChartVersion), shared.ValueOrNone(release.AppVersion)); err != nil {
 		return err

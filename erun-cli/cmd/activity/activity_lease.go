@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/spf13/cobra"
 )
 
@@ -442,7 +442,7 @@ func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	if !sample.HasCounters() {
 		return nil
 	}
-	history, err := common.LoadRuntimeUsageHistory(tenant, environment)
+	history, err := orchestration.LoadRuntimeUsageHistory(tenant, environment)
 	if err != nil {
 		return err
 	}

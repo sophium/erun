@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
@@ -25,7 +25,7 @@ import (
 // fan-out over everything configured, reusing the same decide/report core
 // (eruncommon.DecideWhip/WhipReport).
 
-func NewWhipCmd(store common.ListStore, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewWhipCmd(store lifecycle.ListStore, resolveOpen shared.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -69,7 +69,7 @@ func NewWhipCmd(store common.ListStore, resolveOpen shared.OpenResolver) *cobra.
 	return cmd
 }
 
-func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.ListStore, resolveOpen shared.OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycle.ListStore, resolveOpen shared.OpenResolver, tenant, environment string, jsonOutput bool) error {
 	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
@@ -135,7 +135,7 @@ type whipEnvironmentTarget struct {
 // to the ambient scope the way scopedOpenParams does elsewhere -- a whip with
 // no arguments means "everything configured", not "the current directory's
 // default".
-func resolveWhipEnvironmentTargets(store common.ListStore, tenant, environment string) ([]whipEnvironmentTarget, error) {
+func resolveWhipEnvironmentTargets(store lifecycle.ListStore, tenant, environment string) ([]whipEnvironmentTarget, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant != "" || environment != "" {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
@@ -42,7 +42,7 @@ func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInputsUploadCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), args[0], args[1], common.RunRemoteCommandWithStdin)
+			return runInputsUploadCommand(shared.CommandContext(cmd), resolveOpen, shared.ScopedOpenParams(cmd.CommandPath(), tenant, environment), args[0], args[1], inputs.RunRemoteCommandWithStdin)
 		},
 	}
 	shared.AddDryRunFlag(cmd)
@@ -51,13 +51,13 @@ func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, localPath, remotePath string, run inputs.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	out, err := common.UploadRuntimeInput(ctx, req, common.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
+	out, err := inputs.UploadRuntimeInput(ctx, req, inputs.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
 	if err != nil {
 		return err
 	}

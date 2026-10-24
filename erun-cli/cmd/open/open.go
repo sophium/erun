@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -218,7 +218,7 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params sharedpkg.OpenPar
 }
 
 func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
-	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
 		ctx:                       ctx,

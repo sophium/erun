@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -124,9 +124,9 @@ func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkC
 // otherwise the branch is kept exactly as an ordinary set of unpushed commits
 // would be.
 func decideBranchWorkCloneReclaim(ctx core.Context, dir, branch string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	upstream, hasUpstream := eruncommon.ResolveBranchUpstreamCandidate(ctx, dir, branch)
+	upstream, hasUpstream := orchestration.ResolveBranchUpstreamCandidate(ctx, dir, branch)
 	if hasUpstream {
-		ahead, err := eruncommon.GitCommitsAhead(ctx, dir, upstream, branch)
+		ahead, err := orchestration.GitCommitsAhead(ctx, dir, upstream, branch)
 		if err != nil {
 			decision.Reason = fmt.Sprintf("could not compare %s against its upstream %s: %v", branch, upstream, err)
 			return decision
@@ -203,7 +203,7 @@ func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBr
 // default names are checked directly against what actually exists on the
 // remote rather than guessed blindly.
 func resolveDefaultBranchForMerge(ctx core.Context, dir, remote string) (string, bool) {
-	if def, ok := eruncommon.GitRemoteDefaultBranch(ctx, dir, remote); ok {
+	if def, ok := orchestration.GitRemoteDefaultBranch(ctx, dir, remote); ok {
 		return def, true
 	}
 	for _, candidate := range []string{"main", "master", "develop"} {

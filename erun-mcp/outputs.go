@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 type OutputsListInput struct {
@@ -35,7 +35,7 @@ type OutputsDownloadResult struct {
 	// Signing is present only when the download ran on a macOS host and ad-hoc
 	// code signing had something to report. macOS kills an unsigned Mach-O with
 	// SIGKILL and no message, so a caller must be able to see what was done.
-	Signing *eruncommon.HostArtifactSigning `json:"signing,omitempty"`
+	Signing *orchestration.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, jobs.RuntimeOutputsListResult, error) {
@@ -91,5 +91,5 @@ func outputsDirInput(path string) string {
 	if trimmed := strings.TrimSpace(path); trimmed != "" {
 		return trimmed
 	}
-	return strings.TrimSpace(os.Getenv(eruncommon.RuntimeOutputsDirEnvVar))
+	return strings.TrimSpace(os.Getenv(orchestration.RuntimeOutputsDirEnvVar))
 }

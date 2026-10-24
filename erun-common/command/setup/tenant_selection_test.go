@@ -5,15 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func refusingSelector(called *bool) SelectTenantFunc {
-	return func([]config.TenantConfig) (eruncommon.TenantSelectionResult, error) {
+	return func([]config.TenantConfig) (TenantSelectionResult, error) {
 		*called = true
-		return eruncommon.TenantSelectionResult{}, nil
+		return TenantSelectionResult{}, nil
 	}
 }
 
@@ -84,9 +83,9 @@ func TestSelectTenantUnavailableLeavesAnExplicitChoiceAlone(t *testing.T) {
 func TestSelectTenantAvailableStillAsks(t *testing.T) {
 	called := false
 	runner := BootstrapRunner{BootstrapInitDependencies: BootstrapInitDependencies{
-		SelectTenant: func([]config.TenantConfig) (eruncommon.TenantSelectionResult, error) {
+		SelectTenant: func([]config.TenantConfig) (TenantSelectionResult, error) {
 			called = true
-			return eruncommon.TenantSelectionResult{Tenant: "frs"}, nil
+			return TenantSelectionResult{Tenant: "frs"}, nil
 		},
 	}}
 

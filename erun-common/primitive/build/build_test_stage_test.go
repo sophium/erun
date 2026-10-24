@@ -170,3 +170,20 @@ func TestDockerImageBuilderPromotesATestStageDockerfile(t *testing.T) {
 		t.Fatalf("expected a promote with no docker build, got invocations:\n%s", invocations())
 	}
 }
+
+// TestRealDevopsDockerfileStillConsumesItsTestStage pins the real artefact the
+// synthetic cases only model: the erun-devops image, which ships erun and
+// emcp, must be produced only once its test stage has passed, so a successful
+// build of it -- and the fp tag written after one -- means its tests ran and
+// passed.
+//
+// Reads a sibling module, so it must run uncached (go test -count=1).
+func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
+	path := filepath.Join(erunRepoRoot(t), "erun-devops", "docker", "erun-devops", "Dockerfile")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the erun-devops Dockerfile is not readable at %s: %v", path, err)
+	}
+	if !shared.DockerfileHasConsumedTestStage(path) {
+		t.Fatalf("%s no longer declares a stage `AS test` that a later stage consumes (`FROM test` or `COPY --from=test`), so its image would build and publish with its tests never run", path)
+	}
+}

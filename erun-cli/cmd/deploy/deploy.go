@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -68,7 +68,7 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 			// before spec resolution names it.
 			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, tenant, environment)
+			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
 				tenant, environment, deployTarget.VersionOverride,

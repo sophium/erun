@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -215,7 +215,7 @@ func traceE2EVersion(ctx core.Context, version string, overridden bool) {
 
 // resolveE2ERun picks a suite's base URL, refuses one a docker build cannot
 // reach, and renders the docker invocation that runs it.
-func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, baseURLOverride string, exposed []eruncommon.ExposedService, secrets []config.DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
+func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, baseURLOverride string, exposed []orchestration.ExposedService, secrets []config.DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
 	baseURL := baseURLOverride
 	ctx.Trace(fmt.Sprintf("e2e: suite %s: %s", suite.Component, suite.Dockerfile))
 	if baseURL != "" {
@@ -249,7 +249,7 @@ func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, 
 // while the stages it builds on (dependency installs) stay cached. Its output
 // is cache-only: an e2e run proves something about a deployment and produces
 // no image.
-func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []eruncommon.ExposedService, secrets []config.DockerBuildSecret, cgroupParent string) []string {
+func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []orchestration.ExposedService, secrets []config.DockerBuildSecret, cgroupParent string) []string {
 	args := []string{
 		"build", "--progress=plain",
 		"--target", "e2e",
@@ -372,7 +372,7 @@ func e2eLogTail(path string, n int) string {
 // all. Read-only, so it runs even under --dry-run -- the same "no mutation, so
 // no reason to skip it" reasoning CheckKubernetesDeployment's own doc comment
 // gives.
-func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite, baseURLOverridden bool, versionOverride string) (string, []eruncommon.ExposedService, error) {
+func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite, baseURLOverridden bool, versionOverride string) (string, []orchestration.ExposedService, error) {
 	if baseURLOverridden && versionOverride != "" {
 		ctx.Trace("e2e: --base-url and --version name the target; no environment is read (deployment, exposure and version checks skipped)")
 		return versionOverride, nil, nil
@@ -390,7 +390,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 			target.Tenant, target.Environment, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
 	}
 
-	var exposed []eruncommon.ExposedService
+	var exposed []orchestration.ExposedService
 	if !baseURLOverridden {
 		if exposed, err = checkE2EExposures(target, suites); err != nil {
 			return "", nil, err
@@ -413,8 +413,8 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 
 // checkE2EExposures lists the environment's exposed services and refuses a
 // suite whose service is not exposed or not yet serving a valid certificate.
-func checkE2EExposures(target E2ETarget, suites []E2ESuite) ([]eruncommon.ExposedService, error) {
-	exposed, err := eruncommon.ListExposedServices(config.ShellLaunchParams{
+func checkE2EExposures(target E2ETarget, suites []E2ESuite) ([]orchestration.ExposedService, error) {
+	exposed, err := orchestration.ListExposedServices(config.ShellLaunchParams{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
 		Namespace:         target.Namespace,
@@ -441,13 +441,13 @@ func checkE2EExposures(target E2ETarget, suites []E2ESuite) ([]eruncommon.Expose
 
 // resolveE2EExposedService picks the exposure a suite runs against: the one
 // whose service is named like the suite's directory.
-func resolveE2EExposedService(services []eruncommon.ExposedService, service, tenant, environment string) (eruncommon.ExposedService, error) {
+func resolveE2EExposedService(services []orchestration.ExposedService, service, tenant, environment string) (orchestration.ExposedService, error) {
 	for _, s := range services {
 		if s.Service == service {
 			return s, nil
 		}
 	}
-	return eruncommon.ExposedService{}, fmt.Errorf("erun e2e: the %q suite targets the %q service, which is not exposed in %s/%s, so there is no URL; run `erun expose %s` first, or pass --base-url", service, service, tenant, environment, service)
+	return orchestration.ExposedService{}, fmt.Errorf("erun e2e: the %q suite targets the %q service, which is not exposed in %s/%s, so there is no URL; run `erun expose %s` first, or pass --base-url", service, service, tenant, environment, service)
 }
 
 // parseE2EBaseURLOverride validates --base-url. Empty means no override.
@@ -550,7 +550,7 @@ func e2eLogPath(target E2ETarget, component string) (string, error) {
 		}
 		return filepath.Join(home, ".erun", "e2e", component+".log"), nil
 	}
-	tracePath, err := eruncommon.EnvTraceLogPath(target.Tenant, target.Environment)
+	tracePath, err := EnvTraceLogPath(target.Tenant, target.Environment)
 	if err != nil {
 		return "", err
 	}

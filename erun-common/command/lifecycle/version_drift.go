@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // EnvironmentVersionStatus is one environment's erun version, compared
@@ -179,7 +179,7 @@ func gateVersionUnresolvedReason(resolution environmentVersionResolution) string
 	return resolution.UnresolvedReason
 }
 
-func erunVersionString(env eruncommon.ListEnvironmentResult) string {
+func erunVersionString(env ListEnvironmentResult) string {
 	if env.ErunVersion == nil {
 		return ""
 	}
@@ -189,7 +189,7 @@ func erunVersionString(env eruncommon.ListEnvironmentResult) string {
 // maxResolvedVersion returns the newest parseable erun version among envs'
 // resolutions. ok is false when none parses -- an empty/snapshot-only tenant
 // has no max to compare against, not a max of zero.
-func maxResolvedVersion(envs []eruncommon.ListEnvironmentResult, resolutions map[string]environmentVersionResolution) (version registry.Semver, ok bool) {
+func maxResolvedVersion(envs []ListEnvironmentResult, resolutions map[string]environmentVersionResolution) (version registry.Semver, ok bool) {
 	for _, env := range envs {
 		parsed, parsedOK := registry.ParseRegistryStableVersion(resolutions[env.Name].Version)
 		if !parsedOK {
@@ -222,7 +222,7 @@ type environmentVersionResolution struct {
 // distinguish "never deployed" from "deployed by a process whose config
 // never learned about it" -- both look identical to the config reader, and
 // only asking the cluster directly can tell them apart.
-func resolveEnvironmentVersionForDrift(ctx core.Context, tenant string, env eruncommon.ListEnvironmentResult) environmentVersionResolution {
+func resolveEnvironmentVersionForDrift(ctx core.Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
 	if version := erunVersionString(env); version != "" {
 		return environmentVersionResolution{Version: version}
 	}
@@ -237,7 +237,7 @@ func resolveEnvironmentVersionForDrift(ctx core.Context, tenant string, env erun
 // resolution comes back unresolved with a reason that says so, matching the
 // no-live-network-call dry-run contract every other list-mode live check in
 // this file already follows.
-func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env eruncommon.ListEnvironmentResult) environmentVersionResolution {
+func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
 	req := config.ShellLaunchParams{
 		Tenant:            tenant,
 		Environment:       env.Name,
@@ -245,15 +245,15 @@ func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env eruncomm
 		KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 	}
 	releaseName := config.RuntimeReleaseName(tenant)
-	statusArgs := eruncommon.ObserveHelmStatusArgs(req)
-	listArgs := eruncommon.ObserveHelmListArgs(req, releaseName)
+	statusArgs := orchestration.ObserveHelmStatusArgs(req)
+	listArgs := orchestration.ObserveHelmListArgs(req, releaseName)
 	ctx.Trace("list: " + tenant + "/" + env.Name + "'s runtime version is not recorded locally -- checking its deployed release live")
 	ctx.TraceCommand("", "helm", statusArgs...)
 	ctx.TraceCommand("", "helm", listArgs...)
 	if ctx.DryRun {
 		return environmentVersionResolution{UnresolvedReason: "not checked in a dry run"}
 	}
-	release := eruncommon.FetchObservedHelmRelease(statusArgs, listArgs, releaseName, req.Namespace)
+	release := orchestration.FetchObservedHelmRelease(statusArgs, listArgs, releaseName, req.Namespace)
 	if release.Error != "" {
 		return environmentVersionResolution{UnresolvedReason: "could not read the deployed release: " + release.Error}
 	}
@@ -276,11 +276,11 @@ func findListTenant(result ListResult, tenant string) (ListTenantResult, bool) {
 	return ListTenantResult{}, false
 }
 
-func findListEnvironment(tenant ListTenantResult, environment string) (eruncommon.ListEnvironmentResult, bool) {
+func findListEnvironment(tenant ListTenantResult, environment string) (ListEnvironmentResult, bool) {
 	for _, candidate := range tenant.Environments {
 		if candidate.Name == environment {
 			return candidate, true
 		}
 	}
-	return eruncommon.ListEnvironmentResult{}, false
+	return ListEnvironmentResult{}, false
 }

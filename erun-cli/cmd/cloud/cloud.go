@@ -9,9 +9,9 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -71,7 +71,7 @@ func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, 
 	if err != nil {
 		return err
 	}
-	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	refresh, err := cloud.RefreshHostAWSCredentials(ctx, store, result, deps)
 	if err != nil {

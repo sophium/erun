@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -286,9 +287,9 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 	// otherwise be reported below as unemitted, and this fixture is the answer
 	// to that report for anyone extending the example.
 	policy := config.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
-	fixture := eruncommon.EnvironmentReadModel{
+	fixture := lifecycle.EnvironmentReadModel{
 		Tenant: "myapp",
-		Environment: eruncommon.ListEnvironmentResult{
+		Environment: lifecycle.ListEnvironmentResult{
 			Name:           "local",
 			Type:           config.EnvironmentTypeLocalAgent,
 			RuntimeVersion: "1.0.308",
@@ -296,10 +297,10 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 			IsDefault:      true,
 			IsEffective:    true,
 		},
-		State: eruncommon.EnvironmentLifecycleRunning,
+		State: lifecycle.EnvironmentLifecycleRunning,
 		Idle:  &activity.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
-		Health: &eruncommon.EnvironmentHealth{
-			RootConfig: eruncommon.RootConfigInspection{ConfigStatus: eruncommon.RootConfigStatusOK},
+		Health: &lifecycle.EnvironmentHealth{
+			RootConfig: orchestration.RootConfigInspection{ConfigStatus: orchestration.RootConfigStatusOK},
 			Deploy:     deploy.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
 		},
 	}

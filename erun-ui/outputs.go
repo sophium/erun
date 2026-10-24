@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -90,7 +90,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
 		return "", err
 	}
-	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
+	a.reportHostArtifactSigning(orchestration.SignHostArtifact(dest))
 	return dest, nil
 }
 
@@ -99,7 +99,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 // modified on its way in; a failure is worth one because the alternative is the
 // silent SIGKILL macOS answers an unsigned binary with. Both go through the
 // notification surface so the message survives the dialog that started it.
-func (a *App) reportHostArtifactSigning(signing eruncommon.HostArtifactSigning) {
+func (a *App) reportHostArtifactSigning(signing orchestration.HostArtifactSigning) {
 	note := signing.Describe()
 	if note == "" {
 		return

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 func (a *App) LoadERunConfig() (uiERunConfig, error) {
@@ -377,12 +377,12 @@ func validateGatewayCatalogModelIDs(catalog *configpkg.OpenRouterConfig) error {
 		return nil
 	}
 	for _, m := range catalog.Models {
-		if err := eruncommon.ValidateClaudeModelID(m.ID); err != nil {
+		if err := orchestration.ValidateClaudeModelID(m.ID); err != nil {
 			return fmt.Errorf("cannot save the gateway catalog: %w", err)
 		}
 	}
 	if def := catalog.DefaultModel; def != "" {
-		if err := eruncommon.ValidateClaudeModelID(def); err != nil {
+		if err := orchestration.ValidateClaudeModelID(def); err != nil {
 			return fmt.Errorf("cannot save the gateway catalog: default %w", err)
 		}
 	}

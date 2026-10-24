@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // exposure_app.go is the desktop half of the Ports tab's public-exposure
@@ -36,9 +36,9 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 	if !configured {
 		return uiExposureList{Services: []uiExposedService{}, NotConfiguredReason: notConfiguredReason}, nil
 	}
-	services, err := eruncommon.ListExposedServices(req)
+	services, err := orchestration.ListExposedServices(req)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrListExposedServicesForbidden) {
+		if errors.Is(err, orchestration.ErrListExposedServicesForbidden) {
 			return uiExposureList{Configured: true, Restricted: true, Services: []uiExposedService{}}, nil
 		}
 		return uiExposureList{Configured: true, Error: err.Error(), Services: []uiExposedService{}}, nil
@@ -178,7 +178,7 @@ func (a *App) exposeProjectRoot() string {
 	return root
 }
 
-func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedService {
+func toUIExposedServices(services []orchestration.ExposedService) []uiExposedService {
 	result := make([]uiExposedService, 0, len(services))
 	for _, service := range services {
 		result = append(result, uiExposedService{

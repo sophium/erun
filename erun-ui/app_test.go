@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -44,8 +43,8 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 		Tenants: []lifecycle.ListTenantResult{
 			{
 				Name: "erun",
-				Environments: []eruncommon.ListEnvironmentResult{
-					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: eruncommon.ListSSHResult{Enabled: true}},
+				Environments: []lifecycle.ListEnvironmentResult{
+					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: lifecycle.ListSSHResult{Enabled: true}},
 					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: configpkg.EnvironmentTypeRemoteAgent, LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
 			},
@@ -90,7 +89,7 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 			{Name: "empty"},
 			{
 				Name: "active",
-				Environments: []eruncommon.ListEnvironmentResult{
+				Environments: []lifecycle.ListEnvironmentResult{
 					{Name: "prod"},
 				},
 			},

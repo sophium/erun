@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
@@ -37,7 +37,7 @@ type RuntimeContext struct {
 
 type runtimeStore interface {
 	setup.BootstrapStore
-	eruncommon.ListStore
+	lifecycle.ListStore
 	shared.DockerStore
 	deploy.DeployStore
 }
@@ -220,7 +220,7 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log i
 	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
 	// version) deliberately bypass runRuntimeCommand so probe polls cannot
 	// flood the trace log.
-	ctx, closeEnvTrace := eruncommon.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
+	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
 	defer closeEnvTrace()
 
 	workDir, err := runtimeRepoPath(runtime.Context)

@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/cmd/build"
 	"github.com/sophium/erun/cmd/initcmd"
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -91,7 +90,7 @@ func newRunInit(store setup.BootstrapStore, findProjectRoot sharedpkg.ProjectFin
 		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
 			Store:           setup.TraceBootstrapStore(ctx, store),
 			FindProjectRoot: findProjectRoot,
-			SelectTenant: func(tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
+			SelectTenant: func(tenants []config.TenantConfig) (setup.TenantSelectionResult, error) {
 				return initcmd.SelectTenantPrompt(selectRunner, tenants)
 			},
 			TenantSelectionUnavailable: initcmd.TenantSelectionUnavailable(),

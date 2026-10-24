@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -215,6 +215,6 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	}
 	// Sync signs what it mirrors, but an artifact can also predate that pass, so
 	// the launch re-checks rather than trusting the mirror to have done it.
-	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(exePath))
+	a.reportHostArtifactSigning(orchestration.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }

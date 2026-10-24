@@ -5,17 +5,17 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/orchestration"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewListCmd(store common.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewListCmd(store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var versionDriftTenant string
 	var gateEnvironment string
 	var controlPlanes bool
@@ -65,7 +65,7 @@ func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) err
 	return nil
 }
 
-func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx core.Context, store lifecycle.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
@@ -515,7 +515,7 @@ func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
 // The remedy is deliberately manual. erun wrote these blocks, but it cannot
 // tell one it wrote from one an operator hand-maintained under the same naming
 // convention, and a prune that guessed would delete an alias someone relies on.
-func writeOrphanedSSHAliases(ctx core.Context, orphans []common.SSHOrphanedAlias) error {
+func writeOrphanedSSHAliases(ctx core.Context, orphans []orchestration.SSHOrphanedAlias) error {
 	if len(orphans) == 0 {
 		return nil
 	}
@@ -538,7 +538,7 @@ func sshConfigLocationLabel() string {
 	return "~/.ssh/config"
 }
 
-func orphanedSSHAliasLine(orphan common.SSHOrphanedAlias) string {
+func orphanedSSHAliasLine(orphan orchestration.SSHOrphanedAlias) string {
 	line := orphan.Alias + ": no environment claims it"
 	if orphan.ReachesEnvironment != "" {
 		target := orphan.ReachesTenant + "/" + orphan.ReachesEnvironment
@@ -836,7 +836,7 @@ func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error
 	return nil
 }
 
-func writeEnvironmentEntry(ctx core.Context, tenantName string, env common.ListEnvironmentResult) error {
+func writeEnvironmentEntry(ctx core.Context, tenantName string, env lifecycle.ListEnvironmentResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, environmentHeaderLine(env)); err != nil {
 		return err
 	}
@@ -856,7 +856,7 @@ func tenantHeaderLine(tenant lifecycle.ListTenantResult) string {
 	return header
 }
 
-func environmentHeaderLine(env common.ListEnvironmentResult) string {
+func environmentHeaderLine(env lifecycle.ListEnvironmentResult) string {
 	envLine := "      - " + env.Name
 	if markers := statusMarkers(env.IsDefault, env.IsEffective); len(markers) > 0 {
 		envLine += " [" + strings.Join(markers, ", ") + "]"
@@ -868,7 +868,7 @@ func environmentHeaderLine(env common.ListEnvironmentResult) string {
 	return envLine
 }
 
-func environmentDetailLines(tenantName string, env common.ListEnvironmentResult) []string {
+func environmentDetailLines(tenantName string, env lifecycle.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
 		indent + "type: " + shared.ValueOrNone(string(env.Type)),
@@ -905,7 +905,7 @@ func environmentDetailLines(tenantName string, env common.ListEnvironmentResult)
 	return lines
 }
 
-func environmentSSHDetailLines(tenantName, environmentName string, ssh common.ListSSHResult, indent string) []string {
+func environmentSSHDetailLines(tenantName, environmentName string, ssh lifecycle.ListSSHResult, indent string) []string {
 	return []string{
 		indent + "sshd: on",
 		indent + "ssh-host: " + sshHostAliasLabel(tenantName, environmentName, ssh.HostAlias),
@@ -944,7 +944,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 // deployed still reads "none", unchanged; one that has deployed but recorded
 // no resolved image reads distinctly as "line undetermined" rather than
 // guessing a line from the tenant name.
-func runtimeVersionLabel(tenantName string, env common.ListEnvironmentResult) string {
+func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult) string {
 	version := shared.ValueOrNone(env.RuntimeVersion)
 	if env.RuntimeVersionLine == nil {
 		return version

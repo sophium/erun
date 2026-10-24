@@ -3,8 +3,8 @@ package setup
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -63,12 +63,12 @@ func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
 		{Alias: "erun-erun-remote", Port: 17222},
 		{Alias: "myserver", Port: 22},
 	}
-	environments := []eruncommon.SSHEnvironmentAlias{
+	environments := []orchestration.SSHEnvironmentAlias{
 		{Tenant: "erun", Environment: "petios", Alias: "erun-erun-petios", LocalPort: 17122},
 		{Tenant: "erun", Environment: "remote", Alias: "erun-erun-remote", LocalPort: 17222},
 	}
 
-	orphans := eruncommon.FindOrphanedSSHAliases(entries, environments)
+	orphans := orchestration.FindOrphanedSSHAliases(entries, environments)
 	if len(orphans) != 2 {
 		t.Fatalf("expected the two unclaimed erun blocks and nothing else, got %+v", orphans)
 	}
@@ -84,15 +84,15 @@ func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
 
 func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *testing.T) {
 	entries := []config.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
-	environments := []eruncommon.SSHEnvironmentAlias{
+	environments := []orchestration.SSHEnvironmentAlias{
 		{Tenant: "team", Environment: "dev", Alias: open.SSHHostAlias("team", "dev"), LocalPort: 17022},
 	}
-	if orphans := eruncommon.FindOrphanedSSHAliases(entries, environments); len(orphans) != 0 {
+	if orphans := orchestration.FindOrphanedSSHAliases(entries, environments); len(orphans) != 0 {
 		t.Fatalf("a claimed alias is not stale, got %+v", orphans)
 	}
 	// And with nothing configured at all, every erun block is stale -- the
 	// environment whose block it was is gone.
-	if orphans := eruncommon.FindOrphanedSSHAliases(entries, nil); len(orphans) != 1 {
+	if orphans := orchestration.FindOrphanedSSHAliases(entries, nil); len(orphans) != 1 {
 		t.Fatalf("with no environments every erun block is stale, got %+v", orphans)
 	}
 }

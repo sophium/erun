@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -52,11 +52,11 @@ type DoctorRepairAliasInput struct {
 // outcomes so an LLM agent can decide whether to retry with full
 // per-alias init params or escalate to the user.
 type DoctorRootConfigReport struct {
-	Inspection                  eruncommon.RootConfigInspection `json:"inspection"`
-	RestoredFromBackup          string                          `json:"restoredFromBackup,omitempty"`
-	RestoredEnvConfigFromBackup string                          `json:"restoredEnvConfigFromBackup,omitempty"`
-	RepairedAliases             []string                        `json:"repairedAliases,omitempty"`
-	UnresolvedAliases           []string                        `json:"unresolvedAliases,omitempty"`
+	Inspection                  orchestration.RootConfigInspection `json:"inspection"`
+	RestoredFromBackup          string                             `json:"restoredFromBackup,omitempty"`
+	RestoredEnvConfigFromBackup string                             `json:"restoredEnvConfigFromBackup,omitempty"`
+	RepairedAliases             []string                           `json:"repairedAliases,omitempty"`
+	UnresolvedAliases           []string                           `json:"unresolvedAliases,omitempty"`
 }
 
 func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -235,7 +235,7 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 // state that must stop the flow before tenant/env work even when more was
 // requested — for example, the file is corrupted and no repair input was supplied.
 func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCtx core.Context) (*DoctorRootConfigReport, bool, error) {
-	inspection, err := eruncommon.InspectRootConfig(runtime.Store)
+	inspection, err := orchestration.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return nil, false, err
 	}
@@ -266,7 +266,7 @@ func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCt
 	return report, false, nil
 }
 
-func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx core.Context, inspection eruncommon.RootConfigInspection, selector string, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
+func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx core.Context, inspection orchestration.RootConfigInspection, selector string, report *DoctorRootConfigReport) (orchestration.RootConfigInspection, error) {
 	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
 	if err != nil {
 		return inspection, err
@@ -284,24 +284,24 @@ func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx core.Contex
 	return refreshDoctorInspection(runtime, report)
 }
 
-func refreshDoctorInspection(runtime RuntimeConfig, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
-	refreshed, err := eruncommon.InspectRootConfig(runtime.Store)
+func refreshDoctorInspection(runtime RuntimeConfig, report *DoctorRootConfigReport) (orchestration.RootConfigInspection, error) {
+	refreshed, err := orchestration.InspectRootConfig(runtime.Store)
 	if err != nil {
-		return eruncommon.RootConfigInspection{}, err
+		return orchestration.RootConfigInspection{}, err
 	}
 	report.Inspection = refreshed
 	return refreshed, nil
 }
 
-func doctorRootConfigBlocks(inspection eruncommon.RootConfigInspection, input DoctorInput) bool {
-	if inspection.ConfigStatus != eruncommon.RootConfigStatusOK {
+func doctorRootConfigBlocks(inspection orchestration.RootConfigInspection, input DoctorInput) bool {
+	if inspection.ConfigStatus != orchestration.RootConfigStatusOK {
 		return true
 	}
 	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
-func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core.Context, inspection eruncommon.RootConfigInspection, report *DoctorRootConfigReport) error {
-	byAlias := make(map[string]eruncommon.OrphanedAlias, len(inspection.OrphanedAliases))
+func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core.Context, inspection orchestration.RootConfigInspection, report *DoctorRootConfigReport) error {
+	byAlias := make(map[string]orchestration.OrphanedAlias, len(inspection.OrphanedAliases))
 	for _, orphan := range inspection.OrphanedAliases {
 		byAlias[orphan.Alias] = orphan
 	}
@@ -332,7 +332,7 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core
 	return nil
 }
 
-func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
+func resolveDoctorBackupSelector(inspection orchestration.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
 		return config.ConfigBackup{Path: selector}, true, nil
 	}
@@ -343,7 +343,7 @@ func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, sel
 	return backup, ok, nil
 }
 
-func preferredRegionForOrphanAlias(orphan eruncommon.OrphanedAlias) string {
+func preferredRegionForOrphanAlias(orphan orchestration.OrphanedAlias) string {
 	for _, ref := range orphan.ReferencedByCloudContexts {
 		region := strings.TrimSpace(ref.Region)
 		if region != "" {
@@ -519,7 +519,7 @@ func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (config.O
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return eruncommon.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	return orchestration.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 }
 
 func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {

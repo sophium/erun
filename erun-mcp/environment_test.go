@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // The environment read model composes list/idle/doctor; what matters here is
@@ -32,7 +32,7 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	if result.Health != nil {
 		t.Fatalf("preview must skip the live deploy diagnosis, got %+v", result.Health)
 	}
-	if result.State == eruncommon.EnvironmentLifecycleUnknown {
+	if result.State == lifecycle.EnvironmentLifecycleUnknown {
 		t.Fatalf("a resolvable non-managed environment with a real idle read should not report unknown")
 	}
 }
@@ -97,10 +97,10 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
-	if result.State != eruncommon.EnvironmentLifecycleUnknown {
+	if result.State != lifecycle.EnvironmentLifecycleUnknown {
 		t.Fatalf("an unobserved managed-cloud power state must read as unknown, got %s", result.State)
 	}
-	if result.State == eruncommon.EnvironmentLifecycleStopped || result.State == eruncommon.EnvironmentLifecycleIdle {
+	if result.State == lifecycle.EnvironmentLifecycleStopped || result.State == lifecycle.EnvironmentLifecycleIdle {
 		t.Fatalf("an unobserved signal must never resolve to a real state; got %s", result.State)
 	}
 }

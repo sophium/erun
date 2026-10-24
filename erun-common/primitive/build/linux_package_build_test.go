@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -361,5 +362,48 @@ func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 		if !strings.Contains(line, "--cgroup-parent "+parent+" -f ") {
 			t.Fatalf("every package build should carry --cgroup-parent %s, got %q", parent, line)
 		}
+	}
+}
+
+// Below debug verbosity a package build's BuildKit output is captured, so its
+// test stage (erun-ui's runs for many minutes) is silent: the run's heartbeat is
+// the only sign it is working rather than wedged, and it must name the package
+// while its docker build runs. The stub holds the build until the test has
+// looked at the heartbeat.
+func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
+	projectRoot, uiDir, _ := linuxPackageProject(t)
+	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
+	gate := t.TempDir()
+	stub := writeExecutableScript(t, "touch '"+gate+"/started'\nwhile [ ! -e '"+gate+"/release' ]; do sleep 0.01; done\nexit 0")
+	t.Setenv("ERUN_DOCKER_BIN", stub)
+	var log syncBuffer
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ticks := make(chan time.Time)
+	heartbeat := &core.BuildHeartbeat{Now: time.Now, Emit: func(string) {}, Ticks: ticks}
+	ctx.Progress = heartbeat
+	done := make(chan error, 1)
+	go func() { done <- RunLinuxPackageChecks(ctx, packages) }()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(gate, "started")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the package build never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	line := heartbeat.Line()
+	if err := os.WriteFile(filepath.Join(gate, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(line, "still building erun-ui, ") {
+		t.Fatalf("while the package build runs the heartbeat should name it, got %q", line)
+	}
+	if after := heartbeat.Line(); after != "" {
+		t.Fatalf("a finished package build must leave the heartbeat, got %q", after)
 	}
 }

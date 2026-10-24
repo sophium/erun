@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // fakeIMDS serves the two reads the boot makes. With v2 it requires the token a
@@ -73,7 +73,7 @@ func TestRuntimeBootFillsAnUninjectedRegionAndInstanceIDFromIMDS(t *testing.T) {
 			t.Fatal(err)
 		}
 		var root config.ERunConfig
-		readTestYAML(t, eruncommon.RuntimeRootConfigPath(boot.configHome()), &root)
+		readTestYAML(t, orchestration.RuntimeRootConfigPath(boot.configHome()), &root)
 		if len(root.CloudContexts) != 1 || root.CloudContexts[0].InstanceID != "i-0abc123" || root.CloudContexts[0].Region != "eu-west-2" {
 			t.Fatalf("v2=%v: the boot config should record the instance's cloud context, got %+v", v2, root.CloudContexts)
 		}

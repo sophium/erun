@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -159,7 +159,7 @@ func TestSyncConfigRootNotRewrittenWhenInSync(t *testing.T) {
 	mustNoErr(t, err, "first inspect")
 	mustNoErr(t, RunRuntimeConfigSync(testTraceContext(false), first), "first sync")
 
-	rootPath := eruncommon.RuntimeRootConfigPath(configHome)
+	rootPath := orchestration.RuntimeRootConfigPath(configHome)
 	rootDir := filepath.Dir(rootPath)
 	before, err := os.ReadFile(rootPath)
 	mustNoErr(t, err, "read root config after first sync")

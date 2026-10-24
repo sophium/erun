@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/orchestration"
 )
 
 // computeObserveDrift is pure (no subprocess, no filesystem), the same shape
@@ -27,7 +27,7 @@ func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
 
 func TestComputeObserveDriftGenuinelyAbsentReleaseReportsNotFound(t *testing.T) {
 	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{Name: "team-devops"}
+	release := &orchestration.ObservedHelmRelease{Name: "team-devops"}
 
 	got := computeObserveDrift(req, release, nil)
 
@@ -39,7 +39,7 @@ func TestComputeObserveDriftGenuinelyAbsentReleaseReportsNotFound(t *testing.T) 
 
 func TestComputeObserveDriftUnreadableReleaseNamesTheReasonNotFoundPhrasing(t *testing.T) {
 	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{Name: "team-devops", Error: "observe: not authorized to read helm release \"team-devops\""}
+	release := &orchestration.ObservedHelmRelease{Name: "team-devops", Error: "observe: not authorized to read helm release \"team-devops\""}
 
 	got := computeObserveDrift(req, release, nil)
 
@@ -57,7 +57,7 @@ func TestComputeObserveDriftUnreadableReleaseNamesTheReasonNotFoundPhrasing(t *t
 
 func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing(t *testing.T) {
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
+	release := &orchestration.ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
 
 	got := computeObserveDrift(req, release, nil)
 	if len(got) != 0 {
@@ -78,7 +78,7 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 // field must marshal, and marshal as [].
 func TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList(t *testing.T) {
 	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{Name: "team-devops", Found: true, AppVersion: "1.0.0"}
+	release := &orchestration.ObservedHelmRelease{Name: "team-devops", Found: true, AppVersion: "1.0.0"}
 
 	encoded, err := json.Marshal(ObserveResult{Drift: computeObserveDrift(req, release, nil)})
 	if err != nil {
@@ -96,7 +96,7 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 	// is parsed) but the drift computation must not assume that of its input;
 	// it evaluates whatever runningImageDrift's own inputs allow.
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{
+	release := &orchestration.ObservedHelmRelease{
 		Name:           "team-devops",
 		Error:          "observe: not authorized to read helm release",
 		ImageOverrides: map[string]string{"erun-devops": "registry.example/erun-devops:1.0.0"},
@@ -124,7 +124,7 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 
 func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodAvailable(t *testing.T) {
 	req := config.ShellLaunchParams{Namespace: "team-dev", RuntimePod: config.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
-	release := &eruncommon.ObservedHelmRelease{
+	release := &orchestration.ObservedHelmRelease{
 		Name:       "team-devops",
 		Error:      "observe: not authorized to read helm release",
 		RuntimePod: config.RuntimePodResources{CPU: "2", Memory: "4096Mi"},
@@ -145,7 +145,7 @@ func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodA
 
 func TestComputeObserveDriftFoundReleaseKeepsExistingChecks(t *testing.T) {
 	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", RuntimeImage: "registry.example/erun-devops:1.0.0", Namespace: "team-dev"}
-	release := &eruncommon.ObservedHelmRelease{
+	release := &orchestration.ObservedHelmRelease{
 		Name:           "team-devops",
 		Found:          true,
 		AppVersion:     "1.0.1",
