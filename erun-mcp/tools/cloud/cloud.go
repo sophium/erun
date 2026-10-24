@@ -1,0 +1,268 @@
+package cloud
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+)
+
+type CloudListInput struct {
+	Verbosity int `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudInitAWSInput struct {
+	SSOStartURL   string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
+	SSORegion     string `json:"ssoRegion" jsonschema:"AWS IAM Identity Center region"`
+	AccountID     string `json:"accountId" jsonschema:"AWS account ID to use for SSO login"`
+	RoleName      string `json:"roleName" jsonschema:"AWS permission set (IAM Identity Center) to assume for SSO login"`
+	Region        string `json:"region,omitempty" jsonschema:"default AWS region for the generated configuration; defaults to ssoRegion"`
+	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" jsonschema:"OIDC issuer URL trusted by deployed ERun APIs"`
+	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
+	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudInitCloudflareInput struct {
+	AccountID string `json:"accountId" jsonschema:"Cloudflare account ID the scoped API token belongs to"`
+	TokenName string `json:"tokenName" jsonschema:"label for the scoped API token"`
+	APIToken  string `json:"apiToken" jsonschema:"Cloudflare API token value (Zone + DNS edit, plus any other scopes you'll use such as Cloudflare Pages); held in the local secret store, never written to erun-config.yaml"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without verifying the token or saving config"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudInitERunInput struct {
+	APIURL    string `json:"apiUrl" jsonschema:"base URL of the hosted erun platform's API; its own config (issuer, CLI OIDC client id) is discovered from GET /v1/platform"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without discovering the platform or saving config"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudLoginInput struct {
+	Alias     string   `json:"alias" jsonschema:"configured cloud provider alias to login"`
+	Scopes    []string `json:"scopes,omitempty" jsonschema:"extra OAuth scopes to request on top of openid offline_access and the org-claim scope requested by default; a provider\u0027s reserved scopes are often unadvertised and can only be asked for by name"`
+	Flow      string   `json:"flow,omitempty" jsonschema:"OIDC grant for an erun-hosted alias: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete"`
+	Preview   bool     `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
+	Verbosity int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudOIDCInput struct {
+	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to refresh"`
+	Audience  string `json:"audience,omitempty" jsonschema:"audience for the AWS web identity bearer token; defaults to erun-api"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudSetInput struct {
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should be updated; defaults to the server tenant context"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to update; defaults to the server environment context"`
+	Alias       string `json:"alias" jsonschema:"cloud provider alias to assign to the environment"`
+	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without saving config"`
+	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+// CloudListResult is cloud_list's structured result. CloudProviders carries no
+// omitempty: omitempty drops a slice of length zero as well as a nil one, so an
+// environment with no configured aliases answered a bare {}, and a caller could
+// not tell "no aliases are configured" -- the diagnosis this tool exists to
+// confirm -- from "this tool does not report aliases".
+type CloudListResult struct {
+	CloudProviders []cloud.CloudProviderStatus `json:"cloudProviders"`
+}
+
+type CloudActionResult struct {
+	Preview  bool                      `json:"preview"`
+	Alias    string                    `json:"alias,omitempty"`
+	Provider cloud.CloudProviderStatus `json:"provider,omitempty"`
+	Trace    []string                  `json:"trace,omitempty"`
+	Plan     []string                  `json:"plan,omitempty"`
+}
+
+type CloudSetResult struct {
+	Preview     bool                `json:"preview"`
+	Tenant      string              `json:"tenant"`
+	Environment string              `json:"environment"`
+	EnvConfig   configpkg.EnvConfig `json:"envConfig"`
+	Trace       []string            `json:"trace,omitempty"`
+}
+
+func CloudListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
+		statuses, err := cloud.ListCloudProviderStatuses(runtime.Store, shared.CloudDependencies())
+		if err != nil {
+			return nil, CloudListResult{}, err
+		}
+		return nil, CloudListResult{CloudProviders: statuses}, nil
+	}
+}
+
+func CloudInitAWSTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		params := cloud.InitAWSCloudProviderParams{
+			SSOStartURL:   input.SSOStartURL,
+			SSORegion:     input.SSORegion,
+			AccountID:     input.AccountID,
+			RoleName:      input.RoleName,
+			Region:        input.Region,
+			OIDCIssuerURL: input.OIDCIssuerURL,
+		}
+		if input.Preview {
+			plan := []string{
+				"aws configure set sso_start_url " + strings.TrimSpace(input.SSOStartURL) + " --profile erun-sso-<timestamp>",
+				"aws configure set sso_region " + strings.TrimSpace(input.SSORegion) + " --profile erun-sso-<timestamp>",
+				"aws configure set sso_account_id " + strings.TrimSpace(input.AccountID) + " --profile erun-sso-<timestamp>",
+				"aws configure set sso_role_name " + strings.TrimSpace(input.RoleName) + " --profile erun-sso-<timestamp>",
+				"aws sso login --profile erun-sso-<timestamp>",
+				"aws sts get-caller-identity --profile erun-sso-<timestamp>",
+				"aws iam enable-outbound-web-identity-federation --query IssuerIdentifier --output text --profile erun-sso-<timestamp> if AWS outbound web identity federation is disabled",
+				"aws sts get-web-identity-token --audience " + configpkg.CloudProviderBearerAudience + " --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile erun-sso-<timestamp>",
+				"save root cloud provider alias resolved from AWS identity",
+				"save cloud provider OIDC issuer resolved from AWS web identity token",
+			}
+			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
+		}
+		provider, err := cloud.InitAWSCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func CloudInitCloudflareTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		params := cloud.InitCloudflareCloudProviderParams{
+			AccountID: input.AccountID,
+			TokenName: input.TokenName,
+			APIToken:  input.APIToken,
+		}
+		if input.Preview {
+			plan := []string{
+				"GET https://api.cloudflare.com/client/v4/user/tokens/verify (verify scoped API token)",
+				"store cloudflare api token in the local secret store",
+				"save cloud provider alias <token-name>+<account-id>@cloudflare",
+			}
+			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
+		}
+		provider, err := cloud.InitCloudflareCloudProvider(ctx, runtime.Store, params, shared.CloudDependencies())
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		status := cloud.CloudProviderTokenStatus(provider, shared.CloudDependencies())
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func CloudInitERunTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		params := cloud.InitERunCloudProviderParams{APIURL: input.APIURL}
+		if input.Preview {
+			plan := []string{
+				"GET " + strings.TrimRight(strings.TrimSpace(input.APIURL), "/") + "/v1/platform",
+				"GET <issuer>/.well-known/openid-configuration",
+				"save cloud provider alias erun+<platform-host>@erun",
+			}
+			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
+		}
+		provider, err := cloud.InitERunCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func CloudLoginTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		alias := strings.TrimSpace(input.Alias)
+		if alias == "" {
+			return nil, CloudActionResult{}, fmt.Errorf("cloud provider alias is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		if input.Preview {
+			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
+		}
+		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, cloud.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, shared.CloudDependencies())
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func CloudOIDCTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		alias := strings.TrimSpace(input.Alias)
+		if alias == "" {
+			return nil, CloudActionResult{}, fmt.Errorf("cloud provider alias is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		if input.Preview {
+			return nil, CloudActionResult{
+				Preview: true,
+				Alias:   alias,
+				Plan: []string{
+					"check cloud provider token status",
+					"run provider login if token is expired",
+					"enable AWS outbound web identity federation if disabled",
+					"request AWS STS web identity token for audience " + cloudAudienceForPlan(input.Audience),
+					"save cloud provider OIDC issuer resolved from bearer token",
+				},
+			}, nil
+		}
+		status, _, err := cloud.SetupCloudProviderOIDC(ctx, runtime.Store, cloud.CloudBearerParams{
+			Alias:    alias,
+			Audience: input.Audience,
+		}, cloud.CloudDependencies{})
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: shared.NormalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func CloudSetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
+		tenant, environment, err := shared.ScopedTenantEnv(input.Tenant, input.Environment, runtime)
+		if err != nil {
+			return nil, CloudSetResult{}, err
+		}
+		traceOutput := strings.Builder{}
+		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, cloud.SetEnvironmentCloudAliasParams{
+			Tenant:      tenant,
+			Environment: environment,
+			Alias:       input.Alias,
+		})
+		if err != nil {
+			return nil, CloudSetResult{}, err
+		}
+		return nil, CloudSetResult{
+			Preview:     input.Preview,
+			Tenant:      tenant,
+			Environment: environment,
+			EnvConfig:   config,
+			Trace:       shared.NormalizeTraceLines(traceOutput.String()),
+		}, nil
+	}
+}
+
+func cloudAudienceForPlan(audience string) string {
+	audience = strings.TrimSpace(audience)
+	if audience == "" {
+		return configpkg.CloudProviderBearerAudience
+	}
+	return audience
+}

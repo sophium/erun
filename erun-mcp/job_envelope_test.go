@@ -13,6 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // A tool started with wait:false runs its work inside this server's own
@@ -25,13 +27,13 @@ import (
 // then did.
 func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "build", JobEnvelopeInput{
+	job := startEnvelopeJob(t, runtime, "build", shared.JobEnvelopeInput{
 		Wait:           boolPtr(false),
 		StartedByJobID: "gate-parent",
-	}, func(bool, io.Writer) (CommandOutput, error) {
-		return CommandOutput{Executed: true}, nil
+	}, func(bool, io.Writer) (shared.CommandOutput, error) {
+		return shared.CommandOutput{Executed: true}, nil
 	})
 
 	if job.StartedByJobID != "gate-parent" {
@@ -48,10 +50,10 @@ func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 // definite answer to an unknown question.
 func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "deploy", JobEnvelopeInput{Wait: boolPtr(false)}, func(bool, io.Writer) (CommandOutput, error) {
-		return CommandOutput{Executed: true}, nil
+	job := startEnvelopeJob(t, runtime, "deploy", shared.JobEnvelopeInput{Wait: boolPtr(false)}, func(bool, io.Writer) (shared.CommandOutput, error) {
+		return shared.CommandOutput{Executed: true}, nil
 	})
 
 	if job.StartedByJobID != "" {
@@ -63,14 +65,14 @@ func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 // running past my turn" into a parent that waits for it.
 func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "release", JobEnvelopeInput{
+	job := startEnvelopeJob(t, runtime, "release", shared.JobEnvelopeInput{
 		Wait:           boolPtr(false),
 		StartedByJobID: "gate-parent",
 		Handoff:        true,
-	}, func(bool, io.Writer) (CommandOutput, error) {
-		return CommandOutput{Executed: true}, nil
+	}, func(bool, io.Writer) (shared.CommandOutput, error) {
+		return shared.CommandOutput{Executed: true}, nil
 	})
 
 	if !job.Handoff {
@@ -84,11 +86,11 @@ func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 // work's own trace and output now reach the job's log as it produces them.
 func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"}}
 
-	job := startEnvelopeJob(t, runtime, "doctor", JobEnvelopeInput{Wait: boolPtr(false)}, func(_ bool, log io.Writer) (CommandOutput, error) {
+	job := startEnvelopeJob(t, runtime, "doctor", shared.JobEnvelopeInput{Wait: boolPtr(false)}, func(_ bool, log io.Writer) (shared.CommandOutput, error) {
 		_, _ = io.WriteString(log, "docker build failed: no space left on device\n")
-		return CommandOutput{Executed: true}, errors.New("exit status 1")
+		return shared.CommandOutput{Executed: true}, errors.New("exit status 1")
 	})
 
 	if job.Succeeded {
@@ -105,26 +107,6 @@ func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	}
 }
 
-// A synchronous call has no job and no log, and already returns everything
-// inline, so it must not be handed a nil writer the work would panic on.
-func TestJobEnvelopeGivesASynchronousCallADiscardLog(t *testing.T) {
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev"}}
-
-	envelope, err := runJobEnvelope(runtime, "build", JobEnvelopeInput{}, false, func(_ bool, log io.Writer) (CommandOutput, error) {
-		if log == nil {
-			return CommandOutput{}, errors.New("synchronous execute was handed a nil log writer")
-		}
-		_, writeErr := io.WriteString(log, "ignored")
-		return CommandOutput{Executed: true}, writeErr
-	})
-	if err != nil {
-		t.Fatalf("runJobEnvelope: %v", err)
-	}
-	if !envelope.Wait || envelope.JobID != "" {
-		t.Fatalf("envelope = %+v, want the synchronous shape", envelope)
-	}
-}
-
 // Embedding JobEnvelopeInput must stay invisible on the wire: the SDK's schema
 // reflection flattens an embedded struct, so wait keeps its own top-level
 // property exactly as it had when every input declared it itself, and the two
@@ -133,7 +115,7 @@ func TestJobEnvelopeGivesASynchronousCallADiscardLog(t *testing.T) {
 func TestJobEnvelopeSwitchesArePublishedAsTopLevelProperties(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	t.Setenv("ERUN_CODEX_BIN", "true")
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	tools, err := session.ListTools(context.Background(), nil)
@@ -185,9 +167,9 @@ func publishedInputProperties(t *testing.T, name string, inputSchema any) map[st
 // startEnvelopeJob starts a background task through the envelope and returns
 // its finished record, bounded so work that never settles fails the test
 // rather than hanging the suite.
-func startEnvelopeJob(t *testing.T, runtime RuntimeConfig, name string, input JobEnvelopeInput, execute func(bool, io.Writer) (CommandOutput, error)) eruncommon.EnvironmentJob {
+func startEnvelopeJob(t *testing.T, runtime shared.RuntimeConfig, name string, input shared.JobEnvelopeInput, execute func(bool, io.Writer) (shared.CommandOutput, error)) eruncommon.EnvironmentJob {
 	t.Helper()
-	envelope, err := runJobEnvelope(runtime, name, input, false, execute)
+	envelope, err := shared.RunJobEnvelope(runtime, name, input, false, execute)
 	if err != nil {
 		t.Fatalf("runJobEnvelope: %v", err)
 	}
@@ -218,7 +200,7 @@ func startEnvelopeJob(t *testing.T, runtime RuntimeConfig, name string, input Jo
 // that invocation is where the value has to appear.
 func TestExecRawBackgroundThreadsTheCallersJobIDToTheSupervisor(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
-	runtime := normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}})
 
 	for _, tc := range []struct {
 		name  string
@@ -229,7 +211,7 @@ func TestExecRawBackgroundThreadsTheCallersJobIDToTheSupervisor(t *testing.T) {
 		{"omitted", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, envelope, err := rawTool(runtime)(context.Background(), nil, RawInput{
+			_, envelope, err := exectool.RawTool(runtime)(context.Background(), nil, exectool.RawInput{
 				Command:        []string{"true"},
 				Wait:           boolPtr(false),
 				Preview:        true,

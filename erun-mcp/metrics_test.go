@@ -17,14 +17,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // scrapeMetrics serves recorder's registry the same way runMetricsHTTP does
 // and parses the response as real Prometheus text exposition format — proving
 // the exposition parses, not just that the handler wrote some bytes.
-func scrapeMetrics(t *testing.T, recorder *metricsRecorder) map[string]*dto.MetricFamily {
+func scrapeMetrics(t *testing.T, recorder *shared.MetricsRecorder) map[string]*dto.MetricFamily {
 	t.Helper()
-	server := httptest.NewServer(promhttp.HandlerFor(recorder.registry, promhttp.HandlerOpts{}))
+	server := httptest.NewServer(promhttp.HandlerFor(recorder.Registry, promhttp.HandlerOpts{}))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL)
@@ -109,11 +110,11 @@ func counterValue(t *testing.T, families map[string]*dto.MetricFamily, name stri
 // tenant+environment labels the spec requires on every series.
 func TestMetricsEndpointServesAllFiveDocumentedSeries(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
-	recorder.setIdleEligibility(true)
-	recorder.setTerminalInputSecondsSinceLast(42)
-	recorder.setTrafficWindowBytes(1024)
-	recorder.recordMCPCall("idle", "success")
-	recorder.recordAuditEvent("mcp.idle", "agent", "success")
+	recorder.SetIdleEligibility(true)
+	recorder.SetTerminalInputSecondsSinceLast(42)
+	recorder.SetTrafficWindowBytes(1024)
+	recorder.RecordMCPCall("idle", "success")
+	recorder.RecordAuditEvent("mcp.idle", "agent", "success")
 
 	families := scrapeMetrics(t, recorder)
 
@@ -149,8 +150,8 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	xdg.Reload()
 
-	runtime := normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 	})
 	// WorkingHours spans virtually the whole day so the test's outcome does not
 	// depend on the wall-clock hour it happens to run at: outside working hours,
@@ -232,11 +233,11 @@ func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
-	runtime := normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 	})
 	recorder := newMetricsRecorder("acme", "dev")
-	recorder.addMCPBytes(100)
+	recorder.AddMCPBytes(100)
 
 	lastSSH, lastMCP := sampleTrafficWindow(runtime, recorder, 0, 0)
 	if got := gaugeValue(t, scrapeMetrics(t, recorder), "erun_traffic_window_bytes"); got != 100 {
@@ -250,7 +251,7 @@ func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 		t.Fatalf("quiet window = %v, want 0", got)
 	}
 
-	recorder.addMCPBytes(50)
+	recorder.AddMCPBytes(50)
 	_, _ = sampleTrafficWindow(runtime, recorder, lastSSH, lastMCP)
 	if got := gaugeValue(t, scrapeMetrics(t, recorder), "erun_traffic_window_bytes"); got != 50 {
 		t.Fatalf("second active window = %v, want 50 (only the new bytes)", got)
@@ -270,8 +271,8 @@ type guardToolTestOutput struct {
 // dry-run call, an error, and a capability refusal.
 func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
-	admin := authIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
-	readOnly := authIdentity{Tenant: "acme", Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)})}
+	admin := shared.AuthIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
+	readOnly := shared.AuthIdentity{Tenant: "acme", Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)})}
 
 	successHandler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, guardToolTestOutput, error) {
 		return nil, guardToolTestOutput{Executed: true}, nil
@@ -283,18 +284,18 @@ func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 		return nil, guardToolTestOutput{}, errors.New("boom")
 	}
 
-	if _, _, err := guardTool(admin, "deploy", recorder, successHandler)(context.Background(), nil, struct{}{}); err != nil {
+	if _, _, err := shared.GuardTool(admin, "deploy", recorder, successHandler)(context.Background(), nil, struct{}{}); err != nil {
 		t.Fatalf("success call failed: %v", err)
 	}
-	if _, _, err := guardTool(admin, "deploy", recorder, dryRunHandler)(context.Background(), nil, struct{}{}); err != nil {
+	if _, _, err := shared.GuardTool(admin, "deploy", recorder, dryRunHandler)(context.Background(), nil, struct{}{}); err != nil {
 		t.Fatalf("dry-run call failed: %v", err)
 	}
-	if _, _, err := guardTool(admin, "deploy", recorder, errorHandler)(context.Background(), nil, struct{}{}); err == nil {
+	if _, _, err := shared.GuardTool(admin, "deploy", recorder, errorHandler)(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("expected the error handler's error to propagate")
 	}
 	// A read-only caller reaching a mutating tool directly (bypassing
 	// registration filtering) is refused by the guard itself.
-	if _, _, err := guardTool(readOnly, "deploy", recorder, successHandler)(context.Background(), nil, struct{}{}); err == nil {
+	if _, _, err := shared.GuardTool(readOnly, "deploy", recorder, successHandler)(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("expected the capability refusal to propagate")
 	}
 
@@ -323,19 +324,19 @@ func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 // listener never has to be threaded through every call site as a separate
 // "is metrics enabled" branch.
 func TestNilMetricsRecorderIsSafe(t *testing.T) {
-	var recorder *metricsRecorder
-	recorder.recordMCPCall("idle", "success")
-	recorder.recordAuditEvent("mcp.idle", "agent", "success")
-	recorder.setIdleEligibility(true)
-	recorder.setTerminalInputSecondsSinceLast(1)
-	recorder.setTrafficWindowBytes(1)
-	recorder.addMCPBytes(1)
+	var recorder *shared.MetricsRecorder
+	recorder.RecordMCPCall("idle", "success")
+	recorder.RecordAuditEvent("mcp.idle", "agent", "success")
+	recorder.SetIdleEligibility(true)
+	recorder.SetTerminalInputSecondsSinceLast(1)
+	recorder.SetTrafficWindowBytes(1)
+	recorder.AddMCPBytes(1)
 
-	admin := authIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
+	admin := shared.AuthIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, guardToolTestOutput, error) {
 		return nil, guardToolTestOutput{Executed: true}, nil
 	}
-	if _, _, err := guardTool(admin, "version", nil, handler)(context.Background(), nil, struct{}{}); err != nil {
+	if _, _, err := shared.GuardTool(admin, "version", nil, handler)(context.Background(), nil, struct{}{}); err != nil {
 		t.Fatalf("guardTool with a nil recorder failed: %v", err)
 	}
 }

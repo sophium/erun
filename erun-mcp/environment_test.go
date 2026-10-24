@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // The environment read model composes list/idle/doctor; what matters here is
@@ -14,15 +15,15 @@ import (
 // ResolveEnvironmentLifecycleState for the state machine itself.
 func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
 		},
 	}
 
-	_, result, err := environmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
+	_, result, err := shared.EnvironmentTool(runtime)(context.Background(), nil, shared.EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
@@ -48,8 +49,8 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
 	t.Setenv("ERUN_MCP_PORT", "17200")
 	t.Setenv("ERUN_SSHD_PORT", "17222")
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
@@ -57,7 +58,7 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 		},
 	}
 
-	_, result, err := environmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
+	_, result, err := shared.EnvironmentTool(runtime)(context.Background(), nil, shared.EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
@@ -83,8 +84,8 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 // not as stopped or idle.
 func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *testing.T) {
 	isolateLeaseCache(t)
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
 			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs: map[string]config.EnvConfig{
@@ -93,7 +94,7 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 		},
 	}
 
-	_, result, err := environmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
+	_, result, err := shared.EnvironmentTool(runtime)(context.Background(), nil, shared.EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}

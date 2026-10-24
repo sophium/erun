@@ -8,6 +8,12 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-mcp/tools/doctor"
+	"github.com/sophium/erun/erun-mcp/tools/expose"
+	"github.com/sophium/erun/erun-mcp/tools/observe"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/terraform"
+	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
 
 // TestCrossEnvironmentToolsRefuseAForeignEnvironment sweeps every remaining
@@ -25,30 +31,30 @@ func TestCrossEnvironmentToolsRefuseAForeignEnvironment(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	ctx := context.Background()
 
-	_, _, err := doctorTool(runtime)(ctx, nil, DoctorInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
+	_, _, err := doctor.DoctorTool(runtime)(ctx, nil, doctor.DoctorInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
 	assertRefusedForeignTarget(t, "doctor", err)
 
-	_, _, err = observeTool(runtime)(ctx, nil, ObserveInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
+	_, _, err = observe.ObserveTool(runtime)(ctx, nil, observe.ObserveInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
 	assertRefusedForeignTarget(t, "observe", err)
 
-	_, _, err = usageTool(runtime)(ctx, nil, UsageInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
+	_, _, err = usage.UsageTool(runtime)(ctx, nil, usage.UsageInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
 	assertRefusedForeignTarget(t, "usage", err)
 
-	_, _, err = exposeTool(runtime)(ctx, nil, ExposeInput{
+	_, _, err = expose.ExposeTool(runtime)(ctx, nil, expose.ExposeInput{
 		Tenant: "tenant-b", Environment: "prod", Service: "api", IP: "127.0.0.1", Preview: true,
 	})
 	assertRefusedForeignTarget(t, "expose", err)
 
-	_, _, err = unexposeTool(runtime)(ctx, nil, UnexposeInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
+	_, _, err = expose.UnexposeTool(runtime)(ctx, nil, expose.UnexposeInput{Tenant: "tenant-b", Environment: "prod", Preview: true})
 	assertRefusedForeignTarget(t, "unexpose", err)
 
-	_, _, err = terraformTool(runtime)(ctx, nil, TerraformInput{
+	_, _, err = terraform.TerraformTool(runtime)(ctx, nil, terraform.TerraformInput{
 		Tenant: "tenant-b", Environment: "prod", Operation: "plan", Preview: true,
 	})
 	assertRefusedForeignTarget(t, "terraform", err)
@@ -62,8 +68,8 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store:   usageTestStore("tenant-a", "dev"),
 	}
 	ctx := context.Background()
@@ -77,17 +83,17 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 		{"restated", "tenant-a", "dev"},
 	} {
 		t.Run("doctor/"+tc.name, func(t *testing.T) {
-			if _, _, err := doctorTool(runtime)(ctx, nil, DoctorInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
+			if _, _, err := doctor.DoctorTool(runtime)(ctx, nil, doctor.DoctorInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
 				t.Errorf("doctor refused its own scope: %v", err)
 			}
 		})
 		t.Run("observe/"+tc.name, func(t *testing.T) {
-			if _, _, err := observeTool(runtime)(ctx, nil, ObserveInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
+			if _, _, err := observe.ObserveTool(runtime)(ctx, nil, observe.ObserveInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
 				t.Errorf("observe refused its own scope: %v", err)
 			}
 		})
 		t.Run("usage/"+tc.name, func(t *testing.T) {
-			if _, _, err := usageTool(runtime)(ctx, nil, UsageInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
+			if _, _, err := usage.UsageTool(runtime)(ctx, nil, usage.UsageInput{Tenant: tc.tenant, Environment: tc.environment, Preview: true}); err != nil {
 				t.Errorf("usage refused its own scope: %v", err)
 			}
 		})
@@ -100,8 +106,8 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 // and PlatformNamespace are supplied explicitly (mirroring the CLI's
 // --services-zone/--platform-namespace) so the call needs no project on disk.
 func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeRuntime, KubernetesContext: "test-context"},
@@ -119,7 +125,7 @@ func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 		{"restated", "acme", "dev"},
 	} {
 		t.Run("expose/"+tc.name, func(t *testing.T) {
-			_, _, err := exposeTool(runtime)(ctx, nil, ExposeInput{
+			_, _, err := expose.ExposeTool(runtime)(ctx, nil, expose.ExposeInput{
 				Tenant: tc.tenant, Environment: tc.environment,
 				Service: "api", IP: "127.0.0.1",
 				ServicesZone: "zone.test", PlatformNamespace: "ns-test",
@@ -130,7 +136,7 @@ func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 			}
 		})
 		t.Run("unexpose/"+tc.name, func(t *testing.T) {
-			_, _, err := unexposeTool(runtime)(ctx, nil, UnexposeInput{
+			_, _, err := expose.UnexposeTool(runtime)(ctx, nil, expose.UnexposeInput{
 				Tenant: tc.tenant, Environment: tc.environment,
 				ServicesZone: "zone.test", PlatformNamespace: "ns-test",
 				Preview: true,
@@ -166,8 +172,8 @@ func TestTerraformAcceptsItsOwnScope(t *testing.T) {
 		t.Fatalf("mkdir terraform root: %v", err)
 	}
 
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: projectRoot},
+	runtime := shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: projectRoot},
 		Store: terraformTestStore{listToolStore{
 			envConfigs: map[string]config.EnvConfig{
 				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent},
@@ -185,7 +191,7 @@ func TestTerraformAcceptsItsOwnScope(t *testing.T) {
 		{"restated", "acme", "dev"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, output, err := terraformTool(runtime)(ctx, nil, TerraformInput{
+			_, output, err := terraform.TerraformTool(runtime)(ctx, nil, terraform.TerraformInput{
 				Tenant: tc.tenant, Environment: tc.environment, Operation: "plan", Preview: true,
 			})
 			if err != nil {

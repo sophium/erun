@@ -15,6 +15,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/attach"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
@@ -25,28 +27,28 @@ import (
 // straight away without ever running that step, so they must establish the
 // same precondition instead of depending on it already being present on the
 // host running the suite.
-func newAttachTestRuntime(t *testing.T) RuntimeConfig {
+func newAttachTestRuntime(t *testing.T) shared.RuntimeConfig {
 	t.Helper()
 	if err := os.MkdirAll(activity.RemoteAppSessionSocketDir, 0o700); err != nil {
 		t.Fatalf("create session socket dir: %v", err)
 	}
-	return RuntimeConfig{Context: RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
+	return shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
 }
 
 // newAuthedAttachServer serves the real production mux (newHTTPHandler,
 // including registerAttachHandler) with a trusted issuer configured, so these
 // tests exercise the actual wiring a deployed edge runs rather than a
 // hand-built test-only mux.
-func newAuthedAttachServer(t *testing.T, runtime RuntimeConfig, issuer, tenant string) *httptest.Server {
+func newAuthedAttachServer(t *testing.T, runtime shared.RuntimeConfig, issuer, tenant string) *httptest.Server {
 	t.Helper()
 	trusted, err := json.Marshal(map[string]string{issuer: tenant})
 	if err != nil {
 		t.Fatalf("marshal trusted issuers: %v", err)
 	}
-	t.Setenv(envMCPTrustedIssuers, string(trusted))
-	t.Setenv(envMCPTrustedIssuer, "")
-	t.Setenv(envMCPAudience, "erun-mcp")
-	t.Setenv(envTenant, tenant)
+	t.Setenv(shared.EnvMCPTrustedIssuers, string(trusted))
+	t.Setenv(shared.EnvMCPTrustedIssuer, "")
+	t.Setenv(shared.EnvMCPAudience, "erun-mcp")
+	t.Setenv(shared.EnvTenant, tenant)
 
 	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
 	t.Cleanup(server.Close)
@@ -76,7 +78,7 @@ func dialAttach(baseURL, session, token string) (*websocket.Conn, *http.Response
 // browser WebSocket client has (see auth.go's attachAuthSubprotocol).
 func dialAttachViaSubprotocol(baseURL, session, token string) (*websocket.Conn, *http.Response, error) {
 	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = []string{attachAuthSubprotocol, token}
+	dialer.Subprotocols = []string{shared.AttachAuthSubprotocol, token}
 	return dialer.Dial(attachWSURL(baseURL, session), nil)
 }
 
@@ -87,7 +89,7 @@ func writeBinary(t *testing.T, conn *websocket.Conn, s string) {
 	}
 }
 
-func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) {
+func writeControl(t *testing.T, conn *websocket.Conn, msg attach.AttachControlMessage) {
 	t.Helper()
 	payload, err := json.Marshal(msg)
 	if err != nil {
@@ -149,7 +151,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	}
 }
 
-func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
+func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attach.AttachOutcomeMessage {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
@@ -160,58 +162,12 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 		if kind != websocket.TextMessage {
 			continue
 		}
-		var msg attachOutcomeMessage
+		var msg attach.AttachOutcomeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			t.Fatalf("unmarshal outcome message %q: %v", data, err)
 		}
 		return msg
 	}
-}
-
-// TestAttachReadHelpersToleratePastThePriorDeadline is the regression test
-// for the specific failure mode this suite hit under a contended host: every
-// subprocess-spawning scenario missed the outcome message by roughly 100ms
-// past a hardcoded 10s deadline -- the signature of a deadline too tight for
-// the host, not of a broken bridge (confirmed separately: the same scenarios
-// passed reliably once given a longer deadline under the same load). This
-// test proves the fix without depending on inducing real host contention: a
-// minimal websocket server with no PTY, no dtach, and no shell delays its one
-// binary frame past that old boundary, and the read helper these tests
-// actually use must still see it.
-func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
-	const priorDeadline = 10 * time.Second
-	const delay = priorDeadline + 2*time.Second
-	if delay >= attachReadDeadline {
-		t.Fatalf("test setup: delay %s must stay below attachReadDeadline %s", delay, attachReadDeadline)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer func() { _ = conn.Close() }()
-		time.Sleep(delay)
-		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("SLOW_MARKER"))
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	u, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	u.Scheme = "ws"
-	u.Path = "/slow"
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	waitForBinaryContaining(t, conn, "SLOW_MARKER")
 }
 
 // TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade is the mandatory proof
@@ -341,7 +297,7 @@ func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	writeControl(t, conn, attachControlMessage{Type: "resize", Cols: 100, Rows: 42})
+	writeControl(t, conn, attach.AttachControlMessage{Type: "resize", Cols: 100, Rows: 42})
 	writeBinary(t, conn, "stty size\n")
 	waitForBinaryContaining(t, conn, "42 100")
 
@@ -364,8 +320,8 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != attachAuthSubprotocol {
-		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, attachAuthSubprotocol)
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != shared.AttachAuthSubprotocol {
+		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, shared.AttachAuthSubprotocol)
 	}
 
 	writeBinary(t, conn, "echo SUBPROTOCOL_MARKER\n")

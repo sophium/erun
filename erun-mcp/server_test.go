@@ -26,6 +26,14 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-mcp/tools/build"
+	"github.com/sophium/erun/erun-mcp/tools/cloud"
+	"github.com/sophium/erun/erun-mcp/tools/diff"
+	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/initenv"
+	"github.com/sophium/erun/erun-mcp/tools/list"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+	versionpkg "github.com/sophium/erun/erun-mcp/tools/version"
 )
 
 type initInteractionStore struct{}
@@ -111,14 +119,14 @@ func (s listToolStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, err
 }
 
 func TestBuildVersionOutputDefaultsVersion(t *testing.T) {
-	got := buildVersionOutput(model.BuildInfo{})
+	got := versionpkg.BuildVersionOutput(model.BuildInfo{})
 	if got.Version != "dev" || got.Commit != "" || got.Date != "" {
 		t.Fatalf("unexpected defaults: %+v", got)
 	}
 }
 
 func TestBuildVersionOutput(t *testing.T) {
-	got := buildVersionOutput(model.BuildInfo{
+	got := versionpkg.BuildVersionOutput(model.BuildInfo{
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
@@ -192,9 +200,9 @@ var wantRegisteredTools = []string{
 // unauthenticated test client) and connects a client session to a freshly
 // built handler, so each caller gets a clean session without repeating the
 // setup and its own defer-cleanup.
-func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime RuntimeConfig) *mcp.ClientSession {
+func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime shared.RuntimeConfig) *mcp.ClientSession {
 	t.Helper()
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	cfg := HTTPConfig{Path: "/mcp"}
@@ -218,7 +226,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
-	}, RuntimeConfig{})
+	}, shared.RuntimeConfig{})
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -253,7 +261,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 // fail as a tool error naming its replacements, not as a protocol-level
 // "unknown tool" that names a problem and no action the caller can take.
 func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
-	session := connectTestMCPSession(t, model.BuildInfo{}, RuntimeConfig{})
+	session := connectTestMCPSession(t, model.BuildInfo{}, shared.RuntimeConfig{})
 
 	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "job_start",
@@ -374,11 +382,11 @@ func TestCorsMiddlewareAddsNothingForNonBrowserCallers(t *testing.T) {
 // behind it must still require the bearer token -- CORS widens who can reach
 // the server, never who is authorized.
 func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
-	t.Setenv(envMCPTrustedIssuer, "file:///some/key.pub")
-	t.Setenv(envTenant, "acme")
+	t.Setenv(shared.EnvMCPTrustedIssuer, "file:///some/key.pub")
+	t.Setenv(shared.EnvTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, shared.RuntimeConfig{}, nil))
 	defer httpServer.Close()
 
 	preflight, err := http.NewRequest(http.MethodOptions, httpServer.URL+cfg.Path, nil)
@@ -415,7 +423,7 @@ func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -449,7 +457,7 @@ func TestActivityHTTPMiddlewareRecordsWithoutIdleProbe(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -479,7 +487,7 @@ func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 	xdg.Reload()
 
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -523,12 +531,12 @@ func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 			},
 		},
 	}
-	handler := cloudSetTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "dev"},
+	handler := cloud.CloudSetTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "frs", Environment: "dev"},
 		Store:   store,
 	}))
 
-	_, result, err := handler(context.Background(), nil, CloudSetInput{Alias: "team-cloud"})
+	_, result, err := handler(context.Background(), nil, cloud.CloudSetInput{Alias: "team-cloud"})
 	if err != nil {
 		t.Fatalf("cloudSetTool failed: %v", err)
 	}
@@ -554,10 +562,10 @@ func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
 		t.Fatalf("write app.txt: %v", err)
 	}
 
-	handler := diffTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := diff.DiffTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
-	_, output, err := handler(context.Background(), nil, DiffInput{})
+	_, output, err := handler(context.Background(), nil, diff.DiffInput{})
 	if err != nil {
 		t.Fatalf("diffTool failed: %v", err)
 	}
@@ -591,10 +599,10 @@ const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'q
 func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 
-	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.WriteTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
-	_, output, err := handler(context.Background(), nil, WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
+	_, output, err := handler(context.Background(), nil, exectool.WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
 	if err != nil {
 		t.Fatalf("writeTool failed: %v", err)
 	}
@@ -622,7 +630,7 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 		t.Fatalf("written content = %q, want byte-identical %q", got, dangerousExecContent)
 	}
 
-	_, _, err = handler(context.Background(), nil, WriteInput{Path: "../escape.txt", Content: "x"})
+	_, _, err = handler(context.Background(), nil, exectool.WriteInput{Path: "../escape.txt", Content: "x"})
 	if err == nil {
 		t.Fatalf("expected refusal for a path outside the repo root")
 	}
@@ -644,10 +652,10 @@ func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.WriteTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
-	_, _, err := handler(context.Background(), nil, WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
+	_, _, err := handler(context.Background(), nil, exectool.WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
 	if err == nil {
 		t.Fatalf("expected refusal writing through a symlinked directory component")
 	}
@@ -666,23 +674,23 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 		t.Fatalf("write app.txt: %v", err)
 	}
 
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "not-main", Message: dangerousExecContent})
+	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "not-main", Message: dangerousExecContent})
 	if err == nil {
 		t.Fatalf("expected refusal when the declared branch does not match the current branch")
 	}
 
-	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: dangerousExecContent})
+	_, output, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: dangerousExecContent})
 	if err != nil {
 		t.Fatalf("commitTool failed: %v", err)
 	}
 	assertCommitToolOutput(t, output, projectRoot)
 }
 
-func assertCommitToolOutput(t *testing.T, output JobEnvelopeOutput, projectRoot string) {
+func assertCommitToolOutput(t *testing.T, output shared.JobEnvelopeOutput, projectRoot string) {
 	t.Helper()
 
 	if output.Commit == nil {
@@ -743,11 +751,11 @@ func seedCommitToolScopedPathsRepo(t *testing.T) string {
 
 func TestCommitToolScopedPathsRefusesUnrelatedDirtyFile(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
+	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
 	if err == nil {
 		t.Fatalf("expected refusal when the tree has changes outside the declared paths")
 	}
@@ -764,11 +772,11 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	if err := os.Remove(filepath.Join(projectRoot, "unrelated.txt")); err != nil {
 		t.Fatalf("remove unrelated.txt: %v", err)
 	}
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
+	_, output, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
 	if err != nil {
 		t.Fatalf("commitTool failed: %v", err)
 	}
@@ -787,11 +795,11 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 // omitting Paths entirely.
 func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
+	handler := exectool.CommitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
+	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
 	if err == nil {
 		t.Fatalf("expected refusal for a paths list of blank entries")
 	}
@@ -802,8 +810,8 @@ func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 
 func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	projectRoot := t.TempDir()
-	handler := listTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := list.ListTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Tenant:      "tenant-a",
 			Environment: "dev",
 			RepoPath:    projectRoot,
@@ -833,7 +841,7 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 		},
 	}))
 
-	_, output, err := handler(context.Background(), nil, ListInput{})
+	_, output, err := handler(context.Background(), nil, list.ListInput{})
 	if err != nil {
 		t.Fatalf("listTool failed: %v", err)
 	}
@@ -841,7 +849,7 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	assertListToolOutput(t, output)
 }
 
-func assertListToolOutput(t *testing.T, output ListToolResult) {
+func assertListToolOutput(t *testing.T, output list.ListToolResult) {
 	t.Helper()
 
 	if output.Defaults.Tenant != "tenant-a" || output.Defaults.Environment != "dev" {
@@ -881,13 +889,13 @@ func TestReleaseToolPreview(t *testing.T) {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
 
-	handler := releaseTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.ReleaseTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			RepoPath: projectRoot,
 		},
 	}))
 
-	_, output, err := handler(context.Background(), nil, ReleaseInput{Preview: true, Verbosity: 1})
+	_, output, err := handler(context.Background(), nil, build.ReleaseInput{Preview: true, Verbosity: 1})
 	if err != nil {
 		t.Fatalf("releaseTool failed: %v", err)
 	}
@@ -963,8 +971,8 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 		t.Fatalf("write Dockerfile: %v", err)
 	}
 
-	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.PushTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    projectRoot,
 		},
@@ -972,7 +980,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 
 	// Pass a version so the version-required gate passes and the test reaches
 	// the repo-root-without-component rejection it actually covers.
-	_, _, err := handler(context.Background(), nil, PushInput{Version: "1.0.0"})
+	_, _, err := handler(context.Background(), nil, build.PushInput{Version: "1.0.0"})
 	if err == nil {
 		t.Fatal("expected missing Dockerfile error")
 	}
@@ -985,14 +993,14 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 // primitive that publishes a built version and never mints one, so the tool
 // must fail before any work when no version is supplied (erun-mcp/AGENTS.md).
 func TestPushToolRequiresVersion(t *testing.T) {
-	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.PushTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    t.TempDir(),
 		},
 	}))
 
-	if _, _, err := handler(context.Background(), nil, PushInput{}); err != errMissingPushVersion {
+	if _, _, err := handler(context.Background(), nil, build.PushInput{}); err != build.ErrMissingPushVersion {
 		t.Fatalf("expected errMissingPushVersion, got %v", err)
 	}
 }
@@ -1008,8 +1016,8 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	}
 
 	var called bool
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.BuildTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
@@ -1029,7 +1037,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 		},
 	}))
 
-	_, output, err := handler(context.Background(), nil, BuildInput{})
+	_, output, err := handler(context.Background(), nil, build.BuildInput{})
 	if err != nil {
 		t.Fatalf("buildTool failed: %v", err)
 	}
@@ -1072,8 +1080,8 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	projectRoot := newComponentBuildFixture(t)
 
 	var captured *eruncommon.DockerBuildSpec
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.BuildTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
@@ -1087,7 +1095,7 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 		},
 	}))
 
-	_, output, err := handler(context.Background(), nil, BuildInput{Component: "web", NoIncremental: true})
+	_, output, err := handler(context.Background(), nil, build.BuildInput{Component: "web", NoIncremental: true})
 	if err != nil {
 		t.Fatalf("buildTool failed: %v", err)
 	}
@@ -1132,8 +1140,8 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 		t.Fatalf("write project config: %v", err)
 	}
 
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := build.BuildTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
@@ -1143,7 +1151,7 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 		},
 	}))
 
-	_, _, err := handler(context.Background(), nil, BuildInput{Component: "web", Preview: true})
+	_, _, err := handler(context.Background(), nil, build.BuildInput{Component: "web", Preview: true})
 	if err == nil {
 		t.Fatal("expected an error for an invalid paths.dockercontext value")
 	}
@@ -1156,15 +1164,15 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	projectRoot := t.TempDir()
 
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
+	handler := initenv.InitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{
 			Tenant:   "tenant-a",
 			RepoPath: projectRoot,
 		},
 		Store: initInteractionStore{},
 	}))
 
-	_, output, err := handler(context.Background(), nil, InitInput{})
+	_, output, err := handler(context.Background(), nil, initenv.InitInput{})
 	if err != nil {
 		t.Fatalf("initTool failed: %v", err)
 	}
@@ -1250,8 +1258,8 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	// the seam confirms erun-devops published at every version instead of
 	// reaching a live registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{},
+	handler := initenv.InitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{},
 		Store:   initInteractionStore{},
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
@@ -1265,7 +1273,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
 	}))
 
-	_, output, err := handler(context.Background(), nil, InitInput{
+	_, output, err := handler(context.Background(), nil, initenv.InitInput{
 		Tenant:             "frs",
 		Environment:        "dev",
 		Remote:             true,
@@ -1295,8 +1303,8 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	// live registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	var deployedVersion string
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{},
+	handler := initenv.InitTool(normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{},
 		Store:   initInteractionStore{},
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
@@ -1311,7 +1319,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
 	}))
 
-	_, output, err := handler(context.Background(), nil, InitInput{
+	_, output, err := handler(context.Background(), nil, initenv.InitInput{
 		Tenant:             "tenanta",
 		Environment:        "dev",
 		Version:            "1.0.19-snapshot-20260418141901",
@@ -1385,7 +1393,7 @@ func (b *lockedBuffer) String() string {
 // SDK emits, not on the response, because the response was always correct --
 // it is the visibility that was missing.
 func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
 		t.Setenv(key, "")
 	}
 
@@ -1395,7 +1403,7 @@ func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	t.Cleanup(func() { mcpServerLogger = previous })
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, shared.RuntimeConfig{}, nil))
 	t.Cleanup(httpServer.Close)
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`

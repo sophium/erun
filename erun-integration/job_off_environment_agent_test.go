@@ -32,7 +32,7 @@ import (
 // off-environment half, only reasoned about. This scenario runs the real
 // `emcp` binary (erun-mcp/cmd/emcp) as a genuine subprocess standing in for
 // the target environment's own edge, with MCP auth left unconfigured -- the
-// documented "legacy loopback-only" mode (erun-mcp/auth.go's
+// documented "legacy loopback-only" mode (erun-mcp/tools/shared/auth.go's
 // mcpAuthConfigFromEnv), not a test-only bypass.
 //
 // emcp runs as a real subprocess rather than in-process (erunmcp.RunHTTP

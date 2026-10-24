@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-mcp/tools/doctor"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // TestDoctorToolSkipsPodDependentSectionsWhenClusterUnreachable is the MCP
@@ -38,12 +40,12 @@ func TestDoctorToolSkipsPodDependentSectionsWhenClusterUnreachable(t *testing.T)
 	}
 	t.Setenv("ERUN_KUBECTL_BIN", kubectlPath)
 
-	runtime := normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store:   usageTestStore("acme", "dev"),
 	})
 
-	_, output, err := doctorTool(runtime)(context.Background(), nil, DoctorInput{PruneImages: true})
+	_, output, err := doctor.DoctorTool(runtime)(context.Background(), nil, doctor.DoctorInput{PruneImages: true})
 	if err != nil {
 		t.Fatalf("doctorTool failed: %v", err)
 	}

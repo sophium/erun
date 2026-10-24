@@ -9,6 +9,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/jobs"
 )
 
 // A task job's Result is "whatever the task returned, captured verbatim as
@@ -128,7 +129,7 @@ func TestExecJobStatusOutputSchemaAcceptsAJobWithNoResult(t *testing.T) {
 // execJobStatus calls the real tool through a real MCP session, so it
 // exercises the SDK's own output-schema validation on the way out -- the
 // exact step that failed for a finished release job.
-func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatusResult {
+func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) jobs.JobStatusResult {
 	t.Helper()
 	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "exec_job_status",
@@ -144,7 +145,7 @@ func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatu
 	if err != nil {
 		t.Fatalf("marshal structured content: %v", err)
 	}
-	var out JobStatusResult
+	var out jobs.JobStatusResult
 	if err := json.Unmarshal(structured, &out); err != nil {
 		t.Fatalf("unmarshal structured content: %v", err)
 	}
@@ -154,7 +155,7 @@ func execJobStatus(t *testing.T, session *mcp.ClientSession, id string) JobStatu
 	return out
 }
 
-func assertResultRoundTrips(t *testing.T, out JobStatusResult, want json.RawMessage) {
+func assertResultRoundTrips(t *testing.T, out jobs.JobStatusResult, want json.RawMessage) {
 	t.Helper()
 	var wantAny, gotAny any
 	if err := json.Unmarshal(want, &wantAny); err != nil {

@@ -7,46 +7,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
-
-func TestExecRawResolveDir(t *testing.T) {
-	repoRoot := t.TempDir()
-	subdir := filepath.Join(repoRoot, "sub")
-	if err := os.Mkdir(subdir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	cfg := RuntimeConfig{Context: RuntimeContext{RepoPath: repoRoot}}
-
-	t.Run("empty dir defaults to the repo root", func(t *testing.T) {
-		got, err := execRawResolveDir(cfg, "")
-		if err != nil {
-			t.Fatalf("execRawResolveDir: %v", err)
-		}
-		if got != repoRoot {
-			t.Fatalf("got %q, want repo root %q", got, repoRoot)
-		}
-	})
-
-	t.Run("relative dir resolves against the repo root", func(t *testing.T) {
-		got, err := execRawResolveDir(cfg, "sub")
-		if err != nil {
-			t.Fatalf("execRawResolveDir: %v", err)
-		}
-		if got != subdir {
-			t.Fatalf("got %q, want %q", got, subdir)
-		}
-	})
-
-	t.Run("absolute dir passes through unchanged", func(t *testing.T) {
-		got, err := execRawResolveDir(cfg, subdir)
-		if err != nil {
-			t.Fatalf("execRawResolveDir: %v", err)
-		}
-		if got != subdir {
-			t.Fatalf("got %q, want %q", got, subdir)
-		}
-	})
-}
 
 func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -57,9 +21,9 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 	if err := os.Mkdir(subdir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{RepoPath: repoRoot}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{RepoPath: repoRoot}}))
 
-	_, output, err := handler(context.Background(), nil, RawInput{
+	_, output, err := handler(context.Background(), nil, exectool.RawInput{
 		Command: []string{"pwd"},
 		Dir:     "sub",
 	})
@@ -89,9 +53,9 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 }
 
 func TestRawToolRefusesEnvInTheForeground(t *testing.T) {
-	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{RepoPath: t.TempDir()}}))
 
-	_, _, err := handler(context.Background(), nil, RawInput{
+	_, _, err := handler(context.Background(), nil, exectool.RawInput{
 		Command: []string{"true"},
 		Env:     map[string]string{"FOO": "bar"},
 	})
@@ -110,9 +74,9 @@ func TestRawToolRefusesForeignEnvironmentInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
 	}
-	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
 
-	_, _, err := handler(context.Background(), nil, RawInput{
+	_, _, err := handler(context.Background(), nil, exectool.RawInput{
 		Command:     []string{"true"},
 		Tenant:      "erun",
 		Environment: "build",
@@ -133,7 +97,7 @@ func TestRawToolAcceptsItsOwnScopeInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
 	}
-	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
+	handler := exectool.RawTool(normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "erun", Environment: "code1", RepoPath: t.TempDir()}}))
 
 	for _, tc := range []struct {
 		name        string
@@ -144,7 +108,7 @@ func TestRawToolAcceptsItsOwnScopeInTheForeground(t *testing.T) {
 		{"restated", "erun", "code1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := handler(context.Background(), nil, RawInput{
+			_, _, err := handler(context.Background(), nil, exectool.RawInput{
 				Command:     []string{"true"},
 				Tenant:      tc.tenant,
 				Environment: tc.environment,

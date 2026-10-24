@@ -21,7 +21,27 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - depguard
   settings:
+    # One package per tool group (#2741, erun-common/AGENTS.md "Package
+    # layers"): a tool group reaches another only through tools/shared, so an
+    # edit to one group rebuilds that group and the server that registers it.
+    depguard:
+      rules:
+        tools:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/*/*.go", "!**/erun-mcp/tools/shared/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-mcp/tools/shared$
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: an erun-mcp tool package may import tools/shared, never the server package or another tool group
+        shared:
+          list-mode: lax
+          files: ["**/erun-mcp/tools/shared/*.go"]
+          deny:
+            - pkg: github.com/sophium/erun/erun-mcp
+              desc: tools/shared sits below every tool group and imports none of them
     funlen:
       lines: 100
       statements: 50

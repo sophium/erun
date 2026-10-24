@@ -1,0 +1,295 @@
+package shared
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"reflect"
+	"strings"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
+)
+
+// Authentication says which tenant is calling; this says what that caller may
+// do. The edge needs both, because a token that proves a tenant still reaches
+// `raw` — which can kubectl-exec — and every mutating tool besides.
+//
+// The gate is applied twice on purpose. The registered tool set is filtered per
+// request, so `tools/list` shows a caller only what it may call and anything
+// else is simply unknown to it; and each surviving handler re-checks at call
+// time, so a tool reached by any other route still cannot run. Neither layer
+// depends on the SDK propagating anything through context.
+
+// AuthIdentity is the resolved caller, carried from the auth middleware to the
+// per-request server factory and into audit lines.
+type AuthIdentity struct {
+	Tenant       string
+	User         string
+	Capabilities mcptools.MCPCapabilitySet
+}
+
+type authContextKey struct{}
+
+func WithAuthIdentity(ctx context.Context, identity AuthIdentity) context.Context {
+	return context.WithValue(ctx, authContextKey{}, identity)
+}
+
+// AuthIdentityFrom returns the resolved caller. An unauthenticated edge — the
+// loopback-only deployment that predates a trust anchor — has no identity, and
+// resolves to the coarse admin the desktop already assumes, so turning
+// authentication off does not quietly turn authorization on.
+func AuthIdentityFrom(ctx context.Context) AuthIdentity {
+	if identity, ok := ctx.Value(authContextKey{}).(AuthIdentity); ok {
+		return identity
+	}
+	return AuthIdentity{Capabilities: mcptools.AdminMCPCapabilitySet()}
+}
+
+// ToolRegistrar carries what a registration needs to decide. It exists because
+// generic functions cannot be methods, so the alternative was threading three
+// arguments through every register* call.
+type ToolRegistrar struct {
+	Server   *mcp.Server
+	Identity AuthIdentity
+	Metrics  *MetricsRecorder
+}
+
+// AddTool registers a tool only when the caller may use it. A tool the caller
+// cannot call is never registered, so it does not appear in `tools/list` and is
+// reported as unknown rather than forbidden — the caller learns nothing about
+// what it is not allowed to see.
+func AddTool[In, Out any](reg ToolRegistrar, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
+	if !reg.Identity.Capabilities.AllowsTool(tool.Name) {
+		return
+	}
+	describeTool(tool)
+	AdvertisePreview[In](tool)
+	if tool.OutputSchema == nil {
+		if schema := outputSchemaFor[Out](); schema != nil {
+			tool.OutputSchema = schema
+		}
+	}
+	mcp.AddTool(reg.Server, tool, GuardTool(reg.Identity, tool.Name, reg.Metrics, handler))
+}
+
+// PreviewAdvertised is the exact trailing sentence a tool description carries
+// when its input schema accepts `preview`. Callers scan descriptions for this
+// phrase, so it is added and checked verbatim.
+const PreviewAdvertised = "Supports preview."
+
+// AdvertisePreview makes "Supports preview." follow from the tool's input type,
+// in both directions.
+//
+// The sentence used to be typed by hand onto some descriptions and not others:
+// 22 tools advertised a dry run while 58 more accepted `preview` silently. A
+// caller reading that split reasonably concludes the silent ones have no dry
+// run, which is the one direction that costs something -- the tools it hides
+// include the destructive ones. Deriving the sentence from In instead of from
+// an author's memory means the description cannot drift from the schema.
+func AdvertisePreview[In any](tool *mcp.Tool) {
+	description := strings.TrimSpace(tool.Description)
+	claims := strings.HasSuffix(description, PreviewAdvertised)
+	accepts := inputAcceptsPreview[In]()
+	if !accepts {
+		// The reverse direction. A description that promises a dry run the
+		// schema cannot deliver is the same defect mirrored, and registration
+		// is where it is still cheap to catch.
+		if claims {
+			panic(fmt.Sprintf("erun-mcp: tool %q advertises preview but its input type has no preview property", tool.Name))
+		}
+		return
+	}
+	if claims {
+		return
+	}
+	tool.Description = description + " " + PreviewAdvertised
+}
+
+// inputAcceptsPreview reports whether In -- the type the SDK derives a tool's
+// input schema from -- declares a `preview` property.
+func inputAcceptsPreview[In any]() bool {
+	return structHasJSONField(reflect.TypeFor[In](), "preview", map[reflect.Type]bool{})
+}
+
+func structHasJSONField(rt reflect.Type, name string, seen map[reflect.Type]bool) bool {
+	for rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+	if rt.Kind() != reflect.Struct || seen[rt] {
+		return false
+	}
+	seen[rt] = true
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		if field.Anonymous {
+			if structHasJSONField(field.Type, name, seen) {
+				return true
+			}
+			continue
+		}
+		if tag, _, _ := strings.Cut(field.Tag.Get("json"), ","); tag == name {
+			return true
+		}
+	}
+	return false
+}
+
+// rawJSONSchemaOverrides widens json.RawMessage fields to accept any JSON
+// value. The SDK's reflector otherwise reads json.RawMessage by its
+// underlying Go kind — a []byte — and renders the wire representation of "an
+// arbitrary JSON value captured verbatim" (e.g. EnvironmentJob.Result) as an
+// array of bytes, which the value it actually carries (an object, a string, a
+// number...) can never satisfy.
+var rawJSONSchemaOverrides = &jsonschema.ForOptions{
+	TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[json.RawMessage](): anyJSONValueSchema(),
+	},
+}
+
+// anyJSONValueSchema is the schema published for a json.RawMessage field, and
+// what it must be is "any JSON value" — expressed as an object, never as the
+// boolean `true`.
+//
+// An empty jsonschema.Schema is the obvious way to write that, and it is
+// wrong here: Schema.MarshalJSON deliberately collapses `{}` to `true` (the
+// two are the same schema), and a boolean subschema is not something every
+// client's tool-list validator accepts. One json.RawMessage field anywhere in
+// one tool's output schema was enough for a client to refuse the *entire*
+// tools/list — build_profile's record (BuildProfileResult.Record) took the
+// whole erun surface away from an in-pod agent, which then saw no erun tools
+// at all rather than one tool with an odd schema.
+//
+// So the six-type union says the same thing in a shape no validator has to
+// special-case. It is every JSON type the spec defines, so it accepts exactly
+// what `true` accepts; adding a seventh type to the language is the only way
+// it could ever become narrower, and the MCP protocol would have moved first.
+func anyJSONValueSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Types: []string{"object", "array", "string", "number", "boolean", "null"},
+	}
+}
+
+// outputSchemaFor computes the schema for a tool's Out type the same way the
+// SDK's own AddTool does when no explicit schema is given, except routed
+// through rawJSONSchemaOverrides. It returns nil for Out == any, matching the
+// SDK's own choice to omit the output schema entirely in that case.
+func outputSchemaFor[Out any]() *jsonschema.Schema {
+	rt := reflect.TypeFor[Out]()
+	if rt == reflect.TypeFor[any]() {
+		return nil
+	}
+	if rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+	schema, err := jsonschema.ForType(rt, rawJSONSchemaOverrides)
+	if err != nil {
+		panic(fmt.Sprintf("erun-mcp: computing output schema for %s: %v", rt, err))
+	}
+	return schema
+}
+
+// describeTool attaches the tool's family, CLI path, title and annotations from
+// erun-common's descriptor table.
+//
+// It panics on a tool with no descriptor, deliberately. The alternative is
+// shipping it on the MCP spec defaults -- readOnlyHint false, destructiveHint
+// true, openWorldHint true -- which is how `version` came to be advertised as a
+// destructive open-world tool (#1186). A missing descriptor is a programming
+// error in a binary that is built and tested together, so failing at
+// registration is loud and immediate; a silent conservative default would be
+// the same invisible-wrong-answer this table exists to remove.
+func describeTool(tool *mcp.Tool) {
+	descriptor, ok := mcptools.MCPToolDescriptorFor(tool.Name)
+	if !ok {
+		panic(fmt.Sprintf("erun-mcp: tool %q has no descriptor in erun-common's MCPToolDescriptor table; add one so it does not ship on the MCP spec defaults", tool.Name))
+	}
+
+	tool.Title = descriptor.Title
+	// destructiveHint and openWorldHint are *bool in the SDK and default to
+	// TRUE when nil, so both must be set explicitly on every tool -- including
+	// to false. That nil-means-true is the whole reason the surface was
+	// uniformly destructive before this.
+	destructive, openWorld := descriptor.Destructive, descriptor.OpenWorld
+	tool.Annotations = &mcp.ToolAnnotations{
+		Title:           descriptor.Title,
+		ReadOnlyHint:    descriptor.ReadOnly,
+		DestructiveHint: &destructive,
+		IdempotentHint:  descriptor.Idempotent,
+		OpenWorldHint:   &openWorld,
+	}
+
+	meta := mcp.Meta{"family": descriptor.Family}
+	if descriptor.CLIPath == nil {
+		// No command behind it. Reporting mcpOnly is more useful than inventing
+		// a path, which is how workspace_sync drifted from `erun sshd sync`.
+		meta["mcpOnly"] = true
+	} else {
+		meta["cliPath"] = descriptor.CLIPath
+	}
+	tool.Meta = meta
+}
+
+// GuardTool re-checks at call time. Registration already filtered, so this only
+// fires if a tool is reached another way — which is exactly when a check that
+// depends on registration would have been useless.
+//
+// It is also the one place every MCP tool call passes through regardless of
+// which register* function added it, which makes it the natural home for
+// erun_mcp_calls_total and erun_audit_events_total (erun-docs/docs/
+// agent-reference/metrics-spec.md): every call is counted here exactly once,
+// with the same allow/deny/outcome guardTool already computes for the log
+// line above. actor_kind is always "agent" because this edge is MCP-only — an
+// Operator's own actions go through the CLI, a source this in-pod counter does
+// not read from yet (see the spec's corrected note on erun_audit_events_total).
+func GuardTool[In, Out any](identity AuthIdentity, name string, metrics *MetricsRecorder, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
+		// A server is cached per capability set, so the identity captured at
+		// registration is whichever caller first produced that set. Its
+		// capabilities are right by construction; its user is not. Prefer the
+		// live caller so the audit line names who actually called.
+		//
+		// caller is a per-call local: this closure is built once at
+		// registration and reused for every call to this tool, so the
+		// captured identity parameter is shared across concurrent callers and
+		// must stay read-only.
+		caller := identity
+		if live, ok := ctx.Value(authContextKey{}).(AuthIdentity); ok {
+			caller = live
+		}
+		action := "mcp." + name
+		if !caller.Capabilities.AllowsTool(name) {
+			var zero Out
+			AuditToolDecision(caller, name, false)
+			metrics.RecordAuditEvent(action, "agent", "error")
+			return nil, zero, fmt.Errorf("tool %q requires the %s capability", name, mcptools.MCPToolCapability(name))
+		}
+		AuditToolDecision(caller, name, true)
+		result, out, err := handler(ctx, req, input)
+		label := mcpCallResultLabel(out, err)
+		metrics.RecordMCPCall(name, label)
+		metrics.RecordAuditEvent(action, "agent", label)
+		return result, out, err
+	}
+}
+
+// AuditToolDecision records every allow and every deny with the resolved
+// identity. A deny nobody can see is indistinguishable from a tool that was
+// never called, which is the wrong thing to learn after an incident.
+func AuditToolDecision(identity AuthIdentity, tool string, allowed bool) {
+	decision := "deny"
+	if allowed {
+		decision = "allow"
+	}
+	log.Printf("erun-mcp authz: %s tool=%s tenant=%s user=%s capabilities=%v",
+		decision, tool, orUnset(identity.Tenant), orUnset(identity.User), identity.Capabilities.Names())
+}
+
+func orUnset(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}

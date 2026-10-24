@@ -15,9 +15,40 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	activitypkg "github.com/sophium/erun/erun-mcp/tools/activity"
+	"github.com/sophium/erun/erun-mcp/tools/agent"
+	"github.com/sophium/erun/erun-mcp/tools/aisessions"
+	"github.com/sophium/erun/erun-mcp/tools/attach"
+	"github.com/sophium/erun/erun-mcp/tools/build"
+	"github.com/sophium/erun/erun-mcp/tools/cloud"
+	"github.com/sophium/erun/erun-mcp/tools/contribute"
+	"github.com/sophium/erun/erun-mcp/tools/deploy"
+	"github.com/sophium/erun/erun-mcp/tools/diff"
+	"github.com/sophium/erun/erun-mcp/tools/doctor"
+	"github.com/sophium/erun/erun-mcp/tools/e2e"
+	"github.com/sophium/erun/erun-mcp/tools/envdelete"
+	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/expose"
+	"github.com/sophium/erun/erun-mcp/tools/idle"
+	"github.com/sophium/erun/erun-mcp/tools/initenv"
+	"github.com/sophium/erun/erun-mcp/tools/jobs"
+	"github.com/sophium/erun/erun-mcp/tools/kubecontext"
+	"github.com/sophium/erun/erun-mcp/tools/list"
+	"github.com/sophium/erun/erun-mcp/tools/observe"
+	"github.com/sophium/erun/erun-mcp/tools/outputs"
+	"github.com/sophium/erun/erun-mcp/tools/pin"
+	"github.com/sophium/erun/erun-mcp/tools/platform"
+	"github.com/sophium/erun/erun-mcp/tools/resize"
+	"github.com/sophium/erun/erun-mcp/tools/review"
+	"github.com/sophium/erun/erun-mcp/tools/services"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
+	"github.com/sophium/erun/erun-mcp/tools/terraform"
+	"github.com/sophium/erun/erun-mcp/tools/upgrade"
+	"github.com/sophium/erun/erun-mcp/tools/usage"
+	"github.com/sophium/erun/erun-mcp/tools/version"
+	"github.com/sophium/erun/erun-mcp/tools/whip"
 )
 
 const (
@@ -37,7 +68,7 @@ type HTTPConfig struct {
 // often) cancels the other and its error wins, rather than the metrics
 // listener silently dying while the MCP edge keeps the process alive for the
 // rest of the pod's lifetime.
-func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime RuntimeConfig) error {
+func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime shared.RuntimeConfig) error {
 	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
 		return err
@@ -67,7 +98,7 @@ func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsC
 	return second
 }
 
-func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) error {
+func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) error {
 	server := &http.Server{
 		Addr:              listenAddress(cfg),
 		Handler:           newHTTPHandler(info, cfg, runtime, recorder),
@@ -89,13 +120,13 @@ func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runti
 	return err
 }
 
-func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) http.Handler {
+func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) http.Handler {
 	cfg, _ = normalizeHTTPConfig(cfg)
 
 	// One server per distinct capability set, resolved per request: a caller
 	// sees exactly the tools it may call, and `tools/list` is the same answer as
 	// what it is allowed to do rather than a menu with locked entries.
-	servers := newCapabilityServerCache(func(identity authIdentity) *mcp.Server {
+	servers := newCapabilityServerCache(func(identity shared.AuthIdentity) *mcp.Server {
 		return newServer(info, runtime, identity, recorder)
 	})
 	streamable := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
@@ -105,7 +136,7 @@ func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig,
 	})
 	handler := withSessionKeepAlive(streamable, cfg.Path, mcpSessionTimeout)
 
-	authCfg := mcpAuthConfigFromEnv()
+	authCfg := shared.McpAuthConfigFromEnv()
 	mux := http.NewServeMux()
 	// CORS sits outside auth: a browser preflight carries no Authorization
 	// header at all, so gating it on auth would fail every cross-origin caller
@@ -116,13 +147,13 @@ func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig,
 	// runs. Traffic metering sits just inside it so a rejected call's tiny
 	// response still counts, but wraps the real MCP traffic that
 	// erun_traffic_window_bytes exists to measure.
-	mux.Handle(cfg.Path, corsMiddleware(authHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
+	mux.Handle(cfg.Path, corsMiddleware(shared.AuthHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
 	// The WebSocket attach edge is not wrapped in trafficMeteringMiddleware:
 	// that wrapper's byteCountingResponseWriter does not implement
 	// http.Hijacker, and the WebSocket upgrade needs to hijack the
 	// connection. It shares the same auth middleware, so a caller still needs
 	// a valid token before the handler ever inspects capabilities or upgrades.
-	registerAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
+	attach.RegisterAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
 	return mux
 }
 
@@ -177,26 +208,17 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handler {
+func activityHTTPMiddleware(runtime shared.RuntimeConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get(mcppkg.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
 			return
 		}
-		recordRuntimeActivity(runtime, config.ActivityKindMCP, false)
+		shared.RecordRuntimeActivity(runtime, config.ActivityKindMCP, false)
 		if requestLooksLikeCodex(req) {
-			recordRuntimeActivity(runtime, config.ActivityKindCodex, false)
+			shared.RecordRuntimeActivity(runtime, config.ActivityKindCodex, false)
 		}
 		next.ServeHTTP(w, req)
-	})
-}
-
-func recordRuntimeActivity(runtime RuntimeConfig, kind string, seen bool) {
-	_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
-		Tenant:      runtime.Context.Tenant,
-		Environment: runtime.Context.Environment,
-		Kind:        kind,
-		Seen:        seen,
 	})
 }
 
@@ -261,7 +283,7 @@ var mcpSessionTimeout = 5 * time.Minute
 // absence of the request.
 var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-func newServer(info model.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
+func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shared.AuthIdentity, metrics *shared.MetricsRecorder) *mcp.Server {
 	info = model.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
 
@@ -270,10 +292,10 @@ func newServer(info model.BuildInfo, runtime RuntimeConfig, identity authIdentit
 		Version: info.Version,
 	}, &mcp.ServerOptions{Logger: mcpServerLogger})
 
-	reg := toolRegistrar{server: server, identity: identity, metrics: metrics}
+	reg := shared.ToolRegistrar{Server: server, Identity: identity, Metrics: metrics}
 	registerReadModelTools(reg, info, runtime)
 	registerIdleStopTools(reg, runtime)
-	registerWhipTools(reg, runtime)
+	whip.RegisterWhipTools(reg, runtime)
 	registerJobTools(reg, runtime)
 	registerCloudTools(reg, runtime)
 	registerContextTools(reg, runtime)
@@ -294,9 +316,9 @@ func newServer(info model.BuildInfo, runtime RuntimeConfig, identity authIdentit
 // over its capability. The input type accepts any arguments so a caller still
 // shaped for the retired tool's own schema reaches this handler rather than
 // failing schema validation first.
-func registerRemovedTools(reg toolRegistrar) {
+func registerRemovedTools(reg shared.ToolRegistrar) {
 	for name, guidance := range mcptools.MCPRemovedTools() {
-		addTool(reg, &mcp.Tool{
+		shared.AddTool(reg, &mcp.Tool{
 			Name:        name,
 			Description: fmt.Sprintf("Removed; use %s instead.", guidance),
 		}, removedTool(name, guidance))
@@ -309,62 +331,62 @@ func removedTool(name, guidance string) func(context.Context, *mcp.CallToolReque
 	}
 }
 
-func registerReadModelTools(reg toolRegistrar, info model.BuildInfo, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerReadModelTools(reg shared.ToolRegistrar, info model.BuildInfo, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "version",
 		Description: "Return build metadata for the current erun binary",
-	}, versionTool(info))
-	addTool(reg, &mcp.Tool{
+	}, version.VersionTool(info))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "list",
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory. " +
 			"Pass versionDriftTenant to additionally report erun-version drift across that tenant's environments, and gateEnvironment to flag whether the environment driving that tenant's merge-queue gate is running an older erun version than any environment it gates.",
-	}, listTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, list.ListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "environment",
 		Description: "Return this environment's read model: its list-style summary (name, type, RuntimeVersion, default/effective markers), a resolved lifecycle state (running, idle, deploy-failed, stopped, or unknown), its idle policy + activity snapshot, its cloud-context config, and a doctor deploy diagnosis -- one call composing list/idle/doctor instead of three. " +
 			"Cloud-context power state is never refreshed live (no AWS credentials reach inside this pod), so a managed-cloud environment's state reads unknown rather than a guess unless something else already refreshed it. " +
 			"Pass preview=true to skip the live helm/kubectl deploy diagnosis.",
-	}, environmentTool(runtime))
+	}, shared.EnvironmentTool(runtime))
 }
 
-func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerIdleStopTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "idle",
 		Description: "Return environment idle stop timeout and marker status without recording activity. Includes the leases currently holding the env busy, so a caller can see what is deferring auto-stop.",
-	}, idleTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, idle.IdleTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "activity_lease_take",
 		Description: "Hold a named lease for the lifetime of long work in this env, so it reports as busy and idle-stop leaves it alone. " +
 			"Take one before detaching a build, test suite, or agent run: a detached job makes no MCP calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting. " +
 			"Re-taking the same id renews it. Pass the detached job's pid so the lease is reclaimed if it dies; a lease also expires on its own, so it can never pin the env awake forever. " +
 			"Set exclusive=true before any mutating work (git checkout, staging, committing) in a target environment: at most one exclusive holder is allowed per scope (default 'worktree'), so a second exclusive take in that scope is refused and named in the error, while a holder in a different scope - a separate clone in the same pod - is unaffected. An exclusive take is also refused while an operator's own SSH session is active in the environment, since the operator never takes a lease of their own. Which work a held claim refuses depends on its scope: only an 'environment' claim refuses other job starts here, while a 'worktree' claim - the default - is refused by erun exec gate-merge, which rewrites that one shared worktree, and a claim at another scope refuses neither.",
-	}, activityLeaseTakeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, activitypkg.ActivityLeaseTakeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
 		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds, and the result's released field reports whether anything was actually held rather than reading the same success either way. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it, and if a different id holds that scope the call fails naming the actual holder instead of silently leaving it in place.",
-	}, activityLeaseReleaseTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, activitypkg.ActivityLeaseReleaseTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "activity_lease_list",
 		Description: "List the leases currently holding this env busy. Reading the list also reclaims leases that expired or whose holder process is gone, so what it returns is what is actually deferring auto-stop.",
-	}, activityLeaseListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, activitypkg.ActivityLeaseListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_cancel",
 		Description: "Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed.",
 	}, idleStopCancelTool(runtime))
-	addTool(reg, &mcp.Tool{
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_history",
 		Description: "Return the last N (cap 10) auto-stop audit entries for the env, newest first. Each row carries the per-marker idle/active breakdown captured when the auto-stop grace was armed.",
 	}, idleStopHistoryTool(runtime))
-	addTool(reg, &mcp.Tool{
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_record",
 		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
 	}, idleStopRecordTool(runtime))
-	addTool(reg, &mcp.Tool{
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "ai_sessions",
 		Description: "Return the structured status (idle, busy, awaiting-input, exited, or oom-killed) of AI tool sessions in this environment, resolved from each session's own last reported turn-boundary event -- never from PTY output volume or silence. " +
 			"Pass session to resolve one session; omit it to list every session recorded for the environment. " +
 			"The write side is 'erun activity ai-session report', which a tool's own hooks invoke at each turn boundary.",
-	}, aiSessionsTool(runtime))
+	}, aisessions.AiSessionsTool(runtime))
 }
 
 // registerJobTools registers the exec_job_* family (#1246, following the
@@ -376,8 +398,8 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 // compatibility shim would have meant shipping a tool whose input shape lied
 // about what it accepted. Its command mode is exec_raw's wait:false path and
 // its agent mode is exec_agent, both already registered elsewhere.
-func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerJobTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_agent",
 		Description: "Run an AI tool (claude or codex) as a detached job and return its handle. " +
 			"erun invokes it in its streaming mode, so exec_job_output returns events while it works and exec_job_status reports its current activity rather than only running -- running the tool through exec_raw instead would report nothing at all until it exits. " +
@@ -386,14 +408,14 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it. " +
 			"env sets additional environment for just this run (e.g. raising CLAUDE_CODE_MAX_OUTPUT_TOKENS for a run that will write large files) — see the env parameter description for what it refuses and why it is not for secrets. " +
 			"This is a one-shot, non-interactive run: nothing wakes it once it exits, so it must not end its own turn believing something will notify it about work it is still waiting on. If the run itself starts another job through its own Bash tool (a full build, most often) before ending, await that job to a real verdict first -- the wrapping job here does the same internally and will not report exited until it does. There is one narrow exception: if this run's own process ends while what it started has not reached a verdict, or has reached a bad one, erun resumes the same session with the concrete outcome so the model can act on it, bounded to a small fixed count and a wall-clock budget (see exec_job_status's reinvocationCount). Past that bound, or for any other outcome, nothing acts on it -- write the prompt as if there is no later, because past the bound there is none.",
-	}, agentTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, agent.AgentTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_job_attach",
 		Description: "Give work you started another way a job handle and an activity lease, so it is visible and protected from idle-stop. " +
 			"erun tracks the pid you name and nothing else: the job reads as running while that process lives and as unknown once it is gone. " +
 			"It can never report an exit status, because nothing erun ran was waiting on that process to observe one — start work through exec_raw or exec_agent when you need the outcome.",
-	}, jobAttachTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobAttachTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_job_status",
 		Description: "Return one job's state and outcome, or every retained job newest-first. " +
 			"The answer is always definite: running, exited with a captured exit code, or explicitly unknown with the reason (its supervisor is gone without an outcome, most often because the runtime pod was replaced). " +
@@ -404,8 +426,8 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"An agent job also carries progress — current activity (the last tool and its target), turns, tools run, and the last thing the agent said — normalized by erun from the tool's own event stream, so the shape is the same across AI tools. Poll this to report an in-pod agent's progress; do not scrape the agent's private transcript. " +
 			"A job started as a background task (build, deploy, doctor, and the rest of the job-envelope tools called with wait: false) carries its typed result on this record's result field once exited, in the same shape the tool would have returned synchronously. " +
 			"command is collapsed to a short identifying prefix once it runs past 240 characters -- an agent job's command embeds its whole dispatch prompt, and a status poll is never where that is needed back, since you already have it.",
-	}, jobStatusTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobStatusTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_job_await",
 		Description: "Wait a bounded time (default 30s, max 600s -- a longer timeoutSeconds is refused, not silently capped) for a job to finish. " +
 			"A job that runs longer than 600s (a full build with its test suite routinely does) is not a case this tool refuses to cover: call it again, at up to the 600s max, each time it reports timedOut=true, instead of asking for one longer wait or treating the timeout as the answer -- timedOut=true is never a verdict on the job, only on this one call's own bounded wait. " +
@@ -414,78 +436,78 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"An agent job's own process exiting is not this call's cue to stop: if that process started another job through its own Bash tool and left it running, this job keeps reading as running (not exited) until that started job reaches a verdict too, up to gate-incomplete if the wait is exhausted first -- including, for an agent job, one bounded automatic resumption of the session to act on that verdict before either is reported final (see exec_job_status's reinvocationCount). Keep awaiting this job's id, not the underlying tool's transcript, for the real answer. " +
 			"The returned job's aliveAgeMs (see exec_job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile. " +
 			"command is collapsed the same way exec_job_status collapses it (see there), so a bounded wait that times out on a long-running agent job never re-echoes its whole dispatch prompt.",
-	}, jobAwaitTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobAwaitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_job_output",
 		Description: "Read a page of a job's captured output, including while it is still running, so progress is visible before the work exits. " +
 			"Pass the previous read's nextOffset back as offset to continue where you left off. " +
 			"complete is true only when the job has finished and you have read to the end; the job's own outputTruncated says whether output was dropped at the cap. " +
 			"The returned job also carries aliveAgeMs (see exec_job_status) — a silent-but-healthy command never advances outputBytes for minutes at a time, so use aliveAgeMs, not output growth, to tell quiet-but-alive apart from actually dead. " +
 			"A background task job (see exec_job_status) has no output log of its own; read its typed result off the returned job instead.",
-	}, jobOutputTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobOutputTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "exec_job_cancel",
 		Description: "Signal a running job's work (TERM by default, or INT/HUP/KILL). " +
 			"The target comes from the job record, never from a command-line pattern, so a cancel can only reach the work it names and never a process that merely looks like it. " +
 			"The job's supervisor is deliberately left alone, so it survives to record the outcome; the cancelled job then reads back as a normal exited job carrying the signal. " +
 			"A background task job (build, deploy, doctor, and the rest) has no subprocess of its own to signal and is refused; wait for it or let it finish.",
-	}, jobCancelTool(runtime))
+	}, jobs.JobCancelTool(runtime))
 
 	// Deprecated aliases for the five renamed job tools, kept callable for one
 	// release (the same window #1186 used for the exec_* renames). job_start
 	// has no equivalent alias: see the function comment above for why.
-	addTool(reg, &mcp.Tool{
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_attach",
 		Description: "Deprecated: use exec_job_attach. Retained for one release; this name will be removed.",
-	}, jobAttachTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobAttachTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_status",
 		Description: "Deprecated: use exec_job_status. Retained for one release; this name will be removed.",
-	}, jobStatusTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobStatusTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_await",
 		Description: "Deprecated: use exec_job_await. Retained for one release; this name will be removed.",
-	}, jobAwaitTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobAwaitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_output",
 		Description: "Deprecated: use exec_job_output. Retained for one release; this name will be removed.",
-	}, jobOutputTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobOutputTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "job_cancel",
 		Description: "Deprecated: use exec_job_cancel. Retained for one release; this name will be removed.",
-	}, jobCancelTool(runtime))
+	}, jobs.JobCancelTool(runtime))
 }
 
-func registerCloudTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerCloudTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_list",
 		Description: "List configured root-level cloud provider aliases and token status",
-	}, cloudListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_init_aws",
 		Description: "Initialize an AWS SSO cloud provider alias in root ERun config, with preview support",
-	}, cloudInitAWSTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudInitAWSTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_init_cloudflare",
 		Description: "Initialize a Cloudflare cloud provider alias from a delegated API token (Zone + DNS edit, plus any other scopes the operator will use such as Cloudflare Pages for static sites). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
-	}, cloudInitCloudflareTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudInitCloudflareTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_init_erun",
 		Description: "Initialize a hosted erun platform cloud provider alias: discovers the platform's own config (OIDC issuer, CLI client id) from its unauthenticated GET /v1/platform endpoint and saves the alias — no instance's name is hardcoded. Call cloud_login afterward to sign in (Device Authorization Grant, falling back to Authorization Code + PKCE). Supports preview.",
-	}, cloudInitERunTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudInitERunTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_login",
 		Description: "Login to a configured cloud provider alias, with preview support. For an erun-hosted alias, flow selects the OIDC grant: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete.",
-	}, cloudLoginTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudLoginTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_oidc",
 		Description: "Refresh the OIDC issuer for a configured cloud provider alias, with preview support",
-	}, cloudOIDCTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudOIDCTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_set",
 		Description: "Set the cloud provider alias for a tenant environment, with preview support",
-	}, cloudSetTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, cloud.CloudSetTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "cloud_inject_aws_credentials",
 		Description: "Write temporary AWS credentials into the runtime pod's ~/.aws/credentials under the erun-host profile, " +
 			"replacing that profile in place. The credential values are tool arguments, so DO NOT call this from anything " +
@@ -493,318 +515,318 @@ func registerCloudTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"credential refresher, which holds the values in memory. To refresh an environment's host credentials from a " +
 			"script, an agent, or a terminal, run `erun cloud refresh <tenant> <environment>` instead: it reads the " +
 			"operator's own profile and streams the secret to the pod on stdin, so nothing sensitive passes through the caller.",
-	}, cloudInjectAWSCredentialsTool())
-	addTool(reg, &mcp.Tool{
+	}, shared.CloudInjectAWSCredentialsTool())
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_clear_aws_credentials",
 		Description: "Remove the erun-host profile from the runtime pod's ~/.aws/credentials",
-	}, cloudClearAWSCredentialsTool())
+	}, shared.CloudClearAWSCredentialsTool())
 }
 
-func registerContextTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerContextTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "context_list",
 		Description: "List managed ERun cloud Kubernetes contexts",
-	}, contextListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, kubecontext.ContextListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "context_init",
 		Description: "Initialize a managed cloud k3s Kubernetes context, with preview support",
-	}, contextInitTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, kubecontext.ContextInitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "context_stop",
 		Description: "Stop a managed ERun cloud Kubernetes context, with preview support",
-	}, contextStopTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, kubecontext.ContextStopTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "context_start",
 		Description: "Start a managed ERun cloud Kubernetes context, with preview support",
-	}, contextStartTool(runtime))
+	}, kubecontext.ContextStartTool(runtime))
 }
 
-func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerPlatformTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_whoami",
 		Description: "Resolve the caller's identity against a hosted erun platform (erun-backend-api) over the erun-type cloud alias erun cloud init erun / erun cloud login set up. Supports preview.",
-	}, platformWhoamiTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformWhoamiTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_version",
 		Description: "Report the build actually serving a hosted erun platform's own API (erun-backend-api) over GET /v1/platform. Unauthenticated, so it still answers with an expired or missing access token -- useful for telling a stale plane apart from an unreachable one or an authorization failure on some other route. Compare the reported version against the version a route or feature was added in to tell \"merged but not deployed\" apart from a real bug. Supports preview.",
-	}, platformVersionTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformVersionTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_tenant_create",
 		Description: "Register a new tenant on the erun platform. Requires an operations-tenant caller. A real, immediate write, not a preview, unless preview is set.",
-	}, platformTenantCreateTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformTenantCreateTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_tenant_list",
 		Description: "List tenants visible to the caller on the erun platform: every tenant for an operations-tenant caller, or just the caller's own tenant otherwise. Supports preview.",
-	}, platformTenantListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformTenantListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_tenant_repair-org-mapping",
 		Description: "Repair a tenant already stuck with an unresolvable (issuer, org) mapping -- one that lists but that no token can ever authenticate into, such as a tenant created with no orgFieldValue before platform_tenant_create started refusing that. Converts issuer to org-scoped (if not already) and sets tenantId's own org value. Requires an operations-tenant caller. There is no tenant delete on this platform, so this is the only way back short of direct database access. A real, immediate write, not a preview, unless preview is set.",
-	}, platformTenantRepairOrgMappingTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformTenantRepairOrgMappingTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_identity_org_create",
 		Description: "Create an organization on the erun platform's own identity provider. Requires an operations-tenant caller. An org-scoped tenant needs an org of its own before platform_tenant_create's orgFieldValue can produce a mapping any token will ever resolve to -- this is how a caller obtains that value. A real, immediate write, not a preview, unless preview is set.",
-	}, platformIdentityOrgCreateTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformIdentityOrgCreateTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_user_enroll",
 		Description: "Enroll a user in a tenant on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
-	}, platformUserEnrollTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformUserEnrollTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_user_grant-role",
 		Description: "Grant a role to a user already enrolled in the caller's tenant. This is the post-enrollment grant platform_user_enroll cannot perform: enrolling an identity that is already enrolled is a no-op that leaves its roles untouched. Find the role id in the tenant's role list; the role whose permissions cover what the user needs is the one to name. Requires a caller whose own role includes the grant route. A real, immediate write, not a preview, unless preview is set.",
-	}, platformUserGrantRoleTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformUserGrantRoleTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_user_list",
 		Description: "List a tenant's users on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
-	}, platformUserListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformUserListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_list",
 		Description: "List the caller's tenant's hosted environments on the erun platform. Supports preview.",
-	}, platformEnvListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_get",
 		Description: "Fetch one hosted environment by id from the erun platform. Supports preview.",
-	}, platformEnvGetTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvGetTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_register",
 		Description: "Register a hosted environment on the erun platform. A real, immediate write, not a preview, unless preview is set. For a runtime environment with runtimeVersion set and a deploy executor configured on the platform, this also starts a server-side deploy: poll platform_env_get to watch status move registered -> provisioning -> running/failed.",
-	}, platformEnvRegisterTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvRegisterTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_deploy",
 		Description: "Start a server-side deploy of an already-registered environment on the erun platform. Fails with a conflict if a deploy is already in progress. Supports preview.",
-	}, platformEnvDeployTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvDeployTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_stop",
 		Description: "Scale a hosted environment's runtime to zero on the erun platform, the server-side equivalent of `erun stop`. Supports preview.",
-	}, platformEnvStopTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvStopTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_env_delete",
 		Description: "Start deleting a hosted environment and tearing down its remote namespace on the erun platform, the server-side equivalent of `erun delete`. Not recoverable. The teardown itself runs in the background — a namespace stuck on an unsatisfiable finalizer can take a while, so this returns as soon as the delete is accepted, with the environment's status \"deleting\". Call platform_env_get to watch it converge to gone (not found) or \"deletion-blocked\" (its deleteError names why); calling delete again against a blocked or still-deleting environment retries it. This call never prompts: pass confirm=true to actually delete. Supports preview (confirm is ignored when preview is true).",
-	}, platformEnvDeleteTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformEnvDeleteTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_context_list",
 		Description: "List the caller's tenant's cloud contexts (managed clusters) on the erun platform. Supports preview.",
-	}, platformContextListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformContextListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_context_get",
 		Description: "Fetch one cloud context by id from the erun platform. Supports preview.",
-	}, platformContextGetTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformContextGetTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_context_create",
 		Description: "Bootstrap a cloud context (managed cluster) on the erun platform: without planOnly this launches a real cloud VM and provisions k3s on it, billing the tenant's cloud account until stopped. planOnly asks the platform to resolve and return the bootstrap plan without creating anything — a real API call, distinct from preview, which skips the network call entirely.",
-	}, platformContextCreateTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, platform.PlatformContextCreateTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "platform_provision",
 		Description: "Resolve and return the ordered plan for provisioning a hosted environment on the erun platform — tenant, quota, context bootstrap or reuse, namespace, register, deploy — without executing any of it or writing to the database. Pass either contextName (with contextAlias and contextRegion) to bootstrap a new cluster, or kubernetesContext to reuse an existing one.",
-	}, platformProvisionTool(runtime))
+	}, platform.PlatformProvisionTool(runtime))
 }
 
-func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerReviewTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_list",
 		Description: "List reviews on the erun platform, narrowed by any combination of targetBranch, sourceBranch, status, authorUserId, and reviewerUserId. mine and waitingOnMe resolve to the caller's own user id via whoami and cannot be combined with the equivalent explicit id filter. Supports preview.",
-	}, reviewListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_show",
 		Description: "Fetch one review on the erun platform together with its comment threads and recorded builds. Supports preview.",
-	}, reviewShowTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewShowTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_create",
 		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. issueRef records the issue the work belongs to, as owner/repo#number or as a bare number joined to the recorded repository; a recorded issue is declared, and outranks the number the source branch names. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewCreateTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewCreateTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_comment",
 		Description: "Comment on a line of a review on the erun platform, or reply to an existing comment with parentCommentId. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewCommentTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewCommentTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_resolve",
 		Description: "Resolve a comment thread on a review by closing its root comment. commentId must be the thread's root comment (the first comment posted at a file/line, not one created with parentCommentId set); addressing a reply fails, naming the root comment to retry against. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewResolveTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewResolveTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_unresolve",
 		Description: "Reopen a comment thread on a review by marking its root comment OPEN again. commentId must be the thread's root comment (the first comment posted at a file/line, not one created with parentCommentId set); addressing a reply fails, naming the root comment to retry against. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewUnresolveTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewUnresolveTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_close",
 		Description: "Close a review on the erun platform without merging it. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewCloseTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewCloseTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_record-build",
 		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one) — required even when successful is false; a recorded build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required. The merge queue records its build the same way: the environment a review's merge queue promoted to MERGE runs a plain build of the prospective merge commit exec_gate-merge prepared and records it here with the version it minted; only a successful build of the merge commit that landed can later be reported MERGED. A build reported as failed whose failureDetail names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright — a build has no INCONCLUSIVE result, so recording it FAILED would move the review out of the merge queue for a network blip; re-run the build once the signature clears and record that result instead. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewRecordBuildTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewRecordBuildTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_report-merged",
 		Description: "Report a review MERGED on the erun platform. Which verification applies is decided by where the review is, not by what the caller claims. A review at MERGE is the merge queue's: this is for the environment the queue promoted once it has fetched the review's target and source, built the prospective squash merge, recorded that build (review_record-build), and pushed the result. buildId must name that successful recorded build of the merge commit, and the platform fetches remoteUrl to confirm the build's commit is really reachable from the target branch's tip and descends from, without being, the target tip this review was queued against. Any other review is one whose work landed without the queue — in practice a GitHub squash merge, where no merge-commit build exists to name: omit buildId, and the platform confirms against the same remote that everything the review's source branch adds is already present in the target branch's history. Either way a check failing refuses with 409 MERGE_NOT_VERIFIED — a branch that did not land is refused just as firmly. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewReportMergedTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewReportMergedTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_requeue",
 		Description: "Move a review stuck at MERGE back to READY on the erun platform, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at MERGE per target branch at a time. For a review whose queued build never finishes, or one left at MERGE by a batched exec_gate-merge whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at MERGE. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewRequeueTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewRequeueTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_list",
 		Description: "List the users assigned to review a review on the erun platform. Supports preview.",
-	}, reviewReviewersListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewReviewersListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_add",
 		Description: "Assign a reviewer to a review on the erun platform, so an Agent can assign a peer Agent (or itself) as reviewer. userId must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; use review_queue_advance's unresolved-thread gate for what actually blocks a merge. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewReviewerAddTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewReviewerAddTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_remove",
 		Description: "Remove a reviewer from a review on the erun platform. A real, immediate write, not a preview, unless preview is set.",
-	}, reviewReviewerRemoveTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewReviewerRemoveTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_queue_list",
 		Description: "List a target branch's merge queue on the erun platform, in queue order. Supports preview.",
-	}, reviewMergeQueueListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewMergeQueueListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "jobs_list",
 		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight, and so is PLANNED — work recorded before it starts, which the abandonment sweep deliberately leaves alone; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
-	}, jobsListTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobsListTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "jobs_show",
 		Description: "Show one job in full on the erun platform. Supports preview.",
-	}, jobsShowTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobsShowTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "jobs_start",
 		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. A PLANNED job holds its scope too. status PLANNED records work that has not started — a triage or plan item parked against its issue, visible in the pipeline view before any code exists, and deliberately never swept to ABANDONED. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
-	}, jobsStartTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobsStartTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "jobs_finish",
 		Description: "Report how a job ended, refresh what it is doing, or open a planned job, on the erun platform. status RUNNING on a PLANNED job is the one move that begins work; every other status closes the job. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
-	}, jobsFinishTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, jobs.JobsFinishTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
 		Description: "Advance a target branch's merge queue head to MERGE on the erun platform, which starts that review's merge-queue build. Refuses with the unresolved comment thread count when the queue head still has open threads — resolve them (review_resolve) or use review_queue_override_advance. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
-	}, reviewMergeQueueAdvanceTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, review.ReviewMergeQueueAdvanceTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "review_queue_override-advance",
 		Description: "Bypass review_queue_advance's unresolved-thread gate and advance a target branch's merge queue head to MERGE anyway. reason is required and is recorded in the platform's audit trail alongside the caller's identity — this is a deliberate, accountable escape hatch, not a routine way to advance the queue. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
-	}, reviewMergeQueueOverrideAdvanceTool(runtime))
+	}, review.ReviewMergeQueueOverrideAdvanceTool(runtime))
 }
 
-func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerDeliveryTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "init",
 		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
-	}, initTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, initenv.InitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "build",
 		Description: "Build the project's container images for the resolved tenant/environment. The build step of the build → release → push → deploy flow: set deploy to push and roll them out, or release to stamp and publish the release version first.",
-	}, buildTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, build.BuildTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "push",
 		Description: "Build and push the project's container images to the BUILD-marked registry for the resolved tenant/environment. The push step of the build → release → push → deploy flow.",
-	}, pushTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, build.PushTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "deploy",
 		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow. Waits for the rollout to become ready (default 5m, the env's deploy.timeout, or the timeout input) and watches the new pods, keeping the wait while an image is still pulling and aborting early on a real container failure.",
-	}, deployTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, deploy.DeployTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "publish",
 		Description: "Mirror an already-built version's images from the FROM registry to each TO registry for the resolved tenant/environment, without building or deploying. Use it to hand a version you have tested (e.g. built against a local cluster registry) to other users by copying that exact multi-arch image to the shared TO registry. Requires a version (produced by build then push) and a FROM source plus at least one TO destination marked in the registry list.",
-	}, publishTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, build.PublishTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "upgrade",
 		Description: "Redeploy the resolved environment to the latest version for its release channel when it is opted into Upgrade all (autoupgrade) and lags. Snapshot-channel environments adopt a stable release once one is published on top of the latest snapshot. High blast radius: rolls out a new runtime image and restarts pods. Set preview to resolve and return the plan (channel, current → target) without deploying.",
-	}, upgradeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, upgrade.UpgradeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "doctor",
 		Description: "Diagnose and repair the resolved environment: report why a deploy may have failed (helm release status and runtime pods, read-only); recover a failing runtime release by clearing a stuck pending helm lock or rolling back to the last successful revision; prune unused Docker images, build cache, or stopped containers; and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
-	}, doctorTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, doctor.DoctorTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "observe",
 		Description: "Report the resolved environment's Kubernetes state, read-only: pods (each container's name, running image, and resource limits), ResourceQuota/LimitRange usage, Ingress hosts and TLS secret names, Certificate readiness, and the runtime helm release (chart/app version, revision, status, and the image overrides and runtime resource limits erun itself set). When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is walked automatically for the failure reason, so a stuck issuance (for example a webhook solver's RBAC denial) surfaces in this one call. The release is diffed against the running containers and against the env config's recorded runtimeversion/runtimeimage/runtimepod, so a drifted deploy (an out-of-band image, a resized pod the release never recorded) is named in the result's `drift` list rather than left for the caller to spot, and that list is empty when the comparison found nothing to report. Optionally check named Secrets for a key's presence without reading their values. Every call is a kubectl get or a helm status; nothing here can mutate the cluster.",
-	}, observeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, observe.ObserveTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "usage",
 		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call. `disk[].totalBytes`/`usedBytes`/`percentUsed` describe the whole mount (`nodeShared: true`): every environment scheduled on the same node reports the identical figures, so cleaning up one environment may barely move them. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory) is the figure this environment can actually reduce. `requests` reports what the scheduler admits this pod on: each container's declared `resources.requests` and the pod's effective total, read from the live pod spec because no cgroup file records a request. The limits above it are ceilings that reserve nothing, and the request is the figure that decides placement and how much of a node this environment actually holds; a pod spec that could not be read is reported as `requests.unavailable` rather than as a reservation of nothing. On a build-capable environment (local-agent, remote-agent), `excludesBuilds` is true because every image build actually runs in the erun-dind sidecar, a separate cgroup from the runtime container above -- so this call also reads the sidecar's own CPU and memory against its own limit and returns it as `dind`, with the same named warnings if the sidecar itself nears its memory limit or records an OOM kill; `dind` is absent only when the sidecar's own cgroup could not be read, and `observe` reports its resource limits either way. Also carries this environment's standing sizing recommendation (`sizing`), when retained usage history has accumulated one -- the same raise/lower/hold verdict and evidence window `resize` reasons from, so a caller does not need a separate resize call just to see it. That history is retained by this environment's own pod monitor and lives with the environment, so " +
-			UsageSizingClaim() + ". What varies is whether that history is there to read -- a reading taken from a host has the live counters to reason from and no observed window: the advice the counters prove (a raise, after a peak at the limit or a recorded OOM kill) fires there too, while the shrink direction, which needs a day of quiet evidence, reads as insufficient-evidence. ",
-	}, usageTool(runtime))
-	addTool(reg, &mcp.Tool{
+			usage.UsageSizingClaim() + ". What varies is whether that history is there to read -- a reading taken from a host has the live counters to reason from and no observed window: the advice the counters prove (a raise, after a peak at the limit or a recorded OOM kill) fires there too, while the shrink direction, which needs a day of quiet evidence, reads as insufficient-evidence. ",
+	}, usage.UsageTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "resize",
 		Description: "Change the runtime pod's CPU/memory limits and roll it out, without re-running init to change two numbers. Pass cpu/memory explicitly, or applyRecommendation to size from this environment's own standing sizing recommendation (resolved from usage history retained in this pod) instead of retyping a value already computed. A resize whose resolved size matches the current one is a no-op. Moves only the runtime container's throttle/OOM ceiling and its namespace quota draw -- never the scheduler's fixed request, the erun-dind sidecar, or any PVC. Because a resize rolls the pod (Recreate strategy) and would kill any live session inside it, it first checks this environment's activity leases and refuses, naming every holder, unless overrideLease is set. Supports preview.",
-	}, resizeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, resize.ResizeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
-	}, deleteTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, envdelete.DeleteTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "services",
 		Description: "Report the resolved environment's Services, read-only: each Service's name, type, ports, and the public address it already has when an erun-expose Ingress fronts it. The exposure is read from the Ingress's own backend rather than re-derived from the <tenant>-<service> naming convention, so a repo-native chart that names its Service something else still reports the Service its Ingress really routes to. This is the read that answers \"what can I expose here, and under what name\" before `expose`, which otherwise takes a name nothing on the wire can supply. Both reads are plain kubectl gets; nothing here can mutate the cluster. Supports preview.",
-	}, servicesTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, services.ServicesTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "expose",
 		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. The Ingress routes to <tenant>-<service> unless backendService names the in-namespace Service explicitly, which any repo with its own chart needs -- a derived name no Service holds yields a hostname that resolves and an ingress that 503s; the `services` tool lists the candidates. The Ingress references a per-env wildcard TLS Secret by default; nothing populates it unless dns01TokenFile, dns01BrokerUrl, and acmeEmail are also set, in which case it also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker. Supports preview.",
-	}, exposeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, expose.ExposeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "e2e",
 		Description: "Discover this project's e2e suites -- <tenant>-devops/e2e/<component>/Dockerfile, each declaring an `e2e` stage -- the way build discovers docker/ and deploy discovers k8s/, then run each one as `docker build --target e2e --no-cache-filter e2e --output type=cacheonly` against this server's own resolved environment, every suite in order unless component names one. Each suite receives ERUN_E2E_VERSION (the deployed version), ERUN_E2E_BASE_URL (the HTTPS URL of the exposed service named like the suite's directory) and ERUN_E2E_URL_<SERVICE> for every exposed service as build args, plus the .erun/config.yaml e2e.secrets as --secret. Refuses before any suite runs, naming the cause, when the environment is not deployed, a suite's service is not exposed or its certificate is not yet issued, or its URL resolves to a loopback address a docker build cannot reach; also refuses a suite whose playwright.config sets ignoreHTTPSErrors or hardcodes baseURL. baseUrl replaces the exposed URL and skips the exposure and certificate checks; version replaces the deployed version the suites expect, and with both the environment is not read at all. A failing suite fails the call with its component, target URL, deployed version and log path; e2e is not a release or merge gate and files nothing itself. A project with no e2e/ suite is a clean no-op. Supports preview.",
-	}, e2eTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, e2e.E2eTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "unexpose",
 		Description: "Remove an environment's per-env wildcard DNS record — the DNS-side counterpart to expose, run at environment teardown so records don't accumulate for environments that no longer exist. Touches only the platform DNS zone; the Ingress that referenced the record lives in the environment's own namespace and is torn down with it. Requires a platform block in .erun/config.yaml unless servicesZone and platformNamespace are both set. Supports preview.",
-	}, unexposeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, expose.UnexposeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name: "pin",
 		Description: "Re-pin every erun version reference for tenant/environment (defaulting to the MCP runtime context) in one motion: the Terraform module ?ref, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun chart dependencies, the build-env image tag, a stated runtime chart or runtime image naming erun's own stock release, and the environment's own runtime version when that environment runs erun's own runtime image. " +
 			"Rewrites projectRoot (or, when unset, the runtime repo path); refuses rather than scan a wider directory when neither resolves, since a caller here has no working directory to fall back to the way a shell user does. " +
 			"They only work when they agree, and nothing else keeps them in step. Idempotent and a no-op once aligned. Refuses a version that is not published. Set revert to go back to the version recorded before the last re-pin. " +
 			"Set preview to return the full plan — every site, old and new — without writing. Edits the source of truth only: realizing the version (terraform apply, deploy) stays a separate explicit step.",
-	}, pinTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, pin.PinTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "terraform",
 		Description: "Run a hosted platform's per-environment Terraform from terraform-<tenant>/<environment>/ (or <tenant>-devops/terraform-<tenant>/<environment>/, or the paths.terraform base from .erun/config.yaml) for the resolved tenant/environment: resolve the env folder, pick up the symlinked common.tf, and run its main.tf with <environment>.tfvars. State and the provider cache live on the durable home directory (not the playbook tree), so they survive a runtime pod restart. operation is apply (init → fmt → plan → apply), plan (read-only), or destroy. apply/destroy mutate real cloud and cluster state and require confirm to equal the environment name. Injects TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN when present. Set preview to resolve and return the terraform commands without executing them.",
-	}, terraformTool(runtime))
+	}, terraform.TerraformTool(runtime))
 }
 
-func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
-	addTool(reg, &mcp.Tool{
+func registerInspectionTools(reg shared.ToolRegistrar, runtime shared.RuntimeConfig) {
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_diff",
 		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",
-	}, diffTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, diff.DiffTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_raw",
 		Description: "Run an arbitrary command from the runtime repo root and return captured stdout, stderr, and trace output",
-	}, rawTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.RawTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_write",
 		Description: "Write content to a path in the runtime repo's working tree, taking the content as data — never through a shell, so nothing in it is reinterpreted. Refuses if the resolved path would land outside the repo root. Reports the resolved path and byte count written. Set preview to trace the write without performing it.",
-	}, writeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.WriteTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_commit",
 		Description: "Stage every change (or, with paths set, only those paths) in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. When paths is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace the files that would be committed without committing.",
-	}, commitTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.CommitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_push",
 		Description: "Push the runtime repo's working tree's current branch to a remote. branch must match the tree's actual current branch; the push is refused, loudly, when it does not, rather than pushing whichever branch HEAD happens to be on. A real, immediate mutation of shared remote state — a branch a hosted review or another reviewer can only ever fetch once it has actually landed there. Set preview to verify the branch and trace the push without running it.",
-	}, execPushTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecPushTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_merge",
 		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort — unless the conflict is confined to atlas.sum, the regenerable migration checksum, which is regenerated from the migration files already on disk and staged, completing the merge commit so the merge lands instead. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
-	}, execMergeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecMergeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_gate-merge",
 		Description: "Prepare the prospective merge a merge queue promotion (or batch) builds: fetch targetBranch and every source's branch, check out a fresh local branch named targetBranch at its own current remote tip, then squash-merge each source onto it in turn, each as its own commit carrying its own message plus that source branch's own load-bearing trailers (Closes #N, Defect-Fix:, and the Reproduces: / Regression-Test: lines a defect fix declares), read from every line of its commit bodies rather than from a trailing trailer block so a declaration is not lost to whatever paragraph an author put after it — leaving a stack of one commit per landed source, with each landed source's carriedTrailers naming what it carried, including when it carried none. Passing more than one source batches several unmerged branches into one prospective merge, so the build that follows tests whether they compile *together*, not just individually; a single source is the ordinary one-branch merge. For the environment a review's merge queue promotes to MERGE: gate-merge, then a plain build of the result, then review_record-build with the version that build minted and, only on success, exec_push and review_report-merged. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A source whose squash conflicts is skipped, not fatal: the merge is backed out and recorded in the result's skipped list, and the rest of the batch still builds against the working tree as it stood before that attempt. A conflict confined to atlas.sum, the regenerable migration checksum, is not a skip: it is regenerated from the migration files already on disk and staged, and the source lands like a clean squash. A source that contributes nothing is skipped the same way: when its squash stages no changes because its content is already on the target, it is recorded as skipped with that reason rather than failing the batch, so an already-landed branch is a no-op instead of a dead merge. A defect fix whose declaration does not resolve against what its squash staged is skipped the same way, with a regression-test policy: reason. A batch where every source is skipped lands nothing and returns an error. A real, immediate mutation of the working tree. Set preview to trace the fetch, checkout, and each squash merge and commit without running them.",
-	}, execGateMergeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecGateMergeTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_report-commit-status",
 		Description: "Report a commit status on GitHub for commit — the last step in the merge queue (exec_gate-merge, build, review_record-build): report success once the recorded build succeeded, or failure the moment it did not, naming which step failed in description. A required status check on the remote's branch protection has nothing to require until this reports it. commit should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit exec_gate-merge produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the build has already succeeded and been pushed. Set preview to trace the request without sending it.",
-	}, execReportCommitStatusTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecReportCommitStatusTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_close-pr",
 		Description: "Close branch's open pull request on GitHub, once review_report-merged has already succeeded, and record landingCommit on it. GitHub never reconciles a queued merge with its pull request on its own, since exec_gate-merge's squash commit is never the branch head GitHub tracks — the commit that actually shipped exists nowhere the pull request can see until this reports it. Safe when branch has no open pull request against targetBranch: this is a no-op, not an error, since queueing a plain branch with no review is legitimate. Refuses, loudly, when the pull request's current head does not match gatedCommit — something pushed to branch after the merge queue fetched it, so the built content is not what closing would discard. Set preview to trace the lookup without closing or commenting on anything.",
-	}, execClosePRTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecClosePRTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_reconcile-bypass",
 		Description: "Cross-reference GitHub's own bypass ledger for rulesetId on targetBranch against erun's recorded builds: every push that bypassed rulesetId is reported next to whether a successful build was recorded for a commit it actually landed (RECONCILED, naming that buildId), a release tag accounts for it (RELEASE), or nothing does (UNRECONCILED). The reconciliation half of erun#1912's recorded decision -- narrowing who may hold the bypass grant is a separate, ops-side change; this makes every bypass accountable after the fact regardless of who holds it. The result's unreconciled count and each push's verdict are the loud signal: a caller must not treat a non-zero unreconciled count as routine. Set preview to trace the GitHub and platform lookups without sending them.",
-	}, execReconcileBypassTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecReconcileBypassTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_plan-ruleset-bypass",
 		Description: "Plan narrowing a protected branch's ruleset bypass grant to one non-human queue identity. A merge queue's push is itself a direct push, so it must bypass the branch's pull-request rule; that is only accountable if exactly one nameable, non-human identity can bypass at all — and GitHub's bypass is per-actor, not per-rule, so adding a required status check on top of a broad always grant changes nothing for whoever holds it. Resolves the exact edit from the ruleset as it actually is, in two stages that never leave the branch unmergeable: stage 1 grants queueActor an always bypass alongside today's actors, stage 2 demotes every other always actor to pull_request. Refuses when the queue identity cannot already push, when GitHub will not show the ruleset's bypass actors, or when targetBranch is not a branch this ruleset governs. Writes stage1, stage2 and rollback payload files and returns the paths; it never writes to GitHub, so applying the edit stays a deliberate human step. Set preview to trace the lookups and the files it would write without sending or writing anything.",
-	}, execPlanRulesetBypassTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.ExecPlanRulesetBypassTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "exec_route-check",
 		Description: "Prove every route erun-backend-api's router registers is actually reachable on a deployed plane, rather than trusting that merged code is deployed code. Reads the route inventory straight out of erun-backend-api's own source (never a hand-maintained list) and GETs each one; first sanity-probes GET /v1/whoami and reports the plane unreachable rather than every route missing when that does not answer. Every probe is a plain GET regardless of a route's own registered method — the router reports 405 for a path it knows under a different method — so this never risks creating, updating, or deleting anything, and only the plane's own unmodified 404 page means a route was never registered at all. The result's planeReachable, missing, and errors fields are the loud signal: a caller must not treat a non-empty missing list as routine. Set preview to trace the resolved plane and route inventory without sending any request.",
-	}, execRouteCheckTool(runtime))
+	}, expose.ExecRouteCheckTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools
@@ -814,40 +836,40 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	// shares its replacement's handler and resolves to the same descriptor and
 	// capability, so nothing about authorization or auditing changes with the
 	// name a caller happens to use.
-	addTool(reg, &mcp.Tool{
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "diff",
 		Description: "Deprecated: use exec_diff. Retained for one release; this name will be removed.",
-	}, diffTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, diff.DiffTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "raw",
 		Description: "Deprecated: use exec_raw. Retained for one release; this name will be removed.",
-	}, rawTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.RawTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "write",
 		Description: "Deprecated: use exec_write. Retained for one release; this name will be removed.",
-	}, writeTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.WriteTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "commit",
 		Description: "Deprecated: use exec_commit. Retained for one release; this name will be removed.",
-	}, commitTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, exectool.CommitTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "outputs_list",
 		Description: "List the files and folders an agent produced in the runtime pod's outputs directory ($ERUN_OUTPUTS_DIR, default /home/erun/.erun/outputs), newest-first. Read-only.",
-	}, outputsListTool())
-	addTool(reg, &mcp.Tool{
+	}, outputs.OutputsListTool())
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "outputs_download",
 		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. On a macOS host an unsigned macOS binary is ad-hoc signed first, because the system kills an unsigned one on exec without printing anything; the signing field reports it. Set preview to return name/type/size without the bytes.",
-	}, outputsDownloadTool())
-	addTool(reg, &mcp.Tool{
+	}, outputs.OutputsDownloadTool())
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "build_profile",
 		Description: "List recent erun build runs (newest-first), or return one build's full step tree -- duration, CPU seconds against the build's cgroup quota, throttled periods, and I/O per step -- when id is set. Reads the same ~/.erun/timing/build-*.json records `erun build` already writes. Read-only.",
-	}, buildProfileTool())
-	addTool(reg, &mcp.Tool{
+	}, build.BuildProfileTool())
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "release",
 		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata, commits and tags it locally, then pushes the tag, syncs packaging checksums, prepares the next patch version, and pushes the branches. It marks source control and nothing else: it never builds, publishes, or verifies an artifact, so it completes having published nothing and says so. Build and publish belong to `erun build --release`, which composes this same stamp/tag work with the build and the publish, and to `erun push --version <version>`. Set preview to resolve and return the plan without executing it.",
-	}, releaseTool(runtime))
-	addTool(reg, &mcp.Tool{
+	}, build.ReleaseTool(runtime))
+	shared.AddTool(reg, &mcp.Tool{
 		Name:        "contribute_clone",
 		Description: "Clone the ERun source repository into $HOME/git/erun inside the environment so contribute-mode tabs can build and run a local ERun checkout",
-	}, contributeCloneTool(runtime))
+	}, contribute.ContributeCloneTool(runtime))
 }

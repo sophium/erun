@@ -4,21 +4,24 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-mcp/tools/expose"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // exposePreviewRuntime is the smallest runtime the expose tool runs against
 // with no project to resolve: the platform coordinates come in as the explicit
 // servicesZone/platformNamespace override, which is the caller shape that
 // needs no .erun/config.yaml at all.
-func exposePreviewRuntime(t *testing.T) RuntimeConfig {
+func exposePreviewRuntime(t *testing.T) shared.RuntimeConfig {
 	t.Helper()
 	return servicesTestRuntime(t, "frs", "dev")
 }
 
-func exposePreviewTrace(t *testing.T, runtime RuntimeConfig, input ExposeInput) string {
+func exposePreviewTrace(t *testing.T, runtime shared.RuntimeConfig, input expose.ExposeInput) string {
 	t.Helper()
 	input.Preview = true
-	_, output, err := exposeTool(runtime)(context.Background(), nil, input)
+	_, output, err := expose.ExposeTool(runtime)(context.Background(), nil, input)
 	if err != nil {
 		t.Fatalf("exposeTool returned err: %v", err)
 	}
@@ -42,7 +45,7 @@ func exposePreviewTrace(t *testing.T, runtime RuntimeConfig, input ExposeInput) 
 func TestExposeToolBackendServiceOverridesTheDerivedName(t *testing.T) {
 	runtime := exposePreviewRuntime(t)
 
-	override := exposePreviewTrace(t, runtime, ExposeInput{
+	override := exposePreviewTrace(t, runtime, expose.ExposeInput{
 		Tenant:            "frs",
 		Environment:       "dev",
 		Service:           "api",
@@ -61,7 +64,7 @@ func TestExposeToolBackendServiceOverridesTheDerivedName(t *testing.T) {
 	// The control: with no backendService the derivation still applies, so the
 	// test above is reading the override and not the only value the tool can
 	// ever produce.
-	derived := exposePreviewTrace(t, runtime, ExposeInput{
+	derived := exposePreviewTrace(t, runtime, expose.ExposeInput{
 		Tenant:            "frs",
 		Environment:       "dev",
 		Service:           "api",

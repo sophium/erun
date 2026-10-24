@@ -75,6 +75,12 @@ erun-common/
   root `cmd` package registering them. erun-cli's `.golangci.yml` holds a
   command to `cmd/shared` and `cmd/shared` to no command. Split with the same
   tool, run from `erun-cli/cmd` (`maps/06-cli.map` names the command).
+- erun-mcp's tools are split the same way: `erun-mcp/tools/<group>` per tool
+  group, `erun-mcp/tools/shared` below them, and the root package
+  (`server.go`) registering them; erun-mcp's `.golangci.yml` holds the same
+  two rules. A split outside erun-common passes `-timing-env` so the suite
+  `TestMain` each new package gets redirects the timing seam
+  (`maps/07-mcp.map` names the command).
 - A test whose helper is this test binary re-executed registers that helper
   from an `init` in its own file (`reentryHelpers`, in each package's suite
   `TestMain`), so it keeps working from whichever package its file is in.

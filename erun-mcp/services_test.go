@@ -11,6 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-mcp/tools/services"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // servicesKubectlStub points ERUN_KUBECTL_BIN at a script answering the two
@@ -35,11 +37,11 @@ func servicesKubectlStub(t *testing.T, servicesJSON, ingressesJSON string) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-func servicesTestRuntime(t *testing.T, tenant, environment string) RuntimeConfig {
+func servicesTestRuntime(t *testing.T, tenant, environment string) shared.RuntimeConfig {
 	t.Helper()
 	repoPath := t.TempDir()
-	return RuntimeConfig{
-		Context: RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
+	return shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
 		Store: listToolStore{
 			tenantConfigs: map[string]config.TenantConfig{tenant: {Name: tenant}},
 			envConfigs: map[string]config.EnvConfig{
@@ -77,7 +79,7 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 	)
 
 	runtime := servicesTestRuntime(t, "frs", "dev")
-	_, output, err := servicesTool(runtime)(context.Background(), nil, ServicesInput{})
+	_, output, err := services.ServicesTool(runtime)(context.Background(), nil, services.ServicesInput{})
 	if err != nil {
 		t.Fatalf("servicesTool returned err: %v", err)
 	}
@@ -113,7 +115,7 @@ func TestServicesToolPreviewExecutesNothingAndReportsNoServices(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", kubectl)
 
 	runtime := servicesTestRuntime(t, "frs", "dev")
-	_, output, err := servicesTool(runtime)(context.Background(), nil, ServicesInput{Preview: true})
+	_, output, err := services.ServicesTool(runtime)(context.Background(), nil, services.ServicesInput{Preview: true})
 	if err != nil {
 		t.Fatalf("servicesTool returned err: %v", err)
 	}

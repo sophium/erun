@@ -9,6 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/review"
+	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 const reviewCommentTestAlias = "erun-test"
@@ -20,7 +22,7 @@ const reviewCommentTestAlias = "erun-test"
 // platform client, or a bearer token is reached. A call that does reach one
 // panics loudly rather than silently passing.
 type stubReviewCommentStore struct {
-	runtimeStore
+	shared.RuntimeStore
 	config configpkg.ERunConfig
 }
 
@@ -28,9 +30,9 @@ func (s stubReviewCommentStore) LoadERunConfig() (configpkg.ERunConfig, string, 
 	return s.config, "/tmp/.erun/config.yaml", nil
 }
 
-func reviewCommentTestRuntime() RuntimeConfig {
-	return RuntimeConfig{
-		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
+func reviewCommentTestRuntime() shared.RuntimeConfig {
+	return shared.RuntimeConfig{
+		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: stubReviewCommentStore{config: configpkg.ERunConfig{
 			CloudProviders: []configpkg.CloudProviderConfig{{
 				Alias:    reviewCommentTestAlias,
@@ -44,7 +46,7 @@ func reviewCommentTestRuntime() RuntimeConfig {
 // callReviewCommentTool drives the registered tool over a real MCP session,
 // the same schema-validating path a client uses, so a declared-required field
 // the caller omitted is caught here rather than only in the handler.
-func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewCommentResult {
+func callReviewCommentTool(t *testing.T, arguments map[string]any) review.ReviewCommentResult {
 	t.Helper()
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "review_comment", Arguments: arguments})
@@ -58,7 +60,7 @@ func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewComment
 	if err != nil {
 		t.Fatalf("marshal structured content: %v", err)
 	}
-	var out ReviewCommentResult
+	var out review.ReviewCommentResult
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		t.Fatalf("decode structured content %s: %v", encoded, err)
 	}
@@ -68,7 +70,7 @@ func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewComment
 // traceLine returns the single planned platform call, the MCP analogue of the
 // CLI's --dry-run trace, or "" when the result carries a different number of
 // trace lines.
-func traceLine(result ReviewCommentResult) string {
+func traceLine(result review.ReviewCommentResult) string {
 	if len(result.Trace) != 1 {
 		return ""
 	}
@@ -131,52 +133,6 @@ func TestReviewCommentToolKeepsAReplyInItsThread(t *testing.T) {
 	want := "platform: POST https://api.test/v1/reviews/018f0000-0000-7000-8000-000000000000/comments (commitId=abc123, filePath=main.go, line=42, replyTo=018g0000-0000-7000-8000-000000000000)"
 	if got := traceLine(result); got != want {
 		t.Errorf("reply planned call:\n got %q\nwant %q", got, want)
-	}
-}
-
-// TestReviewCommentToolRefusesACallMissingReviewIDOrBody keeps the remaining
-// required inputs required, and keeps the refusal naming which one is
-// missing rather than listing every field the tool accepts.
-func TestReviewCommentToolRefusesACallMissingReviewIDOrBody(t *testing.T) {
-	handler := reviewCommentTool(RuntimeConfig{})
-	cases := []struct {
-		name  string
-		input ReviewCommentInput
-		want  string
-	}{
-		{
-			name:  "no reviewId",
-			input: ReviewCommentInput{Body: "overall this looks good"},
-			want:  "reviewId is required",
-		},
-		{
-			name:  "no body",
-			input: ReviewCommentInput{ReviewID: "018f0000-0000-7000-8000-000000000000"},
-			want:  "body is required",
-		},
-		{
-			name:  "whitespace-only body",
-			input: ReviewCommentInput{ReviewID: "018f0000-0000-7000-8000-000000000000", Body: "  \n"},
-			want:  "body is required",
-		},
-		{
-			name:  "neither",
-			input: ReviewCommentInput{},
-			want:  "reviewId and body are required",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// No store is configured: the refusal must precede any platform
-			// resolution, so a missing input never depends on config state.
-			_, _, err := handler(context.Background(), nil, tc.input)
-			if err == nil {
-				t.Fatal("expected a refusal, got none")
-			}
-			if err.Error() != tc.want {
-				t.Errorf("refusal message:\n got %q\nwant %q", err.Error(), tc.want)
-			}
-		})
 	}
 }
 

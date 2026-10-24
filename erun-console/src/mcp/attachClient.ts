@@ -2,7 +2,7 @@ import { isRecord } from 'erun-kit';
 
 // attachClient speaks the erun-mcp WebSocket attach edge's own wire protocol
 // directly from the browser (see erun-mcp/AGENTS.md's "The WebSocket Attach
-// Edge Is Not An MCP Tool" and erun-mcp/attach.go): binary frames carry raw
+// Edge Is Not An MCP Tool" and erun-mcp/tools/attach/attach.go): binary frames carry raw
 // PTY bytes in both directions, text frames carry the two JSON control
 // messages (`resize` outbound, `outcome` inbound, sent once immediately
 // before the server closes the socket).
@@ -11,7 +11,7 @@ import { isRecord } from 'erun-kit';
 // handshake -- its only credential-bearing surface is the subprotocol list --
 // so authentication rides the Sec-WebSocket-Protocol offer instead:
 // `new WebSocket(url, [ATTACH_AUTH_SUBPROTOCOL, token])`. This must match
-// erun-mcp/auth.go's `attachAuthSubprotocol` exactly, or the edge falls back
+// erun-mcp/tools/shared/auth.go's `attachAuthSubprotocol` exactly, or the edge falls back
 // to "no bearer token" and refuses the handshake with 401.
 const ATTACH_AUTH_SUBPROTOCOL = 'erun.bearer.v1';
 
