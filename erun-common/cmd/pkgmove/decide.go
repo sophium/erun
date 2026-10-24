@@ -580,7 +580,7 @@ func (w *world) collisions(d decisions) []string {
 	var errs []string
 	for _, key := range sortedKeys(w.objects) {
 		o := w.objects[key]
-		if o.member {
+		if o.member || neverCollides(o.name) {
 			continue
 		}
 		name := o.name
@@ -597,6 +597,12 @@ func (w *world) collisions(d decisions) []string {
 	}
 	sort.Strings(errs)
 	return errs
+}
+
+// neverCollides says whether a package may declare a name any number of
+// times: init functions and the blank identifier.
+func neverCollides(name string) bool {
+	return name == "init" || name == "_"
 }
 
 func (w *world) describeKey(key string) string {
