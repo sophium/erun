@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -20,26 +21,18 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// repoRoot resolves the checkout root from this file's own location rather
-// than the working directory `go test` happens to run from, so the gate finds
-// erun-ui/frontend regardless of how it is invoked.
+// repoRoot resolves the checkout root from this file's location, not the working directory.
 func repoRoot(t testing.TB) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller could not resolve this test file's path")
 	}
-	// This file lives at <repoRoot>/erun-integration/desktop_surface_test.go.
 	return filepath.Dir(filepath.Dir(file))
 }
 
-// readOperatorSurfaceSource concatenates every .ts/.tsx file under each given
-// src root -- the committed, human-facing subtrees that together make up
-// "the operator's surface": the desktop app (erun-ui/frontend/src) and the
-// hosted web console (erun-console/src). Their sibling wailsjs/dist/node_modules
-// directories are generated and gitignored, so a capability's binding
-// showing up there is not evidence a human can reach it -- see
-// erun-ui/.gitignore and erun-console/.gitignore.
+// readOperatorSurfaceSource concatenates every .ts/.tsx file under the given src
+// roots; generated wailsjs/dist/node_modules siblings are not operator surface.
 func readOperatorSurfaceSource(t testing.TB, roots ...string) desktopsurface.FrontendSource {
 	t.Helper()
 	var sb strings.Builder
@@ -58,7 +51,7 @@ func readOperatorSurfaceSource(t testing.TB, roots ...string) desktopsurface.Fro
 			if readErr != nil {
 				return readErr
 			}
-			sb.Write(content)
+			sb.WriteString(stripTSComments(string(content)))
 			sb.WriteByte('\n')
 			return nil
 		})
@@ -69,29 +62,20 @@ func readOperatorSurfaceSource(t testing.TB, roots ...string) desktopsurface.Fro
 	return desktopsurface.FrontendSource(sb.String())
 }
 
-// capabilityToken picks the literal token most likely to appear in whatever
-// frontend code calls a capability: the last CLI path segment when one
-// exists, falling further back to family, then the raw name, for a wire-only
-// tool. A hyphenated leaf is collapsed to one run of letters rather than
-// trimmed to its final word -- "override-advance" becomes "overrideadvance",
-// "repair-org-mapping" becomes "repairorgmapping".
-//
-// Trimming to the final word only recovers a capability's core verb by
-// accident, and this gate's value is entirely its trustworthiness. It holds
-// for "override-advance", whose last word *is* the verb and whose frontend
-// call site is OverrideAdvanceMergeQueue. It does not hold for
-// "repair-org-mapping", whose last word is the generic noun "mapping" while
-// the verb that identifies it -- "repair" -- is the part discarded. A token
-// that generic identifies nothing: FrontendSource.Contains is a raw
-// case-insensitive substring search over every .ts/.tsx file with no comment
-// stripping, so "mapping" matched unrelated prose in both trees (a colour
-// mapping named in a *.test.ts comment, an OIDC issuer mapping a form comment
-// says it deliberately cannot configure) and reported a capability with no
-// operator surface as surfaced -- the silent pass this derivation produced.
-// Collapsing the whole leaf keeps distinct capabilities distinct, since no
-// leaf can collide with another's token, while still matching the camelCase
-// identifier a real call site writes: OverrideAdvanceMergeQueue lowercases to
-// "overrideadvancemergequeue", which contains "overrideadvance".
+var (
+	tsBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	tsLineComment  = regexp.MustCompile(`(?m)^\s*//.*$`)
+)
+
+// stripTSComments drops comments so only code can count as an entry point.
+func stripTSComments(src string) string {
+	return tsLineComment.ReplaceAllString(tsBlockComment.ReplaceAllString(src, ""), "")
+}
+
+// capabilityToken picks the token a frontend call site would contain: the last CLI
+// segment, else family, else name. A hyphenated leaf collapses to one run
+// ("repair-org-mapping" -> "repairorgmapping") because Contains is a raw substring
+// search and a trailing word like "mapping" matches unrelated prose.
 func capabilityToken(name, family string, cliPath []string) string {
 	token := name
 	if len(cliPath) > 0 {
@@ -99,26 +83,15 @@ func capabilityToken(name, family string, cliPath []string) string {
 	} else if family != "" {
 		token = family
 	}
-	// A single-segment name or family is already one undistinguished run;
-	// the hyphen is the one separator the frontend trees never write.
 	return strings.ReplaceAll(token, "-", "")
 }
 
-// TestCapabilityTokenKeepsCapabilitiesDistinct pins the property the whole
-// gate rests on: a capability's token has to identify that capability. Before
-// this fix, capabilityToken trimmed a hyphenated leaf to its final word, so
-// "platform tenant repair-org-mapping" searched for "mapping" -- a
-// noun generic enough to match prose about a different mapping entirely, in a
-// tree where no call site existed.
 func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		path []string
-		want string
-		// callSite is the identifier a real frontend call site writes for
-		// this capability. Keeping capabilities distinct must not cost a
-		// genuine surface its match.
+		path     []string
+		want     string
 		callSite string
 	}{
 		{[]string{"review_queue", "override-advance"}, "overrideadvance", "OverrideAdvanceMergeQueue"},
@@ -135,10 +108,7 @@ func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
 		}
 	}
 
-	// The exact prose that made the gate report an unsurfaced capability as
-	// surfaced: a colour mapping named in a *.test.ts comment and a form
-	// comment about an OIDC issuer mapping that form cannot configure. Neither
-	// is a way in, so neither may satisfy the token.
+	// Prose mentioning "mapping" that is not a way in.
 	unrelated := desktopsurface.FrontendSource(strings.Join([]string{
 		"// rather than relying on a reviewer noticing a new hand-rolled color mapping.",
 		"// because it configures an OIDC issuer mapping this form has no safe way to ...",
@@ -151,7 +121,6 @@ func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
 	}
 }
 
-// mcpCapabilities returns one Capability per registered MCP tool.
 func mcpCapabilities() []desktopsurface.Capability {
 	names := mcptools.MCPToolNames()
 	capabilities := make([]desktopsurface.Capability, 0, len(names))
@@ -171,9 +140,8 @@ func mcpCapabilities() []desktopsurface.Capability {
 	return capabilities
 }
 
-// mcpCoveredCLIPaths returns every CLI path (space-joined, below "erun") that
-// an MCP tool already represents, so the CLI tree walk below does not
-// double-count the same capability under its CLI identity too.
+// mcpCoveredCLIPaths returns the CLI paths an MCP tool already represents, so they
+// are not double-counted.
 func mcpCoveredCLIPaths() map[string]bool {
 	covered := make(map[string]bool)
 	for _, name := range mcptools.MCPToolNames() {
@@ -186,21 +154,13 @@ func mcpCoveredCLIPaths() map[string]bool {
 	return covered
 }
 
-// cliOnlyCapabilities walks the real, fully-wired erun command tree and
-// returns one Capability per invocable command with no matching MCP tool.
-// Hidden and Deprecated commands are excluded outright: both are themselves
-// explicit, reviewable markers at the command's own definition site (a
-// contributor sees them in the diff that adds the command), so they need no
-// second declaration here -- see erun-cli/cmd/command_tree.go.
+// cliOnlyCapabilities returns one Capability per invocable command with no MCP
+// tool; Hidden and Deprecated commands are already explicit at their definition.
 func cliOnlyCapabilities(t testing.TB) []desktopsurface.Capability {
 	t.Helper()
 	covered := mcpCoveredCLIPaths()
 	var capabilities []desktopsurface.Capability
-	// hidden propagates down the tree: Cobra's own Hidden field only removes a
-	// command from its *parent's* help listing, but a command nested under a
-	// Hidden parent (erun-cli/cmd/activity/activity.go's whole "activity" group) is just
-	// as undiscoverable to a human as the parent itself, so a leaf must not
-	// need its own redundant Hidden to inherit that.
+	// A command under a Hidden parent is as undiscoverable as the parent.
 	var walk func(c *cobra.Command, path []string, hidden bool)
 	walk = func(c *cobra.Command, path []string, hidden bool) {
 		for _, child := range c.Commands() {
@@ -226,17 +186,9 @@ func cliOnlyCapabilities(t testing.TB) []desktopsurface.Capability {
 	return capabilities
 }
 
-// operatorFacingCommandPaths walks the same tree cliOnlyCapabilities does and
-// returns every command path whose *command* the gate holds to needing an
-// operator entry point -- runnable, not Hidden or Deprecated, and not
-// declared agent-facing on either the MCP or the CLI side. Those are exactly
-// the commands whose flags are worth auditing: a flag on a command nobody is
-// expected to reach from the desktop needs no affordance either.
-//
-// The tree is auditCommandTree()'s, not CommandTreeForAudit()'s directly, so
-// build/push's flags are enumerated the same way regardless of the working
-// directory the test binary runs from (see auditCommandTree in
-// cli_help_flag_drift_test.go).
+// operatorFacingCommandPaths returns runnable, non-hidden, non-deprecated commands
+// not declared agent-facing. Uses auditCommandTree so build/push flags do not
+// depend on the working directory.
 func operatorFacingCommandPaths() []string {
 	covered := mcpCoveredCLIPaths()
 	agentFacingTool := agentFacingMCPToolPaths()
@@ -263,8 +215,6 @@ func operatorFacingCommandPaths() []string {
 	return paths
 }
 
-// agentFacingMCPToolPaths returns the CLI path of every MCP tool declared
-// AgentFacing.
 func agentFacingMCPToolPaths() map[string]bool {
 	agentFacingTool := make(map[string]bool)
 	for _, name := range mcptools.MCPToolNames() {
@@ -277,9 +227,7 @@ func agentFacingMCPToolPaths() map[string]bool {
 	return agentFacingTool
 }
 
-// camelCaseFlagName renders a kebab-case flag name the way a frontend request
-// model spells the same field ("waiting-on-me" -> "waitingOnMe"), which is the
-// other half of how a flag's dimension shows up in operator-surface source.
+// camelCaseFlagName renders a kebab-case flag the way a frontend model spells it.
 func camelCaseFlagName(name string) string {
 	parts := strings.Split(name, "-")
 	var sb strings.Builder
@@ -297,16 +245,8 @@ func camelCaseFlagName(name string) string {
 	return sb.String()
 }
 
-// cliFlagCapabilities returns one Capability per flag on an operator-facing
-// command -- the granularity the gate was missing when it reasoned only about
-// whole commands, so a filter or selection dimension delivered as new flags
-// on a command that already has a desktop surface cannot ship CLI-only
-// unnoticed.
-//
-// Only a command's own flags count: an inherited persistent flag belongs to
-// the ancestor that registered it and would otherwise be re-audited once per
-// descendant. Hidden flags are skipped for the same reason Hidden commands
-// are -- the marker is already explicit at the registration site.
+// cliFlagCapabilities returns one Capability per own, non-hidden flag on an
+// operator-facing command; inherited flags belong to the ancestor.
 func cliFlagCapabilities() []desktopsurface.Capability {
 	root := auditCommandTree()
 	var capabilities []desktopsurface.Capability
@@ -338,7 +278,6 @@ func cliFlagCapabilities() []desktopsurface.Capability {
 	return capabilities
 }
 
-// resolveCommandPath walks a space-joined command path down from root.
 func resolveCommandPath(root *cobra.Command, path string) *cobra.Command {
 	current := root
 	for _, name := range strings.Fields(path) {
@@ -351,14 +290,8 @@ func resolveCommandPath(root *cobra.Command, path string) *cobra.Command {
 	return current
 }
 
-// operatorConfigCapabilities returns one Capability per registry entry in
-// config.OperatorSettableConfigFields -- a config field an operator is
-// expected to set through some product surface, not by hand-editing
-// config.yaml. Unlike the other three enumerations, there is no fully-
-// automatic discovery for this source (a struct field carries no
-// "operator-settable" marker to walk), so the registry itself is the
-// enumeration: a bare config field is none of a route, an MCP tool, or a CLI
-// command, so none of the other three enumerations can see it.
+// operatorConfigCapabilities returns one Capability per
+// config.OperatorSettableConfigFields entry; struct fields carry no marker to walk.
 func operatorConfigCapabilities() []desktopsurface.Capability {
 	fields := config.OperatorSettableConfigFields
 	capabilities := make([]desktopsurface.Capability, 0, len(fields))
@@ -374,16 +307,9 @@ func operatorConfigCapabilities() []desktopsurface.Capability {
 	return capabilities
 }
 
-// TestDesktopSurfaceGate fails when a user-facing CLI command, MCP tool, API
-// route, operator-settable config field, or flag on an operator-facing
-// command has no way in from an operator surface -- erun-ui/frontend or
-// erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
-// mode 3). See erun-integration/AGENTS.md,
-// erun-common/infra/mcptools/mcp_tools.go's AgentFacing field, erun-cli/cmd/command_tree.go's
-// cliOnlyAgentFacingCommands and cliOnlyAgentFacingFlags,
-// erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes, and
-// erun-common/base/config/operator_settable_config.go's
-// OperatorSettableConfigFields for the declaration mechanisms.
+// TestDesktopSurfaceGate fails when a user-facing command, MCP tool, API route,
+// operator-settable config field, or operator-facing flag has no operator surface.
+// See erun-integration/AGENTS.md for the declaration mechanisms.
 func TestDesktopSurfaceGate(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -411,9 +337,7 @@ func TestDesktopSurfaceGate(t *testing.T) {
 	}
 }
 
-// capabilityNamed returns the enumerated capability with the given name, or
-// fails the test -- a name that no longer resolves means the enumeration
-// changed under the test, not that the assertion below is satisfied.
+// capabilityNamed fails the test when name no longer resolves.
 func capabilityNamed(t testing.TB, capabilities []desktopsurface.Capability, name string) desktopsurface.Capability {
 	t.Helper()
 	for _, c := range capabilities {
@@ -425,12 +349,6 @@ func capabilityNamed(t testing.TB, capabilities []desktopsurface.Capability, nam
 	return desktopsurface.Capability{}
 }
 
-// TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand locks
-// flag-level granularity. Against an
-// operator surface that references the command `erun review list` but nothing
-// about its --status filter, command granularity reports no gap at all, and
-// flag granularity reports the filter -- so a capability shipped as new flags
-// on a command that already has a desktop surface cannot pass unexamined.
 func TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand(t *testing.T) {
 	t.Parallel()
 
@@ -442,8 +360,6 @@ func TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand(t *tes
 		t.Fatalf("%q is declared exempt, so it cannot demonstrate the granularity change", flagName)
 	}
 
-	// References the command the way the desktop's reviews panel does, and
-	// says nothing about a status filter.
 	surface := desktopsurface.FrontendSource("export function ReviewsPanel() { return reviewList() }")
 
 	if missing := desktopsurface.FindMissingDesktopSurface([]desktopsurface.Capability{command}, surface); len(missing) != 0 {
@@ -456,11 +372,7 @@ func TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand(t *tes
 	}
 }
 
-// TestCLIFlagDeclarationsNameRealFlags fails when either flag registry names a
-// flag the command tree no longer has. A declaration nobody can invalidate
-// rots into fiction: a renamed or deleted flag would leave an exemption
-// standing that silently covers nothing, and the next flag to take that name
-// would inherit it.
+// TestCLIFlagDeclarationsNameRealFlags keeps flag exemptions from outliving their flags.
 func TestCLIFlagDeclarationsNameRealFlags(t *testing.T) {
 	t.Parallel()
 	realFlags := make(map[string]bool)
@@ -483,11 +395,8 @@ func TestCLIFlagDeclarationsNameRealFlags(t *testing.T) {
 	}
 }
 
-// appMethodDecls parses every non-test .go file directly under erun-ui (not
-// its subpackages: *App lives at the module root) and returns one
-// AppMethodDecl per method on *App, with IdentUses counting how many other
-// places in the same file set mention the bare method name -- a real caller,
-// or nothing.
+// appMethodDecls returns one AppMethodDecl per *App method in erun-ui's root
+// package, with IdentUses counting other mentions of the name.
 func appMethodDecls(t testing.TB, root string) []desktopsurface.AppMethodDecl {
 	t.Helper()
 	dir := filepath.Join(root, "erun-ui")
@@ -510,10 +419,7 @@ func appMethodDecls(t testing.TB, root string) []desktopsurface.AppMethodDecl {
 		files[path] = file
 	}
 
-	// identCounts[name] counts every bare-identifier occurrence of name across
-	// the whole file set, including its own declaration; FindUnboundAppMethods
-	// only needs "any other use", so the declaration's own contribution
-	// (exactly 1 per method, from the FuncDecl.Name identifier) is subtracted.
+	// Subtract each method's own declaration.
 	identCounts := countIdents(files)
 
 	var decls []desktopsurface.AppMethodDecl
@@ -536,7 +442,6 @@ func appMethodDecls(t testing.TB, root string) []desktopsurface.AppMethodDecl {
 	return decls
 }
 
-// countIdents counts every bare-identifier occurrence of each name across files.
 func countIdents(files map[string]*ast.File) map[string]int {
 	identCounts := make(map[string]int)
 	for _, file := range files {
@@ -550,10 +455,8 @@ func countIdents(files map[string]*ast.File) map[string]int {
 	return identCounts
 }
 
-// TestNoUnboundAppMethods fails when a method on *App is unexported and
-// called from nowhere else in erun-ui: Wails binds only exported methods, so
-// that combination is a Wails binding location with no binding -- the
-// specific shape whipOrchestratorNow shipped in.
+// TestNoUnboundAppMethods: Wails binds only exported methods, so an unexported
+// *App method with no caller is a binding that never happened.
 func TestNoUnboundAppMethods(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
