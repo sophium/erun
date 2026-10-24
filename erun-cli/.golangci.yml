@@ -21,7 +21,28 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - depguard
   settings:
+    # One package per command (#2741, erun-common/AGENTS.md "Package layers"):
+    # a command reaches another only through cmd/shared, so an edit to one
+    # command rebuilds that command and the root that registers it, not every
+    # command's test binary.
+    depguard:
+      rules:
+        commands:
+          list-mode: lax
+          files: ["**/erun-cli/cmd/*/*.go", "!**/erun-cli/cmd/shared/*.go"]
+          allow:
+            - github.com/sophium/erun/cmd/shared$
+          deny:
+            - pkg: github.com/sophium/erun/cmd
+              desc: an erun-cli command package may import cmd/shared, never the root command or another command
+        shared:
+          list-mode: lax
+          files: ["**/erun-cli/cmd/shared/*.go"]
+          deny:
+            - pkg: github.com/sophium/erun/cmd
+              desc: cmd/shared sits below every command and imports none of them
     funlen:
       lines: 100
       statements: 50

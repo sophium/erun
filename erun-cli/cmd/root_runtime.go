@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/cmd/build"
+	"github.com/sophium/erun/cmd/initcmd"
+	"github.com/sophium/erun/cmd/shared"
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
@@ -24,47 +27,6 @@ type rootStore interface {
 	common.DeployStore
 }
 
-func addCommands(parent *cobra.Command, commands ...*cobra.Command) {
-	for _, command := range commands {
-		if command == nil {
-			continue
-		}
-		wrapCommandTreeWithElapsedTime(command)
-		parent.AddCommand(command)
-	}
-}
-
-func newCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Command {
-	command := &cobra.Command{
-		Use:           use,
-		Short:         short,
-		SilenceErrors: true,
-		SilenceUsage:  true,
-	}
-	addCommands(command, commands...)
-	return command
-}
-
-// scopedOpenParams adapts the --tenant/--environment flag pair every
-// environment-scoped command shares: an omitted flag means "the current scope",
-// resolved the same way as for `deploy` or `open`.
-// cmd supplies the command's own invocation (CommandPath), so a
-// tenant-resolution failure names the command the operator actually ran and
-// offers that command's own recovery. Every scoped command routing through
-// here is what keeps that true when a new command adopts the flag pair.
-func scopedOpenParams(command, tenant, environment string) common.OpenParams {
-	tenant = strings.TrimSpace(tenant)
-	environment = strings.TrimSpace(environment)
-	return common.OpenParams{
-		Tenant:                    tenant,
-		Environment:               environment,
-		UseDefaultTenant:          tenant == "",
-		UseDefaultEnvironment:     environment == "",
-		Command:                   command,
-		CommandScopesTenantByFlag: true,
-	}
-}
-
 func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command {
 	var verbosity int
 
@@ -77,14 +39,14 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 		SilenceUsage:     true,
 		SilenceErrors:    true,
 		TraverseChildren: true,
-		PersistentPreRun: auditCommand,
+		PersistentPreRun: shared.AuditCommand,
 		RunE:             runRoot,
 	}
-	addDryRunFlag(cmd)
-	addTimeFlag(cmd)
-	addOutputFlag(cmd)
-	wrapCommandTreeWithElapsedTime(cmd)
-	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", verboseFlagUsage)
+	shared.AddDryRunFlag(cmd)
+	shared.AddTimeFlag(cmd)
+	shared.AddOutputFlag(cmd)
+	shared.WrapCommandTreeWithElapsedTime(cmd)
+	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", shared.VerboseFlagUsage)
 	return cmd
 }
 
@@ -117,31 +79,31 @@ func bootstrapInitExitError(err error) error {
 	return err
 }
 
-func newRunInit(store setup.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime setup.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
+func newRunInit(store setup.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, listKubernetesContexts shared.KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime setup.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
 	return func(ctx core.Context, params common.BootstrapInitParams) error {
-		ctx = withCloudContextPreflight(ctx, store)
-		params.RuntimeVersionDefault = currentBuildInfo().Version
+		ctx = shared.WithCloudContextPreflight(ctx, store)
+		params.RuntimeVersionDefault = shared.CurrentBuildInfo().Version
 		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
 			Store:           setup.TraceBootstrapStore(ctx, store),
 			FindProjectRoot: findProjectRoot,
 			SelectTenant: func(tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
-				return selectTenantPrompt(selectRunner, tenants)
+				return initcmd.SelectTenantPrompt(selectRunner, tenants)
 			},
-			TenantSelectionUnavailable: tenantSelectionUnavailable(),
+			TenantSelectionUnavailable: initcmd.TenantSelectionUnavailable(),
 			Confirm: func(label string) (bool, error) {
-				return confirmPrompt(promptRunner, label)
+				return shared.ConfirmPrompt(promptRunner, label)
 			},
 			PromptKubernetesContext: func(label string) (string, error) {
-				return kubernetesContextPrompt(promptRunner, selectRunner, listKubernetesContexts, label)
+				return initcmd.KubernetesContextPrompt(promptRunner, selectRunner, listKubernetesContexts, label)
 			},
 			PromptContainerRegistry: func(label string) (string, error) {
-				return containerRegistryPrompt(promptRunner, label)
+				return initcmd.ContainerRegistryPrompt(promptRunner, label)
 			},
 			PromptRemoteRepositoryURL: func(label string) (string, error) {
-				return remoteRepositoryURLPrompt(promptRunner, label)
+				return initcmd.RemoteRepositoryURLPrompt(promptRunner, label)
 			},
 			PromptCodeCommitSSHKeyID: func(label string) (string, error) {
-				return codeCommitSSHKeyIDPrompt(promptRunner, label)
+				return initcmd.CodeCommitSSHKeyIDPrompt(promptRunner, label)
 			},
 			EnsureKubernetesNamespace: setup.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
 			LoadProjectConfig:         config.LoadProjectConfig,
@@ -202,9 +164,9 @@ func newRunInitForOpen(store config.OpenStore, runInit func(core.Context, common
 	}
 }
 
-func newPushOperation(pushDockerImage common.DockerImagePusherFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerPushFunc {
+func newPushOperation(pushDockerImage common.DockerImagePusherFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner shared.SelectRunner) common.DockerPushFunc {
 	return func(ctx core.Context, pushInput common.DockerPushSpec) error {
-		return runDockerPushWithRetry(
+		return build.RunDockerPushWithRetry(
 			ctx,
 			pushInput,
 			func(ctx core.Context, pushInput common.DockerPushSpec) error {
