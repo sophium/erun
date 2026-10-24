@@ -217,7 +217,7 @@ type uiPinRepoCheckoutStatus struct {
 }
 
 // PinRepoCheckoutStatus mirrors resolvePinProjectRoot's own decision
-// (erun-cli/cmd/pin.go) without running the CLI: an environment whose worktree
+// (erun-cli/cmd/pin/pin.go) without running the CLI: an environment whose worktree
 // lives on this machine always has one; a remote-worktree environment
 // (remote-agent or runtime) needs a sibling environment of the same tenant
 // that does, since every environment of a tenant shares one repo.

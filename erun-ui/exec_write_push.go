@@ -13,7 +13,7 @@ import (
 )
 
 // exec_write_push.go exposes the runtime repo's commit/push primitives to the
-// desktop, the same precondition `erun-cli/cmd/exec.go` and the MCP
+// desktop, the same precondition `erun-cli/cmd/execcmd/exec.go` and the MCP
 // `exec_commit`/`exec_push` tools already give the CLI and agents — reached
 // the way `LoadDiff` (terminal_sessions.go) already reaches exec_diff, so a
 // review's source branch can be pushed from the app instead of requiring a

@@ -1,0 +1,291 @@
+package orchestrator
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/sophium/erun/cmd/shared"
+	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/spf13/cobra"
+)
+
+// An operator-triggered pass that pushes every live orchestrator
+// and every environment's own agent session with the pacing nudge, and
+// reports who was pushed and who was skipped, and why. The automatic version
+// of this already runs inside the desktop for orchestrators
+// (erun-ui/orchestrator_pacing.go); this command is the manual, host-side
+// fan-out over everything configured, reusing the same decide/report core
+// (eruncommon.DecideWhip/WhipReport).
+
+func NewWhipCmd(store common.ListStore, resolveOpen shared.OpenResolver) *cobra.Command {
+	var tenant string
+	var environment string
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "whip [TENANT] [ENVIRONMENT]",
+		Short: "Push every live orchestrator and environment agent to keep moving",
+		Long: "Re-states the pacing contract into every live session it can reach. Scoped\n" +
+			"to one TENANT/ENVIRONMENT, it pushes only that environment's own AI session\n" +
+			"(over that environment's MCP edge) and targets no orchestrator. Given neither,\n" +
+			"it fans out over every configured environment plus every persisted\n" +
+			"orchestrator definition. Reports each target's outcome — pushed, or skipped\n" +
+			"and why — rather than only reporting that it ran.\n\n" +
+			"A CLI/MCP process has no channel into a desktop-held orchestrator's live PTY,\n" +
+			"so every orchestrator is reported skipped as unreachable from this transport;\n" +
+			"only the desktop's own automatic pass can push those. An environment whose MCP\n" +
+			"edge is not answering (nobody has it open in the desktop, or its port-forward\n" +
+			"dropped) is reported skipped as channel-down, with the `erun open` that brings\n" +
+			"the edge back, and the sweep carries on to the remaining targets.\n\n" +
+			"A --dry-run never reattaches a channel: the reattach starts a real\n" +
+			"`erun open --reconnect`, and a preview does not start work that outlives it.\n\n" +
+			"Pass TENANT and ENVIRONMENT to whip one environment only; omit both to whip\n" +
+			"every configured environment plus every persisted orchestrator.",
+		Example:       "  erun whip\n  erun whip --tenant team --environment dev\n  erun whip --dry-run",
+		Args:          cobra.MaximumNArgs(2),
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				tenant = args[0]
+			}
+			if len(args) > 1 {
+				environment = args[1]
+			}
+			return runWhipCommand(cmd.Context(), shared.CommandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
+		},
+	}
+	cmd.Flags().StringVar(&tenant, "tenant", "", "Whip only this tenant's environment (requires --environment)")
+	cmd.Flags().StringVar(&environment, "environment", "", "Whip only this environment (requires --tenant)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
+	shared.AddDryRunFlag(cmd)
+	return cmd
+}
+
+func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.ListStore, resolveOpen shared.OpenResolver, tenant, environment string, jsonOutput bool) error {
+	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
+	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
+	if err != nil {
+		return err
+	}
+
+	report := orchestrator.WhipReport{DryRun: commandCtx.DryRun}
+	// Each target's row is written as it is decided rather than only once the
+	// whole sweep finishes: an unreachable channel can take a full reattach
+	// timeout to answer, and a sweep that showed nothing until the last target
+	// resolved would report an empty pass for as long as one target was slow.
+	// JSON stays a single document on stdout, so it is written at the end.
+	emit := func(result orchestrator.WhipResult) error {
+		report.Results = append(report.Results, result)
+		if shared.CommandWantsJSON(commandCtx, jsonOutput) {
+			return nil
+		}
+		return writeWhipResult(commandCtx, result, commandCtx.DryRun)
+	}
+	for _, target := range targets {
+		if err := emit(whipOneEnvironment(ctx, commandCtx, resolveOpen, target.tenant, target.environment)); err != nil {
+			return err
+		}
+	}
+
+	// An explicit TENANT/ENVIRONMENT scope narrows every axis, not just the
+	// environment list -- a scoped call must never fan out into every
+	// persisted orchestrator too.
+	if !scoped {
+		globalConfig, _, _ := store.LoadERunConfig()
+		whipConfig := orchestrator.ResolveWhipConfig(globalConfig.Whip)
+		now := time.Now()
+		for _, candidate := range orchestrator.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
+			decision, reason := orchestrator.DecideWhip(candidate, now, whipConfig, true)
+			if err := emit(orchestrator.WhipResult{Candidate: candidate, Decision: decision, Reason: reason}); err != nil {
+				return err
+			}
+		}
+	}
+
+	return WriteWhipReport(commandCtx, report, jsonOutput)
+}
+
+// WriteWhipReport picks the wire form once, so the documented global
+// --output json and the command's own --json alias cannot diverge.
+func WriteWhipReport(commandCtx core.Context, report orchestrator.WhipReport, jsonOutput bool) error {
+	if shared.CommandWantsJSON(commandCtx, jsonOutput) {
+		encoder := json.NewEncoder(commandCtx.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	return nil
+}
+
+type whipEnvironmentTarget struct {
+	tenant      string
+	environment string
+}
+
+// resolveWhipEnvironmentTargets lists every configured environment when
+// neither TENANT nor ENVIRONMENT is given, or validates and returns the one
+// named pair otherwise. Enumeration never defaults a bare tenant/environment
+// to the ambient scope the way scopedOpenParams does elsewhere -- a whip with
+// no arguments means "everything configured", not "the current directory's
+// default".
+func resolveWhipEnvironmentTargets(store common.ListStore, tenant, environment string) ([]whipEnvironmentTarget, error) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant != "" || environment != "" {
+		if tenant == "" || environment == "" {
+			return nil, fmt.Errorf("whip: pass both --tenant and --environment to target one environment, or neither to whip everything configured")
+		}
+		return []whipEnvironmentTarget{{tenant: tenant, environment: environment}}, nil
+	}
+
+	tenants, err := store.ListTenantConfigs()
+	if err != nil {
+		return nil, fmt.Errorf("whip: listing configured tenants: %w", err)
+	}
+	var targets []whipEnvironmentTarget
+	for _, t := range tenants {
+		envs, err := store.ListEnvConfigs(t.Name)
+		if err != nil {
+			return nil, fmt.Errorf("whip: listing %s's environments: %w", t.Name, err)
+		}
+		for _, e := range envs {
+			targets = append(targets, whipEnvironmentTarget{tenant: t.Name, environment: e.Name})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].tenant != targets[j].tenant {
+			return targets[i].tenant < targets[j].tenant
+		}
+		return targets[i].environment < targets[j].environment
+	})
+	return targets, nil
+}
+
+// whipOneEnvironment calls the environment's own "whip" tool over its MCP
+// edge, preview-guarded under --dry-run so the call itself is the read that
+// resolves what would happen without ever writing into the session -- the
+// same guarantee RunLocalEnvironmentWhip's dryRun parameter makes on the pod
+// side. An environment with no reachable edge (nobody has it open in the
+// desktop right now) resolves to "not alive": there is no live session there
+// to push, whether or not this was a dry run.
+func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment string) orchestrator.WhipResult {
+	id := tenant + "/" + environment
+	notAlive := orchestrator.WhipResult{
+		Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+		Decision:  orchestrator.WhipDecisionNone,
+		Reason:    orchestrator.WhipReasonNotAlive,
+	}
+
+	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, shared.ScopedOpenParams(commandCtx.Command, tenant, environment))
+	if err != nil {
+		notAlive.Error = err.Error()
+		return notAlive
+	}
+	// Restate the tenant/environment this host already resolved rather than
+	// leaving the tool to infer them from the server's own bound context: it is
+	// the stronger assertion the issue this fixes asked for, and it is what lets
+	// a stale edge pointed at the wrong environment surface as a named mismatch
+	// instead of a silent act on the wrong one (resolveLocalTarget,
+	// erun-mcp/runtime.go).
+	arguments := map[string]any{"preview": commandCtx.DryRun, "tenant": target.Tenant, "environment": target.Environment}
+	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, "whip", shared.CompactMCPArguments(arguments))
+
+	// A failed attempt (network error, target refusal, malformed response) is
+	// reported as failed(), not folded into notAlive: the whip tool itself
+	// already reports a dead session as a *successful* result carrying
+	// WhipReasonNotAlive, so an error here never means "no live session" --
+	// it means the call itself did not work, which is a different problem
+	// asking for different operator action (root AGENTS.md's "Smooth,
+	// Seamless, No Dead Ends" -- distinguish causes before writing copy).
+	failed := func(detail string) orchestrator.WhipResult {
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonCallFailed,
+			Error:     detail,
+		}
+	}
+
+	// An edge that does not answer is a named skip carrying the remedy that
+	// brings it up, never a failed call: whip fans out over sessions that are
+	// already live, and this target is simply one of the ones it could not
+	// reach. The sweep reports it and moves on to the next target.
+	channelDown := func(detail string) orchestrator.WhipResult {
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonChannelDown,
+			Error:     detail,
+		}
+	}
+
+	result, err := shared.CallMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
+	if err != nil {
+		if errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
+			return channelDown(shared.McpEdgeError(target, err).Error())
+		}
+		return failed(err.Error())
+	}
+	var decoded orchestrator.WhipResult
+	if len(result.Structured) == 0 {
+		return failed(fmt.Sprintf("%s/%s returned no result for whip", tenant, environment))
+	}
+	if err := json.Unmarshal(result.Structured, &decoded); err != nil {
+		return failed(fmt.Sprintf("decode the whip result from %s/%s: %v", tenant, environment, err))
+	}
+	return decoded
+}
+
+func writeWhipResult(ctx core.Context, result orchestrator.WhipResult, dryRun bool) error {
+	return shared.WriteLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
+}
+
+func whipResultLabel(result orchestrator.WhipResult) string {
+	switch result.Candidate.Kind {
+	case orchestrator.WhipTargetOrchestrator:
+		label := strings.TrimSpace(result.Candidate.Name)
+		if label == "" {
+			label = result.Candidate.ID
+		}
+		return "orchestrator " + label
+	default:
+		return result.Candidate.ID
+	}
+}
+
+func whipResultValue(result orchestrator.WhipResult, dryRun bool) string {
+	switch result.Decision {
+	case orchestrator.WhipDecisionNudge:
+		if result.Pushed {
+			return fmt.Sprintf("pushed (consecutive nudge %d)", result.Candidate.NudgeCount+1)
+		}
+		if result.Error != "" {
+			return "push failed: " + result.Error
+		}
+		return "would push (dry-run)"
+	case orchestrator.WhipDecisionCap:
+		return "capped: stopped nudging after repeated silence"
+	default:
+		if result.Reason == orchestrator.WhipReasonCallFailed {
+			return "call failed: " + result.Error
+		}
+		value := "skipped — " + string(result.Reason)
+		if result.Error != "" {
+			value += ": " + result.Error
+		}
+		// A dry run never reattaches, so a channel it could not reach says
+		// nothing yet about whether a real pass would have pushed this target:
+		// name that difference rather than letting the row read as a verdict.
+		if dryRun && result.Reason == orchestrator.WhipReasonChannelDown {
+			value += " (a real run reattaches the channel first)"
+		}
+		return value
+	}
+}

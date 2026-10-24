@@ -21,7 +21,7 @@ import (
 // a subset: that reads as complete, and it understates what a re-pin touched
 // in exactly the operation whose blast radius is the question being asked.
 var repinSurfaces = []string{
-	"erun-cli/cmd/pin.go",
+	"erun-cli/cmd/pin/pin.go",
 	"erun-mcp/server.go",
 	"erun-ui/frontend/src/components/app/PinVersionDialog.tsx",
 	"erun-skills/skills/erun-pin-version/SKILL.md",

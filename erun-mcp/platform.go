@@ -11,7 +11,7 @@ import (
 )
 
 // platform.go exposes `erun platform`'s operations as MCP tools over the same
-// shared eruncommon.RunPlatform* functions the CLI drives (erun-cli/cmd/platform.go),
+// shared eruncommon.RunPlatform* functions the CLI drives (erun-cli/cmd/platform/platform.go),
 // so the two transports can never disagree about what a call does. Preview
 // (this module's non-interactive analogue of --dry-run) reuses the exact same
 // trace: every tool runs its RunPlatform* call with Preview forwarded straight

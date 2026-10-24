@@ -70,6 +70,11 @@ erun-common/
   `orchestrator` → `ai` (the launch effort levels), `platform` → `setup`
   (`TestErunRegistry*`), `podruntime` → `doctor`
   (`TestRuntimeBootConfigCloudContextDefaults`).
+- erun-cli's commands follow the same rule one level up: `erun-cli/cmd/<command>`
+  per command, `erun-cli/cmd/shared` for what two or more of them use, and the
+  root `cmd` package registering them. erun-cli's `.golangci.yml` holds a
+  command to `cmd/shared` and `cmd/shared` to no command. Split with the same
+  tool, run from `erun-cli/cmd` (`maps/06-cli.map` names the command).
 - A test whose helper is this test binary re-executed registers that helper
   from an `init` in its own file (`reentryHelpers`, in each package's suite
   `TestMain`), so it keeps working from whichever package its file is in.
@@ -454,7 +459,7 @@ surfaces.
   `open could not infer one` -- so `erun usage` and `erun observe` both report that
   `open` failed (#2363). A command that names itself must be the one the operator
   ran; where a shared helper genuinely cannot know its caller, it names no command.
-  `erun-cli/cmd/pin.go`'s `` see `erun pin --list` `` is the honoured form.
+  `erun-cli/cmd/pin/pin.go`'s `` see `erun pin --list` `` is the honoured form.
 - **A failure that occurred once is reported once, at the level it occurred.**
   `erun-common/cloud_context.go`'s `setCloudContextStatusFailure` builds one
   `status refresh failed: ...` string outside the loop and stamps it on every

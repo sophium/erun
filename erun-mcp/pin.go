@@ -138,7 +138,7 @@ func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx core.Context, pl
 }
 
 // resolvePinToolProjectRoot answers which checkout pin rewrites. Unlike the CLI
-// (resolvePinProjectRoot, erun-cli/cmd/pin.go), this never falls back to a
+// (resolvePinProjectRoot, erun-cli/cmd/pin/pin.go), this never falls back to a
 // working directory: the CLI's cwd fallback stands in for a human who ran the
 // command from inside the tenant repo, but an MCP caller has no cwd to be
 // inside of, so a directory this process happens to be running in (its own

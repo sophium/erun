@@ -135,11 +135,23 @@ func (m measurer) measure(out io.Writer, name string) error {
 	return err
 }
 
-// declaringFile is the erun-common file that declares function name.
+// declaringFile is the file that declares function name: erun-common's first,
+// so an edit named before a step keeps meaning the same edit after it, then
+// each other module's in the order they are gated.
 func (m measurer) declaringFile(name string) (string, error) {
 	decl := regexp.MustCompile(`(?m)^func (\([^)]*\) )?` + regexp.QuoteMeta(name) + `\b`)
+	for _, mod := range modules {
+		found, err := declaringFileIn(filepath.Join(m.repo, filepath.FromSlash(mod)), decl)
+		if err != nil || found != "" {
+			return found, err
+		}
+	}
+	return "", fmt.Errorf("no module file declares func %s", name)
+}
+
+// declaringFileIn is the first non-test Go file under root that decl matches.
+func declaringFileIn(root string, decl *regexp.Regexp) (string, error) {
 	var found string
-	root := filepath.Join(m.repo, "erun-common")
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return err
@@ -151,8 +163,8 @@ func (m measurer) declaringFile(name string) (string, error) {
 		}
 		return err
 	})
-	if found == "" && err == nil {
-		err = fmt.Errorf("no erun-common file declares func %s", name)
+	if os.IsNotExist(err) {
+		return "", nil
 	}
 	return found, err
 }

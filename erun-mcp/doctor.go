@@ -390,7 +390,7 @@ func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParam
 // (eruncommon.DeployDiagnosisResult.ClusterUnreachable), instead of paying
 // another multi-minute kubectl timeout to rediscover the same fact. Mirrors
 // the CLI's reportPodSkippedUnreachable
-// (erun-cli/cmd/doctor_pod_diagnosis.go).
+// (erun-cli/cmd/doctor/doctor_pod_diagnosis.go).
 func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 	_, err := fmt.Fprintf(runCtx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
 	return err
