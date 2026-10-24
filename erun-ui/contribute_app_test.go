@@ -246,12 +246,9 @@ func TestAdoptRefusesAfterStop(t *testing.T) {
 	}
 }
 
-// The CLI's development wrapper builds only erun, so "Open contribute app" must
-// rebuild the desktop itself before serving it, or it serves whatever erun-app
-// an earlier build left behind, or none.
-func TestContributeAppLaunchRebuildsTheDesktopBeforeServingIt(t *testing.T) {
+func TestContributeAppLaunchLeavesTheDesktopRebuildToTheWrapper(t *testing.T) {
 	got := contributeAppLaunchCommand(34567)
-	want := "\"$HOME/git/erun/erun-ui/build.sh\" && erun app --headless --port 34567\n"
+	want := "erun app --headless --port 34567\n"
 	if got != want {
 		t.Fatalf("contributeAppLaunchCommand(34567) = %q, want %q", got, want)
 	}

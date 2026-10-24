@@ -90,7 +90,7 @@ func cliPackageArgs(t *testing.T, versionArgs ...string) []string {
 		"--section", "utils", "--homepage", "https://github.com/sophium/erun",
 		"--description", "Multi-tenant multi-environment deployment and management tool",
 		"--description-line", "ERun ships the erun CLI together with the emcp and eapi executables.",
-		"--go-build", "/src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd.buildVersion",
+		"--go-build", "/src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd/shared.buildVersion",
 		"--go-build", "/src/erun-backend/erun-backend-api:./cmd/eapi:/usr/bin/eapi",
 		"--file", license + ":/usr/share/doc/erun/copyright",
 		"--out", filepath.Join(t.TempDir(), "deb"),
@@ -178,7 +178,7 @@ func TestGoBuildsTargetTheArchitectureAndStampTheVersion(t *testing.T) {
 	}
 	erun := builds[0]
 	if erun.dir != "/src/erun-cli" || !slices.Equal(erun.args[:2], []string{"build", "-trimpath"}) ||
-		erun.args[slices.Index(erun.args, "-ldflags")+1] != "-s -w -X github.com/sophium/erun/cmd.buildVersion=1.2.3" ||
+		erun.args[slices.Index(erun.args, "-ldflags")+1] != "-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=1.2.3" ||
 		erun.args[len(erun.args)-1] != "." {
 		t.Errorf("erun build = %+v", erun)
 	}

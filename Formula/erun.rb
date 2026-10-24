@@ -14,7 +14,7 @@ class Erun < Formula
       system "go", "build",
              *std_go_args(
                output:  bin/"erun",
-               ldflags: "-s -w -X github.com/sophium/erun/cmd.buildVersion=#{version}",
+               ldflags: "-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=#{version}",
              ),
              "."
     end
