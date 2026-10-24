@@ -790,7 +790,7 @@ exit 3`)
 		// is no kubectl on this scrubbed PATH, so it fails fast rather than
 		// hanging); the unreachable channel must still exit on the exit code
 		// distinct from a plain error (mcpChannelUnreachableExitCode, 126 —
-		// erun-cli/cmd/environment_call.go), never a job/tool outcome's own code,
+		// erun-cli/cmd/shared/environment_call.go), never a job/tool outcome's own code,
 		// so a caller looping on this command cannot misread "channel down" as
 		// "finished".
 		skipIfPortsBusy(t, mcpEdgeLocalPort)

@@ -459,7 +459,7 @@ surfaces.
   `open could not infer one` -- so `erun usage` and `erun observe` both report that
   `open` failed (#2363). A command that names itself must be the one the operator
   ran; where a shared helper genuinely cannot know its caller, it names no command.
-  `erun-cli/cmd/pin.go`'s `` see `erun pin --list` `` is the honoured form.
+  `erun-cli/cmd/pin/pin.go`'s `` see `erun pin --list` `` is the honoured form.
 - **A failure that occurred once is reported once, at the level it occurred.**
   `erun-common/cloud_context.go`'s `setCloudContextStatusFailure` builds one
   `status refresh failed: ...` string outside the loop and stamps it on every

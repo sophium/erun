@@ -48,7 +48,7 @@ func skipIfPortsBusy(t *testing.T, ports ...int) {
 //     (`… | Out-Null`, `Set-Location …`) when DetectHost reports windows
 //     (erun-cli/cmd/open.go localShellSetupScript/detectOpenNoShellDialect);
 //   - the adopt-or-conflict port-forward probe (findLocalPortHolder in
-//     erun-cli/cmd/port_forward_adopt.go), which is a no-op unless DetectHost
+//     erun-cli/cmd/shared/port_forward_adopt.go), which is a no-op unless DetectHost
 //     reports a unix host, so the lsof/ps decision-input stubs only drive it
 //     under this override.
 //

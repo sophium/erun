@@ -199,7 +199,7 @@ func cliOnlyCapabilities(t testing.TB) []desktopsurface.Capability {
 	var capabilities []desktopsurface.Capability
 	// hidden propagates down the tree: Cobra's own Hidden field only removes a
 	// command from its *parent's* help listing, but a command nested under a
-	// Hidden parent (erun-cli/cmd/activity.go's whole "activity" group) is just
+	// Hidden parent (erun-cli/cmd/activity/activity.go's whole "activity" group) is just
 	// as undiscoverable to a human as the parent itself, so a leaf must not
 	// need its own redundant Hidden to inherit that.
 	var walk func(c *cobra.Command, path []string, hidden bool)

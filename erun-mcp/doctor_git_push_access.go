@@ -10,7 +10,7 @@ import (
 )
 
 // writeDoctorGitPushAccess is the MCP counterpart of the CLI's
-// reportGitPushAccess (erun-cli/cmd/doctor_git_push_access.go): a public
+// reportGitPushAccess (erun-cli/cmd/doctor/doctor_git_push_access.go): a public
 // GitHub repository fetches anonymously for the entire life of a piece of
 // work, so an environment whose worktree lives in a pod can look completely
 // healthy right up to the moment an agent tries to push a branch or use gh --

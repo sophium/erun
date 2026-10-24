@@ -61,7 +61,7 @@ import (
 //     environment. RuntimeUsage.ExcludesBuilds still names the runtime
 //     container's own CPU/Memory as excluding the sidecar's contribution --
 //     that stays true regardless of whether Dind could be read -- see
-//     erun-cli/cmd/usage_render.go and the desktop's matching
+//     erun-cli/cmd/shared/usage_render.go and the desktop's matching
 //     Sidebar.EnvHoverCard.tsx caveat. What no reading anywhere in this
 //     process can produce is one host-wide figure spanning every
 //     build-capable pod on the node; that view exists only outside any one
@@ -74,7 +74,7 @@ import (
 //     bytes. RuntimeDiskUsage.NodeShared names this explicitly, and
 //     OwnUsedBytes (a `du` of the watched mount, scoped to this environment's
 //     own filesystem tree) is the number an operator can actually act on by
-//     cleaning up this one environment -- see erun-cli/cmd/usage_render.go's
+//     cleaning up this one environment -- see erun-cli/cmd/shared/usage_render.go's
 //     "(node, shared)" label and the own-usage line rendered beneath it.
 //
 // RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
