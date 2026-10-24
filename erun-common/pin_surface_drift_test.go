@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -20,11 +21,11 @@ import (
 // a subset: that reads as complete, and it understates what a re-pin touched
 // in exactly the operation whose blast radius is the question being asked.
 var repinSurfaces = []string{
-	"../erun-cli/cmd/pin.go",
-	"../erun-mcp/server.go",
-	"../erun-ui/frontend/src/components/app/PinVersionDialog.tsx",
-	"../erun-skills/skills/erun-pin-version/SKILL.md",
-	"../erun-docs/docs/cli/pin.md",
+	"erun-cli/cmd/pin.go",
+	"erun-mcp/server.go",
+	"erun-ui/frontend/src/components/app/PinVersionDialog.tsx",
+	"erun-skills/skills/erun-pin-version/SKILL.md",
+	"erun-docs/docs/cli/pin.md",
 }
 
 // pinKindDeclarationPattern reads the PinSiteKind constants out of the source
@@ -77,8 +78,9 @@ func TestEverySurfaceDescribingARepinNamesEveryPinSiteKind(t *testing.T) {
 	if len(PinSiteSummaries) == 0 {
 		t.Fatal("PinSiteSummaries is empty; the rest of this test would pass vacuously")
 	}
+	root := erunRepoRoot(t)
 	for _, path := range repinSurfaces {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Errorf("read %s: %v", path, err)
 			continue

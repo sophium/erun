@@ -27,6 +27,15 @@ const (
 	jobAliveSupervisorHelperIDEnv      = "ERUN_COMMON_TEST_JOB_ALIVE_ID"
 )
 
+func init() {
+	reentryHelpers = append(reentryHelpers, func() (int, bool) {
+		if os.Getenv(jobAliveSupervisorHelperEnv) == "" {
+			return 0, false
+		}
+		return runJobAliveSupervisorHelper(), true
+	})
+}
+
 // runJobAliveSupervisorHelper is the re-entered process body: it runs the real
 // supervisor against a long-lived child, so killing this process is killing
 // exactly what a runtime pod's own supervisor process is.

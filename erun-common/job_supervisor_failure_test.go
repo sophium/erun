@@ -19,6 +19,15 @@ import (
 
 const jobSupervisorSetupFailureHelperEnv = "ERUN_COMMON_TEST_JOB_SUPERVISOR_SETUP_FAILURE_HELPER"
 
+func init() {
+	reentryHelpers = append(reentryHelpers, func() (int, bool) {
+		if os.Getenv(jobSupervisorSetupFailureHelperEnv) == "" {
+			return 0, false
+		}
+		return runJobSupervisorSetupFailureHelper(), true
+	})
+}
+
 // runJobSupervisorSetupFailureHelper re-enters this test binary as a real
 // supervisor process that is handed work it rejects at a point its own running
 // record is already durable (a negative lease TTL, refused by

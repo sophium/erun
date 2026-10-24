@@ -3,20 +3,13 @@ package eruncommon
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
-// repoRootForDockerignoreTest returns the repo root. erun-common sits directly
-// under the root, so the grandparent of this file is the root regardless of the
-// test's working directory.
+// repoRootForDockerignoreTest returns the repo root.
 func repoRootForDockerignoreTest(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Dir(filepath.Dir(file))
+	return erunRepoRoot(t)
 }
 
 // TestRootDockerignoreExcludesDocsBuildArtifacts locks the fix for the

@@ -27,6 +27,15 @@ const (
 	testSupervisorStartupEnvironment = "dev"
 )
 
+func init() {
+	reentryHelpers = append(reentryHelpers, func() (int, bool) {
+		if os.Getenv(jobSupervisorStartupHelperEnv) == "" {
+			return 0, false
+		}
+		return runJobSupervisorStartupHelper(os.Getenv(jobSupervisorStartupHelperEnv)), true
+	})
+}
+
 // runJobSupervisorStartupHelper re-enters this test binary as a real supervisor
 // process that ends before registerEnvironmentJob has made anything durable.
 //
