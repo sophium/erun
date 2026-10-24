@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
-
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // awsSDKRunner implements the eruncommon.CloudContextDependencies.RunAWS seam
@@ -67,8 +67,8 @@ func newAWSSDKRunner(credentialsJSON, endpoint string) (*awsSDKRunner, error) {
 
 // runAWS adapts the runner to the eruncommon seam, binding the DBOS step's
 // context so a cancelled workflow cancels the in-flight AWS call.
-func (r *awsSDKRunner) runAWS(ctx context.Context) func(eruncommon.Context, eruncommon.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
+func (r *awsSDKRunner) runAWS(ctx context.Context) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, region string, args []string) (string, error) {
 		return r.run(ctx, region, args)
 	}
 }

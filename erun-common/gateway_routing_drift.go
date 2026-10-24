@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // GatewayRouting is where an environment's running pod sends Claude Code
@@ -32,8 +35,8 @@ func (r GatewayRouting) Drifted() bool {
 
 // WantedGatewayEndpoint is the base URL deploy renders for an environment, the
 // same resolution the chart values use.
-func WantedGatewayEndpoint(claude EnvironmentClaudeConfig, catalog *OpenRouterConfig) string {
-	return EffectiveGateway(claude, catalog).Endpoint()
+func WantedGatewayEndpoint(claude config.EnvironmentClaudeConfig, catalog *config.OpenRouterConfig) string {
+	return config.EffectiveGateway(claude, catalog).Endpoint()
 }
 
 func normalizeGatewayEndpoint(endpoint string) string {
@@ -78,7 +81,7 @@ var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, nam
 		args = append(args, "--context", c)
 	}
 	args = append(args, "-n", namespace, "get", "deployment", deployment, "--ignore-not-found", "-o", "json")
-	cmd := CommandContext(ctx, "kubectl", args...)
+	cmd := core.CommandContext(ctx, "kubectl", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, false, fmt.Errorf("read deployment %s/%s: %w", namespace, deployment, err)
@@ -91,7 +94,7 @@ var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, nam
 
 // ReadGatewayRouting compares the running runtime pod of tenant/environment
 // with its saved configuration. found is false when no runtime is deployed.
-func ReadGatewayRouting(ctx context.Context, env EnvConfig, tenant string, catalog *OpenRouterConfig) (routing GatewayRouting, found bool, err error) {
+func ReadGatewayRouting(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (routing GatewayRouting, found bool, err error) {
 	routing.Wanted = WantedGatewayEndpoint(env.Claude, catalog)
 	namespace := KubernetesNamespaceName(tenant, env.Name)
 	raw, found, err := loadRuntimeDeploymentJSON(ctx, env.KubernetesContext, namespace, RuntimeReleaseName(tenant))

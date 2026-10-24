@@ -7,12 +7,14 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type openKubectlRunnerFunc func(args []string, stdout, stderr io.Writer) error
 
 func runOpenKubectl(args []string, stdout, stderr io.Writer) error {
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}

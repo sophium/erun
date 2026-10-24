@@ -3,13 +3,13 @@ package main
 import (
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // Both fields are pull-time coordinates the Manage dialog now edits, so an
 // edit has to survive the round trip rather than silently reverting on save.
 func TestPullCoordinatesRoundTripThroughTheEditor(t *testing.T) {
-	existing := eruncommon.EnvConfig{
+	existing := config.EnvConfig{
 		RuntimeRegistry:  "old.example.com",
 		ImagePullSecrets: []string{"old-secret"},
 	}
@@ -33,7 +33,7 @@ func TestPullCoordinatesRoundTripThroughTheEditor(t *testing.T) {
 // place -- a stale pull secret is how an env keeps failing after the operator
 // believes they fixed it.
 func TestClearingPullCoordinatesClearsTheConfig(t *testing.T) {
-	existing := eruncommon.EnvConfig{
+	existing := config.EnvConfig{
 		RuntimeRegistry:  "old.example.com",
 		ImagePullSecrets: []string{"old-secret"},
 	}

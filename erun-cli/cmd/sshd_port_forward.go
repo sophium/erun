@@ -10,6 +10,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const sshdPortForwardStartupTimeout = 5 * time.Second
@@ -26,7 +28,7 @@ type sshdPortForwardState struct {
 	ProxyProcessID    int    `json:"proxyProcessId,omitempty"`
 }
 
-func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common.SSHConnectionInfo, error) {
+func ensureSSHDPortForward(ctx core.Context, result config.OpenResult) (common.SSHConnectionInfo, error) {
 	info := common.SSHConnectionInfoForResult(result)
 	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
@@ -77,7 +79,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 // adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
 // SSHD forward. See that function for the contract.
-func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info common.SSHConnectionInfo) (bool, error) {
+func adoptForeignSSHDPortForward(ctx core.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info common.SSHConnectionInfo) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(info.Port)
 	if !ok {
 		return false, fmt.Errorf("local SSH port %d is already in use", info.Port)
@@ -110,7 +112,7 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 // record) forces replacement regardless of reachability, so it is excluded
 // from the "holds the port but doesn't answer" trace, which would otherwise
 // misdescribe a forward that actually answers fine.
-func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortForwardState, localPort int) {
+func stopStaleSSHDPortForward(ctx core.Context, matches bool, state sshdPortForwardState, localPort int) {
 	if !matches || state.ProcessID <= 0 {
 		return
 	}
@@ -130,7 +132,7 @@ func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortFo
 	}
 }
 
-func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
+func startSSHDPortForward(ctx core.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
 	expectedState.LogPath = logPath
 	process, err := startPortForwardWithBindRetry(ctx, "sshd", info.Port, func() (*os.Process, error) {
@@ -166,7 +168,7 @@ func launchSSHDPortForwardProcess(logPath string, args []string) (*os.Process, e
 		_ = logFile.Close()
 	}()
 
-	cmd := common.Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
@@ -197,7 +199,7 @@ func waitForSSHDPortForward(port int, logPath string, logStart int64) error {
 	return fmt.Errorf("timed out waiting for SSH port-forward on 127.0.0.1:%d; see %s", port, logPath)
 }
 
-func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
+func kubectlPortForwardArgs(result config.OpenResult, localPort int) []string {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
@@ -209,7 +211,7 @@ func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
 	args = append(args,
 		"port-forward",
 		"deployment/"+common.RuntimeReleaseName(result.Tenant),
-		fmt.Sprintf("%d:%d", localPort, common.SSHLocalPortForResult(result)),
+		fmt.Sprintf("%d:%d", localPort, config.SSHLocalPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const dindTestPod = "erun-devops-7d9f-abcde"
@@ -50,7 +52,7 @@ func (r *dindRun) host() dindEntrypointHost {
 
 func (r *dindRun) run(t *testing.T, dryRun bool, args ...string) {
 	t.Helper()
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &r.output, &r.output), DryRun: dryRun}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &r.output, &r.output), DryRun: dryRun}
 	if err := runDindEntrypoint(ctx, DindEntrypointParams{DockerdArgs: args}, r.host()); err != nil {
 		t.Fatalf("the entrypoint failed: %v\n%s", err, r.output.String())
 	}
@@ -305,7 +307,7 @@ func TestDindEntrypointRequiresTheStockEntrypointOnPath(t *testing.T) {
 	run := newDindRun(t)
 	host := run.host()
 	host.lookPath = func(string) (string, error) { return "", errors.New("not found") }
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &run.output, &run.output)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &run.output, &run.output)}
 	err := runDindEntrypoint(ctx, DindEntrypointParams{}, host)
 	if err == nil || !strings.Contains(err.Error(), "dockerd-entrypoint.sh is not on PATH") {
 		t.Fatalf("expected a missing stock entrypoint to be named, got %v", err)
@@ -313,10 +315,10 @@ func TestDindEntrypointRequiresTheStockEntrypointOnPath(t *testing.T) {
 }
 
 func TestDindEntrypointRefusesAnHostThatIsNotLinux(t *testing.T) {
-	restore := hostOSOverEnv
-	hostOSOverEnv = func() string { return "darwin" }
-	t.Cleanup(func() { hostOSOverEnv = restore })
-	err := RunDindEntrypoint(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}, DindEntrypointParams{})
+	restore := core.HostOSOverEnv
+	core.HostOSOverEnv = func() string { return "darwin" }
+	t.Cleanup(func() { core.HostOSOverEnv = restore })
+	err := RunDindEntrypoint(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}, DindEntrypointParams{})
 	if err == nil || !strings.Contains(err.Error(), "runs only inside the erun-dind sidecar, which is Linux; this host is darwin") {
 		t.Fatalf("expected an unsupported-OS refusal, got %v", err)
 	}

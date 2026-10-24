@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportPodUnreachable prints a degraded report for a doctor check that needs
@@ -12,7 +14,7 @@ import (
 // helm release status and pod state doctor prints first are the causal
 // evidence, so this only names what could not be read and points back at
 // them rather than surfacing a raw exec error with no next step.
-func reportPodUnreachable(ctx common.Context, header string, err error) error {
+func reportPodUnreachable(ctx core.Context, header string, err error) error {
 	_, ferr := fmt.Fprintf(ctx.Stdout, "== %s ==\ncould not read: %s\nThe runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header, strings.TrimSpace(err.Error()))
 	return ferr
 }
@@ -22,7 +24,7 @@ func reportPodUnreachable(ctx common.Context, header string, err error) error {
 // the cluster is unreachable (common.DeployDiagnosisResult.ClusterUnreachable)
 // -- skipping here is what turns four independent multi-minute kubectl
 // timeouts rediscovering the same fact into one immediate line each.
-func reportPodSkippedUnreachable(ctx common.Context, header string) error {
+func reportPodSkippedUnreachable(ctx core.Context, header string) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
 	return err
 }
@@ -36,7 +38,7 @@ func reportPodSkippedUnreachable(ctx common.Context, header string) error {
 // depends on a credential resolving for each at deploy time; a mismatch here
 // is worth flagging on its own, because a credential failure for the image's
 // own registry is exactly what leaves a redeployed pod unable to pull.
-func reportRuntimeImageRegistryMismatch(ctx common.Context, result common.OpenResult) error {
+func reportRuntimeImageRegistryMismatch(ctx core.Context, result config.OpenResult) error {
 	imageRegistry, runtimeRegistry, mismatched := result.EnvConfig.RuntimeImageRegistryMismatch()
 	if !mismatched {
 		return nil
@@ -60,7 +62,7 @@ func reportRuntimeImageRegistryMismatch(ctx common.Context, result common.OpenRe
 // without an explicit --runtime-image/--runtime-chart can silently move the
 // pod back onto the wrong line, and the runtime chart's Recreate strategy
 // tears the running pod down before that mistake is visible.
-func reportRuntimeImageLineMismatch(ctx common.Context, result common.OpenResult) error {
+func reportRuntimeImageLineMismatch(ctx core.Context, result config.OpenResult) error {
 	recordedLine, observedLine, mismatched := result.EnvConfig.RuntimeImageLineMismatch()
 	if !mismatched {
 		return nil

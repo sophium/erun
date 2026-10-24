@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // portForwardStateKinds are every kind of forward `erun open` can record for
@@ -17,13 +21,13 @@ type (
 )
 
 type DeleteStore interface {
-	LoadTenantConfig(string) (TenantConfig, string, error)
-	SaveTenantConfig(TenantConfig) error
+	LoadTenantConfig(string) (config.TenantConfig, string, error)
+	SaveTenantConfig(config.TenantConfig) error
 	DeleteTenantConfig(string) error
-	LoadERunConfig() (ERunConfig, string, error)
-	SaveERunConfig(ERunConfig) error
-	LoadEnvConfig(string, string) (EnvConfig, string, error)
-	ListEnvConfigs(string) ([]EnvConfig, error)
+	LoadERunConfig() (config.ERunConfig, string, error)
+	SaveERunConfig(config.ERunConfig) error
+	LoadEnvConfig(string, string) (config.EnvConfig, string, error)
+	ListEnvConfigs(string) ([]config.EnvConfig, error)
 	DeleteEnvConfig(string, string) error
 }
 
@@ -55,12 +59,12 @@ func DeleteEnvironmentConfirmation(tenant, environment string) string {
 	return tenant + "-" + environment
 }
 
-func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
+func RunDeleteEnvironment(ctx core.Context, params DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
 	store, deleteNamespace = normalizeDeleteEnvironmentDependencies(store, deleteNamespace)
 
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if err := errMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
 		return DeleteEnvironmentResult{}, err
 	}
 
@@ -111,7 +115,7 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 // and one that outlives them: a state file reclaimed without its log leaves a
 // file that nothing else in erun will ever open, restart, or rotate again, for
 // an environment that no longer exists to reopen it.
-func removePortForwardStateFiles(ctx Context, tenant, environment string) error {
+func removePortForwardStateFiles(ctx core.Context, tenant, environment string) error {
 	for _, kind := range portForwardStateKinds {
 		if err := RemovePortForwardRecord(ctx, kind, tenant, environment); err != nil {
 			return err
@@ -128,7 +132,7 @@ func removePortForwardStateFiles(ctx Context, tenant, environment string) error 
 // live pod the operator did not name. Only the alias this environment derives
 // is touched, and only while no other configured environment derives it, so a
 // block a live environment legitimately owns survives.
-func removeEnvironmentSSHConfigAlias(ctx Context, store DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
+func removeEnvironmentSSHConfigAlias(ctx core.Context, store DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
 	alias := SSHHostAlias(tenant, environment)
 	if alias == "" {
 		return nil
@@ -141,11 +145,11 @@ func removeEnvironmentSSHConfigAlias(ctx Context, store DeleteStore, tenant, env
 		ctx.Trace(fmt.Sprintf("delete: keeping ssh config block Host %s: another environment still derives that alias", alias))
 		return nil
 	}
-	path, err := DefaultSSHConfigPath()
+	path, err := config.DefaultSSHConfigPath()
 	if err != nil {
 		return err
 	}
-	hasBlock, err := SSHConfigHasAlias(path, alias)
+	hasBlock, err := config.SSHConfigHasAlias(path, alias)
 	if err != nil {
 		return fmt.Errorf("read ssh config %s: %w", path, err)
 	}
@@ -158,7 +162,7 @@ func removeEnvironmentSSHConfigAlias(ctx Context, store DeleteStore, tenant, env
 	if ctx.DryRun {
 		return nil
 	}
-	if _, err := RemoveSSHConfigAlias(path, alias); err != nil {
+	if _, err := config.RemoveSSHConfigAlias(path, alias); err != nil {
 		return fmt.Errorf("remove Host %s block from %s: %w", alias, path, err)
 	}
 	return nil
@@ -188,7 +192,7 @@ func sshAliasClaimedByOtherEnvironment(store DeleteStore, tenant, environment, a
 
 func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteStore, NamespaceDeleterFunc) {
 	if store == nil {
-		store = ConfigStore{}
+		store = config.ConfigStore{}
 	}
 	if deleteNamespace == nil {
 		deleteNamespace = DeleteKubernetesNamespace
@@ -196,7 +200,7 @@ func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace N
 	return store, deleteNamespace
 }
 
-func deleteEnvironmentResult(tenant, environment string, envConfig EnvConfig, configPath string) DeleteEnvironmentResult {
+func deleteEnvironmentResult(tenant, environment string, envConfig config.EnvConfig, configPath string) DeleteEnvironmentResult {
 	return DeleteEnvironmentResult{
 		Tenant:            tenant,
 		Environment:       environment,
@@ -206,7 +210,7 @@ func deleteEnvironmentResult(tenant, environment string, envConfig EnvConfig, co
 	}
 }
 
-func deleteRemoteEnvironmentNamespace(ctx Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
+func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
 	result.Namespace = KubernetesNamespaceName(result.Tenant, result.Environment)
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
 		return fmt.Errorf("delete environment %s/%s: %w", result.Tenant, result.Environment, err)
@@ -221,7 +225,7 @@ func deleteRemoteEnvironmentNamespace(ctx Context, deleteNamespace NamespaceDele
 	return nil
 }
 
-func removeTenantWhenLastEnvironmentDeleted(ctx Context, store DeleteStore, tenant, deletedEnvironment string) error {
+func removeTenantWhenLastEnvironmentDeleted(ctx core.Context, store DeleteStore, tenant, deletedEnvironment string) error {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		return err
@@ -239,10 +243,10 @@ func removeTenantWhenLastEnvironmentDeleted(ctx Context, store DeleteStore, tena
 	return clearDeletedDefaultTenant(ctx, store, tenant)
 }
 
-func clearDeletedDefaultTenant(ctx Context, store DeleteStore, deletedTenant string) error {
+func clearDeletedDefaultTenant(ctx core.Context, store DeleteStore, deletedTenant string) error {
 	toolConfig, _, err := store.LoadERunConfig()
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			return nil
 		}
 		return err
@@ -255,7 +259,7 @@ func clearDeletedDefaultTenant(ctx Context, store DeleteStore, deletedTenant str
 	return store.SaveERunConfig(toolConfig)
 }
 
-func clearDeletedDefaultEnvironment(ctx Context, store DeleteStore, tenant, deletedEnvironment string) error {
+func clearDeletedDefaultEnvironment(ctx core.Context, store DeleteStore, tenant, deletedEnvironment string) error {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {
 		return err

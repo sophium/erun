@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // agentTestApp is an orchestrator test app over a given fake Claude service,
@@ -208,7 +209,7 @@ func TestMovingEffortToMaxRecreatesTheAgentOnItsCurrentConversation(t *testing.T
 	first := agents.named(id)[0]
 	agents.clear(first.ID, "b4196e75-0000-4000-8000-000000000000")
 
-	_, err := eruncommon.SetOrchestratorEffort(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: id, Effort: "max"})
+	_, err := eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: id, Effort: "max"})
 	mustNoErr(t, err, "SetOrchestratorEffort")
 	_, err = app.RestartOrchestrator(id, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")
@@ -237,7 +238,7 @@ func TestARestartAppliesSettingsWithoutRecreatingTheAgent(t *testing.T) {
 	id := startAgentOrchestrator(t, app, "erun")
 	agentID := agents.named(id)[0].ID
 
-	_, err := eruncommon.SetOrchestratorModel(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: id, Model: "sonnet"})
+	_, err := eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: id, Model: "sonnet"})
 	mustNoErr(t, err, "SetOrchestratorModel")
 	restarted, err := app.RestartOrchestrator(id, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")

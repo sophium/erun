@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // repoRootForOverviewDocTest returns the repo root. erun-mcp sits directly
@@ -281,12 +282,12 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 	// model omits when zero: an omitempty field left at its zero value would
 	// otherwise be reported below as unemitted, and this fixture is the answer
 	// to that report for anyone extending the example.
-	policy := eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
+	policy := config.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
 	fixture := eruncommon.EnvironmentReadModel{
 		Tenant: "myapp",
 		Environment: eruncommon.ListEnvironmentResult{
 			Name:           "local",
-			Type:           eruncommon.EnvironmentTypeLocalAgent,
+			Type:           config.EnvironmentTypeLocalAgent,
 			RuntimeVersion: "1.0.308",
 			ManagedCloud:   true,
 			IsDefault:      true,

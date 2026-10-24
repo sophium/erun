@@ -9,6 +9,8 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // forceStdinTerminal drives the stdinIsTerminal seam for one test. It is the
@@ -21,8 +23,8 @@ func forceStdinTerminal(t *testing.T, terminal bool) {
 	t.Cleanup(func() { stdinIsTerminal = previous })
 }
 
-func doctorActionResult() common.OpenResult {
-	return common.OpenResult{Tenant: "team", Environment: "dev"}
+func doctorActionResult() config.OpenResult {
+	return config.OpenResult{Tenant: "team", Environment: "dev"}
 }
 
 // Without a terminal nobody can answer the optional prune prompts, so doctor
@@ -38,7 +40,7 @@ func TestDoctorSkipsOptionalPrunePromptsWithoutTerminal(t *testing.T) {
 		return "", promptui.ErrEOF
 	}
 	var out bytes.Buffer
-	ctx := common.Context{Stdout: &out}
+	ctx := core.Context{Stdout: &out}
 
 	actions, err := selectedDoctorActions(ctx, runner, doctorActionResult(), doctorOptions{}, false)
 	if err != nil {
@@ -77,7 +79,7 @@ func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 		return "y", nil
 	}
 	var out bytes.Buffer
-	ctx := common.Context{Stdout: &out}
+	ctx := core.Context{Stdout: &out}
 
 	actions, err := selectedDoctorActions(ctx, runner, doctorActionResult(), doctorOptions{}, false)
 	if err != nil {
@@ -109,7 +111,7 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	forceStdinTerminal(t, true)
 	runner := func(promptui.Prompt) (string, error) { return "", promptui.ErrEOF }
 	var out bytes.Buffer
-	ctx := common.Context{Stdout: &out}
+	ctx := core.Context{Stdout: &out}
 
 	actions, err := selectedDoctorActions(ctx, runner, doctorActionResult(), doctorOptions{}, false)
 	if err != nil {
@@ -138,7 +140,7 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 func TestDoctorConfirmDeclinesOnEOFWithoutFailing(t *testing.T) {
 	runner := func(promptui.Prompt) (string, error) { return "", promptui.ErrEOF }
 	var out bytes.Buffer
-	ctx := common.Context{Stdout: &out}
+	ctx := core.Context{Stdout: &out}
 
 	confirmed, err := doctorConfirm(ctx, runner, "Roll back team/dev to its last successful revision?", "Re-run with --rollback to run it without a prompt.")
 	if err != nil {
@@ -157,7 +159,7 @@ func TestDoctorConfirmDeclinesOnEOFWithoutFailing(t *testing.T) {
 func TestDoctorStillReportsRealPromptErrors(t *testing.T) {
 	forceStdinTerminal(t, true)
 	runner := func(promptui.Prompt) (string, error) { return "", errors.New("prompt runner broke") }
-	ctx := common.Context{Stdout: &bytes.Buffer{}}
+	ctx := core.Context{Stdout: &bytes.Buffer{}}
 
 	if _, err := selectedDoctorActions(ctx, runner, doctorActionResult(), doctorOptions{}, false); err == nil {
 		t.Fatal("a real prompt-runner error was swallowed")

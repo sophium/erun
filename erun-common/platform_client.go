@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // PlatformClient is the transport-neutral client for a hosted erun platform's
@@ -134,9 +137,9 @@ type PlatformWhoami struct {
 	// Capabilities is nil when the platform did not answer with one, and
 	// non-nil but empty when the caller may do nothing. Do not conflate them —
 	// see PlatformCapabilities.Known.
-	Capabilities PlatformCapabilities `json:"capabilities"`
-	Issuer       string               `json:"issuer"`
-	Subject      string               `json:"subject"`
+	Capabilities model.PlatformCapabilities `json:"capabilities"`
+	Issuer       string                     `json:"issuer"`
+	Subject      string                     `json:"subject"`
 }
 
 // PlatformTenant mirrors model.Tenant's JSON shape.
@@ -200,8 +203,8 @@ type PlatformEnvDefinitionRecord struct {
 	TenantID      string `json:"tenantId"`
 	// Revision increases by one on every upload. It is the number a local
 	// marker stamps to record what it last synced from.
-	Revision   int                   `json:"revision"`
-	Definition PlatformEnvDefinition `json:"definition"`
+	Revision   int                             `json:"revision"`
+	Definition configpkg.PlatformEnvDefinition `json:"definition"`
 	// WrittenByUserID is the ERun user whose token performed the upload.
 	WrittenByUserID string    `json:"writtenByUserId,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
@@ -211,9 +214,9 @@ type PlatformEnvDefinitionRecord struct {
 // PutEnvironmentDefinition stores definition as the environment's current one,
 // advancing its revision by one — or writing revision 1 for an environment that
 // has none yet. It is what an upload calls.
-func (c *PlatformClient) PutEnvironmentDefinition(ctx context.Context, environmentID string, definition PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
+func (c *PlatformClient) PutEnvironmentDefinition(ctx context.Context, environmentID string, definition configpkg.PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
 	body := struct {
-		Definition PlatformEnvDefinition `json:"definition"`
+		Definition configpkg.PlatformEnvDefinition `json:"definition"`
 	}{Definition: definition}
 	var record PlatformEnvDefinitionRecord
 	path := "/v1/environments/" + url.PathEscape(environmentID) + "/definition"

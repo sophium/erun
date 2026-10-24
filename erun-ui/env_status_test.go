@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // Tab presence alone is not running-ness: these tests lock when the sidebar's
@@ -16,16 +16,16 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 	t.Helper()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &config.ERunConfig{
+			CloudContexts: []config.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "cluster-cloud"},
 		},
 	}

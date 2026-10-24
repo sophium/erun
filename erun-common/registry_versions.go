@@ -12,9 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-)
 
-const DefaultRuntimeImageName = "erun-devops"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+)
 
 // ErrRegistryAuthRequired marks a version listing that failed because the caller
 // is not authorized to read the (private) repository, so callers can tell
@@ -66,53 +67,8 @@ type RuntimeVersionSuggestion struct {
 	Image   string `json:"image,omitempty"`
 }
 
-const (
-	defaultDockerHubRegistryBaseURL = "https://hub.docker.com"
-	defaultGHCRRegistryBaseURL      = "https://ghcr.io"
-)
-
-// Resolved returns a fully-specified config, applying registry defaults to any unset field.
-func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
-	resolved := RuntimeRegistryConfig{
-		Namespace:  strings.TrimSpace(c.Namespace),
-		Repository: strings.TrimSpace(c.Repository),
-		BaseURL:    strings.TrimSpace(c.BaseURL),
-		TokenURL:   strings.TrimSpace(c.TokenURL),
-		Insecure:   c.Insecure,
-	}
-	if resolved.Namespace == "" {
-		resolved.Namespace = DefaultContainerRegistry
-	}
-	if resolved.Repository == "" {
-		resolved.Repository = DefaultRuntimeImageName
-	}
-	if resolved.BaseURL == "" {
-		switch host, _, isRegistryHost := ociRegistryHostFromNamespace(resolved.Namespace); {
-		case namespaceIsGHCR(resolved.Namespace):
-			resolved.BaseURL = defaultGHCRRegistryBaseURL
-		case isRegistryHost:
-			// A namespace that names its own registry host is served by that host,
-			// not by Docker Hub; defaulting to the Hub sent the listing to a
-			// repository named after the host and answered 404. That host may speak
-			// plain HTTP only (an insecure in-cluster registry), so honor Insecure
-			// rather than always assuming TLS.
-			scheme := "https://"
-			if resolved.Insecure {
-				scheme = "http://"
-			}
-			resolved.BaseURL = scheme + host
-		default:
-			resolved.BaseURL = defaultDockerHubRegistryBaseURL
-		}
-	}
-	if resolved.TokenURL == "" {
-		resolved.TokenURL = defaultGHCRRegistryBaseURL
-	}
-	return resolved
-}
-
 func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (RuntimeRegistryVersions, error) {
-	config, _, _ := LoadERunConfig()
+	config, _, _ := configpkg.LoadERunConfig()
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistry)
 }
 
@@ -125,19 +81,19 @@ const registryListMaxAttempts = 3
 
 var registryListRetryBase = 200 * time.Millisecond
 
-func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
+func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg configpkg.RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
 	resolved := cfg.Resolved()
 	return resolveRegistryVersionsWithRetry(ctx, func() (RuntimeRegistryVersions, error) {
 		return resolveConfiguredRuntimeRegistryVersionsOnce(ctx, resolved)
 	})
 }
 
-func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
+func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved configpkg.RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	if owner, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
+	if owner, ok := configpkg.GhcrOwnerFromNamespace(resolved.Namespace); ok {
 		return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, resolved.Repository, resolved.BaseURL, resolved.TokenURL)
 	}
-	if host, prefix, ok := ociRegistryHostFromNamespace(resolved.Namespace); ok {
+	if host, prefix, ok := configpkg.OciRegistryHostFromNamespace(resolved.Namespace); ok {
 		return resolveOCIRuntimeRegistryVersionsAt(ctx, client, host, prefix, resolved.Repository, resolved.BaseURL)
 	}
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
@@ -184,33 +140,10 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 
 // ResolveRuntimeImageRegistryVersions is a compatibility overload for callers that pass an explicit namespace/repository pair.
 func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
-	return ResolveConfiguredRuntimeRegistryVersions(ctx, RuntimeRegistryConfig{
+	return ResolveConfiguredRuntimeRegistryVersions(ctx, configpkg.RuntimeRegistryConfig{
 		Namespace:  namespace,
 		Repository: repository,
 	})
-}
-
-func namespaceIsGHCR(namespace string) bool {
-	_, ok := ghcrOwnerFromNamespace(namespace)
-	return ok
-}
-
-func ghcrOwnerFromNamespace(namespace string) (string, bool) {
-	trimmed := strings.TrimSpace(namespace)
-	if trimmed == "" {
-		return "", false
-	}
-	const prefix = "ghcr.io"
-	if !strings.HasPrefix(trimmed, prefix) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(trimmed, prefix)
-	rest = strings.TrimPrefix(rest, "/")
-	rest = strings.Trim(rest, "/")
-	if rest == "" {
-		return "", false
-	}
-	return rest, true
 }
 
 func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, namespace, repository, baseURL string) (RuntimeRegistryVersions, error) {
@@ -224,7 +157,7 @@ func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http
 	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
-		baseURL = defaultDockerHubRegistryBaseURL
+		baseURL = configpkg.DefaultDockerHubRegistryBaseURL
 	}
 
 	endpoint := baseURL + "/v2/repositories/" + url.PathEscape(namespace) + "/" + url.PathEscape(repository) + "/tags?page_size=100"
@@ -294,7 +227,7 @@ func escapeRegistryPathSegments(path string) string {
 func normalizeGHCRBaseURL(rawURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	if trimmed == "" {
-		return defaultGHCRRegistryBaseURL
+		return configpkg.DefaultGHCRRegistryBaseURL
 	}
 	return trimmed
 }
@@ -319,7 +252,7 @@ func collectGHCRTags(ctx context.Context, client *http.Client, endpoint, token s
 func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, tokenBaseURL string, auth registryBasicAuth, hasAuth bool) (string, error) {
 	tokenBaseURL = strings.TrimRight(strings.TrimSpace(tokenBaseURL), "/")
 	if tokenBaseURL == "" {
-		tokenBaseURL = defaultGHCRRegistryBaseURL
+		tokenBaseURL = configpkg.DefaultGHCRRegistryBaseURL
 	}
 	tokenURL := tokenBaseURL + "/token?service=ghcr.io&scope=repository:" + repoPath + ":pull"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
@@ -546,8 +479,8 @@ func (versions RuntimeRegistryVersions) HasVersion(version string) bool {
 	return slices.Contains(versions.Tags, version)
 }
 
-func RuntimeDeployVersionSuggestions(info BuildInfo, registry RuntimeRegistryVersions) []RuntimeVersionSuggestion {
-	info = NormalizeBuildInfo(info)
+func RuntimeDeployVersionSuggestions(info model.BuildInfo, registry RuntimeRegistryVersions) []RuntimeVersionSuggestion {
+	info = model.NormalizeBuildInfo(info)
 	suggestions := make([]RuntimeVersionSuggestion, 0, 4)
 	addSuggestion := func(label, value string) {
 		value = strings.TrimSpace(value)

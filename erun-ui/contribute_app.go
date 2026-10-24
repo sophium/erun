@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // contributeAppForward is the per-env kubectl port-forward that bridges the
@@ -106,7 +108,7 @@ var (
 // timeout. Reaping is owned by the forward, so this must not call Wait().
 var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*exec.Cmd, *bytes.Buffer, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	stderr := new(bytes.Buffer)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = stderr
@@ -124,7 +126,7 @@ func (a *App) startContributeAppForward(ctx context.Context, selection uiSelecti
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("resolve environment: %w", err)
 	}
-	port := eruncommon.ContributeAppPortForResult(result)
+	port := config.ContributeAppPortForResult(result)
 	if port <= 0 {
 		return nil, nil, 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
 	}
@@ -242,7 +244,7 @@ func canConnectLocalContributeAppPort(port int) bool {
 	return true
 }
 
-func kubectlContributeAppPortForwardArgs(result eruncommon.OpenResult, localPort int) []string {
+func kubectlContributeAppPortForwardArgs(result config.OpenResult, localPort int) []string {
 	args := make([]string, 0, 8)
 	if c := strings.TrimSpace(result.EnvConfig.KubernetesContext); c != "" {
 		args = append(args, "--context", c)

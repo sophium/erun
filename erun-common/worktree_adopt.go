@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // worktreeAdoptStagingName is where a partial copy lands inside the claim, so
@@ -59,7 +61,7 @@ type WorktreeAdoptResult struct {
 // Adoption is copy-then-set-aside, never move-first: a failed run leaves the
 // legacy tree intact, and the claim only counts as adopted once the copy landed
 // a real repository. Every later boot finds a populated claim and does nothing.
-func AdoptWorktree(ctx Context, params WorktreeAdoptParams) (WorktreeAdoptResult, error) {
+func AdoptWorktree(ctx core.Context, params WorktreeAdoptParams) (WorktreeAdoptResult, error) {
 	result := WorktreeAdoptResult{LegacyDir: params.LegacyDir, ClaimDir: params.ClaimDir, DryRun: ctx.DryRun}
 	if params.LegacyDir == "" || params.ClaimDir == "" {
 		return result, errors.New("worktree-adopt: both the legacy worktree directory and the worktree claim directory are required")
@@ -81,7 +83,7 @@ func AdoptWorktree(ctx Context, params WorktreeAdoptParams) (WorktreeAdoptResult
 
 // previewWorktreeAdoption traces the copy, promotion and set-aside a real run
 // would perform, touching neither volume.
-func previewWorktreeAdoption(ctx Context, result WorktreeAdoptResult, preserved string) WorktreeAdoptResult {
+func previewWorktreeAdoption(ctx core.Context, result WorktreeAdoptResult, preserved string) WorktreeAdoptResult {
 	staging := filepath.Join(result.ClaimDir, worktreeAdoptStagingName)
 	ctx.Trace(fmt.Sprintf("worktree-adopt: dry run: would copy %s into %s and move the copy into %s once it holds .git", result.LegacyDir, staging, result.ClaimDir))
 	if _, err := os.Lstat(preserved); err == nil {
@@ -98,7 +100,7 @@ func previewWorktreeAdoption(ctx Context, result WorktreeAdoptResult, preserved 
 // decideWorktreeAdoption reports WorktreeAdoptAdopted only when the claim is
 // empty and the legacy path holds a real repository; every other outcome is a
 // no-op the run explains.
-func decideWorktreeAdoption(ctx Context, params WorktreeAdoptParams) (WorktreeAdoptOutcome, error) {
+func decideWorktreeAdoption(ctx core.Context, params WorktreeAdoptParams) (WorktreeAdoptOutcome, error) {
 	if info, err := os.Stat(params.ClaimDir); err != nil || !info.IsDir() {
 		ctx.Info(fmt.Sprintf("worktree-adopt: no worktree volume staged at %s; nothing to adopt", params.ClaimDir))
 		return WorktreeAdoptNoClaim, nil
@@ -146,7 +148,7 @@ func worktreeClaimIsEmpty(claimDir string) (bool, error) {
 // promoteWorktreeCopy copies the legacy tree into the claim's staging dir and,
 // once the copy is proven to hold a repository, moves its entries up into the
 // claim itself.
-func promoteWorktreeCopy(ctx Context, params WorktreeAdoptParams) error {
+func promoteWorktreeCopy(ctx core.Context, params WorktreeAdoptParams) error {
 	staging := filepath.Join(params.ClaimDir, worktreeAdoptStagingName)
 	if err := os.RemoveAll(staging); err != nil {
 		return fmt.Errorf("worktree-adopt: clear abandoned staging dir %s: %w", staging, err)
@@ -180,7 +182,7 @@ func promoteWorktreeCopy(ctx Context, params WorktreeAdoptParams) error {
 // losing the tree a second time is the failure adoption exists to prevent. The
 // sibling name keeps it visible to the operator, where the masked-under-a-mount
 // original was not.
-func setAsideLegacyWorktree(ctx Context, result WorktreeAdoptResult, preserved string) (WorktreeAdoptResult, error) {
+func setAsideLegacyWorktree(ctx core.Context, result WorktreeAdoptResult, preserved string) (WorktreeAdoptResult, error) {
 	if _, err := os.Lstat(preserved); err == nil {
 		ctx.Info(fmt.Sprintf("worktree-adopt: adopted; leaving the original at %s because %s already exists", result.LegacyDir, preserved))
 		result.Outcome = WorktreeAdoptAdoptedOriginal
@@ -204,7 +206,7 @@ func setAsideLegacyWorktree(ctx Context, result WorktreeAdoptResult, preserved s
 // socket, pipe or device has no content to carry and is skipped with a trace.
 // Directories stay writable until applyCopiedDirModes runs, so a read-only
 // directory still receives its children and can still be moved.
-func copyWorktreeTree(ctx Context, src, dst string) ([]copiedDir, error) {
+func copyWorktreeTree(ctx core.Context, src, dst string) ([]copiedDir, error) {
 	copier := worktreeTreeCopier{ctx: ctx, src: src, dst: dst, links: map[fileLinkKey]string{}}
 	if err := filepath.WalkDir(src, copier.visit); err != nil {
 		return nil, err
@@ -239,7 +241,7 @@ type copiedDir struct {
 }
 
 type worktreeTreeCopier struct {
-	ctx   Context
+	ctx   core.Context
 	src   string
 	dst   string
 	dirs  []copiedDir

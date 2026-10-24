@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
+)
 
 // The scenario from #1201: a brand-new environment configured to build+push to
 // ghcr.io, with no docker config, no gh session, and no GH_TOKEN. Before the
@@ -20,7 +24,7 @@ func TestPreflightRegistryPushAccessRefusesBeforeBuildWhenNoCredentialConfigured
 		}},
 	}
 
-	err := preflightRegistryPushAccess(Context{}, execution)
+	err := preflightRegistryPushAccess(core.Context{}, execution)
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a push with no ghcr.io credential configured")
 	}
@@ -44,7 +48,7 @@ func TestPreflightRegistryPushAccessRefusesChartPushWithNoCredentialConfigured(t
 		}},
 	}
 
-	err := preflightRegistryPushAccess(Context{}, execution)
+	err := preflightRegistryPushAccess(core.Context{}, execution)
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a chart push with no ghcr.io credential configured")
 	}
@@ -69,7 +73,7 @@ func TestPreflightRegistryPushAccessSkipsInDryRun(t *testing.T) {
 		}},
 	}
 
-	if err := preflightRegistryPushAccess(Context{DryRun: true}, execution); err != nil {
+	if err := preflightRegistryPushAccess(core.Context{DryRun: true}, execution); err != nil {
 		t.Fatalf("dry-run must not fail on a missing credential, got %v", err)
 	}
 }

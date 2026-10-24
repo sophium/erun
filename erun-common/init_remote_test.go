@@ -3,14 +3,16 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func TestGHCRRegistriesRequiringCredentialFiltersToGHCRBuildOrDeployRoles(t *testing.T) {
-	list := ContainerRegistries{
-		{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
-		{Registry: "ghcr.io/other", Roles: []RegistryRole{RegistryRoleFrom}},
-		{Registry: "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme", Roles: []RegistryRole{RegistryRoleDeploy}},
-		{Cluster: &ClusterRegistry{Service: "erun-registry"}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+	list := config.ContainerRegistries{
+		{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
+		{Registry: "ghcr.io/other", Roles: []config.RegistryRole{config.RegistryRoleFrom}},
+		{Registry: "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme", Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
+		{Cluster: &config.ClusterRegistry{Service: "erun-registry"}, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
 	}
 
 	got := ghcrRegistriesRequiringCredential(list)
@@ -20,10 +22,10 @@ func TestGHCRRegistriesRequiringCredentialFiltersToGHCRBuildOrDeployRoles(t *tes
 }
 
 func TestGHCRRegistriesRequiringCredentialDedupsAndPreservesOrder(t *testing.T) {
-	list := ContainerRegistries{
-		{Registry: "ghcr.io/b", Roles: []RegistryRole{RegistryRoleDeploy}},
-		{Registry: "ghcr.io/a", Roles: []RegistryRole{RegistryRoleBuild}},
-		{Registry: "ghcr.io/b", Roles: []RegistryRole{RegistryRoleBuild}},
+	list := config.ContainerRegistries{
+		{Registry: "ghcr.io/b", Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
+		{Registry: "ghcr.io/a", Roles: []config.RegistryRole{config.RegistryRoleBuild}},
+		{Registry: "ghcr.io/b", Roles: []config.RegistryRole{config.RegistryRoleBuild}},
 	}
 
 	got := ghcrRegistriesRequiringCredential(list)
@@ -34,8 +36,8 @@ func TestGHCRRegistriesRequiringCredentialDedupsAndPreservesOrder(t *testing.T) 
 }
 
 func TestGHCRRegistriesRequiringCredentialEmptyForNoGHCRRegistries(t *testing.T) {
-	list := ContainerRegistries{
-		{Registry: "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme", Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+	list := config.ContainerRegistries{
+		{Registry: "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
 	}
 	if got := ghcrRegistriesRequiringCredential(list); len(got) != 0 {
 		t.Fatalf("expected no registries requiring a ghcr credential, got %v", got)

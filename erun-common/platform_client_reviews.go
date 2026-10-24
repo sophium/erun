@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // platform_client_reviews.go extends PlatformClient with the collaboration
@@ -43,8 +46,8 @@ type PlatformReview struct {
 	// or inferred from the source branch. They are resolved for the response
 	// and never stored, and they are absent together when the review is linked
 	// to no issue at all.
-	IssueRef       string               `json:"issueRef,omitempty"`
-	IssueRefSource IssueReferenceSource `json:"issueRefSource,omitempty"`
+	IssueRef       string                     `json:"issueRef,omitempty"`
+	IssueRefSource model.IssueReferenceSource `json:"issueRefSource,omitempty"`
 }
 
 // PlatformComment mirrors model.Comment's JSON shape.
@@ -90,9 +93,9 @@ type PlatformBuild struct {
 	FailureDetail string `json:"failureDetail,omitempty"`
 	// Profile is the bounded per-step profile the caller collected for this
 	// build, when it collected one.
-	Profile   *BuildProfileSummary `json:"profile,omitempty"`
-	CreatedAt time.Time            `json:"createdAt"`
-	UpdatedAt time.Time            `json:"updatedAt"`
+	Profile   *core.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt time.Time                 `json:"createdAt"`
+	UpdatedAt time.Time                 `json:"updatedAt"`
 }
 
 // PlatformReviewFilter mirrors the discovery filters GET /v1/reviews accepts.

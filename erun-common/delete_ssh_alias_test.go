@@ -5,43 +5,46 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // deleteSSHConfigStore is a minimal DeleteStore over an in-memory environment
 // list, enough to exercise the local-state teardown RunDeleteEnvironment runs.
 type deleteSSHConfigStore struct {
-	envs map[string][]EnvConfig
+	envs map[string][]configpkg.EnvConfig
 }
 
-func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (TenantConfig, string, error) {
-	return TenantConfig{Name: tenant}, "", nil
+func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (configpkg.TenantConfig, string, error) {
+	return configpkg.TenantConfig{Name: tenant}, "", nil
 }
 
-func (s *deleteSSHConfigStore) SaveTenantConfig(TenantConfig) error { return nil }
+func (s *deleteSSHConfigStore) SaveTenantConfig(configpkg.TenantConfig) error { return nil }
 
 func (s *deleteSSHConfigStore) DeleteTenantConfig(string) error { return nil }
 
-func (s *deleteSSHConfigStore) LoadERunConfig() (ERunConfig, string, error) {
-	return ERunConfig{}, "", nil
+func (s *deleteSSHConfigStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return configpkg.ERunConfig{}, "", nil
 }
 
-func (s *deleteSSHConfigStore) SaveERunConfig(ERunConfig) error { return nil }
+func (s *deleteSSHConfigStore) SaveERunConfig(configpkg.ERunConfig) error { return nil }
 
-func (s *deleteSSHConfigStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+func (s *deleteSSHConfigStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	for _, env := range s.envs[tenant] {
 		if env.Name == environment {
 			return env, filepath.Join("/tmp", tenant, environment), nil
 		}
 	}
-	return EnvConfig{}, "", ErrNotInitialized
+	return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (s *deleteSSHConfigStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+func (s *deleteSSHConfigStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
 	return s.envs[tenant], nil
 }
 
 func (s *deleteSSHConfigStore) DeleteEnvConfig(tenant, environment string) error {
-	kept := make([]EnvConfig, 0, len(s.envs[tenant]))
+	kept := make([]configpkg.EnvConfig, 0, len(s.envs[tenant]))
 	for _, env := range s.envs[tenant] {
 		if env.Name != environment {
 			kept = append(kept, env)
@@ -64,7 +67,7 @@ func sandboxSSHConfig(t *testing.T) string {
 
 func writeSSHConfigBlock(t *testing.T, path, alias string, port int) {
 	t.Helper()
-	if err := UpsertSSHConfig(path, SSHHostEntry{
+	if err := configpkg.UpsertSSHConfig(path, configpkg.SSHHostEntry{
 		Alias:        alias,
 		HostKeyAlias: alias,
 		HostName:     "127.0.0.1",
@@ -101,10 +104,10 @@ func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T
 	}
 	writeSSHConfigBlock(t, configPath, alias, 17022)
 
-	store := &deleteSSHConfigStore{envs: map[string][]EnvConfig{
+	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{
 		"team": {{Name: "dev_1"}, {Name: "dev-1"}},
 	}}
-	result, err := RunDeleteEnvironment(Context{}, DeleteEnvironmentParams{
+	result, err := RunDeleteEnvironment(core.Context{}, DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev_1",
 	}, store, nil)
 	if err != nil {
@@ -122,8 +125,8 @@ func TestDeleteEnvironmentDryRunReportsBlockWithoutRemovingIt(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
 	writeSSHConfigBlock(t, configPath, SSHHostAlias("team", "dev"), 17022)
 
-	store := &deleteSSHConfigStore{envs: map[string][]EnvConfig{"team": {{Name: "dev"}}}}
-	result, err := RunDeleteEnvironment(Context{DryRun: true}, DeleteEnvironmentParams{
+	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{"team": {{Name: "dev"}}}}
+	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev",
 	}, store, nil)
 	if err != nil {

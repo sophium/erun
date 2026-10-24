@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 func TestLoadTenantConfigRequiresATenant(t *testing.T) {
@@ -36,10 +36,10 @@ func TestSaveTenantConfigRequiresATenant(t *testing.T) {
 // save from the desktop and quietly return the model to the selectable set the
 // declaration exists to keep it out of.
 func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
-	config := &eruncommon.OpenRouterConfig{
+	config := &configpkg.OpenRouterConfig{
 		BaseURL:      "https://openrouter.ai/api",
 		DefaultModel: "anthropic/claude-fable-5.1",
-		Models: []eruncommon.OpenRouterModel{
+		Models: []configpkg.OpenRouterModel{
 			{ID: "deepseek/deepseek-v4.1-flash", Context: 262144, RequiresReasoningEcho: true},
 			{ID: "anthropic/claude-fable-5.1", Context: 200000},
 		},
@@ -72,7 +72,7 @@ func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
 // drops an id that is not a plain model token, so storing one silently would
 // leave an entry the operator saved and nothing ever offers.
 func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
-	stored := &eruncommon.OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []eruncommon.OpenRouterModel{{ID: "acme/coder"}}}
+	stored := &configpkg.OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []configpkg.OpenRouterModel{{ID: "acme/coder"}}}
 	cases := []struct {
 		name    string
 		catalog uiOpenRouterConfig
@@ -84,7 +84,7 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := stubUIStore{config: &eruncommon.ERunConfig{OpenRouter: stored}}
+			store := stubUIStore{config: &configpkg.ERunConfig{OpenRouter: stored}}
 			app := NewApp(erunUIDeps{store: store})
 			_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &tc.catalog})
 			if err == nil || !strings.Contains(err.Error(), "cannot save the gateway catalog: "+tc.want) {
@@ -96,7 +96,7 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 		})
 	}
 
-	store := stubUIStore{config: &eruncommon.ERunConfig{}}
+	store := stubUIStore{config: &configpkg.ERunConfig{}}
 	app := NewApp(erunUIDeps{store: store})
 	_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &uiOpenRouterConfig{
 		BaseURL:      "https://gateway.example.test",
@@ -116,8 +116,8 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 // offers, and the other way round.
 func TestTheSaveCheckAgreesWithWhatTheCatalogOffers(t *testing.T) {
 	for _, id := range []string{"opus", "acme/coder", "vendor/model:free", "a.b_c-d", "-p", "--model", "a b", "a;b", "$(id)", "a'b", "a\"b", "a|b", "ü", "a\nb", ".hidden", "/abs", ":tag"} {
-		offered := len((&eruncommon.OpenRouterConfig{Models: []eruncommon.OpenRouterModel{{ID: id}}}).ModelIDs()) == 1
-		if accepted := validateGatewayCatalogModelIDs(&eruncommon.OpenRouterConfig{Models: []eruncommon.OpenRouterModel{{ID: id}}}) == nil; accepted != offered {
+		offered := len((&configpkg.OpenRouterConfig{Models: []configpkg.OpenRouterModel{{ID: id}}}).ModelIDs()) == 1
+		if accepted := validateGatewayCatalogModelIDs(&configpkg.OpenRouterConfig{Models: []configpkg.OpenRouterModel{{ID: id}}}) == nil; accepted != offered {
 			t.Fatalf("id %q: the save accepts=%v but the catalog offers=%v", id, accepted, offered)
 		}
 	}

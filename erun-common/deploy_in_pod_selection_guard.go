@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // inPodBlindRuntimeOnlySelection reports whether this deploy is running inside
@@ -16,7 +19,7 @@ import (
 // the pod cannot tell a selection that is genuinely empty from the one the
 // operator saved on the host. The default is the correct fallback off-pod, where
 // the same resolve reads the operator's own config store.
-func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget OpenResult, selected []string, selectionSource string) bool {
+func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, selected []string, selectionSource string) bool {
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
@@ -26,10 +29,10 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 	// same fallback and are refused for it one layer on by the in-pod
 	// runtime-chart guard (guardInPodRuntimeDeploy), so narrowing here leaves no
 	// state unguarded.
-	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeRuntime {
+	if resolvedTarget.EnvConfig.ResolvedType() != config.EnvironmentTypeRuntime {
 		return false
 	}
-	podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(env)
+	podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(env)
 	if !inPod {
 		return false
 	}
@@ -54,7 +57,7 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 // projection rather than the host store by the sibling guard one layer on
 // (guardInPodRuntimeDeploy). An off-pod resolve reads the operator's own config
 // store and is untouched by either.
-func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget OpenResult, target DeployTarget, selected []string, selectionSource string) error {
+func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, target DeployTarget, selected []string, selectionSource string) error {
 	if !inPodBlindRuntimeOnlySelection(env, resolvedTarget, selected, selectionSource) {
 		return nil
 	}

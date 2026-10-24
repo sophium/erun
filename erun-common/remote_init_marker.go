@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -72,7 +73,7 @@ func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 		return err
 	}
 	existing, _ := os.ReadFile(path)
-	data, err := marshalConfigPreservingUnknownFields(existing, &marker)
+	data, err := config.MarshalConfigPreservingUnknownFields(existing, &marker)
 	if err != nil {
 		return err
 	}

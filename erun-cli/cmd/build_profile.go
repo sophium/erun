@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -39,13 +40,13 @@ func newBuildProfileCmd() *cobra.Command {
 	return cmd
 }
 
-func runBuildProfileCommand(ctx common.Context, id string, limit int) error {
+func runBuildProfileCommand(ctx core.Context, id string, limit int) error {
 	if id == "" {
 		summaries, err := common.ListTimingRecords(buildProfileCommandName, limit)
 		if err != nil {
 			return err
 		}
-		if ctx.Output == common.OutputJSON {
+		if ctx.Output == core.OutputJSON {
 			return ctx.WriteResult(summaries)
 		}
 		return writeBuildProfileListText(ctx, summaries)
@@ -54,13 +55,13 @@ func runBuildProfileCommand(ctx common.Context, id string, limit int) error {
 	if err != nil {
 		return err
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(record)
 	}
 	return writeBuildProfileDetailText(ctx, record)
 }
 
-func writeBuildProfileListText(ctx common.Context, summaries []common.TimingRecordSummary) error {
+func writeBuildProfileListText(ctx core.Context, summaries []common.TimingRecordSummary) error {
 	if len(summaries) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "No recorded builds found in ~/.erun/timing.")
 		return err
@@ -81,7 +82,7 @@ func writeBuildProfileListText(ctx common.Context, summaries []common.TimingReco
 	return err
 }
 
-func writeBuildProfileDetailText(ctx common.Context, record common.TimingRecord) error {
+func writeBuildProfileDetailText(ctx core.Context, record core.TimingRecord) error {
 	for _, row := range common.RenderTimingRecordRows(record) {
 		if _, err := fmt.Fprintln(ctx.Stdout, row); err != nil {
 			return err

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // jobSupervisorContainerRestart asks the Kubernetes API for this pod's own
@@ -23,7 +25,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner openKub
 	if podName == "" {
 		return false, "", 0, time.Time{}, false
 	}
-	if currentExecutionMode(kubectlPodGetExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryJobSupervisorContainerRestart(podName, containerName)
 	}
 	return defaultJobSupervisorContainerRestart(podName, containerName, runner)

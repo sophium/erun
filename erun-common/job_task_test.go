@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
@@ -205,7 +207,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 	<-started
 	defer close(release)
 
-	if _, err := CancelEnvironmentJob(Context{}, CancelEnvironmentJobParams{
+	if _, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          job.ID,

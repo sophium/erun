@@ -3,18 +3,21 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestGuardRuntimeImageLineSwitchProceedsWhenLinesAgree(t *testing.T) {
 	// frs/local: rides the stock erun-devops image on erun's own line, on
 	// purpose. Must deploy with no new friction.
-	target := OpenResult{
+	target := config.OpenResult{
 		Tenant: "frs",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			RuntimeRunningImage: "ghcr.io/sophium/erun-devops:1.0.203",
 		},
 	}
-	err := guardRuntimeImageLineSwitch(Context{}, target, "ghcr.io/sophium/erun-devops:1.0.204", false)
+	err := guardRuntimeImageLineSwitch(core.Context{}, target, "ghcr.io/sophium/erun-devops:1.0.204", false)
 	if err != nil {
 		t.Fatalf("unexpected refusal for a consistent stock-image redeploy: %v", err)
 	}
@@ -27,14 +30,14 @@ func TestGuardRuntimeImageLineSwitchProceedsWhenLinesAgree(t *testing.T) {
 // fine, so only comparing release lines catches it). Refuse before any
 // cluster mutation.
 func TestGuardRuntimeImageLineSwitchRefusesCrossLineSwitch(t *testing.T) {
-	target := OpenResult{
+	target := config.OpenResult{
 		Tenant:      "frs",
 		Environment: "build",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.86",
 		},
 	}
-	err := guardRuntimeImageLineSwitch(Context{}, target, "ghcr.io/sophium/erun-devops:1.0.86", false)
+	err := guardRuntimeImageLineSwitch(core.Context{}, target, "ghcr.io/sophium/erun-devops:1.0.86", false)
 	if err == nil {
 		t.Fatal("expected a refusal: this deploy would move the pod off the tenant's own release line without being asked to")
 	}
@@ -48,13 +51,13 @@ func TestGuardRuntimeImageLineSwitchRefusesCrossLineSwitch(t *testing.T) {
 // tree's own image) always proceeds: moving release lines on purpose is
 // exactly what those inputs are for, and must never gain new friction.
 func TestGuardRuntimeImageLineSwitchAllowsExplicitLineChange(t *testing.T) {
-	target := OpenResult{
+	target := config.OpenResult{
 		Tenant: "frs",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.86",
 		},
 	}
-	err := guardRuntimeImageLineSwitch(Context{}, target, "ghcr.io/sophium/erun-devops:1.0.86", true)
+	err := guardRuntimeImageLineSwitch(core.Context{}, target, "ghcr.io/sophium/erun-devops:1.0.86", true)
 	if err != nil {
 		t.Fatalf("an explicit line change must never be refused: %v", err)
 	}
@@ -64,8 +67,8 @@ func TestGuardRuntimeImageLineSwitchAllowsExplicitLineChange(t *testing.T) {
 // environment's first deploy: there is no RuntimeRunningImage yet, so there is
 // nothing to disagree with.
 func TestGuardRuntimeImageLineSwitchProceedsWithNoPriorDeploy(t *testing.T) {
-	target := OpenResult{Tenant: "frs", EnvConfig: EnvConfig{}}
-	err := guardRuntimeImageLineSwitch(Context{}, target, "ghcr.io/sophium/frs-devops:1.0.86", false)
+	target := config.OpenResult{Tenant: "frs", EnvConfig: config.EnvConfig{}}
+	err := guardRuntimeImageLineSwitch(core.Context{}, target, "ghcr.io/sophium/frs-devops:1.0.86", false)
 	if err != nil {
 		t.Fatalf("a first-ever deploy must not be refused: %v", err)
 	}
@@ -78,10 +81,10 @@ func TestGuardRuntimeImageLineSwitchProceedsWithNoPriorDeploy(t *testing.T) {
 // guard could not classify it -- it proceeds, with a trace explaining why.
 func TestGuardRuntimeImageLineSwitchWarnsOnUnclassifiablePriorImage(t *testing.T) {
 	var trace strings.Builder
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &trace, &trace)}
-	target := OpenResult{
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &trace, &trace)}
+	target := config.OpenResult{
 		Tenant: "frs",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			// No tag/digest and no path separator: runtimeImageComponentName
 			// still extracts a name from this ("garbage"), so use something
 			// that yields an empty component name instead -- a value ending
@@ -151,12 +154,12 @@ func TestGuardRuntimeChartLineSwitch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			target := OpenResult{
+			target := config.OpenResult{
 				Tenant:      "frs",
 				Environment: "build",
-				EnvConfig:   EnvConfig{RuntimeRunningImage: tc.runningImage},
+				EnvConfig:   config.EnvConfig{RuntimeRunningImage: tc.runningImage},
 			}
-			err := guardRuntimeChartLineSwitch(Context{}, target, tc.resolvedChart, tc.explicitChange)
+			err := guardRuntimeChartLineSwitch(core.Context{}, target, tc.resolvedChart, tc.explicitChange)
 			if tc.wantRefusal {
 				if err == nil {
 					t.Fatal("expected a refusal: the chart is on a different release line than this environment runs")
@@ -185,7 +188,7 @@ func TestRuntimeImageComponentName(t *testing.T) {
 		"ghcr.io/sophium/":                    "",
 	}
 	for image, want := range cases {
-		if got := runtimeImageComponentName(image); got != want {
+		if got := config.RuntimeImageComponentName(image); got != want {
 			t.Errorf("runtimeImageComponentName(%q) = %q, want %q", image, got, want)
 		}
 	}
@@ -204,7 +207,7 @@ func TestRuntimeImageReleaseLine(t *testing.T) {
 		{"ghcr.io/sophium/frs-devops:1.0.86", "frs", true},
 	}
 	for _, tc := range cases {
-		line, ok := runtimeImageReleaseLine(tc.image)
+		line, ok := config.RuntimeImageReleaseLine(tc.image)
 		if line != tc.wantLine || ok != tc.wantOK {
 			t.Errorf("runtimeImageReleaseLine(%q) = (%q, %v), want (%q, %v)", tc.image, line, ok, tc.wantLine, tc.wantOK)
 		}

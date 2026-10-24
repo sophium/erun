@@ -6,6 +6,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // DefaultRuntimePodCPU/Memory size the runtime container itself, and are the
@@ -266,12 +269,7 @@ func MinimumRuntimeNamespaceQuota() (cpuMillicores, memoryMB, storageGB int64) {
 	return devopsCPU + dindCPU, devopsMemory + dindMemory, storageGB
 }
 
-type RuntimePodResources struct {
-	CPU    string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
-	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
-}
-
-func NormalizeRuntimePodResources(resources RuntimePodResources) RuntimePodResources {
+func NormalizeRuntimePodResources(resources config.RuntimePodResources) config.RuntimePodResources {
 	cpu := strings.TrimSpace(resources.CPU)
 	if cpu == "" {
 		cpu = DefaultRuntimePodCPU
@@ -280,10 +278,10 @@ func NormalizeRuntimePodResources(resources RuntimePodResources) RuntimePodResou
 	if memory == "" {
 		memory = DefaultRuntimePodMemory
 	}
-	return RuntimePodResources{CPU: cpu, Memory: memory}
+	return config.RuntimePodResources{CPU: cpu, Memory: memory}
 }
 
-func ValidateRuntimePodResources(resources RuntimePodResources) error {
+func ValidateRuntimePodResources(resources config.RuntimePodResources) error {
 	resources = NormalizeRuntimePodResources(resources)
 	if _, err := ParseKubernetesCPUToMilli(resources.CPU); err != nil {
 		return fmt.Errorf("runtime pod CPU: %w", err)
@@ -321,7 +319,7 @@ func ValidateRuntimePodResources(resources RuntimePodResources) error {
 // so NormalizeRuntimePodResources' default still applies exactly as before
 // for a brand-new environment that has never been deployed, in-pod or
 // otherwise, and so has no live limits to read.
-func resolveRuntimePodResourcesForDeploy(configured RuntimePodResources, tenant, environment string, env func(string) string, cgroupRoot string) RuntimePodResources {
+func resolveRuntimePodResourcesForDeploy(configured config.RuntimePodResources, tenant, environment string, env func(string) string, cgroupRoot string) config.RuntimePodResources {
 	resolved := configured
 	if strings.TrimSpace(resolved.CPU) != "" && strings.TrimSpace(resolved.Memory) != "" {
 		return resolved
@@ -332,7 +330,7 @@ func resolveRuntimePodResourcesForDeploy(configured RuntimePodResources, tenant,
 	if !IsInRuntimeEnvironment(env) {
 		return resolved
 	}
-	podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(env)
+	podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(env)
 	if !inPod || podTenant != strings.TrimSpace(tenant) || podEnvironment != strings.TrimSpace(environment) {
 		return resolved
 	}
@@ -372,7 +370,7 @@ func liveRuntimePodMemoryLimit(usage RuntimeUsage) string {
 // the erun-dind sidecar, now that it is operator-sizeable (`erun init`/`erun
 // resize --dind-cpu/--dind-memory`) rather than fixed at
 // DefaultRuntimeDindCPU/Memory for every environment.
-func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodResources {
+func NormalizeRuntimeDindPodResources(resources config.RuntimePodResources) config.RuntimePodResources {
 	cpu := strings.TrimSpace(resources.CPU)
 	if cpu == "" {
 		cpu = DefaultRuntimeDindCPU
@@ -381,10 +379,10 @@ func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodR
 	if memory == "" {
 		memory = DefaultRuntimeDindMemory
 	}
-	return RuntimePodResources{CPU: cpu, Memory: memory}
+	return config.RuntimePodResources{CPU: cpu, Memory: memory}
 }
 
-func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
+func ValidateRuntimeDindPodResources(resources config.RuntimePodResources) error {
 	resources = NormalizeRuntimeDindPodResources(resources)
 	if _, err := ParseKubernetesCPUToMilli(resources.CPU); err != nil {
 		return fmt.Errorf("dind sidecar CPU: %w", err)
@@ -395,28 +393,7 @@ func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
 	return nil
 }
 
-// NamespaceResourceQuota is a hard per-environment-namespace ceiling on
-// CPU/memory/storage, enforced by Kubernetes via a ResourceQuota + LimitRange
-// applied to the namespace at deploy time (kubernetes_resource_quota.go). It is
-// distinct from RuntimePodResources: RuntimePodResources sizes the runtime
-// pod's own container; NamespaceResourceQuota caps everything that namespace
-// can ever hold, including future non-runtime workloads. All three fields must
-// be set together — a namespace ResourceQuota is meaningless with only some
-// resources capped, since Kubernetes then admits unbounded amounts of the
-// uncapped ones.
-type NamespaceResourceQuota struct {
-	CPU     string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
-	Memory  string `yaml:"memory,omitempty" json:"memory,omitempty"`
-	Storage string `yaml:"storage,omitempty" json:"storage,omitempty"`
-}
-
-// IsZero reports whether no cap was configured, so deploy applies no
-// ResourceQuota/LimitRange at all rather than an incomplete one.
-func (q NamespaceResourceQuota) IsZero() bool {
-	return q == NamespaceResourceQuota{}
-}
-
-func ValidateNamespaceResourceQuota(quota NamespaceResourceQuota) error {
+func ValidateNamespaceResourceQuota(quota config.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil
 	}

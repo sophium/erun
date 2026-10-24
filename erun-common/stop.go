@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A stopped environment is one whose runtime Deployment is scaled to zero. That
@@ -37,7 +40,7 @@ type RuntimeScaleTarget struct {
 
 // RuntimeScaleTargetForResult derives the scale target from a resolved open
 // target, so stop, wake, and the shell launcher all address the same Deployment.
-func RuntimeScaleTargetForResult(result OpenResult) RuntimeScaleTarget {
+func RuntimeScaleTargetForResult(result config.OpenResult) RuntimeScaleTarget {
 	return RuntimeScaleTarget{
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
@@ -126,8 +129,8 @@ func DecideRuntimeWake(state RuntimeRunState, stoppedIntent, reconnect bool) Run
 // StopEnvironmentParams is a stop request: the resolved target plus the writer
 // that records the operator's intent on the env config.
 type StopEnvironmentParams struct {
-	Result        OpenResult
-	SaveEnvConfig func(string, EnvConfig) error
+	Result        config.OpenResult
+	SaveEnvConfig func(string, config.EnvConfig) error
 }
 
 // StopEnvironmentResult is the transport-neutral outcome of `erun stop`.
@@ -175,8 +178,8 @@ type StopEnvironmentResult struct {
 // these components so the operator learns what is left holding capacity there,
 // rather than by reading the surviving pods afterwards and concluding the stop
 // failed.
-func StopRemainingComponents(result OpenResult) []string {
-	names := selectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, ProjectK8sConfig{})
+func StopRemainingComponents(result config.OpenResult) []string {
+	names := selectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
 	// Nil, not an empty slice: every caller branches on len() and none of them
 	// can tell the two apart, while an empty-but-present slice is what makes a
 	// struct comparison in a test fail for a reason that has nothing to say
@@ -192,7 +195,7 @@ func StopRemainingComponents(result OpenResult) []string {
 // quietly restarting the pod. The intent is written last and only once the
 // cluster has confirmed the scale, so the config never records a stop that did
 // not happen.
-func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironmentResult, error) {
+func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := StopEnvironmentResult{
 		Tenant:            target.Tenant,
@@ -248,7 +251,7 @@ func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironm
 // point of the command, and a replica count that bounced back is the one
 // outcome the operator cannot see for themselves — the config write that
 // follows must never claim a stop the cluster did not keep.
-func confirmRuntimeStopped(ctx Context, target RuntimeScaleTarget) error {
+func confirmRuntimeStopped(ctx core.Context, target RuntimeScaleTarget) error {
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("stop: would re-read %s to confirm it wants 0 replicas before reporting success", target.ReleaseName))
 		return nil
@@ -268,7 +271,7 @@ func confirmRuntimeStopped(ctx Context, target RuntimeScaleTarget) error {
 // pod that is about to go away, and returns their ids for the structured
 // result. Stopping ends them, so saying which turns tabs going dark into a
 // stated consequence of the operator's own command.
-func traceAttachedAppSessions(ctx Context, target RuntimeScaleTarget) []string {
+func traceAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) []string {
 	sessions, err := readAttachedAppSessions(ctx, target)
 	if err != nil {
 		ctx.Trace(fmt.Sprintf("stop: could not list the desktop sessions attached to %s (%s); stopping anyway", target.ReleaseName, strings.TrimSpace(err.Error())))
@@ -295,13 +298,13 @@ func traceAttachedAppSessions(ctx Context, target RuntimeScaleTarget) []string {
 // readAttachedAppSessions runs the same in-pod heartbeat probe the desktop uses
 // to count live sessions. Like the run-state read it performs no mutation, so
 // it runs under --dry-run too and the plan can show what a real stop would end.
-func readAttachedAppSessions(ctx Context, target RuntimeScaleTarget) ([]RemoteAppSessionHeartbeat, error) {
+func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]RemoteAppSessionHeartbeat, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "exec", "deployment/"+target.ReleaseName, "--", "/bin/sh", "-lc",
 		RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
 
 	ctx.TraceCommand("", "kubectl", args...)
-	output, err := Command("kubectl", args...).Output()
+	output, err := core.Command("kubectl", args...).Output()
 	if err != nil {
 		if stderr := stderrFromExitError(err); stderr != "" {
 			return nil, fmt.Errorf("%w: %s", err, stderr)
@@ -315,12 +318,12 @@ func readAttachedAppSessions(ctx Context, target RuntimeScaleTarget) ([]RemoteAp
 // running again, without touching the cluster. `open --deploy` calls it before
 // helm renders the chart, so the rollout brings the pod up instead of
 // re-applying the stop the config still remembered.
-func ClearEnvironmentStopIntent(ctx Context, result OpenResult, saveEnvConfig func(string, EnvConfig) error) (EnvConfig, error) {
+func ClearEnvironmentStopIntent(ctx core.Context, result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error) (config.EnvConfig, error) {
 	if !result.EnvConfig.Stopped {
 		return result.EnvConfig, nil
 	}
 	if err := persistEnvironmentStopIntent(ctx, result, saveEnvConfig, false); err != nil {
-		return EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	updated := result.EnvConfig
 	updated.Stopped = false
@@ -332,8 +335,8 @@ func ClearEnvironmentStopIntent(ctx Context, result OpenResult, saveEnvConfig fu
 // supervisor reattaching a dropped session rather than an operator opening the
 // environment, which is the difference between waking and leaving it stopped.
 type WakeEnvironmentParams struct {
-	Result        OpenResult
-	SaveEnvConfig func(string, EnvConfig) error
+	Result        config.OpenResult
+	SaveEnvConfig func(string, config.EnvConfig) error
 	Reconnect     bool
 }
 
@@ -341,7 +344,7 @@ type WakeEnvironmentParams struct {
 // forward when the stop intent was cleared, so the caller keeps working with the
 // current values.
 type WakeEnvironmentResult struct {
-	EnvConfig      EnvConfig
+	EnvConfig      config.EnvConfig
 	Woken          bool
 	AlreadyRunning bool
 }
@@ -355,7 +358,7 @@ type WakeEnvironmentResult struct {
 // A reconnecting caller gets the opposite answer for a stopped environment: an
 // error, so the reattach fails plainly instead of quietly resurrecting what the
 // operator stopped.
-func EnsureEnvironmentAwake(ctx Context, params WakeEnvironmentParams) (WakeEnvironmentResult, error) {
+func EnsureEnvironmentAwake(ctx core.Context, params WakeEnvironmentParams) (WakeEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := WakeEnvironmentResult{EnvConfig: params.Result.EnvConfig}
 
@@ -409,7 +412,7 @@ func EnsureEnvironmentAwake(ctx Context, params WakeEnvironmentParams) (WakeEnvi
 // config. It is what survives helm reconciliation: deploy renders the chart's
 // `stopped` value from it, so an upgrade of a stopped env re-applies replicas: 0
 // rather than restarting the pod behind the operator's back.
-func persistEnvironmentStopIntent(ctx Context, result OpenResult, saveEnvConfig func(string, EnvConfig) error, stopped bool) error {
+func persistEnvironmentStopIntent(ctx core.Context, result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, stopped bool) error {
 	updated := result.EnvConfig
 	updated.Stopped = stopped
 	if ctx.DryRun {
@@ -433,13 +436,13 @@ const runtimeRunStateSeparator = "/"
 // ReadRuntimeRunState reads the environment's runtime Deployment. Like
 // CheckKubernetesDeployment it runs even under --dry-run: it performs no
 // mutation, and stop/wake need the answer to resolve the plan they trace.
-func ReadRuntimeRunState(ctx Context, target RuntimeScaleTarget) (RuntimeRunState, error) {
+func ReadRuntimeRunState(ctx core.Context, target RuntimeScaleTarget) (RuntimeRunState, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "get", "deployment", target.ReleaseName, "-o",
 		"jsonpath={.spec.replicas}"+runtimeRunStateSeparator+"{.status.readyReplicas}")
 
 	ctx.TraceCommand("", "kubectl", args...)
-	rawOutput, err := Command("kubectl", args...).CombinedOutput()
+	rawOutput, err := core.Command("kubectl", args...).CombinedOutput()
 	output := string(rawOutput)
 	if err != nil {
 		if isKubernetesNotFoundMessage(output) {
@@ -478,25 +481,25 @@ func isKubernetesNotFoundMessage(output string) bool {
 // scaleRuntimeDeployment is the one mutation stop and wake share. It is traced
 // before it runs and short-circuits under --dry-run, so the dry-run plan shows
 // the exact command.
-func scaleRuntimeDeployment(ctx Context, target RuntimeScaleTarget, replicas int) error {
+func scaleRuntimeDeployment(ctx core.Context, target RuntimeScaleTarget, replicas int) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "scale", "deployment/"+target.ReleaseName, "--replicas="+strconv.Itoa(replicas))
-	return RunRawCommand(ctx, RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
+	return core.RunRawCommand(ctx, core.RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
 }
 
 // WaitRuntimeAvailable blocks until the runtime Deployment reports Available,
 // reusing the same rollout wait `erun open` performs before it execs a shell.
-func WaitRuntimeAvailable(ctx Context, target RuntimeScaleTarget) error {
+func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
-	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, defaultShellLaunchWaitTimeout)
 	}
-	return RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
+	return core.RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }
 
 func kubectlRuntimeTargetArgs(target RuntimeScaleTarget) []string {

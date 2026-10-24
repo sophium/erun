@@ -8,10 +8,12 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
-func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command {
+func newIdleCmd(store config.OpenStore, resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -45,7 +47,7 @@ func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command
 	return cmd
 }
 
-func runIdleCommand(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runIdleCommand(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
 	status, resolved, err := resolveEnvironmentIdleStatus(ctx, commandCtx, store, resolveOpen, tenant, environment)
 	if err != nil {
 		return err
@@ -58,7 +60,7 @@ func runIdleCommand(ctx context.Context, commandCtx common.Context, store common
 
 // writeIdleResult picks the wire form once, so the documented global
 // --output json and the command's own --json alias cannot diverge.
-func writeIdleResult(commandCtx common.Context, status common.EnvironmentIdleStatus, jsonOutput bool) error {
+func writeIdleResult(commandCtx core.Context, status common.EnvironmentIdleStatus, jsonOutput bool) error {
 	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -70,7 +72,7 @@ func writeIdleResult(commandCtx common.Context, status common.EnvironmentIdleSta
 // resolveEnvironmentIdleStatus reads the local store only when this process is
 // the environment being asked about; anywhere else the environment's own edge
 // is the only thing that knows.
-func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string) (common.EnvironmentIdleStatus, bool, error) {
+func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen OpenResolver, tenant, environment string) (common.EnvironmentIdleStatus, bool, error) {
 	if environmentTargetsItself() {
 		status, err := common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 		return status, err == nil, err
@@ -78,7 +80,7 @@ func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx common.Context
 	return callEnvironmentTool[common.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
 }
 
-func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) error {
+func writeIdleStatus(ctx core.Context, status common.EnvironmentIdleStatus) error {
 	if err := writeLabeledValue(ctx, "timeout", fmt.Sprintf("%d seconds", int64(status.Policy.Timeout/time.Second))); err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) er
 	return nil
 }
 
-func writeOptionalIdleValue(ctx common.Context, label, value string) error {
+func writeOptionalIdleValue(ctx core.Context, label, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}

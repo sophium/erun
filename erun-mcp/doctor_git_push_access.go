@@ -3,7 +3,9 @@ package erunmcp
 import (
 	"fmt"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // writeDoctorGitPushAccess is the MCP counterpart of the CLI's
@@ -17,7 +19,7 @@ import (
 // confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
 // reports the same skip instead of paying its own kubectl exec timeout to
 // rediscover it.
-func writeDoctorGitPushAccess(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
+func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req eruncommon.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil
 	}
@@ -40,7 +42,7 @@ func mcpGitFetchStatusLine(status eruncommon.GitPushAccessStatus) string {
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func mcpGitPushStatusLine(target eruncommon.OpenResult, status eruncommon.GitPushAccessStatus) string {
+func mcpGitPushStatusLine(target config.OpenResult, status eruncommon.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

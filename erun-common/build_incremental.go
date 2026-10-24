@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func dockerfileCopySources(dockerfilePath, contextDir string) ([]string, error) {
@@ -288,7 +291,7 @@ func componentChartDirForBuild(buildInput DockerBuildSpec) string {
 // fails the build on a resolver error.
 func componentChartDirCandidate(projectRoot, dockerDir string) string {
 	component := filepath.Base(dockerDir)
-	if k8sDir, ok, err := resolveCurrentDevopsK8sDir(FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
+	if k8sDir, ok, err := resolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
 		return filepath.Join(k8sDir, component)
 	}
 	return filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", component)
@@ -645,7 +648,7 @@ type LocalDockerImageInspector func(tag string) (bool, error)
 // ApplyIncrementalToBuildExecution applies fingerprint-based incremental
 // promotion to the execution's docker builds, returning a copy (unchanged when
 // noIncremental is true).
-func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
+func ApplyIncrementalToBuildExecution(ctx core.Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
 	updated, err := ApplyIncrementalToDockerBuilds(ctx, execution.dockerBuilds, noIncremental)
 	if err != nil {
 		return BuildExecutionSpec{}, err
@@ -665,7 +668,7 @@ func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec,
 // A tested component is promotable like any other: an fp tag is written only
 // after a successful docker build, which ran the Dockerfile's test stage, so
 // promoting from it reuses that component's last successful result.
-func ApplyIncrementalToDockerBuilds(ctx Context, builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
+func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}

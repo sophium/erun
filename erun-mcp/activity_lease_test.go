@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The lease tools are how an orchestrator driving detached work in this pod
@@ -106,7 +107,7 @@ func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
 
@@ -119,7 +120,7 @@ func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 	// confirm the *renewal* by the same id still succeeds - only a fresh
 	// claim is gated on operator presence.
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
 	}
@@ -136,11 +137,11 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
 
@@ -178,7 +179,7 @@ func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.
 	}
 
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
 	}
@@ -198,11 +199,11 @@ func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresen
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *test
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
 
@@ -240,7 +241,7 @@ func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *test
 	}
 
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
 	}

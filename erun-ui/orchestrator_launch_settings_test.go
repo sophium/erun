@@ -10,7 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -29,7 +31,7 @@ type orchestratorLaunchRecorder struct {
 	envs     [][]string
 	token    string
 	tokenErr error
-	tokenFor []*eruncommon.OpenRouterConfig
+	tokenFor []*configpkg.OpenRouterConfig
 }
 
 func (r *orchestratorLaunchRecorder) last(t *testing.T) (eruncommon.OrchestratorLaunch, []string, []string) {
@@ -77,7 +79,7 @@ func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 		rec.mu.Unlock()
 		return newStubTerminalSession(), nil
 	}
-	app.deps.resolveGatewayCredential = func(gateway *eruncommon.OpenRouterConfig) (string, error) {
+	app.deps.resolveGatewayCredential = func(gateway *configpkg.OpenRouterConfig) (string, error) {
 		rec.mu.Lock()
 		defer rec.mu.Unlock()
 		rec.tokenFor = append(rec.tokenFor, gateway)
@@ -87,10 +89,10 @@ func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 }
 
 func stageGatewayCatalog(app *App) {
-	app.deps.store.(stubUIStore).config.OpenRouter = &eruncommon.OpenRouterConfig{
+	app.deps.store.(stubUIStore).config.OpenRouter = &configpkg.OpenRouterConfig{
 		BaseURL:      testGatewayURL,
 		DefaultModel: "acme/coder",
-		Models: []eruncommon.OpenRouterModel{
+		Models: []configpkg.OpenRouterModel{
 			{ID: "acme/coder", Context: 200000},
 			{ID: "acme/thinker", RequiresReasoningEcho: true},
 		},
@@ -99,7 +101,7 @@ func stageGatewayCatalog(app *App) {
 
 // editStoredOrchestrator changes the persisted definition behind the desktop's
 // back, as a hand edit or a CLI writer would.
-func editStoredOrchestrator(app *App, id string, edit func(*eruncommon.OrchestratorConfig)) {
+func editStoredOrchestrator(app *App, id string, edit func(*configpkg.OrchestratorConfig)) {
 	config := app.deps.store.(stubUIStore).config
 	for i := range config.Orchestrators {
 		if config.Orchestrators[i].ID == id {
@@ -251,7 +253,7 @@ func TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults(t *testing.T) {
 
 func TestEveryEffortLevelReachesTheLaunchFlags(t *testing.T) {
 	for _, level := range eruncommon.ClaudeEffortLevels() {
-		launch, err := eruncommon.ResolveOrchestratorLaunch(eruncommon.OrchestratorConfig{Model: "sonnet", Effort: level}, nil)
+		launch, err := eruncommon.ResolveOrchestratorLaunch(configpkg.OrchestratorConfig{Model: "sonnet", Effort: level}, nil)
 		if err != nil {
 			t.Fatalf("effort %q: %v", level, err)
 		}
@@ -362,7 +364,7 @@ func TestAGatewayWithNoCatalogRefusesToStartAndKeepsTheRunningSession(t *testing
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	editStoredOrchestrator(app, created.ID, func(o *eruncommon.OrchestratorConfig) { o.UseGateway = true })
+	editStoredOrchestrator(app, created.ID, func(o *configpkg.OrchestratorConfig) { o.UseGateway = true })
 
 	_, err := app.RestartOrchestrator(created.ID, 80, 24)
 	if err == nil || !strings.Contains(err.Error(), "no gateway catalog is configured") ||
@@ -417,7 +419,7 @@ func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.
 	}
 
 	// The terminal writer, over the same store, while the session runs.
-	_, err = eruncommon.SetOrchestratorEffort(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{
+	_, err = eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{
 		OrchestratorID: created.ID, Effort: "low",
 	})
 	mustNoErr(t, err, "SetOrchestratorEffort")
@@ -434,7 +436,7 @@ func TestACrashRespawnKeepsTheLaunchItContinues(t *testing.T) {
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	editStoredOrchestrator(app, created.ID, func(o *eruncommon.OrchestratorConfig) {
+	editStoredOrchestrator(app, created.ID, func(o *configpkg.OrchestratorConfig) {
 		o.UseGateway, o.Model, o.Effort = false, "haiku", "low"
 	})
 	rec.setCredential("sk-rotated", nil)
@@ -483,7 +485,7 @@ func TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit(t *testing.T) {
 	requireStoredLaunchSettings(t, app, "after rename", want)
 
 	// A value the terminal wrote reaches the dialog and survives its next save.
-	_, err = eruncommon.SetOrchestratorModel(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{
+	_, err = eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{
 		OrchestratorID: created.ID, Model: "",
 	})
 	mustNoErr(t, err, "SetOrchestratorModel")
@@ -571,11 +573,11 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 		_, err := app.StartOrchestrator(created.ID, 80, 24)
 		mustNoErr(t, err, "StartOrchestrator")
 
-		_, err = eruncommon.SetOrchestratorModel(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
+		_, err = eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
 		mustNoErr(t, err, "SetOrchestratorModel")
 		requireLoneLaunchSettingsRow(t, app, "after set-model opus", orchestratorLaunchInput{Model: "opus"}, false)
 
-		_, err = eruncommon.SetOrchestratorEffort(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
+		_, err = eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
 		mustNoErr(t, err, "SetOrchestratorEffort")
 		explicit := orchestratorLaunchInput{Model: "opus", Effort: "ultracode"}
 		requireLoneLaunchSettingsRow(t, app, "after set-effort ultracode", explicit, false)
@@ -598,10 +600,10 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 		}
 		requireLoneLaunchSettingsRow(t, app, "before the catalog moved", gateway, false)
 
-		app.deps.store.(stubUIStore).config.OpenRouter = &eruncommon.OpenRouterConfig{
+		app.deps.store.(stubUIStore).config.OpenRouter = &configpkg.OpenRouterConfig{
 			BaseURL:      testGatewayURL,
 			DefaultModel: "acme/other",
-			Models:       []eruncommon.OpenRouterModel{{ID: "acme/coder"}, {ID: "acme/other"}},
+			Models:       []configpkg.OpenRouterModel{{ID: "acme/coder"}, {ID: "acme/other"}},
 		}
 		requireLoneLaunchSettingsRow(t, app, "after the catalog default moved", gateway, true)
 		again, err := app.StartOrchestrator(created.ID, 80, 24)
@@ -625,9 +627,9 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 		created := mustCreateOrchestratorWithLaunch(t, app, gateway)
 		_, err := app.StartOrchestrator(created.ID, 80, 24)
 		mustNoErr(t, err, "StartOrchestrator")
-		app.deps.store.(stubUIStore).config.OpenRouter = &eruncommon.OpenRouterConfig{
+		app.deps.store.(stubUIStore).config.OpenRouter = &configpkg.OpenRouterConfig{
 			BaseURL: "https://other-gateway.example.test",
-			Models:  []eruncommon.OpenRouterModel{{ID: "acme/coder"}},
+			Models:  []configpkg.OpenRouterModel{{ID: "acme/coder"}},
 		}
 		requireLoneLaunchSettingsRow(t, app, "after the endpoint moved", gateway, true)
 	})
@@ -672,9 +674,9 @@ func TestLaunchChoicesNameTheCatalogsUndriveableModels(t *testing.T) {
 		t.Fatalf("expected an empty (not null) undriveable list with no catalog, got %#v", choices.GatewayUndriveableModels)
 	}
 
-	app.deps.store.(stubUIStore).config.OpenRouter = &eruncommon.OpenRouterConfig{
+	app.deps.store.(stubUIStore).config.OpenRouter = &configpkg.OpenRouterConfig{
 		BaseURL: testGatewayURL,
-		Models: []eruncommon.OpenRouterModel{
+		Models: []configpkg.OpenRouterModel{
 			{ID: "acme/coder"},
 			{ID: "acme/thinker", RequiresReasoningEcho: true},
 			{ID: " acme/thinker ", RequiresReasoningEcho: true},
@@ -694,8 +696,8 @@ func TestLaunchChoicesNameTheCatalogsUndriveableModels(t *testing.T) {
 // unreadableRootConfigStore is a store whose root config cannot be read.
 type unreadableRootConfigStore struct{ stubUIStore }
 
-func (unreadableRootConfigStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{}, "", errors.New("permission denied")
+func (unreadableRootConfigStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return configpkg.ERunConfig{}, "", errors.New("permission denied")
 }
 
 func TestLaunchChoicesHeadlineWhatCouldNotBeRead(t *testing.T) {

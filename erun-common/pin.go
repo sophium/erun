@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // One erun version is written down in several places in a tenant repo — the
@@ -189,8 +192,8 @@ func normalizePinPlanInputs(tenant, environment, projectRoot, target string) (st
 // ResolvePinPlan reads every pin site under projectRoot and reports what moving
 // to target would change. It never writes, so a caller can render the plan,
 // refuse it, or apply it.
-func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, target string) (PinPlan, error) {
-	if env.ResolvedType() == EnvironmentTypeHost {
+func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfig, target string) (PinPlan, error) {
+	if env.ResolvedType() == config.EnvironmentTypeHost {
 		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
 	}
 	tenant, environment, projectRoot, target, err := normalizePinPlanInputs(tenant, environment, projectRoot, target)
@@ -257,7 +260,7 @@ type runtimeImageStatement struct {
 // not classify (empty, or naming no component) is skipped rather than guessed,
 // the same "never guess a line from the tenant name" rule RuntimeVersionLine
 // follows.
-func ownLineImageStatements(tenant string, env EnvConfig) []runtimeImageStatement {
+func ownLineImageStatements(tenant string, env config.EnvConfig) []runtimeImageStatement {
 	var statements []runtimeImageStatement
 	for _, candidate := range []runtimeImageStatement{
 		{Reference: strings.TrimSpace(env.RuntimeImage)},
@@ -285,7 +288,7 @@ func ownLineImageStatements(tenant string, env EnvConfig) []runtimeImageStatemen
 // other than erun's. A reference that does not classify (empty, or naming no
 // component) is false: unknown is not a claim about which line it is on.
 func referenceIsOnOwnLine(reference string) bool {
-	line, ok := runtimeImageReleaseLine(reference)
+	line, ok := config.RuntimeImageReleaseLine(reference)
 	return ok && line != "erun"
 }
 
@@ -315,7 +318,7 @@ func ownLineChartStatement(chart string) *runtimeImageStatement {
 // a runtimeimage or a confirmed running image, and nil when that default is the
 // stock erun-devops image — the one case where the erun target is this
 // environment's runtimeversion to hold.
-func defaultDeployImageStatement(tenant string, env EnvConfig) *runtimeImageStatement {
+func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeImageStatement {
 	if strings.TrimSpace(env.RuntimeImage) != "" || strings.TrimSpace(env.RuntimeRunningImage) != "" {
 		return nil
 	}
@@ -357,7 +360,7 @@ func ownLineRuntimeVersionSkipNote(tenant, environment string, statements []runt
 // deploy. See ownLineImageStatements for what counts as evidence of that line:
 // the operative runtimeimage is not the only field that carries it, and an
 // environment that states nothing still has the image a deploy resolves for it.
-func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env EnvConfig) ([]PinSite, []string) {
+func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env config.EnvConfig) ([]PinSite, []string) {
 	var sites []PinSite
 	var skipped []string
 	image := strings.TrimSpace(env.RuntimeImage)
@@ -437,7 +440,7 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 // never actually verified. Best-effort: a HEAD that cannot be read still
 // leaves the note naming the fallback, and an unreadable HEAD never fails the
 // plan this only annotates.
-func DescribeCwdFallbackProjectRoot(ctx Context, plan PinPlan) string {
+func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 	note := "project root resolved from the caller's working directory, not a known checkout of this environment or its tenant"
 	if head, err := GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
 		note += "; HEAD is " + strings.TrimSpace(head)
@@ -617,7 +620,7 @@ func ApplyPinPlan(plan PinPlan) error {
 // saves once. Two independent saves derived from the same starting snapshot
 // would each overwrite the other's change, since a config save writes the
 // whole struct rather than merging fields.
-func ApplyPinnedEnvConfig(env EnvConfig, plan PinPlan) (EnvConfig, bool) {
+func ApplyPinnedEnvConfig(env config.EnvConfig, plan PinPlan) (config.EnvConfig, bool) {
 	updated := env
 	changed := false
 	if planHasSite(plan, PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
@@ -699,15 +702,15 @@ func rewritePinnedVersions(content, target string) string {
 // HelmDependencyUpdater regenerates one chart's Chart.lock and charts/. It is a
 // seam so a scenario can prove the pass runs — and runs once per chart — without
 // a helm binary or a reachable registry.
-type HelmDependencyUpdater func(ctx Context, chartDir string) error
+type HelmDependencyUpdater func(ctx core.Context, chartDir string) error
 
 // RunHelmDependencyUpdate is the real updater.
-func RunHelmDependencyUpdate(ctx Context, chartDir string) error {
+func RunHelmDependencyUpdate(ctx core.Context, chartDir string) error {
 	ctx.TraceCommand(chartDir, "helm", "dependency", "update")
 	if ctx.DryRun {
 		return nil
 	}
-	cmd := Command("helm", "dependency", "update")
+	cmd := core.Command("helm", "dependency", "update")
 	cmd.Dir = chartDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("helm dependency update in %s: %w: %s", chartDir, err, strings.TrimSpace(string(output)))
@@ -740,7 +743,7 @@ func PinnedChartDirs(plan PinPlan) []string {
 // A failure names the chart and stops: leaving some locks refreshed and others
 // stale is a worse tree than the one we started from, and the operator needs to
 // know which one to look at.
-func RefreshPinnedChartLocks(ctx Context, plan PinPlan, update HelmDependencyUpdater) error {
+func RefreshPinnedChartLocks(ctx core.Context, plan PinPlan, update HelmDependencyUpdater) error {
 	if update == nil {
 		update = RunHelmDependencyUpdate
 	}
@@ -762,7 +765,7 @@ type pinHistory struct {
 }
 
 func pinHistoryPath(projectRoot string) string {
-	return filepath.Join(projectRoot, projectConfigDir, pinHistoryFileName)
+	return filepath.Join(projectRoot, config.ProjectConfigDir, pinHistoryFileName)
 }
 
 func pinHistoryKey(tenant, environment string) string {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestRuntimeDeployedHealthCheckPropagatesProbeError locks down that a real
@@ -23,7 +23,7 @@ func TestRuntimeDeployedHealthCheckPropagatesProbeError(t *testing.T) {
 			},
 		},
 	}
-	config := eruncommon.EnvConfig{KubernetesContext: "team-context"}
+	config := configpkg.EnvConfig{KubernetesContext: "team-context"}
 	check := app.runtimeDeployedHealthCheck("team", "dev", config)
 	if check.Status != healthCheckStatusUnknown {
 		t.Fatalf("status = %q, want %q (unknown/could-not-check)", check.Status, healthCheckStatusUnknown)
@@ -47,7 +47,7 @@ func TestRuntimeDeployedHealthCheckReportsNotDeployedOnGenuineNotFound(t *testin
 			},
 		},
 	}
-	config := eruncommon.EnvConfig{KubernetesContext: "team-context"}
+	config := configpkg.EnvConfig{KubernetesContext: "team-context"}
 	check := app.runtimeDeployedHealthCheck("team", "dev", config)
 	if check.Status != healthCheckStatusError {
 		t.Fatalf("status = %q, want %q", check.Status, healthCheckStatusError)

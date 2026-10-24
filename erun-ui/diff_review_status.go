@@ -4,7 +4,8 @@ import (
 	"context"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // diff_review_status.go resolves the diff panel's review-status chip: where
@@ -116,7 +117,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 // has nothing further to read.
 type diffReviewPlatform struct {
 	client       *eruncommon.PlatformClient
-	capabilities eruncommon.PlatformCapabilities
+	capabilities model.PlatformCapabilities
 	canAdvance   bool
 }
 
@@ -148,7 +149,7 @@ func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (dif
 }
 
 // applyDiffReviewLadderState fills in the state a review actually occupies.
-func applyDiffReviewLadderState(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewLadderState(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
 	switch strings.ToUpper(strings.TrimSpace(review.Status)) {
 	case "OPEN":
 		status.State = diffReviewStateOpen
@@ -171,7 +172,7 @@ func applyDiffReviewLadderState(ctx context.Context, client *eruncommon.Platform
 // chip's vantage: Blocked when its comment threads are unresolved (mirrors
 // AdvanceMergeQueueAction's own gate -- merge-queue/advance refuses the same
 // review for the same reason), Ready with its queue position otherwise.
-func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
 			count := eruncommon.CountUnresolvedThreads(comments)

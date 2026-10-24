@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -66,7 +67,7 @@ func TestUsageReportRendersTheSizingRecommendationBesideTheWarnings(t *testing.T
 	report.Sizing = &recommendation
 
 	var out bytes.Buffer
-	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, report); err != nil {
+	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, report); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
 	}
 	rendered := out.String()
@@ -95,7 +96,7 @@ func TestUsageReportRendersTheSizingRecommendationBesideTheWarnings(t *testing.T
 // the output they always did, rather than an empty-headed section.
 func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{
+	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{
 		RuntimeUsage: common.RuntimeUsage{CPU: common.RuntimeCPUUsage{QuotaCores: 4, UtilizationPercent: 1, IntervalSeconds: 1}},
 	}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
@@ -122,7 +123,7 @@ func TestUsageReportNamesTheLimitAndTheSchedulerRequest(t *testing.T) {
 		Pod: common.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * renderMiB},
 	}
 	var out bytes.Buffer
-	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
+	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
 	}
 	rendered := out.String()
@@ -150,7 +151,7 @@ func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
 	usage := code3Reading()
 	usage.Requests = &common.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}
 	var out bytes.Buffer
-	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
+	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
 	}
 	if !strings.Contains(out.String(), "Requests: unavailable (kubectl get pods: connection refused)") {

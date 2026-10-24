@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The environment read model composes list/idle/doctor; what matters here is
@@ -16,8 +17,8 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a"}},
-			envConfigs:    map[string]eruncommon.EnvConfig{"tenant-a/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent}},
+			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
 		},
 	}
 
@@ -50,9 +51,9 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a"}},
-			envConfigs:    map[string]eruncommon.EnvConfig{"tenant-a/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent}},
-			envsByTenant:  map[string][]eruncommon.EnvConfig{"tenant-a": {{Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent}}},
+			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
+			envsByTenant:  map[string][]config.EnvConfig{"tenant-a": {{Name: "dev", Type: config.EnvironmentTypeLocalAgent}}},
 		},
 	}
 
@@ -85,9 +86,9 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a"}},
-			envConfigs: map[string]eruncommon.EnvConfig{
-				"tenant-a/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeRuntime, ManagedCloud: true},
+			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			envConfigs: map[string]config.EnvConfig{
+				"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeRuntime, ManagedCloud: true},
 			},
 		},
 	}

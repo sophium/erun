@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -1048,7 +1049,7 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 		args = append(args, "--namespace", entry.Namespace)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

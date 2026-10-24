@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,11 +15,11 @@ import (
 // next save, with the directories gone from a definition that still looks fine.
 func TestOrchestratorDirectoriesSurviveARoundTrip(t *testing.T) {
 	t.Parallel()
-	original := ERunConfig{
-		Orchestrators: []OrchestratorConfig{{
+	original := config.ERunConfig{
+		Orchestrators: []config.OrchestratorConfig{{
 			ID:   "erun",
 			Name: "erun",
-			Directories: []OrchestratorDirectoryConfig{
+			Directories: []config.OrchestratorDirectoryConfig{
 				{Directory: "/Users/operator/src/notes"},
 				{Directory: "/Users/operator/src/scratch"},
 			},
@@ -35,7 +36,7 @@ func TestOrchestratorDirectoriesSurviveARoundTrip(t *testing.T) {
 		}
 	}
 
-	var decoded ERunConfig
+	var decoded config.ERunConfig
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

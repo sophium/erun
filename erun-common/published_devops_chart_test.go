@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestRuntimeImageRegistry(t *testing.T) {
@@ -16,7 +19,7 @@ func TestRuntimeImageRegistry(t *testing.T) {
 		"  ghcr.io/sophium/erun-devops  ":     "ghcr.io/sophium",
 	}
 	for in, want := range cases {
-		if got := runtimeImageRegistry(in); got != want {
+		if got := config.RuntimeImageRegistry(in); got != want {
 			t.Errorf("runtimeImageRegistry(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -31,12 +34,12 @@ func TestRuntimeImageRegistry(t *testing.T) {
 // over-generalization this guards against).
 func TestPublishedDevopsChartRegistry(t *testing.T) {
 	// A cluster: entry as the init path passes it through, unconcretized.
-	clusterRegistries := ContainerRegistries{
-		{Cluster: &ClusterRegistry{}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+	clusterRegistries := config.ContainerRegistries{
+		{Cluster: &config.ClusterRegistry{}, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
 	}
 
 	t.Run("cluster-registry env resolves the chart from the runtime image registry", func(t *testing.T) {
-		target := OpenResult{EnvConfig: EnvConfig{
+		target := config.OpenResult{EnvConfig: config.EnvConfig{
 			RuntimeImage:        "ghcr.io/sophium/erun-devops",
 			ContainerRegistries: clusterRegistries,
 		}}
@@ -48,11 +51,11 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	t.Run("concretized cluster-registry env resolves the chart from the runtime image registry", func(t *testing.T) {
 		// The deploy path concretizes the cluster entry into its in-cluster pull host
 		// on ClusterPullRegistry; the chart must still resolve from the runtime image.
-		target := OpenResult{
+		target := config.OpenResult{
 			ClusterPullRegistry: "10.43.0.100:5000",
-			EnvConfig: EnvConfig{
+			EnvConfig: config.EnvConfig{
 				RuntimeImage:        "ghcr.io/sophium/erun-devops",
-				ContainerRegistries: ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []RegistryRole{RegistryRoleDeploy}}},
+				ContainerRegistries: config.ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []config.RegistryRole{config.RegistryRoleDeploy}}},
 			},
 		}
 		if got := publishedDevopsChartRegistry(target); got != "ghcr.io/sophium" {
@@ -61,7 +64,7 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	})
 
 	t.Run("explicit runtimeregistry still wins over everything", func(t *testing.T) {
-		target := OpenResult{EnvConfig: EnvConfig{
+		target := config.OpenResult{EnvConfig: config.EnvConfig{
 			RuntimeRegistry:     "example.com/team",
 			RuntimeImage:        "ghcr.io/sophium/erun-devops",
 			ContainerRegistries: clusterRegistries,
@@ -75,9 +78,9 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 		// The regression 49f7f92f introduced: a plain env's chart followed the runtime
 		// image's registry. The chart must stay on the deploy registry — the image
 		// override is an image-only concern the chart does not inherit.
-		target := OpenResult{EnvConfig: EnvConfig{
+		target := config.OpenResult{EnvConfig: config.EnvConfig{
 			RuntimeImage:        "ghcr.io/sophium/erun-devops",
-			ContainerRegistries: ContainerRegistries{{Registry: "registry.example/test", Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}}},
+			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}}},
 		}}
 		if got := publishedDevopsChartRegistry(target); got != "registry.example/test" {
 			t.Fatalf("chart registry = %q, want the deploy registry registry.example/test (the chart must not follow the image registry)", got)
@@ -96,11 +99,11 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 // tenant's component chart and could never find it there.
 func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	t.Run("cluster-registry env with an explicit runtimeregistry still resolves components from the deploy registry", func(t *testing.T) {
-		target := OpenResult{
+		target := config.OpenResult{
 			ClusterPullRegistry: "10.43.0.100:5000",
-			EnvConfig: EnvConfig{
+			EnvConfig: config.EnvConfig{
 				RuntimeRegistry:     "ghcr.io/sophium",
-				ContainerRegistries: ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []RegistryRole{RegistryRoleDeploy}}},
+				ContainerRegistries: config.ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []config.RegistryRole{config.RegistryRoleDeploy}}},
 			},
 		}
 		if got := publishedTenantComponentChartRegistry(target); got != "10.43.0.100:5000" {
@@ -112,8 +115,8 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	})
 
 	t.Run("plain env resolves components from the same deploy registry as the platform chart", func(t *testing.T) {
-		target := OpenResult{EnvConfig: EnvConfig{
-			ContainerRegistries: ContainerRegistries{{Registry: "registry.example/test", Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}}},
+		target := config.OpenResult{EnvConfig: config.EnvConfig{
+			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}}},
 		}}
 		if got := publishedTenantComponentChartRegistry(target); got != "registry.example/test" {
 			t.Fatalf("component chart registry = %q, want registry.example/test", got)
@@ -128,7 +131,7 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 // never be treated as insecure just because the env also has an insecure
 // cluster entry.
 func TestChartRegistryInsecure(t *testing.T) {
-	target := OpenResult{
+	target := config.OpenResult{
 		ClusterPullRegistry:     "10.43.0.100:5000",
 		ClusterRegistryInsecure: true,
 	}
@@ -138,7 +141,7 @@ func TestChartRegistryInsecure(t *testing.T) {
 	if chartRegistryInsecure(target, "ghcr.io/sophium") {
 		t.Fatal("a different registry (the platform chart's) must never be reported insecure")
 	}
-	if chartRegistryInsecure(OpenResult{}, "") {
+	if chartRegistryInsecure(config.OpenResult{}, "") {
 		t.Fatal("an empty registry must never be reported insecure")
 	}
 }
@@ -165,29 +168,29 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 
 	cases := []struct {
 		name        string
-		registries  ContainerRegistries
+		registries  config.ContainerRegistries
 		wantHonored bool
 	}{
 		{
 			name: "deploy role held by the tenant's own registry",
-			registries: ContainerRegistries{
-				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+			registries: config.ContainerRegistries{
+				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
 			},
 			wantHonored: true,
 		},
 		{
 			name: "deploy role held by the tenant's own registry, build elsewhere",
-			registries: ContainerRegistries{
-				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleDeploy}},
-				{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleBuild}},
+			registries: config.ContainerRegistries{
+				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
+				{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{config.RegistryRoleBuild}},
 			},
 			wantHonored: true,
 		},
 		{
 			name: "deploy role held by erun's own registry",
-			registries: ContainerRegistries{
-				{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleDeploy}},
-				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleBuild}},
+			registries: config.ContainerRegistries{
+				{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
+				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleBuild}},
 			},
 			wantHonored: true,
 		},
@@ -201,10 +204,10 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var trace strings.Builder
-			ctx := Context{Logger: NewLoggerWithWriters(0, &trace, &trace)}
-			target := OpenResult{
+			ctx := core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace)}
+			target := config.OpenResult{
 				Tenant: tenant,
-				EnvConfig: EnvConfig{
+				EnvConfig: config.EnvConfig{
 					RuntimeImage:        recordedImage,
 					ContainerRegistries: tc.registries,
 				},
@@ -235,10 +238,10 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 // than kept.
 func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T) {
 	var trace strings.Builder
-	ctx := Context{Logger: NewLoggerWithWriters(0, &trace, &trace)}
-	target := OpenResult{
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace)}
+	target := config.OpenResult{
 		Tenant: "acme",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.178",
 		},
 	}
@@ -269,8 +272,8 @@ func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T)
 // current at this deploy, so a later registry change still resolves
 // dynamically -- only the bare component name is safe to persist here.
 func TestResolveDeployRuntimeImagePersistNameForDefaultFallback(t *testing.T) {
-	ctx := Context{}
-	target := OpenResult{Tenant: "acme", EnvConfig: EnvConfig{}}
+	ctx := core.Context{}
+	target := config.OpenResult{Tenant: "acme", EnvConfig: config.EnvConfig{}}
 
 	image, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
 
@@ -289,8 +292,8 @@ func TestResolveDeployRuntimeImagePersistNameForDefaultFallback(t *testing.T) {
 // PersistRuntimeImage at all, so the persist step leaves RuntimeImage exactly
 // as recorded rather than write an empty string over an operator's own pin.
 func TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments(t *testing.T) {
-	ctx := Context{}
-	target := OpenResult{Tenant: "erun", EnvConfig: EnvConfig{}}
+	ctx := core.Context{}
+	target := config.OpenResult{Tenant: "erun", EnvConfig: config.EnvConfig{}}
 
 	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", DevopsComponentName, "1.0.201", "", false)
 

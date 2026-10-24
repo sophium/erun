@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ExecGateMergeSource is one branch to squash into the prospective merge, in
@@ -30,7 +31,7 @@ type ExecGateMergeInput struct {
 func execGateMergeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecGateMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var merged *eruncommon.GateMergeWorkingTreeResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, workDir string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
 			sources := make([]eruncommon.GateMergeSource, len(input.Sources))
 			for i, source := range input.Sources {
 				sources[i] = eruncommon.GateMergeSource{Branch: source.Branch, Message: source.Message}

@@ -7,6 +7,9 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type remoteRepositoryState struct {
@@ -29,7 +32,7 @@ var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.ama
 // The env it takes is the one this run just reconciled, so init's own deploy sees
 // the settings this invocation supplied rather than the params they arrived in —
 // the two diverge whenever a flag was omitted and the stored value stands.
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, remoteProvisionedSecrets, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (ShellLaunchParams, remoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
@@ -113,8 +116,8 @@ type remoteProvisionedSecrets struct {
 // give, mints the dockerconfigjson Secret the runtime chart mounts. It is the
 // host side of ensureRemoteRegistryCredentials' in-pod check: that check can
 // only fail loudly; this is what gives it something to find.
-func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (string, error) {
-	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+func (s bootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResult) (string, error) {
+	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
 	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
@@ -137,11 +140,11 @@ func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (str
 // environment would have had before this existed. The fallbacks are traced, not
 // silent: a deployment that stayed on the operator's identity has to be
 // distinguishable from one that never asked.
-func (s bootstrapRunner) resolvePlatformAliasSecret(target OpenResult) (string, error) {
+func (s bootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (string, error) {
 	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
 	// The runner's own store, so the alias is resolved against the same config
 	// the rest of init reads rather than whatever the default store finds.
-	var store CloudReadStore = ConfigStore{}
+	var store CloudReadStore = config.ConfigStore{}
 	if s.Store != nil {
 		store = s.Store
 	}
@@ -202,8 +205,8 @@ func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapIni
 	return repository, nil
 }
 
-func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string, envType EnvironmentType) OpenResult {
-	return OpenResult{
+func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string, envType config.EnvironmentType) config.OpenResult {
+	return config.OpenResult{
 		Tenant:       tenant,
 		Environment:  envName,
 		TenantConfig: remoteRepositoryTenantConfig(tenant, envName),
@@ -214,26 +217,26 @@ func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesC
 	}
 }
 
-func remoteRepositoryTenantConfig(tenant, envName string) TenantConfig {
-	return TenantConfig{Name: tenant, DefaultEnvironment: envName}
+func remoteRepositoryTenantConfig(tenant, envName string) config.TenantConfig {
+	return config.TenantConfig{Name: tenant, DefaultEnvironment: envName}
 }
 
-func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType EnvironmentType) EnvConfig {
+func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType config.EnvironmentType) config.EnvConfig {
 	if !envType.IsValid() {
-		envType = EnvironmentTypeRemoteAgent
+		envType = config.EnvironmentTypeRemoteAgent
 	}
-	cfg := EnvConfig{Name: envName, LocalRepoPath: projectRoot, KubernetesContext: kubernetesContext, Type: envType}
+	cfg := config.EnvConfig{Name: envName, LocalRepoPath: projectRoot, KubernetesContext: kubernetesContext, Type: envType}
 	return cfg
 }
 
-func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) EnvironmentLocalPorts {
-	portStore, ok := s.Store.(environmentPortStore)
+func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) config.EnvironmentLocalPorts {
+	portStore, ok := s.Store.(config.EnvironmentPortStore)
 	if !ok {
-		return EnvironmentLocalPorts{}
+		return config.EnvironmentLocalPorts{}
 	}
-	resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
+	resolved, err := config.ResolveEnvironmentLocalPorts(portStore, tenant, envName)
 	if err != nil {
-		return EnvironmentLocalPorts{}
+		return config.EnvironmentLocalPorts{}
 	}
 	return resolved
 }
@@ -250,7 +253,7 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 	return nil
 }
 
-func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
+func (s bootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	runtimeImageStated := runtimeImage != "" && runtimeImage != DevopsComponentName
 	if runtimeImageStated {
@@ -294,8 +297,8 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 // config entry, a gh session, or GH_TOKEN/GITHUB_TOKEN -- not that it is valid
 // or correctly scoped; release's own preflight still confirms that before
 // spending a build.
-func (s bootstrapRunner) ensureRemoteRegistryCredentials(target OpenResult, req ShellLaunchParams) error {
-	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+func (s bootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResult, req ShellLaunchParams) error {
+	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	for _, registry := range registries {
 		configured, err := s.remoteGHCRCredentialConfigured(req, registry)
 		if err != nil {
@@ -315,7 +318,7 @@ func (s bootstrapRunner) ensureRemoteRegistryCredentials(target OpenResult, req 
 // non-ghcr registry (a separate credential story this check does not police),
 // or a cluster: entry (the pod never leaves the cluster to reach it) is not
 // checked.
-func ghcrRegistriesRequiringCredential(list ContainerRegistries) []string {
+func ghcrRegistriesRequiringCredential(list config.ContainerRegistries) []string {
 	registries := make([]string, 0, len(list))
 	seen := make(map[string]struct{}, len(list))
 	for _, entry := range list {
@@ -326,7 +329,7 @@ func ghcrRegistriesRequiringCredential(list ContainerRegistries) []string {
 		if registry == "" || !isGHCRRegistry(registry) {
 			continue
 		}
-		if !entry.hasRole(RegistryRoleBuild) && !entry.hasRole(RegistryRoleDeploy) {
+		if !entry.HasRole(config.RegistryRoleBuild) && !entry.HasRole(config.RegistryRoleDeploy) {
 			continue
 		}
 		if _, ok := seen[registry]; ok {
@@ -713,7 +716,7 @@ func kubectlRemoteExecArgs(req ShellLaunchParams, script string) []string {
 }
 
 func RunRemoteCommand(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
-	cmd := Command("kubectl", kubectlRemoteExecArgs(req, script)...)
+	cmd := core.Command("kubectl", kubectlRemoteExecArgs(req, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

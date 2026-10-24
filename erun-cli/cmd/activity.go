@@ -8,10 +8,12 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
-func newActivityCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command {
+func newActivityCmd(store config.OpenStore, resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "activity",
 		Short:         "Record and inspect environment activity",
@@ -69,7 +71,7 @@ func newActivityTouchCmd() *cobra.Command {
 	return cmd
 }
 
-func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
+func newActivityStatusCmd(store config.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -101,7 +103,7 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 // exit 0 only on Fire, meaning the caller may now stop the instance;
 // every other grace state (Skip/Arm/Wait) exits non-zero so the env
 // stays running.
-func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
+func newActivityStopReadyCmd(store config.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -119,7 +121,7 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 	return cmd
 }
 
-func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, environment, cloudContextName string, jsonOutput bool) error {
+func runActivityStopReady(cmd *cobra.Command, store config.OpenStore, tenant, environment, cloudContextName string, jsonOutput bool) error {
 	status, err := resolveActivityStatus(store, tenant, environment)
 	if err != nil {
 		return err
@@ -357,7 +359,7 @@ func addActivityTargetFlags(cmd *cobra.Command, tenant, environment *string) {
 	cmd.Flags().StringVar(environment, "environment", "", "Environment")
 }
 
-func resolveActivityStatus(store common.OpenStore, tenant, environment string) (common.EnvironmentIdleStatus, error) {
+func resolveActivityStatus(store config.OpenStore, tenant, environment string) (common.EnvironmentIdleStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := validateActivityTarget(tenant, environment); err != nil {
@@ -366,7 +368,7 @@ func resolveActivityStatus(store common.OpenStore, tenant, environment string) (
 	return common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 }
 
-func writeActivityStatus(ctx common.Context, status common.EnvironmentIdleStatus) error {
+func writeActivityStatus(ctx core.Context, status common.EnvironmentIdleStatus) error {
 	if err := writeLabeledValue(ctx, "stop eligible", enabledDisabledLabel(status.StopEligible)); err != nil {
 		return err
 	}

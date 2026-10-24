@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // orchestrator_launch_settings.go holds the CLI's writers for an orchestrator's
@@ -78,39 +81,39 @@ type SetOrchestratorEffortParams struct {
 // SetOrchestratorGateway turns an orchestrator's use of the gateway catalog on
 // or off. Turning it on with no catalog configured is refused: the orchestrator
 // would launch on the host's own sign-in while reading as routed.
-func SetOrchestratorGateway(ctx Context, store OrchestratorAliasStore, params SetOrchestratorGatewayParams) (OrchestratorConfig, error) {
+func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "gateway",
 		usage:   "--gateway <on|off>",
-		apply:   func(o *OrchestratorConfig) { o.UseGateway = params.UseGateway },
+		apply:   func(o *configpkg.OrchestratorConfig) { o.UseGateway = params.UseGateway },
 	})
 }
 
 // SetOrchestratorModel sets the model an orchestrator launches on. A model the
 // gateway cannot drive is refused when the orchestrator uses the gateway.
-func SetOrchestratorModel(ctx Context, store OrchestratorAliasStore, params SetOrchestratorModelParams) (OrchestratorConfig, error) {
+func SetOrchestratorModel(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
 	model := strings.TrimSpace(params.Model)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "model",
 		usage:   "--model <model|default>",
-		apply:   func(o *OrchestratorConfig) { o.Model = model },
+		apply:   func(o *configpkg.OrchestratorConfig) { o.Model = model },
 	})
 }
 
 // SetOrchestratorEffort sets the effort an orchestrator launches at.
-func SetOrchestratorEffort(ctx Context, store OrchestratorAliasStore, params SetOrchestratorEffortParams) (OrchestratorConfig, error) {
+func SetOrchestratorEffort(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorEffortParams) (configpkg.OrchestratorConfig, error) {
 	effort := strings.TrimSpace(params.Effort)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "effort",
 		usage:   "--effort <level|default>",
-		apply:   func(o *OrchestratorConfig) { o.Effort = effort },
+		apply:   func(o *configpkg.OrchestratorConfig) { o.Effort = effort },
 	})
 }
 
 type orchestratorLaunchSettingWrite struct {
 	setting string
 	usage   string
-	apply   func(*OrchestratorConfig)
+	apply   func(*configpkg.OrchestratorConfig)
 }
 
 // orchestratorLaunchSettingRemedy names the command that clears the check that
@@ -137,23 +140,23 @@ func orchestratorLaunchSettingRemedy(err error, orchestratorID string) string {
 // the write, not only the one field written: turning the gateway on can make an
 // already recorded model undriveable, and that combination must be refused by
 // whichever writer would create it.
-func setOrchestratorLaunchSetting(ctx Context, store OrchestratorAliasStore, rawID string, write orchestratorLaunchSettingWrite) (OrchestratorConfig, error) {
+func setOrchestratorLaunchSetting(ctx core.Context, store OrchestratorAliasStore, rawID string, write orchestratorLaunchSettingWrite) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
-		return OrchestratorConfig{}, fmt.Errorf("store is required")
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}
 	orchestratorID := strings.TrimSpace(rawID)
 	if orchestratorID == "" {
-		return OrchestratorConfig{}, fmt.Errorf("set orchestrator %s: no orchestrator id given — pass one explicitly (`erun orchestrator set-%s <id> %s`)",
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("set orchestrator %s: no orchestrator id given — pass one explicitly (`erun orchestrator set-%s <id> %s`)",
 			write.setting, write.setting, write.usage)
 	}
 
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	orchestratorIndex := findOrchestratorIndex(config, orchestratorID)
 	if orchestratorIndex < 0 {
-		return OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", orchestratorID)
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", orchestratorID)
 	}
 
 	orchestrator := config.Orchestrators[orchestratorIndex]
@@ -162,9 +165,9 @@ func setOrchestratorLaunchSetting(ctx Context, store OrchestratorAliasStore, raw
 	// accepted a value a real run refuses would report a plan it cannot carry out.
 	if err := ValidateOrchestratorLaunchSettings(orchestrator, config.OpenRouter); err != nil {
 		if remedy := orchestratorLaunchSettingRemedy(err, orchestratorID); remedy != "" {
-			return OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w -- %s", orchestratorID, err, remedy)
+			return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w -- %s", orchestratorID, err, remedy)
 		}
-		return OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w", orchestratorID, err)
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w", orchestratorID, err)
 	}
 	config.Orchestrators[orchestratorIndex] = orchestrator
 
@@ -173,7 +176,7 @@ func setOrchestratorLaunchSetting(ctx Context, store OrchestratorAliasStore, raw
 		return orchestrator, nil
 	}
 	if err := store.SaveERunConfig(config); err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	return orchestrator, nil
 }

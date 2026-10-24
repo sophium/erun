@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The runtime pod relays the routing values the chart injects into Claude Code's
@@ -308,7 +310,7 @@ func writeRuntimeJSONMap(path string, value map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if err := WriteFileAtomic(path, buffer.Bytes(), 0o600); err != nil {
+	if err := config.WriteFileAtomic(path, buffer.Bytes(), 0o600); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)

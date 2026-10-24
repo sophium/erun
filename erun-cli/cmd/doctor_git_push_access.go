@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportGitPushAccess flags the asymmetry that makes this expensive to
@@ -22,7 +24,7 @@ import (
 // When an earlier section already confirmed the cluster is unreachable
 // (diagnosis.ClusterUnreachable), this reports the same skip instead of
 // paying its own kubectl exec timeout to rediscover it.
-func reportGitPushAccess(ctx common.Context, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if !result.EnvConfig.RemoteWorktree() {
 		return nil
 	}
@@ -52,7 +54,7 @@ func gitFetchStatusLine(status common.GitPushAccessStatus) string {
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func gitPushStatusLine(result common.OpenResult, status common.GitPushAccessStatus) string {
+func gitPushStatusLine(result config.OpenResult, status common.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

@@ -5,7 +5,8 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // CommitInput takes the commit message as data — never a shell — and the
@@ -23,7 +24,7 @@ func commitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CommitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var committed *eruncommon.CommitWorkingTreeResult
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				result, err := eruncommon.CommitWorkingTree(runCtx, workDir, eruncommon.CommitWorkingTreeParams{
 					Branch:  input.Branch,
 					Message: input.Message,

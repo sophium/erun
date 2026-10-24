@@ -1,6 +1,10 @@
 package eruncommon
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/sophium/erun/erun-common/base/core"
+)
 
 // RunPublish mirrors an already-built version's images from the FROM registry to
 // each TO registry without deploying. It reuses deploy's spec resolution — so the
@@ -9,7 +13,7 @@ import "fmt"
 // tested image to the shared registry once I'm happy" a deliberate action rather
 // than a side effect of deploying. A version is required (deploy's contract), and
 // the env must mark a FROM source and at least one TO destination.
-func RunPublish(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) error {
+func RunPublish(ctx core.Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) error {
 	specs, err := ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return err

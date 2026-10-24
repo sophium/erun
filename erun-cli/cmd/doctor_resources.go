@@ -6,6 +6,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // doctorResourceInterval is the CPU sample window the resources section reads
@@ -34,7 +36,7 @@ const doctorResourceInterval = time.Second
 // healthy environment: an environment whose pod was just replaced has no
 // retained history to reason from, and one whose counters cannot be read at all
 // is exactly the case where saying nothing would read as saying it is fine.
-func reportDoctorResources(ctx common.Context, req common.ShellLaunchParams, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportDoctorResources(ctx core.Context, req common.ShellLaunchParams, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
@@ -67,7 +69,7 @@ func reportDoctorResources(ctx common.Context, req common.ShellLaunchParams, res
 // its own unavailable fields: "nothing was observed" is not "nothing is wrong",
 // and a doctor section that stays silent here reads as a clean bill of health
 // for the one environment least able to say otherwise.
-func writeDoctorResourcesNotObserved(ctx common.Context, usage common.RuntimeUsage) error {
+func writeDoctorResourcesNotObserved(ctx core.Context, usage common.RuntimeUsage) error {
 	reason := strings.TrimSpace(usage.Memory.Unavailable)
 	if reason == "" {
 		reason = strings.TrimSpace(usage.CPU.Unavailable)
@@ -91,7 +93,7 @@ func writeDoctorResourcesNotObserved(ctx common.Context, usage common.RuntimeUsa
 // retained usage history, which is readable only from inside its own runtime
 // pod. A verdict that suggests nothing ("hold", or insufficient evidence) gets
 // no next action, because there is nothing to apply.
-func writeDoctorResizeNextAction(ctx common.Context, result common.OpenResult, sizing *common.RuntimeSizingRecommendation) error {
+func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *common.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}

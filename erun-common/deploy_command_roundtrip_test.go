@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestHelmDeployParamsPreservesCommand locks the invariant that the helm command
@@ -38,10 +40,10 @@ func TestHelmDeployParamsPreservesCommand(t *testing.T) {
 		MCPAuthIssuer:        "file:///etc/erun/mcp-auth/desktopid.pub",
 		MCPAuthAudience:      "erun-mcp:frs/prod",
 		RuntimeRegistry:      "ghcr.io/sophium",
-		ContainerRegistries:  ContainerRegistries{{Registry: "ghcr.io/sophium", Roles: []RegistryRole{"deploy"}}},
+		ContainerRegistries:  config.ContainerRegistries{{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{"deploy"}}},
 		DisableBuildScript:   true,
 		PlatformAccount:      true,
-		Platform:             PlatformConfig{BaseDomain: "erunpaas.com", Env: "frs-prod", ServicesZone: "frs.erunpaas.com"},
+		Platform:             config.PlatformConfig{BaseDomain: "erunpaas.com", Env: "frs-prod", ServicesZone: "frs.erunpaas.com"},
 	}
 
 	traced := spec.command()

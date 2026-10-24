@@ -10,25 +10,27 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const mcpPortForwardStartupTimeout = 5 * time.Second
 
-type MCPForwarder func(common.Context, common.OpenResult) error
+type MCPForwarder func(core.Context, config.OpenResult) error
 
 // Aliased rather than redeclared so the shape the CLI writes and the shape the
 // desktop reads cannot drift apart.
 type mcpPortForwardState = common.PortForwardState
 
 func newMCPForwarder() MCPForwarder {
-	return func(ctx common.Context, result common.OpenResult) error {
+	return func(ctx core.Context, result config.OpenResult) error {
 		_, err := ensureMCPPortForward(ctx, result)
 		return err
 	}
 }
 
-func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, error) {
-	localPort := common.MCPPortForResult(result)
+func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, error) {
+	localPort := config.MCPPortForResult(result)
 	statePath, err := mcpPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
@@ -79,7 +81,7 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 // shape that no longer carries traffic is neither: it is the forward that
 // outlived its pod, so it is stopped and (false, nil) sends the caller on to
 // start a replacement.
-func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
+func adoptForeignMCPPortForward(ctx core.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {
 		return false, fmt.Errorf("local MCP port %d is already in use", localPort)
@@ -110,7 +112,7 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 // keeps holding the local port and answers nothing through it, so reusing it on
 // the strength of the recorded state alone leaves the environment unreachable
 // with nothing left to notice.
-func reusableRecordedPortForward(ctx common.Context, kind, logPath string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
+func reusableRecordedPortForward(ctx core.Context, kind, logPath string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
 	bound := canConnectLocalPort(localPort)
 	matches := stateMatchesMCPTarget(state, expected)
 	health := common.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
@@ -132,7 +134,7 @@ func reusableRecordedPortForward(ctx common.Context, kind, logPath string, state
 	return false
 }
 
-func startMCPPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
+func startMCPPortForward(ctx core.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	expectedState.LogPath = logPath
 	process, err := startPortForwardWithBindRetry(ctx, "mcp", localPort, func() (*os.Process, error) {
@@ -168,7 +170,7 @@ func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, er
 		_ = logFile.Close()
 	}()
 
-	cmd := common.Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
@@ -184,7 +186,7 @@ func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, er
 // the "held but the edge never answers" shape that looks identical to a
 // genuinely stale forward to the next caller. Best-effort: the process may
 // already be gone, and the caller's own error already reports the failure.
-func releaseUnreachablePortForward(ctx common.Context, kind string, process *os.Process, localPort int, cause error) {
+func releaseUnreachablePortForward(ctx core.Context, kind string, process *os.Process, localPort int, cause error) {
 	ctx.Trace(fmt.Sprintf("%s: releasing port-forward for 127.0.0.1:%d — it never became reachable: %s", kind, localPort, strings.TrimSpace(cause.Error())))
 	if process != nil {
 		_ = process.Kill()
@@ -218,7 +220,7 @@ func waitForMCPPortForward(localPort int, logPath string, logStart int64) error 
 	return fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d; see %s", localPort, logPath)
 }
 
-func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string {
+func kubectlMCPPortForwardArgs(result config.OpenResult, localPort int) []string {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
@@ -230,7 +232,7 @@ func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string
 	args = append(args,
 		"port-forward",
 		"deployment/"+common.RuntimeReleaseName(result.Tenant),
-		fmt.Sprintf("%d:%d", localPort, common.MCPPortForResult(result)),
+		fmt.Sprintf("%d:%d", localPort, config.MCPPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args

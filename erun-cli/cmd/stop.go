@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
-func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error) *cobra.Command {
+func newStopCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
 	target := common.OpenParams{}
 	cmd := &cobra.Command{
 		Use:   "stop [TENANT] [ENVIRONMENT]",
@@ -48,7 +50,7 @@ func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 // other cluster-touching command wires: that preflight starts a stopped cloud
 // context, and starting a machine in order to stop a pod on it is the opposite
 // of what the operator asked for.
-func runStopCommand(ctx common.Context, args []string, overrides common.OpenParams, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error) error {
+func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
 	params, err := resolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err
@@ -74,7 +76,7 @@ func runStopCommand(ctx common.Context, args []string, overrides common.OpenPara
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun && ctx.Output != common.OutputJSON {
+	if !ctx.DryRun && ctx.Output != core.OutputJSON {
 		_, _ = fmt.Fprintf(ctx.Stdout, "%s\n", stopCommandSummary(stopResult))
 	}
 	return ctx.WriteResult(stopResult)

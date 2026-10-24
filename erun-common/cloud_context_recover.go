@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // RecoverCloudContextParams carries the inputs the recovery flow cannot
@@ -20,7 +23,7 @@ type RecoverCloudContextParams struct {
 // RecoverCloudContextResult records what the recovery flow saved so the
 // caller can surface the values back to the user.
 type RecoverCloudContextResult struct {
-	Saved     CloudContextConfig
+	Saved     configpkg.CloudContextConfig
 	Source    string // "aws-describe-instances"
 	TokenFrom string // "kubeconfig" | "input" | "none"
 }
@@ -63,7 +66,7 @@ type awsDescribeVolumeJSON struct {
 // It deliberately leaves InstanceProfileName / RoleName blank: those matter
 // only when re-init re-attaches a profile, and the recovered instance already
 // has one, so populating them would only widen the recovery's scope.
-func RecoverCloudContextFromAWS(ctx Context, store CloudContextStore, params RecoverCloudContextParams, deps CloudContextDependencies) (RecoverCloudContextResult, error) {
+func RecoverCloudContextFromAWS(ctx core.Context, store CloudContextStore, params RecoverCloudContextParams, deps CloudContextDependencies) (RecoverCloudContextResult, error) {
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.CloudProviderAlias = strings.TrimSpace(params.CloudProviderAlias)
 	params.Region = strings.TrimSpace(params.Region)
@@ -92,9 +95,9 @@ func RecoverCloudContextFromAWS(ctx Context, store CloudContextStore, params Rec
 	}
 	token, tokenFrom := resolveRecoverAdminToken(params)
 
-	config := CloudContextConfig{
+	config := configpkg.CloudContextConfig{
 		Name:               params.KubernetesContext,
-		Provider:           CloudProviderAWS,
+		Provider:           configpkg.CloudProviderAWS,
 		CloudProviderAlias: params.CloudProviderAlias,
 		Region:             params.Region,
 		KubernetesContext:  params.KubernetesContext,
@@ -121,7 +124,7 @@ func resolveRecoverAdminToken(params RecoverCloudContextParams) (string, string)
 	if token := strings.TrimSpace(params.AdminToken); token != "" {
 		return token, "input"
 	}
-	token, ok, err := LookupKubeContextBearerToken(params.KubernetesContext)
+	token, ok, err := configpkg.LookupKubeContextBearerToken(params.KubernetesContext)
 	if err != nil || !ok {
 		return "", "none"
 	}
@@ -143,7 +146,7 @@ type recoveredVolume struct {
 	size       int
 }
 
-func describeCloudContextInstanceByName(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, name string) (recoveredInstance, error) {
+func describeCloudContextInstanceByName(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, name string) (recoveredInstance, error) {
 	out, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-instances",
 		"--filters",
@@ -204,7 +207,7 @@ func flattenAWSDescribeInstances(parsed awsDescribeInstanceJSON) []recoveredInst
 	return out
 }
 
-func describeCloudContextVolume(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, volumeID string) (recoveredVolume, error) {
+func describeCloudContextVolume(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, volumeID string) (recoveredVolume, error) {
 	volumeID = strings.TrimSpace(volumeID)
 	if volumeID == "" || strings.HasPrefix(volumeID, "vol-<") {
 		return recoveredVolume{}, nil

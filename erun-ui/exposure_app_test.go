@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func exposureTestApp(t *testing.T, projectRoot string) *App {
@@ -15,9 +15,9 @@ func exposureTestApp(t *testing.T, projectRoot string) *App {
 	return &App{
 		deps: erunUIDeps{
 			store: stubUIStore{
-				envs: map[string]eruncommon.EnvConfig{
+				envs: map[string]config.EnvConfig{
 					"team/dev":  {KubernetesContext: "team-context"},
-					"team/host": {Type: eruncommon.EnvironmentTypeHost},
+					"team/host": {Type: config.EnvironmentTypeHost},
 				},
 			},
 			findProjectRoot: func() (string, string, error) {
@@ -33,8 +33,8 @@ func exposureTestApp(t *testing.T, projectRoot string) *App {
 func exposableProjectRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := eruncommon.SaveProjectConfig(root, eruncommon.ProjectConfig{
-		Platform: eruncommon.PlatformConfig{
+	if err := config.SaveProjectConfig(root, config.ProjectConfig{
+		Platform: config.PlatformConfig{
 			BaseDomain:   "erunpaas.test",
 			Env:          "frs-prod",
 			ServicesZone: "services.erunpaas.test",

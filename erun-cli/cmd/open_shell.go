@@ -8,10 +8,11 @@ import (
 
 	"github.com/briandowns/spinner"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"golang.org/x/term"
 )
 
-type OpenShellRunner func(common.Context, common.ShellLaunchParams) error
+type OpenShellRunner func(core.Context, common.ShellLaunchParams) error
 
 const desktopAppSessionEnvVar = common.DesktopSessionEnvVar
 
@@ -23,7 +24,7 @@ func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) er
 		execShell = common.ExecShell
 	}
 
-	return func(ctx common.Context, req common.ShellLaunchParams) error {
+	return func(ctx core.Context, req common.ShellLaunchParams) error {
 		if err := runOpenShellWait(ctx, req, waitForShellDeployment); err != nil {
 			return err
 		}
@@ -31,7 +32,7 @@ func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) er
 	}
 }
 
-func runOpenShellWait(ctx common.Context, req common.ShellLaunchParams, waitForShellDeployment func(common.ShellLaunchParams) error) error {
+func runOpenShellWait(ctx core.Context, req common.ShellLaunchParams, waitForShellDeployment func(common.ShellLaunchParams) error) error {
 	if waitForShellDeployment == nil {
 		return fmt.Errorf("wait for shell deployment is required")
 	}
@@ -53,7 +54,7 @@ func isTerminalWriter(w io.Writer) bool {
 	return term.IsTerminal(int(file.Fd()))
 }
 
-func runWithSpinner(ctx common.Context, suffix, finalMessage string, run func() error) error {
+func runWithSpinner(ctx core.Context, suffix, finalMessage string, run func() error) error {
 	if run == nil {
 		return fmt.Errorf("run function is required")
 	}

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportHostCredentials tells the operator whether the environment's copy of
@@ -20,7 +22,7 @@ import (
 // When an earlier section already confirmed the cluster is unreachable
 // (diagnosis.ClusterUnreachable), this reports the same skip instead of
 // paying its own kubectl exec timeout to rediscover it.
-func reportHostCredentials(ctx common.Context, store common.ConfigStore, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
 	}
@@ -54,7 +56,7 @@ func hostCredentialsRegionLine(status common.HostCredentialsStatus) string {
 	return status.Region
 }
 
-func hostCredentialsStatusLine(status common.HostCredentialsStatus, result common.OpenResult) string {
+func hostCredentialsStatusLine(status common.HostCredentialsStatus, result config.OpenResult) string {
 	refresh := fmt.Sprintf("run `erun cloud refresh %s %s`", result.Tenant, result.Environment)
 	switch {
 	case !status.Present:

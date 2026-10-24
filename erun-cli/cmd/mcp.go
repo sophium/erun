@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +29,7 @@ type mcpLaunchContext struct {
 	Namespace         string
 }
 
-func newMCPCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchMCP MCPLauncher) *cobra.Command {
+func newMCPCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchMCP MCPLauncher) *cobra.Command {
 	host := defaultMCPHost
 	port := defaultMCPPort
 	path := defaultMCPPath
@@ -44,7 +46,7 @@ func newMCPCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 			}
 			resolvedPort := port
 			if !cmd.Flags().Changed("port") {
-				resolvedPort = common.MCPPortForResult(result)
+				resolvedPort = config.MCPPortForResult(result)
 			}
 
 			runtime := mcpLaunchContext{
@@ -102,7 +104,7 @@ func mcpCommandArgs(host string, port int, path string, runtime mcpLaunchContext
 }
 
 func launchMCPProcess(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
-	cmd := common.Command(resolveMCPExecutable(), args...)
+	cmd := core.Command(resolveMCPExecutable(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // isolateOrchestratorWhipConfig points the shared xdg config dir at a temp
@@ -154,8 +155,8 @@ func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testin
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
 
-	app := NewApp(erunUIDeps{store: stubUIStore{config: &eruncommon.ERunConfig{
-		Orchestrators: []eruncommon.OrchestratorConfig{
+	app := NewApp(erunUIDeps{store: stubUIStore{config: &config.ERunConfig{
+		Orchestrators: []config.OrchestratorConfig{
 			{ID: "opened", Name: "opened"},
 			{ID: "never-opened", Name: "never-opened"},
 		},
@@ -226,8 +227,8 @@ func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
 // orchestrators" can offer every orchestrator the operator could otherwise
 // pick individually.
 func TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{config: &eruncommon.ERunConfig{
-		Orchestrators: []eruncommon.OrchestratorConfig{
+	app := NewApp(erunUIDeps{store: stubUIStore{config: &config.ERunConfig{
+		Orchestrators: []config.OrchestratorConfig{
 			{ID: "opened", Name: "opened"},
 			{ID: "never-opened", Name: "never-opened"},
 		},

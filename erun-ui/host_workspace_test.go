@@ -8,25 +8,26 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // hostWorkspaceStore builds a remote-agent env whose workspace-sync mirror lives
 // at localPath, so the host-workspace methods resolve to a real host directory.
 func hostWorkspaceStore(localPath string) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"frs/dev": {
 				Name:              "dev",
 				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-dev",
-				Type:              eruncommon.EnvironmentTypeRemoteAgent,
-				SSHD: eruncommon.SSHDConfig{
+				Type:              config.EnvironmentTypeRemoteAgent,
+				SSHD: config.SSHDConfig{
 					Enabled: true,
-					WorkspaceSync: eruncommon.SSHDWorkspaceSyncConfig{
+					WorkspaceSync: config.SSHDWorkspaceSyncConfig{
 						Enabled:   true,
 						LocalPath: localPath,
 					},
@@ -99,14 +100,14 @@ func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 // directory and was never anywhere else.
 func hostTypeEnvironmentStore(localPath string) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"frs/dev": {
 				Name:          "dev",
 				LocalRepoPath: localPath,
-				Type:          eruncommon.EnvironmentTypeHost,
+				Type:          config.EnvironmentTypeHost,
 			},
 		},
 	}

@@ -4,7 +4,8 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -13,15 +14,15 @@ var (
 	buildDate    = ""
 )
 
-func currentBuildInfo() eruncommon.BuildInfo {
-	return eruncommon.NormalizeBuildInfo(eruncommon.BuildInfo{
+func currentBuildInfo() model.BuildInfo {
+	return model.NormalizeBuildInfo(model.BuildInfo{
 		Version: buildVersion,
 		Commit:  buildCommit,
 		Date:    buildDate,
 	})
 }
 
-func resolveCurrentBuildInfo(resolveCLIPath func() string) eruncommon.BuildInfo {
+func resolveCurrentBuildInfo(resolveCLIPath func() string) model.BuildInfo {
 	fallback := currentBuildInfo()
 	if resolveCLIPath == nil {
 		return fallback
@@ -33,7 +34,7 @@ func resolveCurrentBuildInfo(resolveCLIPath func() string) eruncommon.BuildInfo 
 	}
 
 	versionCmd := exec.Command(cliPath, "version", "--no-registry")
-	eruncommon.HideConsoleWindow(versionCmd)
+	core.HideConsoleWindow(versionCmd)
 	output, err := versionCmd.Output()
 	if err != nil {
 		return fallback
@@ -43,32 +44,32 @@ func resolveCurrentBuildInfo(resolveCLIPath func() string) eruncommon.BuildInfo 
 	if !ok {
 		return fallback
 	}
-	return eruncommon.NormalizeBuildInfo(info)
+	return model.NormalizeBuildInfo(info)
 }
 
-func parseVersionOutput(output string) (eruncommon.BuildInfo, bool) {
+func parseVersionOutput(output string) (model.BuildInfo, bool) {
 	lines := strings.Split(output, "\n")
 	for index := len(lines) - 1; index >= 0; index-- {
 		if info, ok := parseVersionLine(lines[index]); ok {
 			return info, true
 		}
 	}
-	return eruncommon.BuildInfo{}, false
+	return model.BuildInfo{}, false
 }
 
-func parseVersionLine(line string) (eruncommon.BuildInfo, bool) {
+func parseVersionLine(line string) (model.BuildInfo, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "erun ") {
-		return eruncommon.BuildInfo{}, false
+		return model.BuildInfo{}, false
 	}
 
 	rest := strings.TrimSpace(strings.TrimPrefix(line, "erun "))
 	if rest == "" {
-		return eruncommon.BuildInfo{}, false
+		return model.BuildInfo{}, false
 	}
 
 	version, details, _ := strings.Cut(rest, " ")
-	info := eruncommon.BuildInfo{Version: strings.TrimSpace(version)}
+	info := model.BuildInfo{Version: strings.TrimSpace(version)}
 	details = strings.TrimSpace(details)
 	if strings.HasPrefix(details, "(") && strings.HasSuffix(details, ")") {
 		details = strings.TrimSuffix(strings.TrimPrefix(details, "("), ")")

@@ -11,13 +11,9 @@ import (
 	"strings"
 	"time"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
-)
-
-const (
-	DefaultEnvironment       = "local"
-	DefaultContainerRegistry = "ghcr.io/sophium"
-	InitializeCurrentProject = "Initialize current project"
 )
 
 var (
@@ -29,23 +25,23 @@ var (
 )
 
 type BootstrapStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-	SaveERunConfig(ERunConfig) error
-	ListTenantConfigs() ([]TenantConfig, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
-	SaveTenantConfig(TenantConfig) error
-	LoadEnvConfig(string, string) (EnvConfig, string, error)
-	SaveEnvConfig(string, EnvConfig) error
+	LoadERunConfig() (configpkg.ERunConfig, string, error)
+	SaveERunConfig(configpkg.ERunConfig) error
+	ListTenantConfigs() ([]configpkg.TenantConfig, error)
+	LoadTenantConfig(string) (configpkg.TenantConfig, string, error)
+	SaveTenantConfig(configpkg.TenantConfig) error
+	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
+	SaveEnvConfig(string, configpkg.EnvConfig) error
 }
 
 type (
 	ProjectFinderFunc       func() (string, string, error)
 	WorkDirFunc             func() (string, error)
-	SelectTenantFunc        func([]TenantConfig) (TenantSelectionResult, error)
+	SelectTenantFunc        func([]configpkg.TenantConfig) (TenantSelectionResult, error)
 	PromptValueFunc         func(string) (string, error)
 	NamespaceEnsurerFunc    func(string, string) error
-	ProjectConfigLoaderFunc func(string) (ProjectConfig, string, error)
-	ProjectConfigSaverFunc  func(string, ProjectConfig) error
+	ProjectConfigLoaderFunc func(string) (configpkg.ProjectConfig, string, error)
+	ProjectConfigSaverFunc  func(string, configpkg.ProjectConfig) error
 	RemoteRuntimeWaitFunc   func(ShellLaunchParams) error
 	RemoteCommandRunnerFunc func(ShellLaunchParams, string) (RemoteCommandResult, error)
 	SleepFunc               func(time.Duration)
@@ -88,17 +84,17 @@ type BootstrapInitParams struct {
 	// ImagePullSecrets names the dockerconfigjson secrets the runtime pod pulls
 	// its image with, which a private runtime image cannot start without.
 	ImagePullSecrets []string
-	RuntimePod       RuntimePodResources
+	RuntimePod       configpkg.RuntimePodResources
 	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
 	// independent of RuntimePod which only sizes the runtime container itself.
-	RuntimeDindPod    RuntimePodResources
+	RuntimeDindPod    configpkg.RuntimePodResources
 	NoGit             bool
 	KubernetesContext string
 	ContainerRegistry string
 	// ClusterRegistry, when set, seeds the new env with a resolvable cluster:
 	// registry entry (addresses resolved from the env's kube-context) instead of
 	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
-	ClusterRegistry *ClusterRegistry
+	ClusterRegistry *configpkg.ClusterRegistry
 	// ErunRegistry, when true, seeds the new env with erun's hosted registry
 	// (HostedRegistryReference(tenant)) instead of the static ContainerRegistry
 	// string. Set by `erun init --erun-registry`; mutually exclusive with
@@ -113,7 +109,7 @@ type BootstrapInitParams struct {
 	// Type is the canonical environment type and takes precedence over the
 	// legacy Remote bool; when unset the type is derived from Remote for
 	// backward compatibility with --remote flag callers.
-	Type                    EnvironmentType
+	Type                    configpkg.EnvironmentType
 	Remote                  bool
 	RemoteRepositoryURL     string
 	CodeCommitSSHKeyID      string
@@ -142,26 +138,26 @@ type BootstrapInitParams struct {
 // `erun init [--remote]`, and an invocation that names neither falls back to
 // local-agent. It answers "what kind of env is this run creating", never "what
 // kind is the env on disk" — for an existing env see RequestedType.
-func (p BootstrapInitParams) ResolvedType() EnvironmentType {
+func (p BootstrapInitParams) ResolvedType() configpkg.EnvironmentType {
 	if p.Type.IsValid() {
 		return p.Type
 	}
 	if p.Remote {
-		return EnvironmentTypeRemoteAgent
+		return configpkg.EnvironmentTypeRemoteAgent
 	}
-	return EnvironmentTypeLocalAgent
+	return configpkg.EnvironmentTypeLocalAgent
 }
 
 // RequestedType reports the type the operator actually named, and whether they
 // named one at all. The fallback ResolvedType applies is a default, not a
 // request: retyping an existing env because a flag was omitted would be a worse
 // silent write than the dropped settings it would be repairing.
-func (p BootstrapInitParams) RequestedType() (EnvironmentType, bool) {
+func (p BootstrapInitParams) RequestedType() (configpkg.EnvironmentType, bool) {
 	if p.Type.IsValid() {
 		return p.Type, true
 	}
 	if p.Remote {
-		return EnvironmentTypeRemoteAgent, true
+		return configpkg.EnvironmentTypeRemoteAgent, true
 	}
 	return "", false
 }
@@ -181,9 +177,9 @@ func (p BootstrapInitParams) resolvedRuntimeVersion() string {
 // filesystem, so both answer false.
 func (p BootstrapInitParams) RemoteWorktree() bool {
 	switch p.ResolvedType() {
-	case EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+	case configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeRuntime:
 		return true
-	case EnvironmentTypeLocalAgent, EnvironmentTypeHost:
+	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
 		return false
 	default:
 		panic(fmt.Sprintf("RemoteWorktree: unhandled EnvironmentType %q", p.ResolvedType()))
@@ -229,9 +225,9 @@ func AsBootstrapInitInteraction(err error) (BootstrapInitInteraction, bool) {
 }
 
 type BootstrapInitResult struct {
-	ERunConfig          ERunConfig
-	TenantConfig        TenantConfig
-	EnvConfig           EnvConfig
+	ERunConfig          configpkg.ERunConfig
+	TenantConfig        configpkg.TenantConfig
+	EnvConfig           configpkg.EnvConfig
 	CreatedERunConfig   bool
 	CreatedTenantConfig bool
 	CreatedEnvConfig    bool
@@ -266,7 +262,7 @@ type BootstrapInitDependencies struct {
 	// refuses an unreachable registry instead of writing config whose pushes
 	// fail later, far from the choice that caused it.
 	ProbeHostedRegistry HostedRegistryProbeFunc
-	Context             Context
+	Context             core.Context
 }
 
 // HostedRegistryProbeFunc reports the hosted registry's current availability.
@@ -274,7 +270,7 @@ type HostedRegistryProbeFunc func(context.Context) HostedRegistryStatus
 
 type bootstrapRunner struct {
 	BootstrapInitDependencies
-	Context Context
+	Context core.Context
 }
 
 type bootstrapRunState struct {
@@ -282,17 +278,17 @@ type bootstrapRunState struct {
 	params                BootstrapInitParams
 	result                BootstrapInitResult
 	detected              projectContext
-	tenants               []TenantConfig
+	tenants               []configpkg.TenantConfig
 	tenantsLoaded         bool
 	setDefaultTenant      bool
 	defaultTenantResolved bool
-	toolConfig            ERunConfig
+	toolConfig            configpkg.ERunConfig
 	toolConfigMissing     bool
 	tenant                string
-	tenantConfig          TenantConfig
+	tenantConfig          configpkg.TenantConfig
 	tenantConfigChanged   bool
 	envName               string
-	envConfig             EnvConfig
+	envConfig             configpkg.EnvConfig
 	envConfigChanged      bool
 }
 
@@ -303,9 +299,9 @@ func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params Boo
 	}.run(params)
 }
 
-func TraceBootstrapStore(ctx Context, store BootstrapStore) BootstrapStore {
+func TraceBootstrapStore(ctx core.Context, store BootstrapStore) BootstrapStore {
 	if store == nil {
-		store = ConfigStore{}
+		store = configpkg.ConfigStore{}
 	}
 	return tracedBootstrapStore{
 		BootstrapStore: store,
@@ -313,13 +309,13 @@ func TraceBootstrapStore(ctx Context, store BootstrapStore) BootstrapStore {
 	}
 }
 
-func TraceProjectConfigSaver(ctx Context, save ProjectConfigSaverFunc) ProjectConfigSaverFunc {
+func TraceProjectConfigSaver(ctx core.Context, save ProjectConfigSaverFunc) ProjectConfigSaverFunc {
 	if save == nil {
-		save = SaveProjectConfig
+		save = configpkg.SaveProjectConfig
 	}
-	return func(projectRoot string, config ProjectConfig) error {
+	return func(projectRoot string, config configpkg.ProjectConfig) error {
 		if strings.TrimSpace(projectRoot) == "" {
-			return ErrNotInGitRepository
+			return configpkg.ErrNotInGitRepository
 		}
 		configPath := filepath.Join(filepath.Clean(projectRoot), ".erun", "config.yaml")
 		if err := traceYAMLWrite(ctx, configPath, config); err != nil {
@@ -332,7 +328,7 @@ func TraceProjectConfigSaver(ctx Context, save ProjectConfigSaverFunc) ProjectCo
 	}
 }
 
-func TraceNamespaceEnsurer(ctx Context, ensure NamespaceEnsurerFunc) NamespaceEnsurerFunc {
+func TraceNamespaceEnsurer(ctx core.Context, ensure NamespaceEnsurerFunc) NamespaceEnsurerFunc {
 	if ensure == nil {
 		return nil
 	}
@@ -345,9 +341,9 @@ func TraceNamespaceEnsurer(ctx Context, ensure NamespaceEnsurerFunc) NamespaceEn
 	}
 }
 
-func traceYAMLWrite(ctx Context, path string, value any) error {
+func traceYAMLWrite(ctx core.Context, path string, value any) error {
 	if _, err := yaml.Marshal(value); err != nil {
-		return ErrFailedToSaveConfig
+		return configpkg.ErrFailedToSaveConfig
 	}
 	ctx.TraceCommand("", "mkdir", "-p", filepath.Dir(path))
 	ctx.TraceCommand("", "write-yaml", path)
@@ -356,13 +352,13 @@ func traceYAMLWrite(ctx Context, path string, value any) error {
 
 type tracedBootstrapStore struct {
 	BootstrapStore
-	ctx Context
+	ctx core.Context
 }
 
-func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
-	configPath, err := resolveConfigFilePath(filepath.Join("erun", "config.yaml"))
+func (s tracedBootstrapStore) SaveERunConfig(config configpkg.ERunConfig) error {
+	configPath, err := configpkg.ResolveConfigFilePath(filepath.Join("erun", "config.yaml"))
 	if err != nil {
-		return ErrNoUserDataFolder
+		return configpkg.ErrNoUserDataFolder
 	}
 	if err := traceYAMLWrite(s.ctx, configPath, config); err != nil {
 		return err
@@ -373,17 +369,17 @@ func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
 	return s.BootstrapStore.SaveERunConfig(config)
 }
 
-func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
+func (s tracedBootstrapStore) SaveTenantConfig(config configpkg.TenantConfig) error {
 	// Validated (and normalized) exactly as the real save does before anything
 	// is traced, so a dry run never reports a mkdir and a write-yaml that the
 	// real run refuses, and the traced path is the one the real run would use.
-	config = NormalizeTenantConfig(config)
-	if err := validateStatePathSegment("tenant", config.Name); err != nil {
+	config = configpkg.NormalizeTenantConfig(config)
+	if err := configpkg.ValidateStatePathSegment("tenant", config.Name); err != nil {
 		return err
 	}
-	configPath, err := resolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
+	configPath, err := configpkg.ResolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
 	if err != nil {
-		return ErrNoUserDataFolder
+		return configpkg.ErrNoUserDataFolder
 	}
 	if err := traceYAMLWrite(s.ctx, configPath, config); err != nil {
 		return err
@@ -394,18 +390,18 @@ func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
 	return s.BootstrapStore.SaveTenantConfig(config)
 }
 
-func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) error {
+func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) error {
 	// Same shape rule and order as the real save: refuse before tracing, so a
 	// dry run's mkdir/write-yaml pair is one the real run would actually do.
-	if err := validateStatePathSegment("tenant", tenant); err != nil {
+	if err := configpkg.ValidateStatePathSegment("tenant", tenant); err != nil {
 		return err
 	}
-	if err := validateStatePathSegment("environment", config.Name); err != nil {
+	if err := configpkg.ValidateStatePathSegment("environment", config.Name); err != nil {
 		return err
 	}
-	configPath, err := resolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
+	configPath, err := configpkg.ResolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
 	if err != nil {
-		return ErrNoUserDataFolder
+		return configpkg.ErrNoUserDataFolder
 	}
 	if err := traceYAMLWrite(s.ctx, configPath, config); err != nil {
 		return err
@@ -416,12 +412,12 @@ func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) err
 	return s.BootstrapStore.SaveEnvConfig(tenant, config)
 }
 
-func (s tracedBootstrapStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+func (s tracedBootstrapStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
 	portStore, ok := s.BootstrapStore.(interface {
-		ListEnvConfigs(string) ([]EnvConfig, error)
+		ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 	})
 	if !ok {
-		return nil, ErrNotInitialized
+		return nil, configpkg.ErrNotInitialized
 	}
 	return portStore.ListEnvConfigs(tenant)
 }
@@ -547,13 +543,13 @@ func (s *bootstrapRunState) detectProject() (projectContext, error) {
 	if err == nil {
 		return project, nil
 	}
-	if errors.Is(err, ErrNotInGitRepository) {
+	if errors.Is(err, configpkg.ErrNotInGitRepository) {
 		s.runner.Context.Logger.Error("erun config is not initialized. Run erun in project directory.")
 	}
 	return projectContext{}, err
 }
 
-func (s *bootstrapRunState) loadTenants() ([]TenantConfig, error) {
+func (s *bootstrapRunState) loadTenants() ([]configpkg.TenantConfig, error) {
 	if s.tenantsLoaded {
 		return s.tenants, nil
 	}
@@ -585,7 +581,7 @@ func (s *bootstrapRunState) loadToolConfig() error {
 	s.runner.Context.Trace("Loading erun tool configuration, configPath=" + configPath)
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrNotInitialized):
+	case errors.Is(err, configpkg.ErrNotInitialized):
 		if err := s.initializeMissingToolConfig(); err != nil {
 			return err
 		}
@@ -612,7 +608,7 @@ func (s *bootstrapRunState) initializeMissingToolConfig() error {
 		return nil
 	}
 	s.runner.Context.Trace("Saving default config")
-	s.toolConfig = ERunConfig{DefaultTenant: tenant}
+	s.toolConfig = configpkg.ERunConfig{DefaultTenant: tenant}
 	if err := s.runner.Store.SaveERunConfig(s.toolConfig); err != nil {
 		return err
 	}
@@ -678,7 +674,7 @@ func (s *bootstrapRunState) resolveTenantFromProject() error {
 	switch {
 	case err == nil:
 		s.tenant = project.tenant
-	case errors.Is(err, ErrNotInGitRepository):
+	case errors.Is(err, configpkg.ErrNotInGitRepository):
 	case err != nil:
 		return err
 	}
@@ -710,14 +706,14 @@ func (s *bootstrapRunState) resolveTenantFromDirectory() error {
 // best-effort: a store that does not expose ListEnvConfigs (or a tenant whose
 // envs fail to load) yields no envs for that tenant, so matching simply finds
 // no owner and the caller falls back to the default-tenant / selection path.
-func (s *bootstrapRunState) envsByTenant(tenants []TenantConfig) map[string][]EnvConfig {
+func (s *bootstrapRunState) envsByTenant(tenants []configpkg.TenantConfig) map[string][]configpkg.EnvConfig {
 	lister, ok := s.runner.Store.(interface {
-		ListEnvConfigs(string) ([]EnvConfig, error)
+		ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 	})
 	if !ok {
 		return nil
 	}
-	envsByTenant := make(map[string][]EnvConfig, len(tenants))
+	envsByTenant := make(map[string][]configpkg.EnvConfig, len(tenants))
 	for _, tenant := range tenants {
 		if envs, err := lister.ListEnvConfigs(tenant.Name); err == nil {
 			envsByTenant[tenant.Name] = envs
@@ -753,7 +749,7 @@ func (s *bootstrapRunState) loadTenantConfig() error {
 	switch {
 	case err == nil:
 		s.tenantConfig = tenantConfig
-	case errors.Is(err, ErrNotInitialized):
+	case errors.Is(err, configpkg.ErrNotInitialized):
 		if err := s.createTenantConfig(); err != nil {
 			return err
 		}
@@ -777,7 +773,7 @@ func (s *bootstrapRunState) createTenantConfig() error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new tenant")
-	s.tenantConfig = TenantConfig{
+	s.tenantConfig = configpkg.TenantConfig{
 		Name:               s.tenant,
 		DefaultEnvironment: defaultBootstrapEnvironment(s.params.Environment),
 	}
@@ -804,7 +800,7 @@ func defaultBootstrapEnvironment(envName string) string {
 	if envName != "" {
 		return envName
 	}
-	return DefaultEnvironment
+	return configpkg.DefaultEnvironment
 }
 
 func (s *bootstrapRunState) normalizeTenantConfig() {
@@ -820,7 +816,7 @@ func (s *bootstrapRunState) resolveEnvironmentName() error {
 		s.envName = s.tenantConfig.DefaultEnvironment
 	}
 	if s.envName == "" {
-		s.envName = DefaultEnvironment
+		s.envName = configpkg.DefaultEnvironment
 	}
 	if s.tenantConfig.DefaultEnvironment == "" {
 		s.tenantConfig.DefaultEnvironment = s.envName
@@ -838,7 +834,7 @@ func (s *bootstrapRunState) loadEnvConfig() error {
 	switch {
 	case err == nil:
 		s.envConfig = envConfig
-	case errors.Is(err, ErrNotInitialized):
+	case errors.Is(err, configpkg.ErrNotInitialized):
 		return s.createEnvConfig()
 	case err != nil:
 		return err
@@ -851,7 +847,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	if err != nil {
 		return err
 	}
-	if s.params.ResolvedType() == EnvironmentTypeHost {
+	if s.params.ResolvedType() == configpkg.EnvironmentTypeHost {
 		return s.createHostEnvConfig(envProjectRoot)
 	}
 	kubernetesContext, cloudProviderAlias, managedCloud, err := s.resolveNewEnvCloudConfig()
@@ -871,7 +867,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	// local-agent envs it is also the hostPath mounted into the pod; remote/runtime
 	// envs use a PVC worktree, so the value is the init-time project root (its
 	// basename names the in-pod worktree) but is never mounted.
-	s.envConfig = EnvConfig{
+	s.envConfig = configpkg.EnvConfig{
 		Name:               s.envName,
 		Type:               s.params.ResolvedType(),
 		LocalRepoPath:      envProjectRoot,
@@ -915,8 +911,8 @@ func (s *bootstrapRunState) createEnvConfig() error {
 // registry. A host environment must not contact a cluster during init any
 // more than it does at any other time.
 func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
-	if err := ValidateHostRepoPath(EnvironmentTypeHost, envProjectRoot); err != nil {
-		return fmt.Errorf("cannot create %s/%s as type %s: %w", s.tenant, s.envName, EnvironmentTypeHost, err)
+	if err := configpkg.ValidateHostRepoPath(configpkg.EnvironmentTypeHost, envProjectRoot); err != nil {
+		return fmt.Errorf("cannot create %s/%s as type %s: %w", s.tenant, s.envName, configpkg.EnvironmentTypeHost, err)
 	}
 	envProjectRoot = strings.TrimSpace(envProjectRoot)
 	// Skipping the cluster/cloud/registry resolution below is what "no cluster
@@ -927,9 +923,9 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new environment")
-	s.envConfig = EnvConfig{
+	s.envConfig = configpkg.EnvConfig{
 		Name:          s.envName,
-		Type:          EnvironmentTypeHost,
+		Type:          configpkg.EnvironmentTypeHost,
 		LocalRepoPath: envProjectRoot,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
@@ -942,12 +938,12 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 // initDeployConfig resolves the Deploy block a new env is created with: a
 // saved components selection when --components named one, else the zero value
 // (no saved selection, so deploy falls back to the repo plan).
-func initDeployConfig(params BootstrapInitParams) EnvironmentDeployConfig {
+func initDeployConfig(params BootstrapInitParams) configpkg.EnvironmentDeployConfig {
 	components, given := initComponentsOverride(params)
 	if !given {
-		return EnvironmentDeployConfig{}
+		return configpkg.EnvironmentDeployConfig{}
 	}
-	return EnvironmentDeployConfig{Components: components}
+	return configpkg.EnvironmentDeployConfig{Components: components}
 }
 
 // initComponentsOverride resolves the deploy.components override an init
@@ -977,11 +973,11 @@ func describeComponentsSetting(components []string) string {
 // a resolvable cluster: entry when the operator requested the in-cluster registry
 // (--cluster-registry), otherwise the single static registry resolved from
 // --container-registry / the prompt.
-func seedInitContainerRegistries(params BootstrapInitParams, registry string) ContainerRegistries {
+func seedInitContainerRegistries(params BootstrapInitParams, registry string) configpkg.ContainerRegistries {
 	if params.ClusterRegistry != nil {
-		return ClusterContainerRegistries(*params.ClusterRegistry)
+		return configpkg.ClusterContainerRegistries(*params.ClusterRegistry)
 	}
-	return SingleContainerRegistries(registry)
+	return configpkg.SingleContainerRegistries(registry)
 }
 
 func (s *bootstrapRunState) envProjectRoot() (string, error) {
@@ -993,7 +989,7 @@ func (s *bootstrapRunState) envProjectRoot() (string, error) {
 	if err == nil {
 		return project.root, nil
 	}
-	if errors.Is(err, ErrNotInGitRepository) {
+	if errors.Is(err, configpkg.ErrNotInGitRepository) {
 		return "", nil
 	}
 	return "", err
@@ -1014,7 +1010,7 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 	if err != nil {
 		return "", "", false, err
 	}
-	managedCloud, err := managedCloudEnvironment(s.runner.Store, EnvConfig{
+	managedCloud, err := managedCloudEnvironment(s.runner.Store, configpkg.EnvConfig{
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		Type:               s.params.ResolvedType(),
@@ -1030,7 +1026,7 @@ func (s *bootstrapRunState) updateEnvConfig() error {
 	// --type host) has no pod and no cluster to reconcile against — skip the
 	// kubernetes-context/cloud-provider/registry steps below entirely rather
 	// than let them resolve a context or ensure a namespace no host env has.
-	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+	if s.envConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		return nil
 	}
 	kubernetesContext, err := s.updateEnvKubernetesContext()
@@ -1223,15 +1219,15 @@ func (s *bootstrapRunState) applyEnvType() error {
 // without one to adopt the retype is refused rather than written: an env
 // recorded as local-agent or host with nothing to use would fail later with a
 // message about the missing path rather than about the flag that caused it.
-func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType) error {
-	if requested != EnvironmentTypeLocalAgent && requested != EnvironmentTypeHost {
+func (s *bootstrapRunState) adoptLocalRepoPathForType(requested configpkg.EnvironmentType) error {
+	if requested != configpkg.EnvironmentTypeLocalAgent && requested != configpkg.EnvironmentTypeHost {
 		return nil
 	}
 	projectRoot, err := s.envProjectRoot()
 	if err != nil {
 		return err
 	}
-	if err := ValidateHostRepoPath(requested, projectRoot); err != nil {
+	if err := configpkg.ValidateHostRepoPath(requested, projectRoot); err != nil {
 		return fmt.Errorf("cannot change %s/%s to type %s: %w", s.tenant, s.envName, requested, err)
 	}
 	projectRoot = strings.TrimSpace(projectRoot)
@@ -1244,19 +1240,19 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	return nil
 }
 
-func describeEnvType(envType EnvironmentType) string {
+func describeEnvType(envType configpkg.EnvironmentType) string {
 	if !envType.IsValid() {
 		return "unset"
 	}
 	return `"` + string(envType) + `"`
 }
 
-func formatRuntimePodResources(resources RuntimePodResources) string {
+func formatRuntimePodResources(resources configpkg.RuntimePodResources) string {
 	resources = NormalizeRuntimePodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
-func formatRuntimeDindPodResources(resources RuntimePodResources) string {
+func formatRuntimeDindPodResources(resources configpkg.RuntimePodResources) string {
 	resources = NormalizeRuntimeDindPodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
@@ -1303,7 +1299,7 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 		if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, "", s.params); err != nil {
 			return err
 		}
-		desired := ClusterContainerRegistries(*s.params.ClusterRegistry)
+		desired := configpkg.ClusterContainerRegistries(*s.params.ClusterRegistry)
 		if !s.envConfig.ContainerRegistries.Equal(desired) {
 			s.envConfig.ContainerRegistries = desired
 			s.envConfigChanged = true
@@ -1322,7 +1318,7 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 		return err
 	}
 	if existing, _ := s.envConfig.ContainerRegistries.BuildRegistry(); containerRegistry != existing {
-		s.envConfig.ContainerRegistries = SingleContainerRegistries(containerRegistry)
+		s.envConfig.ContainerRegistries = configpkg.SingleContainerRegistries(containerRegistry)
 		s.envConfigChanged = true
 	}
 	return nil
@@ -1338,7 +1334,7 @@ func (s *bootstrapRunState) projectRoot() string {
 // Tenants with an existing scaffolded module keep working — deploy prefers a
 // local chart when one exists.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
-	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+	if s.envConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		s.runner.Context.Trace("init: host environment has no pod; no devops scaffold is written")
 		return nil
 	}
@@ -1476,7 +1472,7 @@ func ValidateTenantName(name string) error {
 }
 
 func KubernetesNamespaceName(tenant, envName string) string {
-	return normalizeNamespaceName(tenant + "-" + envName)
+	return configpkg.NormalizeNamespaceName(tenant + "-" + envName)
 }
 
 func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
@@ -1491,8 +1487,8 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	// Trimmed, not normalized: a defaulted limit here would be indistinguishable
 	// from an operator asking for that limit, and the reconcile needs to tell an
 	// omitted flag from a supplied one.
-	params.RuntimePod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
-	params.RuntimeDindPod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
+	params.RuntimePod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
+	params.RuntimeDindPod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)
@@ -1508,19 +1504,19 @@ func (s bootstrapRunner) withDefaults() bootstrapRunner {
 
 func (s bootstrapRunner) withStoreDefaults() bootstrapRunner {
 	if s.Store == nil {
-		s.Store = ConfigStore{}
+		s.Store = configpkg.ConfigStore{}
 	}
 	if s.FindProjectRoot == nil {
-		s.FindProjectRoot = FindProjectRoot
+		s.FindProjectRoot = configpkg.FindProjectRoot
 	}
 	if s.GetWorkingDir == nil {
 		s.GetWorkingDir = os.Getwd
 	}
 	if s.LoadProjectConfig == nil {
-		s.LoadProjectConfig = LoadProjectConfig
+		s.LoadProjectConfig = configpkg.LoadProjectConfig
 	}
 	if s.SaveProjectConfig == nil {
-		s.SaveProjectConfig = SaveProjectConfig
+		s.SaveProjectConfig = configpkg.SaveProjectConfig
 	}
 	return s
 }
@@ -1542,8 +1538,8 @@ func (s bootstrapRunner) withRuntimeDefaults() bootstrapRunner {
 }
 
 func (s bootstrapRunner) withLoggerDefaults() bootstrapRunner {
-	if s.Context.Logger.verbosity == 0 && s.Context.Logger.stdout == nil && s.Context.Logger.stderr == nil {
-		s.Context.Logger = NewLoggerWithWriters(-1, io.Discard, io.Discard)
+	if s.Context.Logger.IsUnconfigured() {
+		s.Context.Logger = core.NewLoggerWithWriters(-1, io.Discard, io.Discard)
 	}
 	return s
 }
@@ -1649,7 +1645,7 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return "", nil
 	}
 	if params.AutoApprove {
-		return DefaultContainerRegistry, nil
+		return configpkg.DefaultContainerRegistry, nil
 	}
 	return s.promptContainerRegistry(tenant, envName)
 }
@@ -1659,13 +1655,13 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 // selection time rather than surfacing at the first build far from the flag
 // that chose it.
 func (s bootstrapRunner) resolveHostedRegistry(tenant string) (string, error) {
-	reference := HostedRegistryReference(tenant)
+	reference := configpkg.HostedRegistryReference(tenant)
 	// A dry-run resolves and traces without touching the world, so it does
 	// not probe. Saying so is the point: a dry-run that printed the resolved
 	// reference alone would read as "this choice works", which is the very
 	// impression the probe exists to stop the real run from giving.
 	if s.Context.DryRun {
-		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + HostedRegistryHost + " and refuses the choice if it is not reachable")
+		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + configpkg.HostedRegistryHost + " and refuses the choice if it is not reachable")
 		return reference, nil
 	}
 	if status := s.probeHostedRegistry(); !status.Available {
@@ -1680,7 +1676,7 @@ func (s bootstrapRunner) projectContainerRegistry(projectRoot, envName string) (
 	}
 	projectConfig, _, err := s.LoadProjectConfig(projectRoot)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, configpkg.ErrNotInitialized) {
 			return "", nil
 		}
 		return "", err
@@ -1694,7 +1690,7 @@ func (s bootstrapRunner) promptContainerRegistry(tenant, envName string) (string
 		return "", BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
 			Type:         BootstrapInitInteractionContainerRegistry,
 			Label:        containerRegistryLabel(tenant, envName),
-			DefaultValue: DefaultContainerRegistry,
+			DefaultValue: configpkg.DefaultContainerRegistry,
 		}}
 	}
 
@@ -1704,7 +1700,7 @@ func (s bootstrapRunner) promptContainerRegistry(tenant, envName string) (string
 	}
 	registry = strings.TrimSpace(registry)
 	if registry == "" {
-		return DefaultContainerRegistry, nil
+		return configpkg.DefaultContainerRegistry, nil
 	}
 	return registry, nil
 }
@@ -1738,12 +1734,12 @@ func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, regi
 	return s.savePlainContainerRegistry(projectRoot, envName, registry)
 }
 
-func (s bootstrapRunner) saveClusterContainerRegistry(projectRoot, envName string, cluster ClusterRegistry) error {
+func (s bootstrapRunner) saveClusterContainerRegistry(projectRoot, envName string, cluster configpkg.ClusterRegistry) error {
 	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
 	if err != nil {
 		return err
 	}
-	desired := ClusterContainerRegistries(cluster)
+	desired := configpkg.ClusterContainerRegistries(cluster)
 	if projectConfig.ContainerRegistriesForEnvironment(envName).Equal(desired) {
 		return nil
 	}
@@ -1762,20 +1758,20 @@ func (s bootstrapRunner) savePlainContainerRegistry(projectRoot, envName, regist
 	if existing, _ := projectConfig.ContainerRegistriesForEnvironment(envName).BuildRegistry(); existing == registry {
 		return nil
 	}
-	projectConfig.SetContainerRegistriesForEnvironment(envName, SingleContainerRegistries(registry))
+	projectConfig.SetContainerRegistriesForEnvironment(envName, configpkg.SingleContainerRegistries(registry))
 	return s.SaveProjectConfig(projectRoot, projectConfig)
 }
 
-func (s bootstrapRunner) loadProjectConfigForContainerRegistry(projectRoot string) (ProjectConfig, error) {
+func (s bootstrapRunner) loadProjectConfigForContainerRegistry(projectRoot string) (configpkg.ProjectConfig, error) {
 	if s.LoadProjectConfig == nil {
-		return ProjectConfig{}, nil
+		return configpkg.ProjectConfig{}, nil
 	}
 	projectConfig, _, err := s.LoadProjectConfig(projectRoot)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return ProjectConfig{}, nil
+		if errors.Is(err, configpkg.ErrNotInitialized) {
+			return configpkg.ProjectConfig{}, nil
 		}
-		return ProjectConfig{}, err
+		return configpkg.ProjectConfig{}, err
 	}
 	return projectConfig, nil
 }
@@ -1814,7 +1810,7 @@ func (e TenantSelectionUnavailableError) Error() string {
 	return fmt.Sprintf("a tenant has to be chosen and this run has nobody to ask; pass --tenant with one of: %s", strings.Join(e.Tenants, ", "))
 }
 
-func tenantNameList(tenants []TenantConfig) []string {
+func tenantNameList(tenants []configpkg.TenantConfig) []string {
 	names := make([]string, 0, len(tenants))
 	for _, tenant := range tenants {
 		names = append(names, tenant.Name)
@@ -1822,7 +1818,7 @@ func tenantNameList(tenants []TenantConfig) []string {
 	return names
 }
 
-func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []TenantConfig) (TenantSelectionResult, error) {
+func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []configpkg.TenantConfig) (TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
 		return TenantSelectionResult{Initialize: true}, nil
 	}
@@ -1834,7 +1830,7 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 		for _, tenant := range tenants {
 			options = append(options, tenant.Name)
 		}
-		options = append(options, InitializeCurrentProject)
+		options = append(options, configpkg.InitializeCurrentProject)
 		return TenantSelectionResult{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
 			Type:    BootstrapInitInteractionSelectTenant,
 			Label:   "Select tenant",
@@ -1869,7 +1865,7 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 // with no host worktree owns no directory. Ties across tenants resolve to no
 // match, so the caller falls back to the default-tenant / selection path rather
 // than guessing.
-func findTenantForDirectory(dir string, tenants []TenantConfig, envsByTenant map[string][]EnvConfig) (TenantConfig, bool) {
+func findTenantForDirectory(dir string, tenants []configpkg.TenantConfig, envsByTenant map[string][]configpkg.EnvConfig) (configpkg.TenantConfig, bool) {
 	cleanDir := filepath.Clean(dir)
 	bestTenant := -1
 	bestLen := -1
@@ -1894,7 +1890,7 @@ func findTenantForDirectory(dir string, tenants []TenantConfig, envsByTenant map
 	}
 
 	if bestTenant == -1 || ambiguous {
-		return TenantConfig{}, false
+		return configpkg.TenantConfig{}, false
 	}
 	return tenants[bestTenant], true
 }
@@ -1910,29 +1906,7 @@ func isWithinDirectory(path, root string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
-func normalizeNamespaceName(value string) string {
-	var builder strings.Builder
-	lastHyphen := false
-
-	for _, r := range strings.ToLower(value) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			builder.WriteRune(r)
-			lastHyphen = false
-		case !lastHyphen && builder.Len() > 0:
-			builder.WriteByte('-')
-			lastHyphen = true
-		}
-	}
-
-	result := strings.Trim(builder.String(), "-")
-	if len(result) > 63 {
-		result = strings.Trim(result[:63], "-")
-	}
-	return result
-}
-
-func saveEnvConfig(store BootstrapStore, tenant string, config EnvConfig) error {
+func saveEnvConfig(store BootstrapStore, tenant string, config configpkg.EnvConfig) error {
 	stored := config
 	if !stored.RemoteWorktree() {
 		stored.ContainerRegistries = nil

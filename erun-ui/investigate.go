@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // InvestigateFailure captures a failure report to a host file and spawns a
@@ -61,9 +63,9 @@ func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, co
 		return orchestratorInfo{}, err
 	}
 
-	var envs []eruncommon.OrchestratorEnvConfig
+	var envs []config.OrchestratorEnvConfig
 	if t, env := strings.TrimSpace(tenant), strings.TrimSpace(environment); t != "" && env != "" {
-		envs = []eruncommon.OrchestratorEnvConfig{
+		envs = []config.OrchestratorEnvConfig{
 			{Tenant: t, Environment: env, Directory: a.investigateWorkingDir(t, env)},
 		}
 	}
@@ -118,7 +120,7 @@ func (a *App) attachInvestigationJob(record investigationRecord, name string) st
 		log.Printf("erun-app: investigation %s has no pid to track; it will not appear as a job", record.ID)
 		return ""
 	}
-	job, err := eruncommon.AttachEnvironmentJob(eruncommon.Context{}, eruncommon.AttachEnvironmentJobParams{
+	job, err := eruncommon.AttachEnvironmentJob(core.Context{}, eruncommon.AttachEnvironmentJobParams{
 		Tenant:      record.Tenant,
 		Environment: record.Environment,
 		ID:          record.ID,

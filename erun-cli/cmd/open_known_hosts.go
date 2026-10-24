@@ -4,12 +4,14 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	sshknownhosts "github.com/sophium/erun/internal/sshknownhosts"
 )
 
 var ensureLocalSSHDKnownHostFunc = ensureLocalSSHDKnownHost
 
-func ensureLocalSSHDKnownHost(ctx common.Context, result common.OpenResult) error {
+func ensureLocalSSHDKnownHost(ctx core.Context, result config.OpenResult) error {
 	info := common.SSHConnectionInfoForResult(result)
 	ctx.TraceCommand("", "ssh-keyscan", "-p", fmt.Sprintf("%d", info.Port), info.Host)
 	if ctx.DryRun {

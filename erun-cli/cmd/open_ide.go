@@ -14,6 +14,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
 
@@ -37,15 +39,15 @@ var (
 )
 
 type (
-	VSCodeLauncher   func(common.Context, common.OpenResult) error
-	IntelliJLauncher func(common.Context, common.OpenResult, PromptRunner) error
+	VSCodeLauncher   func(core.Context, config.OpenResult) error
+	IntelliJLauncher func(core.Context, config.OpenResult, PromptRunner) error
 )
 
-func launchVSCode(ctx common.Context, result common.OpenResult) error {
+func launchVSCode(ctx core.Context, result config.OpenResult) error {
 	return launchIDEURI(ctx, result, vscodeRemoteFolderURI(result))
 }
 
-func launchIntelliJ(ctx common.Context, result common.OpenResult, _ PromptRunner) error {
+func launchIntelliJ(ctx core.Context, result config.OpenResult, _ PromptRunner) error {
 	hostOS := currentHostOS()
 	if err := ensureLocalSSHDKnownHostFunc(ctx, result); err != nil {
 		return err
@@ -65,7 +67,7 @@ func launchIntelliJ(ctx common.Context, result common.OpenResult, _ PromptRunner
 	return nil
 }
 
-func launchIDEURI(ctx common.Context, result common.OpenResult, uri string) error {
+func launchIDEURI(ctx core.Context, result config.OpenResult, uri string) error {
 	if err := ensureLocalSSHDKnownHostFunc(ctx, result); err != nil {
 		return err
 	}
@@ -84,27 +86,27 @@ func launchIDEURI(ctx common.Context, result common.OpenResult, uri string) erro
 	return nil
 }
 
-func vscodeRemoteFolderURI(result common.OpenResult) string {
+func vscodeRemoteFolderURI(result config.OpenResult) string {
 	info := common.SSHConnectionInfoForResult(result)
 	return "vscode://vscode-remote/ssh-remote+" + url.PathEscape(info.HostAlias) + (&url.URL{Path: info.WorkspacePath}).EscapedPath()
 }
 
-func ideLaunchCommand(hostOS common.HostOS, uri string) (string, []string, error) {
+func ideLaunchCommand(hostOS core.HostOS, uri string) (string, []string, error) {
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		return "open", []string{uri}, nil
-	case common.HostOSLinux:
+	case core.HostOSLinux:
 		return "xdg-open", []string{uri}, nil
-	case common.HostOSWindows:
+	case core.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", uri}, nil
 	default:
 		return "", nil, fmt.Errorf("opening IDE links is unsupported on %s", hostOS)
 	}
 }
 
-func openIDEURICommand(ctx common.Context, command string, args []string) (string, error) {
+func openIDEURICommand(ctx core.Context, command string, args []string) (string, error) {
 	cmd := ideExecCommand(command, args...)
-	common.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdin = ctx.Stdin
@@ -121,9 +123,9 @@ func openIDEURICommand(ctx common.Context, command string, args []string) (strin
 	return technical, err
 }
 
-func startIDEURICommand(ctx common.Context, command string, args []string) (string, error) {
+func startIDEURICommand(ctx core.Context, command string, args []string) (string, error) {
 	cmd := ideExecCommand(command, args...)
-	common.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdin = nil
@@ -146,7 +148,7 @@ func startIDEURICommand(ctx common.Context, command string, args []string) (stri
 	return "", nil
 }
 
-func formatIDEOpenError(ideName string, hostOS common.HostOS, result common.OpenResult, technical string, err error, extra string) error {
+func formatIDEOpenError(ideName string, hostOS core.HostOS, result config.OpenResult, technical string, err error, extra string) error {
 	parts := []string{
 		fmt.Sprintf("%s launcher failed on %s.", ideName, hostOSLabel(hostOS)),
 		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", common.SSHConnectionInfoForResult(result).HostAlias, common.SSHConnectionInfoForResult(result).WorkspacePath),
@@ -162,13 +164,13 @@ func formatIDEOpenError(ideName string, hostOS common.HostOS, result common.Open
 	return errors.New(strings.Join(parts, "\n"))
 }
 
-func hostOSLabel(hostOS common.HostOS) string {
+func hostOSLabel(hostOS core.HostOS) string {
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		return "macOS"
-	case common.HostOSLinux:
+	case core.HostOSLinux:
 		return "Linux"
-	case common.HostOSWindows:
+	case core.HostOSWindows:
 		return "Windows"
 	default:
 		return string(hostOS)
@@ -181,13 +183,13 @@ type jetbrainsBootstrapAttempt struct {
 	runSync bool
 }
 
-func runJetBrainsBootstrapAttempt(ctx common.Context, attempt jetbrainsBootstrapAttempt) error {
+func runJetBrainsBootstrapAttempt(ctx core.Context, attempt jetbrainsBootstrapAttempt) error {
 	ctx.TraceCommand("", attempt.command, attempt.args...)
 	if ctx.DryRun {
 		return nil
 	}
 	cmd := ideExecCommand(attempt.command, attempt.args...)
-	common.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	cmd.Stdin = nil
 	cmd.Stdout = &bytes.Buffer{}
 	cmd.Stderr = &bytes.Buffer{}
@@ -207,7 +209,7 @@ func runJetBrainsBootstrapAttempt(ctx common.Context, attempt jetbrainsBootstrap
 	return nil
 }
 
-func openInstalledIntelliJApp(ctx common.Context, _ common.OpenResult, hostOS common.HostOS) error {
+func openInstalledIntelliJApp(ctx core.Context, _ config.OpenResult, hostOS core.HostOS) error {
 	attempt, ok := resolveInstalledIntelliJAttempt(hostOS)
 	if !ok {
 		return fmt.Errorf("IntelliJ IDEA is not available on this host")
@@ -215,7 +217,7 @@ func openInstalledIntelliJApp(ctx common.Context, _ common.OpenResult, hostOS co
 	return runJetBrainsBootstrapAttemptFunc(ctx, attempt)
 }
 
-func openIntelliJGatewayProject(ctx common.Context, result common.OpenResult, hostOS common.HostOS) (bool, error) {
+func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, hostOS core.HostOS) (bool, error) {
 	optionsDir, err := resolveIntelliJOptionsDir(hostOS)
 	if err != nil {
 		return false, nil
@@ -244,17 +246,17 @@ func openIntelliJGatewayProject(ctx common.Context, result common.OpenResult, ho
 	return true, nil
 }
 
-func intelliJGatewayLaunchCommand(ctx common.Context, hostOS common.HostOS, optionsDir string, uri string) (string, []string, error) {
+func intelliJGatewayLaunchCommand(ctx core.Context, hostOS core.HostOS, optionsDir string, uri string) (string, []string, error) {
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		return intelliJGatewayDarwinLaunchCommand(ctx, optionsDir, uri)
 	default:
 		return ideLaunchCommand(hostOS, uri)
 	}
 }
 
-func intelliJGatewayDarwinLaunchCommand(ctx common.Context, optionsDir string, uri string) (string, []string, error) {
-	contentsDir, err := resolveInstalledIntelliJContentsDir(common.HostOSDarwin)
+func intelliJGatewayDarwinLaunchCommand(ctx core.Context, optionsDir string, uri string) (string, []string, error) {
+	contentsDir, err := resolveInstalledIntelliJContentsDir(core.HostOSDarwin)
 	if err != nil {
 		return "", nil, err
 	}
@@ -396,7 +398,7 @@ func newIDEOpenToken() string {
 	)
 }
 
-func registerIntelliJProject(ctx common.Context, result common.OpenResult, hostOS common.HostOS) error {
+func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS core.HostOS) error {
 	optionsDir, err := resolveIntelliJOptionsDir(hostOS)
 	if err != nil {
 		return nil
@@ -419,7 +421,7 @@ func registerIntelliJProject(ctx common.Context, result common.OpenResult, hostO
 	if err := jetbrainsconfig.UpsertOptionsFiles(optionsDir, entry); err != nil {
 		return err
 	}
-	if hostOS == common.HostOSDarwin {
+	if hostOS == core.HostOSDarwin {
 		gatewayOptionsDir, err := resolveIntelliJGatewayOptionsDir(optionsDir)
 		if err == nil {
 			if err := jetbrainsconfig.UpsertOptionsFiles(gatewayOptionsDir, entry); err != nil {
@@ -430,20 +432,20 @@ func registerIntelliJProject(ctx common.Context, result common.OpenResult, hostO
 	return nil
 }
 
-func resolveInstalledIntelliJAttempt(hostOS common.HostOS) (jetbrainsBootstrapAttempt, bool) {
+func resolveInstalledIntelliJAttempt(hostOS core.HostOS) (jetbrainsBootstrapAttempt, bool) {
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		return jetbrainsBootstrapAttempt{
 			command: "open",
 			args:    []string{"-a", "IntelliJ IDEA"},
 			runSync: true,
 		}, true
-	case common.HostOSLinux:
+	case core.HostOSLinux:
 		attempts := lookPathBootstrapAttempts([]string{"idea", "idea64", "intellij-idea-ultimate"})
 		if len(attempts) > 0 {
 			return attempts[0], true
 		}
-	case common.HostOSWindows:
+	case core.HostOSWindows:
 		attempts := lookPathBootstrapAttempts([]string{"idea64.exe", "idea.exe"})
 		if len(attempts) > 0 {
 			return attempts[0], true
@@ -452,9 +454,9 @@ func resolveInstalledIntelliJAttempt(hostOS common.HostOS) (jetbrainsBootstrapAt
 	return jetbrainsBootstrapAttempt{}, false
 }
 
-func resolveInstalledIntelliJContentsDir(hostOS common.HostOS) (string, error) {
+func resolveInstalledIntelliJContentsDir(hostOS core.HostOS) (string, error) {
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		// macOS convention: a user's ~/Applications install shadows the system-wide /Applications one.
 		homeDir, _ := ideUserHomeDir()
 		patterns := make([]string, 0, 2)
@@ -481,7 +483,7 @@ func resolveInstalledIntelliJContentsDir(hostOS common.HostOS) (string, error) {
 	}
 }
 
-func emitIntelliJManualOpenGuidance(ctx common.Context, result common.OpenResult) {
+func emitIntelliJManualOpenGuidance(ctx core.Context, result config.OpenResult) {
 	out := ctx.Stderr
 	if out == nil {
 		out = ctx.Stdout
@@ -525,7 +527,7 @@ func lookPathBootstrapAttempts(candidates []string) []jetbrainsBootstrapAttempt 
 	return attempts
 }
 
-func resolveIntelliJOptionsDir(hostOS common.HostOS) (string, error) {
+func resolveIntelliJOptionsDir(hostOS core.HostOS) (string, error) {
 	baseDir, err := intelliJOptionsBaseDir(hostOS)
 	if err != nil {
 		return "", err
@@ -551,17 +553,17 @@ type intelliJOptionsCandidate struct {
 	modTime time.Time
 }
 
-func intelliJOptionsBaseDir(hostOS common.HostOS) (string, error) {
+func intelliJOptionsBaseDir(hostOS core.HostOS) (string, error) {
 	homeDir, err := ideUserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	switch hostOS {
-	case common.HostOSDarwin:
+	case core.HostOSDarwin:
 		return filepath.Join(homeDir, "Library", "Application Support", "JetBrains"), nil
-	case common.HostOSLinux:
+	case core.HostOSLinux:
 		return filepath.Join(homeDir, ".config", "JetBrains"), nil
-	case common.HostOSWindows:
+	case core.HostOSWindows:
 		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
 			return filepath.Join(appData, "JetBrains"), nil
 		}
@@ -609,7 +611,7 @@ func resolveIntelliJGatewayOptionsDir(optionsDir string) (string, error) {
 	return filepath.Join(homeDir, "Library", "Caches", "JetBrains", versionDir, "tmp", "JetBrainsGateway", "config", "options"), nil
 }
 
-func ensureIntelliJGatewayConfigDir(ctx common.Context, optionsDir string) (string, error) {
+func ensureIntelliJGatewayConfigDir(ctx core.Context, optionsDir string) (string, error) {
 	gatewayOptionsDir, err := resolveIntelliJGatewayOptionsDir(optionsDir)
 	if err != nil {
 		return "", err

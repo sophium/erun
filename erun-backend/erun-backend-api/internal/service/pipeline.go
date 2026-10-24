@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // pipeline.go answers "what is going on?" in one read, across the two
@@ -75,11 +75,11 @@ type PipelineItem struct {
 	// from, so a caller can render an inferred one as inferred. A job's
 	// reference is stated by whoever claimed the job; a review's is what its
 	// author declared, or else the number its branch names.
-	IssueRef       string                          `json:"issueRef,omitempty"`
-	IssueRefSource eruncommon.IssueReferenceSource `json:"issueRefSource,omitempty"`
-	Rung           string                          `json:"rung"`
-	Job            *model.Job                      `json:"job,omitempty"`
-	Review         *model.Review                   `json:"review,omitempty"`
+	IssueRef       string                        `json:"issueRef,omitempty"`
+	IssueRefSource modelpkg.IssueReferenceSource `json:"issueRefSource,omitempty"`
+	Rung           string                        `json:"rung"`
+	Job            *model.Job                    `json:"job,omitempty"`
+	Review         *model.Review                 `json:"review,omitempty"`
 }
 
 // PipelineIssue groups every item keyed on one issue. Items is never empty.
@@ -153,7 +153,7 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 		// derives one from a branch — so it is declared whenever it is
 		// present at all.
 		if item.IssueRef != "" {
-			item.IssueRefSource = eruncommon.IssueReferenceDeclared
+			item.IssueRefSource = modelpkg.IssueReferenceDeclared
 		}
 		item.IssueKey = canonicalJobIssueKey(item.IssueRef)
 		add(item.IssueKey, item)
@@ -166,7 +166,7 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 		}
 		// Resolved through the same shared resolver the review routes use, so
 		// a link this view calls declared is exactly one they would.
-		if resolved, ok := eruncommon.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch); ok {
+		if resolved, ok := modelpkg.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch); ok {
 			item.IssueRef = resolved.Ref
 			item.IssueRefSource = resolved.Source
 		}
@@ -174,7 +174,7 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 		// taken verbatim; a number parsed out of a branch is addressed to the
 		// repository the review recorded. Either way this is the same key
 		// jobs.issue_ref holds, which is what makes one view of both possible.
-		item.IssueKey, _ = eruncommon.CanonicalIssueKey(item.IssueRef, review.Repository)
+		item.IssueKey, _ = modelpkg.CanonicalIssueKey(item.IssueRef, review.Repository)
 		add(item.IssueKey, item)
 	}
 
@@ -203,7 +203,7 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 // argument carries no repository: a bare number written into a job is not
 // joined to anything, and yields no key rather than a guessed one.
 func canonicalJobIssueKey(issueRef string) string {
-	key, ok := eruncommon.CanonicalIssueKey(issueRef, "")
+	key, ok := modelpkg.CanonicalIssueKey(issueRef, "")
 	if !ok {
 		return ""
 	}

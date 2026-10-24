@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"errors"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets proves an ordering
@@ -38,7 +40,7 @@ func TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets(t *testing.T) {
 		MCPAuthSecretName:   "operations-devops-mcp-auth",
 		MCPAuthPublicKeyPEM: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----",
 	}
-	err := RunHelmDeploy(Context{}, spec, func(HelmDeployParams) error {
+	err := RunHelmDeploy(core.Context{}, spec, func(HelmDeployParams) error {
 		t.Error("the chart deployer must not run after the namespace ensure failed")
 		return nil
 	})

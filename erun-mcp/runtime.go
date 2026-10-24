@@ -9,7 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type RuntimeContext struct {
@@ -50,7 +52,7 @@ type CommandOutput struct {
 	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
 	// Build lets an Agent capture the minted version and thread it into `push`
 	// / `deploy`, since MCP composes the pure primitives itself.
-	Build *eruncommon.BuildResult `json:"build,omitempty"`
+	Build *core.BuildResult `json:"build,omitempty"`
 	// Pin carries the resolved re-pin plan so a caller sees every reference that
 	// moved without diffing the tree afterwards.
 	Pin *PinOutput `json:"pin,omitempty"`
@@ -85,7 +87,7 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 
 func normalizeRuntimeConfigBuildDefaults(cfg RuntimeConfig) RuntimeConfig {
 	if cfg.Store == nil {
-		cfg.Store = eruncommon.ConfigStore{}
+		cfg.Store = config.ConfigStore{}
 	}
 	if cfg.BuildScriptRunner == nil {
 		cfg.BuildScriptRunner = eruncommon.BuildScriptRunner
@@ -150,12 +152,12 @@ func mirrorToJobLog(capture, log io.Writer) io.Writer {
 }
 
 func runtimePushFunc(runtime RuntimeConfig) eruncommon.DockerPushFunc {
-	return func(ctx eruncommon.Context, pushInput eruncommon.DockerPushSpec) error {
+	return func(ctx core.Context, pushInput eruncommon.DockerPushSpec) error {
 		return eruncommon.RunDockerPush(ctx, pushInput, runtime.PushDockerImage)
 	}
 }
 
-func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes.Buffer, log io.Writer, run func(eruncommon.Context) error) (CommandOutput, error) {
+func runCommandOutput(ctx core.Context, workDir string, traceOutput *bytes.Buffer, log io.Writer, run func(core.Context) error) (CommandOutput, error) {
 	if ctx.DryRun {
 		if err := run(ctx); err != nil {
 			return CommandOutput{}, err
@@ -196,7 +198,7 @@ func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes
 // false, and nil (or io.Discard) for a synchronous call that returns
 // everything inline; the trace and the work's own stdout/stderr are mirrored
 // into it as they are produced.
-func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log io.Writer, run func(eruncommon.Context, string) error) (CommandOutput, error) {
+func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log io.Writer, run func(core.Context, string) error) (CommandOutput, error) {
 	traceOutput := new(bytes.Buffer)
 	traceSink := mirrorToJobLog(traceOutput, log)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceSink, traceSink)
@@ -213,7 +215,7 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log i
 		return CommandOutput{}, err
 	}
 
-	output, err := runCommandOutput(ctx, workDir, traceOutput, log, func(runCtx eruncommon.Context) error {
+	output, err := runCommandOutput(ctx, workDir, traceOutput, log, func(runCtx core.Context) error {
 		return run(runCtx, workDir)
 	})
 	return output, err
@@ -224,7 +226,7 @@ func runtimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 	if repoPath != "" {
 		return firstNonEmpty(strings.TrimSpace(runtime.Tenant), filepath.Base(repoPath)), filepath.Clean(repoPath), nil
 	}
-	return eruncommon.FindProjectRootFromDir(workDir)
+	return config.FindProjectRootFromDir(workDir)
 }
 
 // resolveLocalTarget resolves the tenant/environment a tool acts on, and refuses
@@ -301,15 +303,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func runtimeCallContext(preview bool, verbosity int, stdin io.Reader, stdout, stderr io.Writer) eruncommon.Context {
-	if preview && verbosity < eruncommon.VerbosityTrace {
-		verbosity = eruncommon.VerbosityTrace
+func runtimeCallContext(preview bool, verbosity int, stdin io.Reader, stdout, stderr io.Writer) core.Context {
+	if preview && verbosity < core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
 	}
-	if verbosity > eruncommon.VerbosityTrace {
-		verbosity = eruncommon.VerbosityTrace
+	if verbosity > core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
 	}
-	return eruncommon.Context{
-		Logger:    eruncommon.NewLoggerWithWriters(verbosity, stderr, stderr),
+	return core.Context{
+		Logger:    core.NewLoggerWithWriters(verbosity, stderr, stderr),
 		Verbosity: verbosity,
 		DryRun:    preview,
 		Stdin:     stdin,

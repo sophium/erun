@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders is the
@@ -22,7 +24,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 	path := filepath.Join(dir, "config.yaml")
 	valueA := []byte(strings.Repeat("a", 4096) + "\n")
 	valueB := []byte(strings.Repeat("b", 8192) + "\n")
-	if err := WriteFileAtomic(path, valueA, 0o644); err != nil {
+	if err := configpkg.WriteFileAtomic(path, valueA, 0o644); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 
@@ -38,7 +40,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 			if i%2 == 1 {
 				value = valueB
 			}
-			if err := WriteFileAtomic(path, value, 0o644); err != nil {
+			if err := configpkg.WriteFileAtomic(path, value, 0o644); err != nil {
 				t.Errorf("concurrent write failed: %v", err)
 				return
 			}
@@ -87,19 +89,19 @@ func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	}
 
 	healed := false
-	configReadRetryObserved = func(int) {
+	configpkg.ConfigReadRetryObserved = func(int) {
 		if healed {
 			return
 		}
 		healed = true
-		if err := WriteFileAtomic(path, []byte("name: healed\n"), 0o644); err != nil {
+		if err := configpkg.WriteFileAtomic(path, []byte("name: healed\n"), 0o644); err != nil {
 			t.Errorf("heal write failed: %v", err)
 		}
 	}
-	t.Cleanup(func() { configReadRetryObserved = nil })
+	t.Cleanup(func() { configpkg.ConfigReadRetryObserved = nil })
 
-	var config EnvConfig
-	if err := loadConfigFile(path, &config); err != nil {
+	var config configpkg.EnvConfig
+	if err := configpkg.LoadConfigFile(path, &config); err != nil {
 		t.Fatalf("expected the retry to observe the healed write, got: %v", err)
 	}
 	if config.Name != "healed" {
@@ -121,12 +123,12 @@ func TestLoadConfigFileGenuinelyCorruptFileStillFails(t *testing.T) {
 		t.Fatalf("seed corrupt file: %v", err)
 	}
 
-	var config EnvConfig
+	var config configpkg.EnvConfig
 	start := time.Now()
-	err := loadConfigFile(path, &config)
+	err := configpkg.LoadConfigFile(path, &config)
 	elapsed := time.Since(start)
 
-	if !errors.Is(err, ErrConfigCorrupted) {
+	if !errors.Is(err, configpkg.ErrConfigCorrupted) {
 		t.Fatalf("expected ErrConfigCorrupted for a file that never becomes valid, got: %v", err)
 	}
 	if elapsed > 2*time.Second {
@@ -142,12 +144,12 @@ func TestLoadConfigFileMissingFileReturnsNotInitializedImmediately(t *testing.T)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	var config EnvConfig
+	var config configpkg.EnvConfig
 	start := time.Now()
-	err := loadConfigFile(path, &config)
+	err := configpkg.LoadConfigFile(path, &config)
 	elapsed := time.Since(start)
 
-	if !errors.Is(err, ErrNotInitialized) {
+	if !errors.Is(err, configpkg.ErrNotInitialized) {
 		t.Fatalf("expected ErrNotInitialized for a missing file, got: %v", err)
 	}
 	if elapsed > 50*time.Millisecond {
@@ -172,15 +174,15 @@ func TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized(t *testin
 		t.Fatalf("seed directory at config path: %v", err)
 	}
 
-	var config EnvConfig
-	err := loadConfigFile(path, &config)
+	var config configpkg.EnvConfig
+	err := configpkg.LoadConfigFile(path, &config)
 	if err == nil {
 		t.Fatal("expected an error reading a directory as a config file")
 	}
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		t.Fatalf("a read failure that is not a real absence must not be reported as ErrNotInitialized, got: %v", err)
 	}
-	if errors.Is(err, ErrConfigCorrupted) {
+	if errors.Is(err, configpkg.ErrConfigCorrupted) {
 		t.Fatalf("a read failure is not corruption either, got: %v", err)
 	}
 }

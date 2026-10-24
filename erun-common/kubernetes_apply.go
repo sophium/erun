@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -120,13 +122,13 @@ func applySecretManifest(contextName, namespace, description, manifest string, a
 // writer winning the create race, in which case err is the refusal to report
 // only if every subsequent attempt fails the same way.
 func applySecretOnce(contextName, namespace, description, manifest string, args []string) (lostCreateRace bool, err error) {
-	if currentExecutionMode(kubectlSecretApplyExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlSecretApplyExecutionOperation) == config.ExecutionModeLibrary {
 		if err := applySecretViaClientGo(contextName, namespace, manifest); err != nil {
 			return apierrors.IsAlreadyExists(err), fmt.Errorf("kubectl apply %s: %w", description, err)
 		}
 		return false, nil
 	}
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stdin = strings.NewReader(manifest)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

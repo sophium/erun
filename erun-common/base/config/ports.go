@@ -1,0 +1,373 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
+)
+
+const (
+	LowerServicePort         = 17000
+	EnvironmentPortRangeSize = 100
+
+	MCPServicePortOffset           = 0
+	SSHServicePortOffset           = 22
+	APIServicePortOffset           = 33
+	ContributeAppServicePortOffset = 50
+
+	MCPServicePort           = LowerServicePort + MCPServicePortOffset
+	APIServicePort           = LowerServicePort + APIServicePortOffset
+	DefaultSSHLocalPort      = LowerServicePort + SSHServicePortOffset
+	ContributeAppServicePort = LowerServicePort + ContributeAppServicePortOffset
+)
+
+type EnvironmentLocalPorts struct {
+	RangeStart    int `json:"rangeStart,omitempty"`
+	RangeEnd      int `json:"rangeEnd,omitempty"`
+	MCP           int `json:"mcp,omitempty"`
+	API           int `json:"api,omitempty"`
+	SSH           int `json:"ssh,omitempty"`
+	ContributeApp int `json:"contributeApp,omitempty"`
+}
+
+type EnvironmentPortStore interface {
+	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
+}
+
+// ErrLocalPortRangeOverlap is returned when two envs persist the same range
+// start. The conflict is surfaced rather than silently reassigned because the
+// persisted value is a durable, user-visible contract only the operator may change.
+type ErrLocalPortRangeOverlap struct {
+	A          string
+	B          string
+	RangeStart int
+}
+
+func (e ErrLocalPortRangeOverlap) Error() string {
+	return fmt.Sprintf("local port range start %d is claimed by both %s and %s; edit localportrangestart in one of the env configs to resolve", e.RangeStart, e.A, e.B)
+}
+
+// EnvironmentLocalPortsFromRangeStart derives the per-service ports from a
+// persisted range start.
+func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
+	if rangeStart <= 0 {
+		return EnvironmentLocalPorts{}
+	}
+	return EnvironmentLocalPorts{
+		RangeStart:    rangeStart,
+		RangeEnd:      rangeStart + EnvironmentPortRangeSize - 1,
+		MCP:           rangeStart + MCPServicePortOffset,
+		API:           rangeStart + APIServicePortOffset,
+		SSH:           rangeStart + SSHServicePortOffset,
+		ContributeApp: rangeStart + ContributeAppServicePortOffset,
+	}
+}
+
+// OverlayInjectedRuntimeLocalPorts prefers the ports the runtime chart injected
+// into this process over the ones derived from the on-disk config.
+//
+// The in-pod config is only the projection the chart writes (see
+// `erun doctor --sync-config`), so an environment that never had a
+// localportrangestart persisted there derives its whole block from the 17000
+// default -- while the ports the pod is actually listening on were injected
+// into the very same process. The injected MCP port is the environment's range
+// start by construction (its service offset is zero), so the block follows from
+// it exactly as it would from a persisted range start; ERUN_SSHD_PORT overrides
+// the ssh entry the way an env's sshd.localport does. Off-pod, and for any
+// environment other than the one this process serves, the injected vars are
+// absent or name someone else and ports is returned unchanged.
+func OverlayInjectedRuntimeLocalPorts(ports EnvironmentLocalPorts, env func(string) string, tenant, environment string) EnvironmentLocalPorts {
+	podTenant, podEnvironment, ok := core.InjectedRuntimePodIdentity(env)
+	if !ok || podTenant != strings.TrimSpace(tenant) || podEnvironment != strings.TrimSpace(environment) {
+		return ports
+	}
+	rangeStart := injectedPortValue(env("ERUN_MCP_PORT"))
+	if _, err := EnvironmentPortIndexForRangeStart(rangeStart, EnvironmentPortKey(tenant, environment)); err != nil {
+		return ports
+	}
+	injected := EnvironmentLocalPortsFromRangeStart(rangeStart)
+	if sshPort := injectedPortValue(env("ERUN_SSHD_PORT")); sshPort > 0 {
+		injected.SSH = sshPort
+	} else {
+		injected.SSH = ports.SSH
+	}
+	return injected
+}
+
+func injectedPortValue(value string) int {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return port
+}
+
+// LocalPortsForResult derives the effective local ports for an OpenResult.
+// It prefers a persisted range start over the resolver's in-memory allocation
+// so the result stays stable no matter how many other envs exist. A zero
+// result is deliberate: a missing range is an upstream bug, so callers that
+// need to bind fail loudly on port 0 rather than get a silent default.
+//
+// The chart-injected ports of the environment's own runtime pod outrank both
+// -- see overlayInjectedRuntimeLocalPorts.
+func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
+	var ports EnvironmentLocalPorts
+	switch {
+	case result.EnvConfig.LocalPortRangeStart > 0:
+		ports = EnvironmentLocalPortsFromRangeStart(result.EnvConfig.LocalPortRangeStart)
+	case result.LocalPorts.RangeStart > 0:
+		ports = result.LocalPorts
+	}
+	if ports.RangeStart > 0 {
+		if ports.MCP == 0 {
+			ports.MCP = ports.RangeStart + MCPServicePortOffset
+		}
+		if ports.API == 0 {
+			ports.API = ports.RangeStart + APIServicePortOffset
+		}
+		if ports.SSH == 0 {
+			ports.SSH = ports.RangeStart + SSHServicePortOffset
+		}
+		if ports.ContributeApp == 0 {
+			ports.ContributeApp = ports.RangeStart + ContributeAppServicePortOffset
+		}
+	}
+	if result.EnvConfig.SSHD.LocalPort > 0 {
+		ports.SSH = result.EnvConfig.SSHD.LocalPort
+	}
+	return OverlayInjectedRuntimeLocalPorts(ports, os.Getenv, result.Tenant, result.Environment)
+}
+
+func MCPPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).MCP
+}
+
+func APIPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).API
+}
+
+// APIServicePortForResult returns the port the API component chart publishes for
+// this environment's Service — the value `erun deploy` hands the chart as
+// `apiPort` (see HelmDeploySpec.command's `apiPort=` --set, which resolves the
+// same block and falls back the same way). Anything that dials that Service has
+// to use this rather than the canonical APIServicePort.
+//
+// The chart parameterizes the Service and container port per environment
+// (`{{ default 17033 .Values.apiPort }}`), so APIServicePort is the deployed
+// value only for the environment whose own block happens to be the 17000 one.
+// For every other environment the two disagree, and a caller pinned to the
+// constant asks kubectl for a service port the Service does not expose. The
+// MCP and SSH forwards do not have this problem because they already resolve
+// their target port per environment; this is the same resolution for the API
+// Service.
+//
+// The fallback mirrors deploy's own: an environment that resolves no API port
+// at all deploys the chart's `default 17033`, so that is the port to dial.
+func APIServicePortForResult(result OpenResult) int {
+	if port := LocalPortsForResult(result).API; port > 0 {
+		return port
+	}
+	return APIServicePort
+}
+
+func SSHLocalPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).SSH
+}
+
+// ContributeAppPortForResult returns the contribute-app port. It is always
+// allocated within the env's local port range but only bound when contribute
+// mode is active and `erun app --headless` runs inside the env.
+func ContributeAppPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).ContributeApp
+}
+
+type environmentPortRef struct {
+	Key string
+	Env EnvConfig
+}
+
+func CollectEnvironmentPortRefs(store EnvironmentPortStore) (persisted, unpersisted []environmentPortRef, err error) {
+	tenants, err := store.ListTenantConfigs()
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(tenants, func(i, j int) bool {
+		return strings.TrimSpace(tenants[i].Name) < strings.TrimSpace(tenants[j].Name)
+	})
+
+	for _, tenant := range tenants {
+		tenantName := strings.TrimSpace(tenant.Name)
+		if tenantName == "" {
+			continue
+		}
+		envs, err := store.ListEnvConfigs(tenantName)
+		if err != nil {
+			return nil, nil, err
+		}
+		sort.Slice(envs, func(i, j int) bool {
+			return strings.TrimSpace(envs[i].Name) < strings.TrimSpace(envs[j].Name)
+		})
+		for _, env := range envs {
+			environmentName := strings.TrimSpace(env.Name)
+			if environmentName == "" {
+				continue
+			}
+			ref := environmentPortRef{Key: EnvironmentPortKey(tenantName, environmentName), Env: env}
+			if env.LocalPortRangeStart > 0 {
+				persisted = append(persisted, ref)
+			} else {
+				unpersisted = append(unpersisted, ref)
+			}
+		}
+	}
+	return persisted, unpersisted, nil
+}
+
+// ResolveAllEnvironmentLocalPorts allocates a range to every env in two passes:
+// persisted envs keep their declared range start, then the rest fill the lowest
+// free index in alphabetical (tenant, env) order so allocation is deterministic.
+// Two persisted envs claiming the same range start surface as
+// ErrLocalPortRangeOverlap instead of being silently reassigned.
+func ResolveAllEnvironmentLocalPorts(store EnvironmentPortStore) (map[string]EnvironmentLocalPorts, error) {
+	if store == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+
+	persisted, unpersisted, err := CollectEnvironmentPortRefs(store)
+	if err != nil {
+		return nil, err
+	}
+
+	allocations := make(map[string]EnvironmentLocalPorts, len(persisted)+len(unpersisted))
+	claimedByIndex := make(map[int]string, len(persisted)+len(unpersisted))
+
+	if err := allocatePersistedEnvironmentPorts(persisted, allocations, claimedByIndex); err != nil {
+		return nil, err
+	}
+	if err := allocateUnpersistedEnvironmentPorts(unpersisted, allocations, claimedByIndex); err != nil {
+		return nil, err
+	}
+
+	return allocations, nil
+}
+
+func allocatePersistedEnvironmentPorts(persisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
+	for _, ref := range persisted {
+		index, err := EnvironmentPortIndexForRangeStart(ref.Env.LocalPortRangeStart, ref.Key)
+		if err != nil {
+			return err
+		}
+		if other, dup := claimedByIndex[index]; dup {
+			return ErrLocalPortRangeOverlap{A: other, B: ref.Key, RangeStart: ref.Env.LocalPortRangeStart}
+		}
+		ports, err := environmentLocalPortsForIndex(index, ref.Env)
+		if err != nil {
+			return err
+		}
+		claimedByIndex[index] = ref.Key
+		allocations[ref.Key] = ports
+	}
+	return nil
+}
+
+func allocateUnpersistedEnvironmentPorts(unpersisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
+	walkerIndex := 0
+	for _, ref := range unpersisted {
+		for {
+			if _, claimed := claimedByIndex[walkerIndex]; !claimed {
+				break
+			}
+			walkerIndex++
+		}
+		ports, err := environmentLocalPortsForIndex(walkerIndex, ref.Env)
+		if err != nil {
+			return err
+		}
+		claimedByIndex[walkerIndex] = ref.Key
+		allocations[ref.Key] = ports
+		walkerIndex++
+	}
+	return nil
+}
+
+func ResolveEnvironmentLocalPorts(store EnvironmentPortStore, tenant, environment string) (EnvironmentLocalPorts, error) {
+	allocations, err := ResolveAllEnvironmentLocalPorts(store)
+	if err != nil {
+		return EnvironmentLocalPorts{}, err
+	}
+
+	ports, ok := allocations[EnvironmentPortKey(tenant, environment)]
+	if !ok {
+		return EnvironmentLocalPorts{}, fmt.Errorf("local port range is not configured for %s/%s", strings.TrimSpace(tenant), strings.TrimSpace(environment))
+	}
+	return ports, nil
+}
+
+func EnvironmentLocalPortsForTarget(store OpenStore, tenant string, env EnvConfig) (EnvironmentLocalPorts, error) {
+	portStore, ok := store.(EnvironmentPortStore)
+	if !ok {
+		return EnvironmentLocalPorts{}, fmt.Errorf("local port range cannot be resolved without tenant/environment listing for %s/%s", strings.TrimSpace(tenant), strings.TrimSpace(env.Name))
+	}
+	// Always resolve through the two-pass resolver even for an already-persisted
+	// env: shortcutting it would skip the cross-tenant overlap check between two
+	// persisted envs.
+	ports, err := ResolveEnvironmentLocalPorts(portStore, tenant, env.Name)
+	if err != nil {
+		return EnvironmentLocalPorts{}, err
+	}
+	if env.SSHD.LocalPort > 0 {
+		ports.SSH = env.SSHD.LocalPort
+	}
+	return ports, nil
+}
+
+func environmentLocalPortsForIndex(index int, env EnvConfig) (EnvironmentLocalPorts, error) {
+	if index < 0 {
+		return EnvironmentLocalPorts{}, fmt.Errorf("environment index must be non-negative")
+	}
+	if MCPServicePortOffset >= EnvironmentPortRangeSize ||
+		APIServicePortOffset >= EnvironmentPortRangeSize ||
+		SSHServicePortOffset >= EnvironmentPortRangeSize ||
+		ContributeAppServicePortOffset >= EnvironmentPortRangeSize {
+		return EnvironmentLocalPorts{}, fmt.Errorf("service port offsets exceed environment local port range size")
+	}
+
+	rangeStart := LowerServicePort + index*EnvironmentPortRangeSize
+	rangeEnd := rangeStart + EnvironmentPortRangeSize - 1
+	if rangeEnd > 65535 {
+		return EnvironmentLocalPorts{}, fmt.Errorf("local port range exceeds maximum TCP port for environment index %d", index)
+	}
+
+	ports := EnvironmentLocalPorts{
+		RangeStart:    rangeStart,
+		RangeEnd:      rangeEnd,
+		MCP:           rangeStart + MCPServicePortOffset,
+		API:           rangeStart + APIServicePortOffset,
+		SSH:           rangeStart + SSHServicePortOffset,
+		ContributeApp: rangeStart + ContributeAppServicePortOffset,
+	}
+	if env.SSHD.LocalPort > 0 {
+		ports.SSH = env.SSHD.LocalPort
+	}
+	return ports, nil
+}
+
+func EnvironmentPortIndexForRangeStart(rangeStart int, ownerKey string) (int, error) {
+	if rangeStart < LowerServicePort {
+		return 0, fmt.Errorf("local port range start %d for %s is below %d", rangeStart, ownerKey, LowerServicePort)
+	}
+	offset := rangeStart - LowerServicePort
+	if offset%EnvironmentPortRangeSize != 0 {
+		return 0, fmt.Errorf("local port range start %d for %s is not aligned to %d-port boundaries from %d", rangeStart, ownerKey, EnvironmentPortRangeSize, LowerServicePort)
+	}
+	return offset / EnvironmentPortRangeSize, nil
+}
+
+func EnvironmentPortKey(tenant, environment string) string {
+	return strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
+}

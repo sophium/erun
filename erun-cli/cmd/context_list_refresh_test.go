@@ -9,20 +9,22 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // listRefreshTestStore is the smallest CloudContextStore the list path needs:
 // four contexts that all share one (alias, region) group, so a single
 // describe-instances call covers every one of them.
 type listRefreshTestStore struct {
-	config common.ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s listRefreshTestStore) LoadERunConfig() (common.ERunConfig, string, error) {
+func (s listRefreshTestStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
-func (s listRefreshTestStore) SaveERunConfig(common.ERunConfig) error { return nil }
+func (s listRefreshTestStore) SaveERunConfig(configpkg.ERunConfig) error { return nil }
 
 const (
 	listRefreshTestAlias  = "dev"
@@ -30,11 +32,11 @@ const (
 )
 
 func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
-	contexts := make([]common.CloudContextConfig, 0, len(instanceIDs))
+	contexts := make([]configpkg.CloudContextConfig, 0, len(instanceIDs))
 	for i, instanceID := range instanceIDs {
-		contexts = append(contexts, common.CloudContextConfig{
+		contexts = append(contexts, configpkg.CloudContextConfig{
 			Name:               fmt.Sprintf("erun-%03d", i+1),
-			Provider:           common.CloudProviderAWS,
+			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: listRefreshTestAlias,
 			Region:             listRefreshTestRegion,
 			InstanceID:         instanceID,
@@ -44,10 +46,10 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 			KubernetesContext:  fmt.Sprintf("erun-%03d", i+1),
 		})
 	}
-	return listRefreshTestStore{config: common.ERunConfig{
-		CloudProviders: []common.CloudProviderConfig{{
+	return listRefreshTestStore{config: configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{{
 			Alias:    listRefreshTestAlias,
-			Provider: common.CloudProviderAWS,
+			Provider: configpkg.CloudProviderAWS,
 		}},
 		CloudContexts: contexts,
 	}}
@@ -57,8 +59,8 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 // session produces: the aws CLI echoes the whole command it was given --
 // including the comma-joined instance IDs of every context in the batch --
 // before the error text.
-func listRefreshTestFailingRunAWS() func(common.Context, common.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ common.Context, _ common.CloudProviderConfig, _ string, args []string) (string, error) {
+func listRefreshTestFailingRunAWS() func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 		command := "aws " + strings.Join(args, " ")
 		return "", fmt.Errorf("%s: aws: [ERROR]: The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.", command)
 	}
@@ -67,10 +69,10 @@ func listRefreshTestFailingRunAWS() func(common.Context, common.CloudProviderCon
 func runListRefreshTest(t *testing.T, store common.CloudContextStore, deps common.CloudContextDependencies) string {
 	t.Helper()
 	var buf bytes.Buffer
-	ctx := common.Context{
+	ctx := core.Context{
 		Stdout: &buf,
 		Stderr: &buf,
-		Logger: common.NewLoggerWithWriters(common.VerbosityInfo, io.Discard, io.Discard),
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard),
 	}
 	if err := runContextListCommand(ctx, store, deps); err != nil {
 		t.Fatalf("context list: %v", err)
@@ -180,11 +182,11 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 	deps := common.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
 
 	var buf bytes.Buffer
-	ctx := common.Context{
-		Output: common.OutputJSON,
+	ctx := core.Context{
+		Output: core.OutputJSON,
 		Stdout: &buf,
 		Stderr: &buf,
-		Logger: common.NewLoggerWithWriters(common.VerbosityInfo, io.Discard, io.Discard),
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard),
 	}
 	if err := runContextListCommand(ctx, store, deps); err != nil {
 		t.Fatalf("context list: %v", err)
@@ -228,7 +230,7 @@ func requireUnknownWithoutSharedCause(t *testing.T, context common.CloudContextS
 // every message would lose the detail that actually differs per row.
 func TestContextListKeepsPerContextMessages(t *testing.T) {
 	store := listRefreshTestStoreWithIDs("i-0aaaa11111aaaa1111")
-	deps := common.CloudContextDependencies{RunAWS: func(common.Context, common.CloudProviderConfig, string, []string) (string, error) {
+	deps := common.CloudContextDependencies{RunAWS: func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 		return "", nil
 	}}
 

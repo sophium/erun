@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // isTransientRegistryReadError decides between "retry the read-back" and "abort
@@ -182,9 +184,9 @@ func TestIsTransientRegistryReadErrorTreatsFinalFailuresAsFinal(t *testing.T) {
 // captureRegistryReadLog points both trace writers at one buffer: the retry
 // announcement is what tells an operator the publish is waiting rather than
 // wedged, so the loop under test must be readable from the Context it was given.
-func captureRegistryReadLog() (Context, *bytes.Buffer) {
+func captureRegistryReadLog() (core.Context, *bytes.Buffer) {
 	log := &bytes.Buffer{}
-	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, log, log)}, log
+	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, log, log)}, log
 }
 
 const (

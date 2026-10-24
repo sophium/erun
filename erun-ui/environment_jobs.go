@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The desktop writes into the job store — Investigate starts a job there — and
@@ -113,7 +115,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 		return uiEnvironmentJob{}, err
 	}
 	if !useMCP {
-		cancel, err := eruncommon.CancelEnvironmentJob(eruncommon.Context{}, params)
+		cancel, err := eruncommon.CancelEnvironmentJob(core.Context{}, params)
 		if err != nil {
 			return uiEnvironmentJob{}, err
 		}
@@ -135,20 +137,20 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 // neither: a pod may well be running jobs behind it that the local store
 // cannot see, so that case is reported as unreachable rather than read as
 // empty.
-func (a *App) jobsReachability(tenant, environment string) (eruncommon.OpenResult, bool, error) {
+func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})
 	if err != nil {
-		return eruncommon.OpenResult{}, false, err
+		return config.OpenResult{}, false, err
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint(mcpPort) {
 		return result, true, nil
 	}
 	if kind := a.classifyMCPUnreachable(mcpPort); kind == eruncommon.LocalMCPStaleForward {
-		return eruncommon.OpenResult{}, false, wrapMCPUnreachableErrorWithKind(kind, errors.New(eruncommon.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
+		return config.OpenResult{}, false, wrapMCPUnreachableErrorWithKind(kind, errors.New(eruncommon.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
 	}
 	return result, false, nil
 }
@@ -157,11 +159,11 @@ func (a *App) jobsReachability(tenant, environment string) (eruncommon.OpenResul
 // failure means the edge dropped mid-call, reported the same way an
 // upfront-unreachable read is; any other failure (including "this runtime
 // image predates the job_* tools") passes through unchanged.
-func (a *App) wrapJobMCPErr(result eruncommon.OpenResult, err error) error {
+func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
 	if err == nil || !isMCPDialFailure(err) {
 		return err
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	return wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 }
 

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // review_commands.go is the shared planning/execution layer `erun review`
@@ -74,7 +78,7 @@ func NormalizeReviewStatus(status string) (string, error) {
 
 // RunReviewList lists reviews visible to the caller's tenant, narrowed by the
 // given filters.
-func RunReviewList(ctx Context, store CloudReadStore, alias string, params ReviewListParams, deps CloudDependencies) ([]PlatformReview, error) {
+func RunReviewList(ctx core.Context, store CloudReadStore, alias string, params ReviewListParams, deps CloudDependencies) ([]PlatformReview, error) {
 	// Resolved before the alias lookup on purpose: a mistyped filter is a bad
 	// argument, and reporting it must not depend on the platform being
 	// reachable or even configured.
@@ -88,7 +92,7 @@ func RunReviewList(ctx Context, store CloudReadStore, alias string, params Revie
 	// a bad argument, and reporting it must not depend on the platform being
 	// reachable — the same reason the status is checked here.
 	if strings.TrimSpace(params.Repository) != "" {
-		repository, err := RepositoryIdentity(params.Repository)
+		repository, err := model.RepositoryIdentity(params.Repository)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +140,7 @@ func reviewListFilter(params ReviewListParams) PlatformReviewFilter {
 // traceReviewList traces every network call RunReviewList would make in
 // order, including the whoami lookup --mine/--waiting-on-me trigger, so a
 // dry run's trace matches what a real run actually does.
-func traceReviewList(ctx Context, provider CloudProviderConfig, filter PlatformReviewFilter, params ReviewListParams) {
+func traceReviewList(ctx core.Context, provider config.CloudProviderConfig, filter PlatformReviewFilter, params ReviewListParams) {
 	details := reviewFilterTraceDetails(filter)
 	if params.Mine {
 		details = append(details, "authorUserId=<caller>")
@@ -182,7 +186,7 @@ type ReviewDetail struct {
 }
 
 // RunReviewShow fetches one review together with its comments and builds.
-func RunReviewShow(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (ReviewDetail, error) {
+func RunReviewShow(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (ReviewDetail, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return ReviewDetail{}, err
@@ -245,7 +249,7 @@ func threadRootCommentID(comments []PlatformComment, commentID string) (string, 
 // and RunReviewUnresolve: it lists the review's comments (both to trace the
 // lookup and to enforce that only a thread's root, never a reply, is
 // addressable) before issuing the status PATCH.
-func runReviewCommentStatus(ctx Context, store CloudReadStore, alias, reviewID, commentID, status string, deps CloudDependencies) (PlatformComment, error) {
+func runReviewCommentStatus(ctx core.Context, store CloudReadStore, alias, reviewID, commentID, status string, deps CloudDependencies) (PlatformComment, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformComment{}, err
@@ -267,13 +271,13 @@ func runReviewCommentStatus(ctx Context, store CloudReadStore, alias, reviewID, 
 
 // RunReviewResolve marks a comment thread CLOSED (resolved). commentID must
 // be a thread's root comment; addressing a reply is refused.
-func RunReviewResolve(ctx Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+func RunReviewResolve(ctx core.Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
 	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "CLOSED", deps)
 }
 
 // RunReviewUnresolve reopens a comment thread (marks it OPEN). commentID must
 // be a thread's root comment; addressing a reply is refused.
-func RunReviewUnresolve(ctx Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+func RunReviewUnresolve(ctx core.Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
 	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "OPEN", deps)
 }
 
@@ -281,7 +285,7 @@ func RunReviewUnresolve(ctx Context, store CloudReadStore, alias, reviewID, comm
 // branches belong to, resolved from the caller's own remote or the checkout
 // they are standing in, so a tenant serving more than one repository can tell
 // whose review this is.
-func RunReviewCreate(ctx Context, store CloudReadStore, alias string, params PlatformCreateReviewParams, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewCreate(ctx core.Context, store CloudReadStore, alias string, params PlatformCreateReviewParams, deps CloudDependencies) (PlatformReview, error) {
 	repository, err := ResolveReviewRepository(ctx, params.Repository, "review create")
 	if err != nil {
 		return PlatformReview{}, err
@@ -319,7 +323,7 @@ type ReviewCommentParams struct {
 }
 
 // RunReviewComment posts a comment (or a reply) on a review.
-func RunReviewComment(ctx Context, store CloudReadStore, alias string, params ReviewCommentParams, deps CloudDependencies) (PlatformComment, error) {
+func RunReviewComment(ctx core.Context, store CloudReadStore, alias string, params ReviewCommentParams, deps CloudDependencies) (PlatformComment, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformComment{}, err
@@ -346,7 +350,7 @@ func RunReviewComment(ctx Context, store CloudReadStore, alias string, params Re
 }
 
 // RunReviewClose closes a review.
-func RunReviewClose(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewClose(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformReview{}, err
@@ -374,7 +378,7 @@ type ReviewRecordBuildParams struct {
 // promotes it to MERGE if it was already the merge queue's head — there is no
 // separate "set review status" call for this, by design (a READY with no
 // build is a different thing: the missed-merge-window requeue).
-func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
+func RunReviewRecordBuild(ctx core.Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
 	if strings.TrimSpace(params.Version) == "" {
 		return PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
 	}
@@ -430,7 +434,7 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 // did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED —
 // either way the answer is a fact about the repository rather than the
 // caller's word.
-func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewReportMerged(ctx core.Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(remoteURL) == "" {
 		return PlatformReview{}, fmt.Errorf("review id and remote url are required")
 	}
@@ -473,7 +477,7 @@ func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, b
 // the server already treats MERGE -> READY as unconditionally valid for any
 // review at MERGE — so it takes no --reason: there is no gate to make
 // accountable, and the status endpoint has no field to persist one in.
-func RunReviewRequeue(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewRequeue(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" {
 		return PlatformReview{}, fmt.Errorf("review id is required")
 	}
@@ -497,7 +501,7 @@ func RunReviewRequeue(ctx Context, store CloudReadStore, alias, reviewID string,
 }
 
 // RunReviewReviewersList lists the users assigned to review a review.
-func RunReviewReviewersList(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) ([]PlatformReviewer, error) {
+func RunReviewReviewersList(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) ([]PlatformReviewer, error) {
 	if strings.TrimSpace(reviewID) == "" {
 		return nil, fmt.Errorf("review id is required")
 	}
@@ -532,7 +536,7 @@ func ensureReviewerIsEnrolledInCallerTenant(client *PlatformClient, userID strin
 
 // RunReviewReviewerAdd assigns userID as a reviewer on reviewID. A userID not
 // enrolled in the caller's own tenant is refused before the network call.
-func RunReviewReviewerAdd(ctx Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) (PlatformReviewer, error) {
+func RunReviewReviewerAdd(ctx core.Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) (PlatformReviewer, error) {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
 		return PlatformReviewer{}, fmt.Errorf("review id and user id are required")
 	}
@@ -552,7 +556,7 @@ func RunReviewReviewerAdd(ctx Context, store CloudReadStore, alias, reviewID, us
 }
 
 // RunReviewReviewerRemove unassigns userID from reviewID's reviewers.
-func RunReviewReviewerRemove(ctx Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) error {
+func RunReviewReviewerRemove(ctx core.Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) error {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("review id and user id are required")
 	}
@@ -574,7 +578,7 @@ func RunReviewReviewerRemove(ctx Context, store CloudReadStore, alias, reviewID,
 // states which. An empty Repository is only reachable when neither is
 // available, and lists or advances across every repository's queue, which the
 // caller sees in the trace rather than discovering by promotion.
-func resolveMergeQueueRepository(ctx Context, params PlatformMergeQueueParams, traceLabel string) (PlatformMergeQueueParams, error) {
+func resolveMergeQueueRepository(ctx core.Context, params PlatformMergeQueueParams, traceLabel string) (PlatformMergeQueueParams, error) {
 	remote := strings.TrimSpace(params.Repository)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
@@ -588,7 +592,7 @@ func resolveMergeQueueRepository(ctx Context, params PlatformMergeQueueParams, t
 		}
 		remote = origin
 	}
-	repository, err := RepositoryIdentity(remote)
+	repository, err := model.RepositoryIdentity(remote)
 	if err != nil {
 		return PlatformMergeQueueParams{}, err
 	}
@@ -599,7 +603,7 @@ func resolveMergeQueueRepository(ctx Context, params PlatformMergeQueueParams, t
 
 // RunReviewMergeQueueList lists one repository's merge queue for a target
 // branch.
-func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) ([]PlatformReview, error) {
+func RunReviewMergeQueueList(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) ([]PlatformReview, error) {
 	params, err := resolveMergeQueueRepository(ctx, params, "review queue list")
 	if err != nil {
 		return nil, err
@@ -619,7 +623,7 @@ func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias string, pa
 // MERGE, refusing with a *PlatformMergeQueueBlockedError when that review
 // still has unresolved comment threads. RunReviewMergeQueueOverrideAdvance is
 // the deliberate, audited way past that refusal.
-func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueAdvance(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) (PlatformReview, error) {
 	params, err := resolveMergeQueueRepository(ctx, params, "review queue advance")
 	if err != nil {
 		return PlatformReview{}, err
@@ -638,7 +642,7 @@ func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias string,
 // RunReviewMergeQueueOverrideAdvance bypasses RunReviewMergeQueueAdvance's
 // unresolved-thread gate. reason is required and is recorded in the
 // platform's audit trail; a blank one is refused before the network call.
-func RunReviewMergeQueueOverrideAdvance(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, reason string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueOverrideAdvance(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, reason string, deps CloudDependencies) (PlatformReview, error) {
 	if strings.TrimSpace(reason) == "" {
 		return PlatformReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
 	}

@@ -5,7 +5,8 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // WriteInput takes file content as data — never a shell — mirroring `erun
@@ -22,7 +23,7 @@ func writeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 	return func(_ context.Context, _ *mcp.CallToolRequest, input WriteInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var written *eruncommon.WriteWorkingTreeFileResult
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				result, err := eruncommon.WriteWorkingTreeFile(runCtx, workDir, eruncommon.WriteWorkingTreeFileParams{
 					Path:    input.Path,
 					Content: input.Content,

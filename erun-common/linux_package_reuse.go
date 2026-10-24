@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A linux package component never produces an image, so it has no fp tag to
@@ -90,7 +93,7 @@ var dockerDaemonPlatformPattern = regexp.MustCompile(`^linux/[a-z0-9_]+$`)
 func readDockerDaemonPlatform() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), linuxPackageDaemonPlatformTimeout)
 	defer cancel()
-	out, err := CommandContext(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}").Output()
+	out, err := core.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}").Output()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return "", fmt.Errorf("docker version: %w", ctxErr)
 	}
@@ -328,5 +331,5 @@ func recordLinuxPackageTestPass(name, fingerprint, platform string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, append(data, '\n'), 0o600)
+	return config.WriteFileAtomic(path, append(data, '\n'), 0o600)
 }

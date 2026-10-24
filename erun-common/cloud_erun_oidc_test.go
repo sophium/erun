@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestDefaultFetchPlatformInfoParsesResponse(t *testing.T) {
@@ -29,7 +31,7 @@ func TestDefaultFetchPlatformInfoParsesResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	info, err := defaultFetchPlatformInfo(Context{}, srv.URL)
+	info, err := defaultFetchPlatformInfo(core.Context{}, srv.URL)
 	if err != nil {
 		t.Fatalf("defaultFetchPlatformInfo: %v", err)
 	}
@@ -51,7 +53,7 @@ func TestDefaultFetchOIDCDiscoveryParsesResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	discovery, err := defaultFetchOIDCDiscovery(Context{}, srv.URL)
+	discovery, err := defaultFetchOIDCDiscovery(core.Context{}, srv.URL)
 	if err != nil {
 		t.Fatalf("defaultFetchOIDCDiscovery: %v", err)
 	}
@@ -66,10 +68,10 @@ func TestFetchHelpersReturnErrorOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := defaultFetchPlatformInfo(Context{}, srv.URL); err == nil {
+	if _, err := defaultFetchPlatformInfo(core.Context{}, srv.URL); err == nil {
 		t.Fatal("expected an error for a 500 response")
 	}
-	if _, err := defaultFetchOIDCDiscovery(Context{}, srv.URL); err == nil {
+	if _, err := defaultFetchOIDCDiscovery(core.Context{}, srv.URL); err == nil {
 		t.Fatal("expected an error for a 500 response")
 	}
 }
@@ -77,10 +79,10 @@ func TestFetchHelpersReturnErrorOnNon2xx(t *testing.T) {
 func TestDryRunFetchersPerformNoRequest(t *testing.T) {
 	// A dry run must never depend on the platform being reachable, so both
 	// fetchers must short-circuit before making any HTTP call.
-	if _, err := defaultFetchPlatformInfo(Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
+	if _, err := defaultFetchPlatformInfo(core.Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
 		t.Fatalf("dry run fetch platform info: %v", err)
 	}
-	if _, err := defaultFetchOIDCDiscovery(Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
+	if _, err := defaultFetchOIDCDiscovery(core.Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
 		t.Fatalf("dry run fetch discovery: %v", err)
 	}
 }
@@ -104,7 +106,7 @@ func TestDefaultStartERunDeviceAuthorization(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	auth, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{DeviceAuthorizationEndpoint: srv.URL}, "cli-1", erunOAuthScope)
+	auth, err := defaultStartERunDeviceAuthorization(core.Context{}, OIDCDiscovery{DeviceAuthorizationEndpoint: srv.URL}, "cli-1", erunOAuthScope)
 	if err != nil {
 		t.Fatalf("defaultStartERunDeviceAuthorization: %v", err)
 	}
@@ -117,7 +119,7 @@ func TestDefaultStartERunDeviceAuthorization(t *testing.T) {
 }
 
 func TestDefaultStartERunDeviceAuthorizationRequiresEndpoint(t *testing.T) {
-	if _, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{Issuer: "https://auth.example.test"}, "cli-1", erunOAuthScope); err == nil {
+	if _, err := defaultStartERunDeviceAuthorization(core.Context{}, OIDCDiscovery{Issuer: "https://auth.example.test"}, "cli-1", erunOAuthScope); err == nil {
 		t.Fatal("expected an error when no device authorization endpoint is advertised")
 	}
 }
@@ -169,7 +171,7 @@ func TestPollERunDeviceTokenSucceedsAfterPendingAndSlowDown(t *testing.T) {
 		Interval:   time.Millisecond,
 		ExpiresIn:  10 * time.Second,
 	}
-	tokens, err := pollERunDeviceToken(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth)
+	tokens, err := pollERunDeviceToken(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth)
 	if err != nil {
 		t.Fatalf("pollERunDeviceToken: %v", err)
 	}
@@ -189,7 +191,7 @@ func TestPollERunDeviceTokenFailsOnExpiredToken(t *testing.T) {
 	defer srv.Close()
 
 	auth := ERunDeviceAuthorization{DeviceCode: "dev-code", Interval: time.Millisecond, ExpiresIn: 10 * time.Second}
-	if _, err := pollERunDeviceToken(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth); err == nil {
+	if _, err := pollERunDeviceToken(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth); err == nil {
 		t.Fatal("expected an error for expired_token")
 	} else if !strings.Contains(err.Error(), "expired_token") {
 		t.Fatalf("error = %v, want to mention expired_token", err)
@@ -204,7 +206,7 @@ func TestPollERunDeviceTokenTimesOutWhenAlwaysPending(t *testing.T) {
 	defer srv.Close()
 
 	auth := ERunDeviceAuthorization{DeviceCode: "dev-code", Interval: time.Millisecond, ExpiresIn: 5 * time.Millisecond}
-	if _, err := pollERunDeviceToken(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth); err == nil {
+	if _, err := pollERunDeviceToken(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", auth); err == nil {
 		t.Fatal("expected the poll to time out")
 	} else if !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("error = %v, want to mention expiry", err)
@@ -213,7 +215,7 @@ func TestPollERunDeviceTokenTimesOutWhenAlwaysPending(t *testing.T) {
 
 func TestPollERunDeviceTokenDryRunPerformsNoRequest(t *testing.T) {
 	auth := ERunDeviceAuthorization{DeviceCode: "dev-code", Interval: time.Millisecond, ExpiresIn: time.Second}
-	if _, err := pollERunDeviceToken(Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: "http://127.0.0.1:1"}, "cli-1", auth); err != nil {
+	if _, err := pollERunDeviceToken(core.Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: "http://127.0.0.1:1"}, "cli-1", auth); err != nil {
 		t.Fatalf("dry run poll: %v", err)
 	}
 }
@@ -230,7 +232,7 @@ func TestDefaultRefreshERunTokens(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tokens, err := defaultRefreshERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", "refresh-1")
+	tokens, err := defaultRefreshERunTokens(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", "refresh-1")
 	if err != nil {
 		t.Fatalf("defaultRefreshERunTokens: %v", err)
 	}
@@ -246,7 +248,7 @@ func TestDefaultRefreshERunTokensPropagatesServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := defaultRefreshERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", "refresh-1")
+	_, err := defaultRefreshERunTokens(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "cli-1", "refresh-1")
 	if err == nil || !strings.Contains(err.Error(), "refresh token revoked") {
 		t.Fatalf("err = %v, want to mention the server's error description", err)
 	}
@@ -268,7 +270,7 @@ func TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope(t *
 	}))
 	defer srv.Close()
 
-	tokens, err := defaultClientCredentialsERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
+	tokens, err := defaultClientCredentialsERunTokens(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
 	if err != nil {
 		t.Fatalf("defaultClientCredentialsERunTokens: %v", err)
 	}
@@ -318,7 +320,7 @@ func TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tokens, err := defaultClientCredentialsERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
+	tokens, err := defaultClientCredentialsERunTokens(core.Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
 	if err != nil {
 		t.Fatalf("defaultClientCredentialsERunTokens: %v", err)
 	}
@@ -339,7 +341,7 @@ func TestDefaultClientCredentialsERunTokensDryRunPerformsNoRequest(t *testing.T)
 	}))
 	defer srv.Close()
 
-	if _, err := defaultClientCredentialsERunTokens(Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1"); err != nil {
+	if _, err := defaultClientCredentialsERunTokens(core.Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -433,7 +435,7 @@ func startERunAuthorizationCodeLogin(discovery OIDCDiscovery, clientID string, s
 	resultCh := make(chan ERunTokens, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		tokens, err := runERunAuthorizationCodeLogin(Context{Stdout: stdout}, discovery, clientID, erunOAuthScope)
+		tokens, err := runERunAuthorizationCodeLogin(core.Context{Stdout: stdout}, discovery, clientID, erunOAuthScope)
 		if err != nil {
 			errCh <- err
 			return
@@ -477,13 +479,13 @@ func TestRunERunAuthorizationCodeLoginRoundTrip(t *testing.T) {
 func TestERunLoginBrowserCommandPerOS(t *testing.T) {
 	const authURL = "https://auth.example.test/authorize?state=1"
 	cases := []struct {
-		hostOS     HostOS
+		hostOS     core.HostOS
 		executable string
 		args       []string
 	}{
-		{HostOSDarwin, "open", []string{authURL}},
-		{HostOSLinux, "xdg-open", []string{authURL}},
-		{HostOSWindows, "cmd", []string{"/c", "start", "", authURL}},
+		{core.HostOSDarwin, "open", []string{authURL}},
+		{core.HostOSLinux, "xdg-open", []string{authURL}},
+		{core.HostOSWindows, "cmd", []string{"/c", "start", "", authURL}},
 	}
 	for _, c := range cases {
 		executable, args, err := erunLoginBrowserCommand(c.hostOS, authURL)
@@ -497,7 +499,7 @@ func TestERunLoginBrowserCommandPerOS(t *testing.T) {
 			t.Fatalf("%s: args = %v, want %v", c.hostOS, args, c.args)
 		}
 	}
-	if _, _, err := erunLoginBrowserCommand(HostOSUnknown, authURL); err == nil {
+	if _, _, err := erunLoginBrowserCommand(core.HostOSUnknown, authURL); err == nil {
 		t.Fatal("expected an unsupported host OS to error")
 	}
 }
@@ -682,7 +684,7 @@ func TestAwaitERunOIDCCallbackTimesOutNamingTheListener(t *testing.T) {
 	}
 	defer func() { _ = listener.Close() }()
 
-	code, err := awaitERunOIDCCallback(Context{}, listener, "state-1", "https://issuer.test/authorize", time.Millisecond)
+	code, err := awaitERunOIDCCallback(core.Context{}, listener, "state-1", "https://issuer.test/authorize", time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected a timeout error, got code %q", code)
 	}
@@ -787,12 +789,12 @@ func TestNoTestCanReachTheHostBrowserOpener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("look up inert binary: %v", err)
 	}
-	for _, hostOS := range []HostOS{HostOSDarwin, HostOSLinux, HostOSWindows} {
+	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux, core.HostOSWindows} {
 		executable, args, err := erunLoginBrowserCommand(hostOS, "https://auth.example.test/authorize")
 		if err != nil {
 			t.Fatalf("%s: %v", hostOS, err)
 		}
-		if got := Command(executable, args...).Path; got != inert {
+		if got := core.Command(executable, args...).Path; got != inert {
 			t.Fatalf("%s opener %q resolves to %q, want the inert %q", hostOS, executable, got, inert)
 		}
 	}

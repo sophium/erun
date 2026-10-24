@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // errOrchestratorNudgeHistoryUnreadable is returned by the write helpers when
@@ -251,5 +251,5 @@ func writeOrchestratorNudgeHistoryEntries(path string, entries []orchestratorNud
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return eruncommon.WriteFileAtomic(path, append(data, '\n'), 0o644)
+	return config.WriteFileAtomic(path, append(data, '\n'), 0o644)
 }

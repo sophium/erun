@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // These tests lock the repair for the failure that has no other witness: an
@@ -87,17 +89,17 @@ func (p *forwardRepairProbe) reconnect() error {
 func forwardRepairTestApp(
 	t *testing.T,
 	probe *forwardRepairProbe,
-	readRunState func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	seedMCPForward(t, "erun", "remote", forwardRepairTestPort)
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			// "fresh" is configured and has no recorded forward: the environment
 			// nobody opened, which the sweep must leave entirely alone.
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -118,7 +120,7 @@ func forwardRepairTestApp(
 				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
-		reconnectMCP: func(context.Context, eruncommon.OpenResult, func(string)) error {
+		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
 			return probe.reconnect()
 		},
 		readRuntimeRunState: readRunState,
@@ -454,7 +456,7 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			probe := &forwardRepairProbe{forwardDropped: testCase.dropped}
 			app, emits := forwardRepairTestApp(t, probe,
-				func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+				func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 					return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 				})
 

@@ -2,7 +2,7 @@ package routes
 
 import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // review_issue_ref.go attaches a review's issue reference to the reviews this
@@ -28,8 +28,8 @@ import (
 // declared — createReviewRequest carries no issueRefSource field — and this
 // function is the only writer of a returned review's
 // IssueRef/IssueRefSource.
-func resolveReviewIssueRef(review model.Review) (eruncommon.IssueReference, bool) {
-	return eruncommon.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch)
+func resolveReviewIssueRef(review model.Review) (modelpkg.IssueReference, bool) {
+	return modelpkg.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch)
 }
 
 // withReviewIssueRef returns review with its resolved issue reference

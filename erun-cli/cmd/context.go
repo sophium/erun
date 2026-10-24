@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +36,7 @@ func newContextListCmd(store common.CloudContextStore, deps common.CloudContextD
 	}
 }
 
-func runContextListCommand(ctx common.Context, store common.CloudContextStore, deps common.CloudContextDependencies) error {
+func runContextListCommand(ctx core.Context, store common.CloudContextStore, deps common.CloudContextDependencies) error {
 	// Status isn't persisted, so it must be refreshed from AWS to show the
 	// live authoritative state rather than an empty value.
 	result, err := common.RefreshCloudContextList(ctx, store, deps)
@@ -45,11 +46,11 @@ func runContextListCommand(ctx common.Context, store common.CloudContextStore, d
 	return writeCloudContextList(ctx, result)
 }
 
-func writeCloudContextList(ctx common.Context, result common.CloudContextListResult) error {
+func writeCloudContextList(ctx core.Context, result common.CloudContextListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return nil
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
@@ -106,7 +107,7 @@ func newContextInitCmd(store common.CloudContextStore, promptRunner PromptRunner
 	return cmd
 }
 
-func runContextInitCommand(ctx common.Context, store common.CloudContextStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudContextParams, deps common.CloudContextDependencies) error {
+func runContextInitCommand(ctx core.Context, store common.CloudContextStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudContextParams, deps common.CloudContextDependencies) error {
 	var err error
 	params.CloudProviderAlias, err = contextProviderAlias(store, selectRunner, params.CloudProviderAlias)
 	if err != nil {
@@ -180,7 +181,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store common.C
 	return cmd
 }
 
-func newContextPowerCmd(use, short string, supportsForce bool, store common.CloudContextStore, deps common.CloudContextDependencies, run func(common.Context, common.CloudContextStore, common.CloudContextParams, common.CloudContextDependencies) (common.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store common.CloudContextStore, deps common.CloudContextDependencies, run func(core.Context, common.CloudContextStore, common.CloudContextParams, common.CloudContextDependencies) (common.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -254,7 +255,7 @@ func selectOrKeepInt(selectRunner SelectRunner, label string, options []int, cur
 	return strconv.Atoi(value)
 }
 
-func writeCloudContext(ctx common.Context, status common.CloudContextStatus) error {
+func writeCloudContext(ctx core.Context, status common.CloudContextStatus) error {
 	context := status.CloudContextConfig
 	line := "  - " + context.Name
 	line += " provider=" + quotedValueOrNone(context.Provider)

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A job's supervisor is the one process a cancel must never reach: it is what
@@ -55,7 +57,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 		t.Fatalf("write job record: %v", err)
 	}
 
-	result, err := CancelEnvironmentJob(Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: id})
+	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: id})
 	if err == nil {
 		t.Fatalf("cancel signalled job %q with no recorded work pid and reported success (target %d); the only pid that record holds is the supervisor's, so this is how a cancelled job's outcome gets lost", id, result.TargetPID)
 	}
@@ -72,8 +74,8 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 // observed for having been signalled.
 func startCancelTestStandInSupervisor(t *testing.T) *exec.Cmd {
 	t.Helper()
-	cmd := Command("sleep", "30")
-	detachEnvironmentJobSupervisor(cmd)
+	cmd := core.Command("sleep", "30")
+	core.DetachEnvironmentJobSupervisor(cmd)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start stand-in supervisor: %v", err)

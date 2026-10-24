@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type InitInput struct {
@@ -84,11 +85,11 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 			Environment:              environment,
 			RuntimeVersion:           strings.TrimSpace(input.Version),
 			RuntimeVersionDefault:    CurrentBuildInfo().Version,
-			RuntimePod: eruncommon.RuntimePodResources{
+			RuntimePod: config.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),
 				Memory: strings.TrimSpace(input.RuntimeMemory),
 			},
-			RuntimeDindPod: eruncommon.RuntimePodResources{
+			RuntimeDindPod: config.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeDindCPU),
 				Memory: strings.TrimSpace(input.RuntimeDindMemory),
 			},
@@ -108,7 +109,7 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 			Components:              input.Components,
 		}
 
-		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
+		if envType := config.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
 			params.Type = envType
 			// The deprecated Remote bool models "not local-agent" for exactly the
 			// two legacy types it predates; deriving it from RemoteWorktree
@@ -126,14 +127,14 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 		_, err := eruncommon.RunBootstrapInitWithDependencies(eruncommon.BootstrapInitDependencies{
 			Store: eruncommon.TraceBootstrapStore(ctx, runtime.Store),
 			FindProjectRoot: func() (string, string, error) {
-				return eruncommon.FindProjectRootFromDir(workDir)
+				return config.FindProjectRootFromDir(workDir)
 			},
 			GetWorkingDir: func() (string, error) {
 				return workDir, nil
 			},
 			EnsureKubernetesNamespace: eruncommon.TraceNamespaceEnsurer(ctx, runtime.EnsureKubernetesNamespace),
-			LoadProjectConfig:         eruncommon.LoadProjectConfig,
-			SaveProjectConfig:         eruncommon.TraceProjectConfigSaver(ctx, eruncommon.SaveProjectConfig),
+			LoadProjectConfig:         config.LoadProjectConfig,
+			SaveProjectConfig:         eruncommon.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
 			WaitForRemoteRuntime:      runtime.WaitForRemoteRuntime,
 			RunRemoteCommand:          runtime.RunRemoteCommand,
 			DeployHelmChart:           runtime.DeployHelmChart,

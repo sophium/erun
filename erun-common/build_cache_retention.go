@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // release_disk_headroom.go's preflight keeps a node from being *filled*: it
@@ -265,7 +267,7 @@ type buildCacheBound struct {
 // budget, or whose share of the node is still larger than the volume it was
 // given, keeps exactly the bound it had before — which is why the volume's own
 // wording is returned unchanged for that case.
-func resolveBuildCacheBound(ctx Context, policy diskHeadroomPolicy, volumeBytes uint64) buildCacheBound {
+func resolveBuildCacheBound(ctx core.Context, policy diskHeadroomPolicy, volumeBytes uint64) buildCacheBound {
 	volume := resolveBuildCacheBounds(volumeBytes)
 	bound := buildCacheBound{
 		bounds:        volume,
@@ -365,7 +367,7 @@ func dockerBuildCacheBytes(limit time.Duration) (uint64, error) {
 // left to the disk floor, which is the guard that decides whether a build may
 // proceed. Both the build and the release path call it, because both grow the
 // same cache.
-func ensureBuildCacheRetention(ctx Context, policy diskHeadroomPolicy) {
+func ensureBuildCacheRetention(ctx core.Context, policy diskHeadroomPolicy) {
 	ensureBuildCacheRetentionWith(ctx, policy, dockerVolumeBytes, dockerBuildCacheBytes, runBuildCacheRetentionPrune)
 }
 
@@ -374,7 +376,7 @@ func ensureBuildCacheRetention(ctx Context, policy diskHeadroomPolicy) {
 // thing under test, and driving it against a real docker daemon is neither
 // deterministic nor safe to do from inside this repository.
 func ensureBuildCacheRetentionWith(
-	ctx Context,
+	ctx core.Context,
 	policy diskHeadroomPolicy,
 	readVolume func() (uint64, error),
 	readCacheBytes func(time.Duration) (uint64, error),

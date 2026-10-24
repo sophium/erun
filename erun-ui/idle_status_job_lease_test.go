@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The banner that names an occupancy can only offer to stop it if it knows
@@ -45,7 +46,7 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 	const tenant = "erun"
 	const environment = "ux"
 
-	if _, err := eruncommon.AttachEnvironmentJob(eruncommon.Context{}, eruncommon.AttachEnvironmentJobParams{
+	if _, err := eruncommon.AttachEnvironmentJob(core.Context{}, eruncommon.AttachEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          "gate-9",

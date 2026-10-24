@@ -1,17 +1,22 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+)
 
 // stockPinTarget is the state the reported failure was reproduced in: an environment whose
 // runtime coordinates are all on erun's own release line and all at 1.0.282,
 // with a deploy asking for 1.0.283. Every field names one coordinate, so a
 // deploy that installs the older artifacts while recording the newer version
 // reports a roll that did not happen.
-func stockPinTarget() OpenResult {
+func stockPinTarget() config.OpenResult {
 	const at = "1.0.282"
-	return OpenResult{
+	return config.OpenResult{
 		Tenant: "erun",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			Name:                "code3",
 			RuntimeVersion:      at,
 			RuntimeImage:        "ghcr.io/sophium/erun-devops:" + at,
@@ -28,7 +33,7 @@ func stockPinTarget() OpenResult {
 // recording the newer version.
 func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	const version = "1.0.283"
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
+	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
@@ -56,9 +61,9 @@ func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 // a chart on the deploy's own line instead, and that one does move -- see
 // TestDeployMovesTenantUmbrellaPinWithTheDeployVersion.
 func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
-	target := OpenResult{
+	target := config.OpenResult{
 		Tenant: "frs",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			Name:                "prod",
 			RuntimeVersion:      "1.0.86",
 			RuntimeImage:        "ghcr.io/sophium/frs-devops:1.0.86",
@@ -67,7 +72,7 @@ func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 			RuntimeRegistry:     "ghcr.io/sophium",
 		},
 	}
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(Context{}, target, "1.0.86", "no local runtime chart", "", false)
+	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, target, "1.0.86", "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
@@ -85,12 +90,12 @@ func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 // is the version the pods run.
 func TestPersistKeepsRecordedVersionAndRunningImageInStep(t *testing.T) {
 	const version = "1.0.283"
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
+	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
-	var saved *EnvConfig
-	persistOrFatal(t, Context{}, []DeploySpec{spec}, capturingSave(new(string), &saved), nil)
+	var saved *config.EnvConfig
+	persistOrFatal(t, core.Context{}, []DeploySpec{spec}, capturingSave(new(string), &saved), nil)
 	if saved == nil {
 		t.Fatalf("the deploy must persist the runtime coordinate it installed")
 	}

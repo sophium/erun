@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A plain activity lease is presence: many holders coexist, and taking one says
@@ -225,8 +227,8 @@ func environmentExclusivityConflict(operation, tenant, environment string, holde
 //
 // Off-pod this is a no-op: an exclusivity claim is environment state, and a
 // command run on an operator's own laptop is not competing for a pod's cores.
-func EnsureEnvironmentNotExclusivelyHeld(ctx Context, what, underLeaseID string) error {
-	tenant, environment, ok := injectedRuntimePodIdentity(os.Getenv)
+func EnsureEnvironmentNotExclusivelyHeld(ctx core.Context, what, underLeaseID string) error {
+	tenant, environment, ok := core.InjectedRuntimePodIdentity(os.Getenv)
 	if !ok {
 		return nil
 	}
@@ -344,7 +346,7 @@ func startingEnvironmentJobID(params StartEnvironmentJobParams) string {
 // proceeding when it cannot. The returned bool is whether *this* job takes the
 // claim — false both for ordinary work and for work running under an ancestor's
 // claim, which must not take a second one to conflict with the first.
-func resolveEnvironmentJobExclusivity(ctx Context, dir string, params StartEnvironmentJobParams, now time.Time) (bool, error) {
+func resolveEnvironmentJobExclusivity(ctx core.Context, dir string, params StartEnvironmentJobParams, now time.Time) (bool, error) {
 	claimID := environmentJobExclusiveLeaseID(params.ID)
 	holder, held := heldEnvironmentExclusivityClaim(params.Tenant, params.Environment, now)
 	if !held {

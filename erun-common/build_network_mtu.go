@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // dockerBuildNetworkStallMarkers are the tells that a build step died reaching
@@ -160,7 +162,7 @@ func dockerBridgeMTUMismatchWith(
 // daemon rather than assumed to be docker's 1500 default, so a daemon already
 // started with --mtu is correctly seen as fine.
 func dockerDefaultBridgeMTU() (int, bool) {
-	cmd := Command("docker", "network", "inspect", "bridge", "--format", `{{index .Options "com.docker.network.driver.mtu"}}`)
+	cmd := core.Command("docker", "network", "inspect", "bridge", "--format", `{{index .Options "com.docker.network.driver.mtu"}}`)
 	out := new(bytes.Buffer)
 	cmd.Stdout = out
 	cmd.Stderr = new(bytes.Buffer)

@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func cloudflareSecretName(releaseName string) string {
@@ -29,7 +32,7 @@ stringData:
 // applyCloudflareCredentialsSecret delivers the delegated Cloudflare token into
 // the env's runtime pod, keeping it out of argv, the trace, and helm release
 // values.
-func applyCloudflareCredentialsSecret(ctx Context, deployInput HelmDeploySpec) error {
+func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
 	}
@@ -61,16 +64,16 @@ func applyCloudflareCredentialsSecret(ctx Context, deployInput HelmDeploySpec) e
 // applyCloudflareDeployMetadata populates the Cloudflare deploy fields from the
 // env's attached alias; the Secret itself is applied later at execution time,
 // not here.
-func applyCloudflareDeployMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudflareDeployMetadata(store CloudReadStore, env config.EnvConfig, deployInput *HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
-	alias := strings.TrimSpace(env.ResolvedCloudAliases()[CloudProviderCloudflare])
+	alias := strings.TrimSpace(env.ResolvedCloudAliases()[config.CloudProviderCloudflare])
 	if alias == "" {
 		return
 	}
 	provider, err := ResolveCloudProvider(store, alias)
-	if err != nil || provider.Provider != CloudProviderCloudflare || provider.Cloudflare == nil {
+	if err != nil || provider.Provider != config.CloudProviderCloudflare || provider.Cloudflare == nil {
 		return
 	}
 	deployInput.CloudflareEnabled = true

@@ -5,7 +5,7 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type VersionInput struct {
@@ -19,7 +19,7 @@ type VersionOutput struct {
 	Trace   []string `json:"trace,omitempty"`
 }
 
-func versionTool(info eruncommon.BuildInfo) func(context.Context, *mcp.CallToolRequest, VersionInput) (*mcp.CallToolResult, VersionOutput, error) {
+func versionTool(info model.BuildInfo) func(context.Context, *mcp.CallToolRequest, VersionInput) (*mcp.CallToolResult, VersionOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input VersionInput) (*mcp.CallToolResult, VersionOutput, error) {
 		output := buildVersionOutput(info)
 		traceOutput := new(bytes.Buffer)
@@ -30,8 +30,8 @@ func versionTool(info eruncommon.BuildInfo) func(context.Context, *mcp.CallToolR
 	}
 }
 
-func buildVersionOutput(info eruncommon.BuildInfo) VersionOutput {
-	info = eruncommon.NormalizeBuildInfo(info)
+func buildVersionOutput(info model.BuildInfo) VersionOutput {
+	info = model.NormalizeBuildInfo(info)
 	return VersionOutput{
 		Version: info.Version,
 		Commit:  info.Commit,

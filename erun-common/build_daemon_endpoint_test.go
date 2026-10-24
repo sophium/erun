@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const testStageDockerfile = "FROM golang:1.26.0 AS test\nRUN --network=host go test ./...\n\nFROM scratch AS runtime\nCOPY --from=test /out/app /app\n"
@@ -63,7 +65,7 @@ func testStageBuild(t *testing.T) []DockerBuildSpec {
 // own daemon there and removes the forwarder when it ends.
 func TestEnsureBuildDaemonEndpointForwardsWhereNothingAnswers(t *testing.T) {
 	calls := stubBuildDaemon(t, false, "true")
-	stop, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t))
+	stop, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +85,7 @@ func TestEnsureBuildDaemonEndpointForwardsWhereNothingAnswers(t *testing.T) {
 // left behind.
 func TestEnsureBuildDaemonEndpointReplacesALeftoverThatAnswersTheProbe(t *testing.T) {
 	calls := stubBuildDaemonWithOwner(t, true, "true", "4242", false)
-	stop, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t))
+	stop, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +101,7 @@ func TestEnsureBuildDaemonEndpointReplacesALeftoverThatAnswersTheProbe(t *testin
 // Inside an environment pod the dind sidecar already answers, so nothing runs.
 func TestEnsureBuildDaemonEndpointUsesAnEndpointThatAnswers(t *testing.T) {
 	calls := stubBuildDaemon(t, true, "true")
-	if _, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t)); err != nil {
+	if _, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t)); err != nil {
 		t.Fatal(err)
 	}
 	if len(callsStartingWith(*calls, "run ")) != 0 || len(callsStartingWith(*calls, "rm ")) != 0 {
@@ -110,7 +112,7 @@ func TestEnsureBuildDaemonEndpointUsesAnEndpointThatAnswers(t *testing.T) {
 func TestEnsureBuildDaemonEndpointIgnoresBuildsWithoutATestStage(t *testing.T) {
 	calls := stubBuildDaemon(t, false, "true")
 	builds := []DockerBuildSpec{{DockerfilePath: writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20\n")}}
-	if _, err := ensureBuildDaemonEndpoint(Context{}, builds); err != nil {
+	if _, err := ensureBuildDaemonEndpoint(core.Context{}, builds); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 0 {
@@ -135,7 +137,7 @@ func TestEnsureBuildDaemonEndpointDryRunOnlyTraces(t *testing.T) {
 // A forwarder that exits at once fails the build here, naming why.
 func TestEnsureBuildDaemonEndpointReportsAForwarderThatExited(t *testing.T) {
 	calls := stubBuildDaemon(t, false, "false")
-	_, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t))
+	_, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t))
 	if err == nil || !strings.Contains(err.Error(), "exited") {
 		t.Fatalf("err = %v, want the exited forwarder reported", err)
 	}
@@ -147,7 +149,7 @@ func TestEnsureBuildDaemonEndpointReportsAForwarderThatExited(t *testing.T) {
 // A forwarder another running build started is shared, and left to that build.
 func TestEnsureBuildDaemonEndpointSharesARunningBuildsForwarder(t *testing.T) {
 	calls := stubBuildDaemonWithOwner(t, false, "true", "4242", true)
-	stop, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t))
+	stop, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +163,7 @@ func TestEnsureBuildDaemonEndpointSharesARunningBuildsForwarder(t *testing.T) {
 // the address; it is replaced instead of making the next build fail to bind.
 func TestEnsureBuildDaemonEndpointReplacesAForwarderWhoseBuildIsGone(t *testing.T) {
 	calls := stubBuildDaemonWithOwner(t, false, "true", "4242", false)
-	if _, err := ensureBuildDaemonEndpoint(Context{}, testStageBuild(t)); err != nil {
+	if _, err := ensureBuildDaemonEndpoint(core.Context{}, testStageBuild(t)); err != nil {
 		t.Fatal(err)
 	}
 	rms, runs := callsStartingWith(*calls, "rm -f erun-build-daemon"), callsStartingWith(*calls, "run -d")

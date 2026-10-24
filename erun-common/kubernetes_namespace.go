@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // NamespaceDeleteTimeout bounds how long DeleteKubernetesNamespace waits for
@@ -60,7 +63,7 @@ func (e *NamespaceDeleteRefusedError) Error() string {
 // resolves the same question live and traces only the branch that will execute —
 // mirroring announceWorktreeVolumeChange's real/dry-run split for the same class
 // of decision.
-func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) {
+func TraceEnsureKubernetesNamespace(ctx core.Context, contextName, namespace string) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
 	if namespace == "" {
@@ -105,7 +108,7 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 	}
 	args = append(args, "create", "namespace", namespace)
 
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if kubernetesNamespaceAlreadyExists(message) {
@@ -120,7 +123,7 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 	return nil
 }
 
-func TraceDeleteKubernetesNamespace(ctx Context, contextName, namespace string) {
+func TraceDeleteKubernetesNamespace(ctx core.Context, contextName, namespace string) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
 	if namespace == "" {
@@ -139,7 +142,7 @@ func TraceDeleteKubernetesNamespace(ctx Context, contextName, namespace string) 
 
 // traceRetractACMEChallenges mirrors retractACMEChallenges for a dry run, so
 // the traced sequence is the one a real delete runs.
-func traceRetractACMEChallenges(ctx Context, contextName, namespace string) {
+func traceRetractACMEChallenges(ctx core.Context, contextName, namespace string) {
 	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName),
 		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
 		"--ignore-not-found", "--timeout", acmeRetractTimeout.String())...)
@@ -182,7 +185,7 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
 
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -293,7 +296,7 @@ func retractACMEChallenges(contextName, namespace string) string {
 	args := append(kubernetesContextArgs(contextName),
 		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
 		"--ignore-not-found", "--timeout", acmeRetractTimeout.String())
-	if output, deleteErr := Command("kubectl", args...).CombinedOutput(); deleteErr != nil {
+	if output, deleteErr := core.Command("kubectl", args...).CombinedOutput(); deleteErr != nil {
 		return fmt.Sprintf("deleting this namespace's cert-manager Certificates before teardown did not succeed (%s: %s); a challenge still finalizing will hold the namespace until the delete times out", deleteErr, strings.TrimSpace(string(output)))
 	}
 
@@ -329,7 +332,7 @@ func acmeCRDsAbsent(message string) bool {
 func acmeChallengesPresent(contextName, namespace string) (bool, error) {
 	args := append(kubernetesContextArgs(contextName),
 		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -362,7 +365,7 @@ func namespaceTerminationConditions(contextName, namespace string) string {
 	args = append(args, "get", "namespace", namespace, "-o",
 		`jsonpath={range .status.conditions[*]}{.type}={.status}{"\t"}{.message}{"\n"}{end}`)
 
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -423,14 +426,14 @@ func WrapHelmChartDeployerWithNamespaceEnsure(ensure NamespaceEnsurerFunc, deplo
 // kubernetesNamespaceExists dispatches to the subprocess or library path per
 // the kubectl-namespace-get execution mode (see execution_mode.go).
 func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
-	if currentExecutionMode(kubectlNamespaceGetExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlNamespaceGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryKubernetesNamespaceExists(contextName, namespace)
 	}
 	return defaultKubernetesNamespaceExists(contextName, namespace)
 }
 
 func defaultKubernetesNamespaceExists(contextName, namespace string) (bool, error) {
-	output, err := Command("kubectl", kubectlGetNamespaceArgs(contextName, namespace)...).CombinedOutput()
+	output, err := core.Command("kubectl", kubectlGetNamespaceArgs(contextName, namespace)...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

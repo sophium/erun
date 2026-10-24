@@ -6,6 +6,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +71,7 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			if err != nil {
 				return err
 			}
-			if ctx.Output == common.OutputJSON {
+			if ctx.Output == core.OutputJSON {
 				return ctx.WriteResult(result)
 			}
 			return writeResizeResult(ctx, result)
@@ -105,7 +106,7 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 // answer "would this be refused", and a stale "no leases" answer would silently
 // defeat that. Reading leases has no side effect, so forcing the real call here
 // costs nothing dry-run is meant to avoid.
-func resizeActivityLeaseLoader(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver) func(string, string, time.Time) ([]common.EnvironmentActivityLease, error) {
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver) func(string, string, time.Time) ([]common.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false
 	return func(tenant, environment string, now time.Time) ([]common.EnvironmentActivityLease, error) {
@@ -117,7 +118,7 @@ func resizeActivityLeaseLoader(ctx context.Context, commandCtx common.Context, r
 	}
 }
 
-func writeResizeResult(ctx common.Context, result common.RuntimeResizeResult) error {
+func writeResizeResult(ctx core.Context, result common.RuntimeResizeResult) error {
 	if ctx.DryRun {
 		return nil
 	}

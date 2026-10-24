@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // gitHubBypassNotice is the stderr a real `git push` to a protected branch
@@ -32,10 +35,10 @@ const gitHubBypassNotice = "remote: Bypassed rule violations for refs/heads/main
 // way to hold the report to account.
 func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 	var out bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &out, &out)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &out, &out)}
 	deps := PushWorkingTreeBranchDependencies{
-		CurrentBranch: func(Context, string) (string, error) { return "main", nil },
-		CurrentCommit: func(Context, string) (string, error) { return "abc1234", nil },
+		CurrentBranch: func(core.Context, string) (string, error) { return "main", nil },
+		CurrentCommit: func(core.Context, string) (string, error) { return "abc1234", nil },
 		RunGit: func(_ string, _ io.Writer, stderr io.Writer, args ...string) error {
 			if _, err := fmt.Fprint(stderr, gitHubBypassNotice); err != nil {
 				t.Fatalf("writing the stub push's stderr: %v", err)
@@ -66,10 +69,10 @@ func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 // ordinary push stays as quiet as it was.
 func TestPushWorkingTreeBranchStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 	var out bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &out, &out)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &out, &out)}
 	deps := PushWorkingTreeBranchDependencies{
-		CurrentBranch: func(Context, string) (string, error) { return "feature/widget", nil },
-		CurrentCommit: func(Context, string) (string, error) { return "abc1234", nil },
+		CurrentBranch: func(core.Context, string) (string, error) { return "feature/widget", nil },
+		CurrentCommit: func(core.Context, string) (string, error) { return "abc1234", nil },
 		RunGit: func(_ string, _ io.Writer, stderr io.Writer, args ...string) error {
 			if _, err := fmt.Fprint(stderr, "To github.com:sophium/erun.git\n   abc1234..def5678  feature/widget -> feature/widget\n"); err != nil {
 				t.Fatalf("writing the stub push's stderr: %v", err)
@@ -110,9 +113,9 @@ func assertBypassReported(t *testing.T, got, wantRef string) {
 // release's git commands the stderr sink a real run has. Leaving it nil is a
 // shape production never produces, and a panic on the sink would prove nothing
 // about the report this exists to check.
-func releaseBypassTestContext(out io.Writer) Context {
-	return Context{
-		Logger: NewLoggerWithWriters(VerbosityInfo, out, out),
+func releaseBypassTestContext(out io.Writer) core.Context {
+	return core.Context{
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out),
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}
@@ -146,7 +149,7 @@ func releaseBypassPushRunner(stderrText string) GitCommandRunnerFunc {
 func TestReleaseReportsAGitHubRulesetBypassOnItsBranchPush(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
-	stage := newPushReleaseStage(t.TempDir(), ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
+	stage := newPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
 
 	err := runReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(gitHubBypassNotice))
 	if err != nil {
@@ -177,7 +180,7 @@ func TestReleaseReportsAGitHubRulesetBypassOnTheVersionTagPush(t *testing.T) {
 func TestReleasePushStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
-	stage := newPushReleaseStage(t.TempDir(), ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
+	stage := newPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
 
 	ordinary := "To github.com:sophium/erun.git\n   46e01916..ae29151f  main -> main\n"
 	if err := runReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(ordinary)); err != nil {
@@ -218,7 +221,7 @@ func TestReleaseClaimPushReportsAGitHubRulesetBypass(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
 
-	sha, err := Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	sha, err := core.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("resolve the commit the claim push names: %v", err)
 	}

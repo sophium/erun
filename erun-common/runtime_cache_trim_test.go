@@ -10,12 +10,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func runtimeTestContext(dryRun bool) (Context, *bytes.Buffer) {
+func runtimeTestContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	var out bytes.Buffer
-	return Context{
-		Logger: NewLoggerWithWriters(VerbosityInfo, &out, &out),
+	return core.Context{
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &out, &out),
 		DryRun: dryRun,
 		Stdout: &out,
 		Stderr: &out,

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // TestExecAgentIsCallableWithOnlyAgentAndPrompt is the end-to-end regression
@@ -24,7 +24,7 @@ func TestExecAgentIsCallableWithOnlyAgentAndPrompt(t *testing.T) {
 	// without a real erun binary on PATH.
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{Version: "1.2.3"}, runtime)
+	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "exec_agent",

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestIdleJSONOmitsTimestampsThatWereNeverSet pins the representation the idle
@@ -27,7 +29,7 @@ import (
 func TestIdleJSONOmitsTimestampsThatWereNeverSet(t *testing.T) {
 	seen := time.Date(2026, 9, 22, 10, 30, 0, 0, time.UTC)
 	status := EnvironmentIdleStatus{
-		Policy:   EnvironmentIdlePolicy{Timeout: time.Hour},
+		Policy:   config.EnvironmentIdlePolicy{Timeout: time.Hour},
 		Markers:  []EnvironmentIdleMarker{NeverTouchedIdleMarker("ssh")},
 		Activity: map[string]EnvironmentActivitySnapshot{"ssh": {}},
 	}

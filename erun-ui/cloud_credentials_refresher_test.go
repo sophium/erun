@@ -4,27 +4,27 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // credentialRefreshTargetApp builds an app whose store holds one env of the
 // given type with the given alias attached, plus the AWS and Cloudflare
 // providers those aliases can resolve to.
-func credentialRefreshTargetApp(t *testing.T, envType eruncommon.EnvironmentType, alias string) *App {
+func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, alias string) *App {
 	t.Helper()
 	projectRoot := t.TempDir()
 	return NewApp(erunUIDeps{
 		store: stubUIStore{
-			config: &eruncommon.ERunConfig{
-				CloudProviders: []eruncommon.CloudProviderConfig{
-					{Alias: "op+123@aws", Provider: eruncommon.CloudProviderAWS, Username: "op", AccountID: "123", Profile: "op"},
-					{Alias: "op@cloudflare", Provider: eruncommon.CloudProviderCloudflare, Username: "op"},
+			config: &config.ERunConfig{
+				CloudProviders: []config.CloudProviderConfig{
+					{Alias: "op+123@aws", Provider: config.CloudProviderAWS, Username: "op", AccountID: "123", Profile: "op"},
+					{Alias: "op@cloudflare", Provider: config.CloudProviderCloudflare, Username: "op"},
 				},
 			},
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"team": {Name: "team", DefaultEnvironment: "dev"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"team/dev": {
 					Name:               "dev",
 					Type:               envType,
@@ -45,10 +45,10 @@ func credentialRefreshTargetApp(t *testing.T, envType eruncommon.EnvironmentType
 // must run for any such env too. Gating it on worktree location left local-agent
 // pods pointing at a profile nothing ever created.
 func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t *testing.T) {
-	for _, envType := range []eruncommon.EnvironmentType{
-		eruncommon.EnvironmentTypeLocalAgent,
-		eruncommon.EnvironmentTypeRemoteAgent,
-		eruncommon.EnvironmentTypeRuntime,
+	for _, envType := range []config.EnvironmentType{
+		config.EnvironmentTypeLocalAgent,
+		config.EnvironmentTypeRemoteAgent,
+		config.EnvironmentTypeRuntime,
 	} {
 		t.Run(string(envType), func(t *testing.T) {
 			app := credentialRefreshTargetApp(t, envType, "op+123@aws")
@@ -69,7 +69,7 @@ func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t 
 func TestResolveCloudCredentialsRefreshTargetSkipsWithoutAnAWSAlias(t *testing.T) {
 	for name, alias := range map[string]string{"no_alias": "", "cloudflare_alias": "op@cloudflare"} {
 		t.Run(name, func(t *testing.T) {
-			app := credentialRefreshTargetApp(t, eruncommon.EnvironmentTypeLocalAgent, alias)
+			app := credentialRefreshTargetApp(t, config.EnvironmentTypeLocalAgent, alias)
 			if _, _, ok := app.resolveCloudCredentialsRefreshTarget(uiSelection{Tenant: "team", Environment: "dev"}); ok {
 				t.Fatalf("expected alias %q to leave the refresher stopped", alias)
 			}

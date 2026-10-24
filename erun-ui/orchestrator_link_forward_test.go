@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // orchestratorLinkForwardTestApp wires the same frs/dev remote-agent env
@@ -17,8 +19,8 @@ import (
 // --reconnect` and how its outcome surfaced -- without a live cluster.
 func orchestratorLinkForwardTestApp(
 	t *testing.T,
-	reconnect func(context.Context, eruncommon.OpenResult, func(string)) error,
-	readRunState func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	reconnect func(context.Context, config.OpenResult, func(string)) error,
+	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	home := t.TempDir()
@@ -56,8 +58,8 @@ func orchestratorLinkForwardTestApp(
 // countingReconnect returns a reconnectMCP stub that records every call
 // ("<tenant>/<environment>") and answers with err, so a test can assert both
 // that the ensure ran and what its outcome was.
-func countingReconnect(mu *sync.Mutex, calls *[]string, err error) func(context.Context, eruncommon.OpenResult, func(string)) error {
-	return func(_ context.Context, result eruncommon.OpenResult, _ func(string)) error {
+func countingReconnect(mu *sync.Mutex, calls *[]string, err error) func(context.Context, config.OpenResult, func(string)) error {
+	return func(_ context.Context, result config.OpenResult, _ func(string)) error {
 		mu.Lock()
 		*calls = append(*calls, result.Tenant+"/"+result.Environment)
 		mu.Unlock()
@@ -157,10 +159,10 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 // environment reported as stopped, not failed or running.
 func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 	app, emits := orchestratorLinkForwardTestApp(t,
-		func(context.Context, eruncommon.OpenResult, func(string)) error {
+		func(context.Context, config.OpenResult, func(string)) error {
 			return errors.New("frs/dev is stopped, and a session reconnect does not start it; run `erun open frs dev` to start it again")
 		},
-		func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0}, nil
 		},
 	)
@@ -186,7 +188,7 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 // entry pointed at nothing with no clue why.
 func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 	app, emits := orchestratorLinkForwardTestApp(t,
-		func(context.Context, eruncommon.OpenResult, func(string)) error {
+		func(context.Context, config.OpenResult, func(string)) error {
 			return errors.New("timed out waiting for MCP port-forward")
 		},
 		nil,

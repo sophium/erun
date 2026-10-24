@@ -3,6 +3,10 @@ package eruncommon
 import (
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // EnvironmentLifecycleState is the environment read model's single resolved
@@ -184,7 +188,7 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (ListEnvironmentResult, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
 		return ListEnvironmentResult{}, err
 	}
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
@@ -196,7 +200,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 		return ListEnvironmentResult{}, err
 	}
 	effective, effectiveErr := ResolveOpen(store, OpenParams{Tenant: tenant, Environment: environment})
-	portAllocations, err := ResolveAllEnvironmentLocalPorts(store)
+	portAllocations, err := config.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListEnvironmentResult{}, err
 	}
@@ -209,10 +213,10 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 // doc comment), and, on a real (non-dry-run) call, a doctor deploy
 // diagnosis, then assembles them. Every piece is an existing resolver; this
 // function only calls them and hands the results to AssembleEnvironmentReadModel.
-func ResolveEnvironmentReadModel(ctx Context, store ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
+func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {
 		return EnvironmentReadModel{}, err
 	}
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // These cover the join orchestratorInfoFor performs against the
@@ -13,7 +13,7 @@ import (
 // the two sources the hover card renders without collecting anything new.
 
 func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
-	envs := []eruncommon.OrchestratorEnvConfig{
+	envs := []config.OrchestratorEnvConfig{
 		{Tenant: "petios", Environment: "rihards-review"},
 		{Tenant: "erun", Environment: "local-ideas"},
 	}
@@ -39,7 +39,7 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 
 func TestEnvInfosDistinguishesOutageFromIdleAndUnobserved(t *testing.T) {
 	key := selectionKey(uiSelection{Tenant: "frs", Environment: "dev"})
-	envs := []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
+	envs := []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
 
 	outage := envInfos(envs, map[string]environmentActivityState{key: {outage: true}}, nil)
 	if outage[0].Activity == nil || !outage[0].Activity.Outage {
@@ -58,7 +58,7 @@ func TestEnvInfosDistinguishesOutageFromIdleAndUnobserved(t *testing.T) {
 }
 
 func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
-	envs := []eruncommon.OrchestratorEnvConfig{
+	envs := []config.OrchestratorEnvConfig{
 		{Tenant: "petios", Environment: "rihards-review"},
 		{Tenant: "erun", Environment: "local-ideas"},
 	}

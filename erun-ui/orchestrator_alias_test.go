@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // orchestratorAliasTestApp is orchestratorTestApp with one erun-type cloud
@@ -16,9 +18,9 @@ func orchestratorAliasTestApp(t *testing.T) *App {
 	t.Helper()
 	app := orchestratorTestApp(t)
 	store := app.deps.store.(stubUIStore)
-	store.config.CloudProviders = []eruncommon.CloudProviderConfig{
-		{Alias: "erun+erunpaas.com@erun", Provider: eruncommon.CloudProviderERun},
-		{Alias: "aws-prod", Provider: eruncommon.CloudProviderAWS},
+	store.config.CloudProviders = []configpkg.CloudProviderConfig{
+		{Alias: "erun+erunpaas.com@erun", Provider: configpkg.CloudProviderERun},
+		{Alias: "aws-prod", Provider: configpkg.CloudProviderAWS},
 	}
 	return app
 }
@@ -97,7 +99,7 @@ func mustUpdateOrchestrator(t *testing.T, app *App, id, name string, envs []orch
 // made inside it.
 func mustSetOrchestratorAlias(t *testing.T, app *App, id, alias string) {
 	t.Helper()
-	if _, err := eruncommon.SetOrchestratorAlias(eruncommon.Context{}, app.deps.store, eruncommon.SetOrchestratorAliasParams{
+	if _, err := eruncommon.SetOrchestratorAlias(core.Context{}, app.deps.store, eruncommon.SetOrchestratorAliasParams{
 		OrchestratorID: id,
 		Alias:          alias,
 	}); err != nil {
@@ -105,7 +107,7 @@ func mustSetOrchestratorAlias(t *testing.T, app *App, id, alias string) {
 	}
 }
 
-func mustLoadRootConfig(t *testing.T, app *App) eruncommon.ERunConfig {
+func mustLoadRootConfig(t *testing.T, app *App) configpkg.ERunConfig {
 	t.Helper()
 	config, _, err := app.deps.store.LoadERunConfig()
 	if err != nil {

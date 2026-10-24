@@ -9,6 +9,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -118,7 +120,7 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params c
 	return err
 }
 
-func takeLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
+func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
 	if !environmentTargetsItself() {
 		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -218,7 +220,7 @@ func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, 
 	return fmt.Sprintf("lease not held: %s", trimmed)
 }
 
-func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
+func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	if !environmentTargetsItself() {
 		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
@@ -280,7 +282,7 @@ func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, 
 	return writeActivityLeases(ctx, leases, time.Now(), jsonOutput)
 }
 
-func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
+func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
 	if !environmentTargetsItself() {
 		return listLeasesInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment)
 	}
@@ -295,7 +297,7 @@ func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen Open
 	return leases, true, nil
 }
 
-func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
+func writeActivityLeases(ctx core.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
 	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -410,13 +412,13 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err != nil {
 		return err
 	}
-	if err := recordActivityIf(interactiveSSH, tenant, environment, common.ActivityKindSSH); err != nil {
+	if err := recordActivityIf(interactiveSSH, tenant, environment, config.ActivityKindSSH); err != nil {
 		return err
 	}
 	return writeActivitySampleResult(commandContext(cmd), result, jsonOutput)
 }
 
-func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult, jsonOutput bool) error {
+func writeActivitySampleResult(ctx core.Context, result common.ResidentActivityResult, jsonOutput bool) error {
 	if commandWantsJSON(ctx, jsonOutput) {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}

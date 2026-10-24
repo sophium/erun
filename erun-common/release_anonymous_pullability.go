@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // moduleReferencedImagePattern matches an erun image reference a Terraform
@@ -210,7 +212,7 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 // image does not block every release until the sophium org's package
 // visibility changes -- unless it turns out to already be pullable, in which
 // case the baseline entry itself is the defect (see verifyImageAnonymouslyPullable).
-func verifyModuleReferencedImagesAnonymouslyPullable(ctx Context, projectRoot string, execution BuildExecutionSpec, probe anonymousPullProbeFunc) error {
+func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRoot string, execution BuildExecutionSpec, probe anonymousPullProbeFunc) error {
 	names, err := discoverModuleReferencedImageNames(filepath.Join(strings.TrimSpace(projectRoot), "erun-devops", "terraform-erun"))
 	if err != nil {
 		return fmt.Errorf("scan terraform modules for image references: %w", err)
@@ -242,7 +244,7 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx Context, projectRoot st
 // A baselined name that probes as pullable fails the release rather than
 // passing silently -- see anonymousPullabilityBaseline's doc comment for why
 // this enforcement has to live here and not in a unit test.
-func verifyImageAnonymouslyPullable(ctx Context, name string, image DockerImageReference, probe anonymousPullProbeFunc) error {
+func verifyImageAnonymouslyPullable(ctx core.Context, name string, image DockerImageReference, probe anonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
 	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
 		return nil

@@ -3,38 +3,40 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // openGatewayStore is an OpenStore whose root config carries a gateway catalog,
 // the way an operator's erun-level OpenRouter settings do.
 type openGatewayStore struct {
-	catalog  *OpenRouterConfig
-	claude   EnvironmentClaudeConfig
+	catalog  *config.OpenRouterConfig
+	claude   config.EnvironmentClaudeConfig
 	repoPath string
 }
 
-func (s openGatewayStore) LoadERunConfig() (ERunConfig, string, error) {
-	return ERunConfig{DefaultTenant: "team", OpenRouter: s.catalog}, "", nil
+func (s openGatewayStore) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{DefaultTenant: "team", OpenRouter: s.catalog}, "", nil
 }
 
-func (s openGatewayStore) LoadTenantConfig(name string) (TenantConfig, string, error) {
-	return TenantConfig{Name: name, DefaultEnvironment: "dev"}, "", nil
+func (s openGatewayStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
+	return config.TenantConfig{Name: name, DefaultEnvironment: "dev"}, "", nil
 }
 
-func (s openGatewayStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+func (s openGatewayStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
 	return s.env(environment), "", nil
 }
 
-func (s openGatewayStore) ListTenantConfigs() ([]TenantConfig, error) {
-	return []TenantConfig{{Name: "team", DefaultEnvironment: "dev"}}, nil
+func (s openGatewayStore) ListTenantConfigs() ([]config.TenantConfig, error) {
+	return []config.TenantConfig{{Name: "team", DefaultEnvironment: "dev"}}, nil
 }
 
-func (s openGatewayStore) ListEnvConfigs(string) ([]EnvConfig, error) {
-	return []EnvConfig{s.env("dev")}, nil
+func (s openGatewayStore) ListEnvConfigs(string) ([]config.EnvConfig, error) {
+	return []config.EnvConfig{s.env("dev")}, nil
 }
 
-func (s openGatewayStore) env(name string) EnvConfig {
-	return EnvConfig{Name: name, LocalRepoPath: s.repoPath, KubernetesContext: "cluster", Claude: s.claude}
+func (s openGatewayStore) env(name string) config.EnvConfig {
+	return config.EnvConfig{Name: name, LocalRepoPath: s.repoPath, KubernetesContext: "cluster", Claude: s.claude}
 }
 
 // TestOpenAILaunchHonoursTheEnvironmentsGateway is the reported flow from the
@@ -44,23 +46,23 @@ func (s openGatewayStore) env(name string) EnvConfig {
 // Anthropic default with Remote Control (which a gateway credential cannot
 // pair), and per-environment gateway choices changed nothing at all.
 func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
-	catalog := &OpenRouterConfig{
+	catalog := &config.OpenRouterConfig{
 		BaseURL:      "https://gateway.example/api",
 		DefaultModel: "vendor/model-x",
-		Models:       []OpenRouterModel{{ID: "vendor/model-x", Context: 200000}},
+		Models:       []config.OpenRouterModel{{ID: "vendor/model-x", Context: 200000}},
 	}
 	on, off := true, false
 	low, opus := "low", "opus"
 	cases := []struct {
 		name          string
-		claude        EnvironmentClaudeConfig
+		claude        config.EnvironmentClaudeConfig
 		model         string
 		remoteControl bool
 		context       bool
 	}{
-		{"inherits the gateway", EnvironmentClaudeConfig{Effort: &low}, "vendor/model-x", false, true},
-		{"selects the gateway", EnvironmentClaudeConfig{UseGateway: &on, Effort: &low}, "vendor/model-x", false, true},
-		{"left the gateway", EnvironmentClaudeConfig{UseGateway: &off, Effort: &low, DefaultModel: &opus}, "opus", true, false},
+		{"inherits the gateway", config.EnvironmentClaudeConfig{Effort: &low}, "vendor/model-x", false, true},
+		{"selects the gateway", config.EnvironmentClaudeConfig{UseGateway: &on, Effort: &low}, "vendor/model-x", false, true},
+		{"left the gateway", config.EnvironmentClaudeConfig{UseGateway: &off, Effort: &low, DefaultModel: &opus}, "opus", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // OIDCDiscovery is the subset of an OIDC provider's
@@ -102,7 +104,7 @@ func isERunInvalidScopeError(err error) bool {
 // defaultFetchPlatformInfo delegates to PlatformClient — the same
 // unauthenticated GET /v1/platform call a caller makes once it has a
 // PlatformClient of its own, so the two never drift.
-func defaultFetchPlatformInfo(ctx Context, apiURL string) (PlatformInfo, error) {
+func defaultFetchPlatformInfo(ctx core.Context, apiURL string) (PlatformInfo, error) {
 	target := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	ctx.Trace("GET " + target + "/v1/platform")
 	if ctx.DryRun {
@@ -115,7 +117,7 @@ func defaultFetchPlatformInfo(ctx Context, apiURL string) (PlatformInfo, error) 
 	return info, nil
 }
 
-func defaultFetchOIDCDiscovery(ctx Context, issuer string) (OIDCDiscovery, error) {
+func defaultFetchOIDCDiscovery(ctx core.Context, issuer string) (OIDCDiscovery, error) {
 	target := strings.TrimRight(strings.TrimSpace(issuer), "/") + "/.well-known/openid-configuration"
 	ctx.Trace("GET " + target)
 	if ctx.DryRun {
@@ -128,7 +130,7 @@ func defaultFetchOIDCDiscovery(ctx Context, issuer string) (OIDCDiscovery, error
 	return discovery, nil
 }
 
-func defaultStartERunDeviceAuthorization(ctx Context, discovery OIDCDiscovery, clientID, scope string) (ERunDeviceAuthorization, error) {
+func defaultStartERunDeviceAuthorization(ctx core.Context, discovery OIDCDiscovery, clientID, scope string) (ERunDeviceAuthorization, error) {
 	if strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) == "" {
 		return ERunDeviceAuthorization{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint", discovery.Issuer)
 	}
@@ -169,7 +171,7 @@ func defaultStartERunDeviceAuthorization(ctx Context, discovery OIDCDiscovery, c
 // completes, honoring RFC 8628's authorization_pending/slow_down/expired_token
 // responses. auth.Interval and auth.ExpiresIn are read directly (not
 // re-defaulted here) so a caller — including a test — controls the pacing.
-func pollERunDeviceToken(ctx Context, discovery OIDCDiscovery, clientID string, auth ERunDeviceAuthorization) (ERunTokens, error) {
+func pollERunDeviceToken(ctx core.Context, discovery OIDCDiscovery, clientID string, auth ERunDeviceAuthorization) (ERunTokens, error) {
 	if ctx.DryRun {
 		return ERunTokens{}, nil
 	}
@@ -230,7 +232,7 @@ func exchangeERunDeviceCode(tokenEndpoint, clientID, deviceCode string) (ERunTok
 // scope — a tenant's own BYO IdP — is retried once without it, so an identity
 // minted somewhere erun's own IdP is not still authenticates as it would have
 // before this grant existed.
-func defaultClientCredentialsERunTokens(ctx Context, discovery OIDCDiscovery, clientID string, clientSecret string) (ERunTokens, error) {
+func defaultClientCredentialsERunTokens(ctx core.Context, discovery OIDCDiscovery, clientID string, clientSecret string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.TokenEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise a token endpoint", discovery.Issuer)
 	}
@@ -271,7 +273,7 @@ func postClientCredentialsForm(tokenEndpoint, clientID, clientSecret, scope stri
 	}, nil
 }
 
-func defaultRefreshERunTokens(ctx Context, discovery OIDCDiscovery, clientID string, refreshToken string) (ERunTokens, error) {
+func defaultRefreshERunTokens(ctx core.Context, discovery OIDCDiscovery, clientID string, refreshToken string) (ERunTokens, error) {
 	ctx.Trace("POST " + discovery.TokenEndpoint + " (refresh_token grant)")
 	if ctx.DryRun {
 		return ERunTokens{}, nil
@@ -293,7 +295,7 @@ func defaultRefreshERunTokens(ctx Context, discovery OIDCDiscovery, clientID str
 // a loopback listener for the redirect, attempts to launch the operator's
 // default browser at the authorize URL, and exchanges the returned code for
 // tokens.
-func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
+func runERunAuthorizationCodeLogin(ctx core.Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.AuthorizationEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise an authorization endpoint", discovery.Issuer)
 	}
@@ -349,7 +351,7 @@ type erunCallbackResult struct {
 // the token exchange completes, is what stops it.
 // timeout is a parameter rather than a read of the constant so the expiry
 // branch is reachable from a test; production passes erunLoginCallbackTimeout.
-func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, authURL string, timeout time.Duration) (string, error) {
+func awaitERunOIDCCallback(ctx core.Context, listener net.Listener, state string, authURL string, timeout time.Duration) (string, error) {
 	resultCh := make(chan erunCallbackResult, 1)
 	server := &http.Server{Handler: erunCallbackHandler(state, resultCh)}
 	go func() { _ = server.Serve(listener) }()
@@ -394,13 +396,13 @@ func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, aut
 // (erun-cli/cmd/open_ide.go): open on darwin, xdg-open on linux, and cmd's
 // start verb on windows (the empty title argument keeps cmd from parsing the
 // URL itself as the window title).
-func erunLoginBrowserCommand(hostOS HostOS, url string) (string, []string, error) {
+func erunLoginBrowserCommand(hostOS core.HostOS, url string) (string, []string, error) {
 	switch hostOS {
-	case HostOSDarwin:
+	case core.HostOSDarwin:
 		return "open", []string{url}, nil
-	case HostOSLinux:
+	case core.HostOSLinux:
 		return "xdg-open", []string{url}, nil
-	case HostOSWindows:
+	case core.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", url}, nil
 	default:
 		return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
@@ -413,11 +415,11 @@ func erunLoginBrowserCommand(hostOS HostOS, url string) (string, []string, error
 // follows. Uses the same ERUN_<NAME>_BIN override Command already wires, so
 // a test can redirect the opener to a stub without a live desktop session.
 func openERunLoginBrowser(url string) error {
-	executable, args, err := erunLoginBrowserCommand(DetectHost().OS, url)
+	executable, args, err := erunLoginBrowserCommand(core.DetectHost().OS, url)
 	if err != nil {
 		return err
 	}
-	cmd := Command(executable, args...)
+	cmd := core.Command(executable, args...)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch %s: %w", executable, err)
 	}

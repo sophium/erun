@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"errors"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestLoginCloudProviderAliasForce locks in the contract the desktop's
@@ -13,25 +16,25 @@ import (
 // just impolite, structurally impossible, since the desktop has no other way
 // to reach the provider's login flow.
 func TestLoginCloudProviderAliasForce(t *testing.T) {
-	provider := CloudProviderConfig{Alias: "me+111111111111@aws", Provider: CloudProviderAWS, Profile: "me+111111111111@aws"}
-	store := stubCloudContextStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{provider}}}
+	provider := config.CloudProviderConfig{Alias: "me+111111111111@aws", Provider: config.CloudProviderAWS, Profile: "me+111111111111@aws"}
+	store := stubCloudContextStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
 
 	t.Run("without force, an active session short-circuits and never re-runs the login flow", func(t *testing.T) {
 		loginCalled := false
 		deps := CloudDependencies{
-			CheckAWSStatus: func(Context, CloudProviderConfig) CloudProviderStatus {
-				return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+			CheckAWSStatus: func(core.Context, config.CloudProviderConfig) CloudProviderStatus {
+				return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
-			RunAWSLogin: func(Context, string) error {
+			RunAWSLogin: func(core.Context, string) error {
 				loginCalled = true
 				return nil
 			},
 		}
-		status, err := LoginCloudProviderAlias(Context{}, store, CloudLoginParams{Alias: provider.Alias}, deps)
+		status, err := LoginCloudProviderAlias(core.Context{}, store, CloudLoginParams{Alias: provider.Alias}, deps)
 		if err != nil {
 			t.Fatalf("LoginCloudProviderAlias: %v", err)
 		}
-		if status.Status != CloudTokenStatusActive {
+		if status.Status != config.CloudTokenStatusActive {
 			t.Fatalf("Status = %q, want active", status.Status)
 		}
 		if loginCalled {
@@ -42,19 +45,19 @@ func TestLoginCloudProviderAliasForce(t *testing.T) {
 	t.Run("with force, an active session still re-runs the login flow", func(t *testing.T) {
 		loginCalled := false
 		deps := CloudDependencies{
-			CheckAWSStatus: func(Context, CloudProviderConfig) CloudProviderStatus {
-				return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+			CheckAWSStatus: func(core.Context, config.CloudProviderConfig) CloudProviderStatus {
+				return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
-			RunAWSLogin: func(Context, string) error {
+			RunAWSLogin: func(core.Context, string) error {
 				loginCalled = true
 				return nil
 			},
 		}
-		status, err := LoginCloudProviderAlias(Context{}, store, CloudLoginParams{Alias: provider.Alias, Force: true}, deps)
+		status, err := LoginCloudProviderAlias(core.Context{}, store, CloudLoginParams{Alias: provider.Alias, Force: true}, deps)
 		if err != nil {
 			t.Fatalf("LoginCloudProviderAlias: %v", err)
 		}
-		if status.Status != CloudTokenStatusActive {
+		if status.Status != config.CloudTokenStatusActive {
 			t.Fatalf("Status = %q, want active", status.Status)
 		}
 		if !loginCalled {
@@ -64,14 +67,14 @@ func TestLoginCloudProviderAliasForce(t *testing.T) {
 
 	t.Run("force does not delete anything up front, so a failed re-login leaves the prior session active", func(t *testing.T) {
 		deps := CloudDependencies{
-			CheckAWSStatus: func(Context, CloudProviderConfig) CloudProviderStatus {
-				return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+			CheckAWSStatus: func(core.Context, config.CloudProviderConfig) CloudProviderStatus {
+				return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
-			RunAWSLogin: func(Context, string) error {
+			RunAWSLogin: func(core.Context, string) error {
 				return errors.New("aws sso login: cancelled")
 			},
 		}
-		_, err := LoginCloudProviderAlias(Context{}, store, CloudLoginParams{Alias: provider.Alias, Force: true}, deps)
+		_, err := LoginCloudProviderAlias(core.Context{}, store, CloudLoginParams{Alias: provider.Alias, Force: true}, deps)
 		if err == nil {
 			t.Fatal("expected the failed re-login to surface an error")
 		}
@@ -81,7 +84,7 @@ func TestLoginCloudProviderAliasForce(t *testing.T) {
 		// so a cancelled or failed attempt leaves the operator signed in as
 		// they were, rather than signed out with nothing to show for it.
 		status := CloudProviderTokenStatus(provider, deps)
-		if status.Status != CloudTokenStatusActive {
+		if status.Status != config.CloudTokenStatusActive {
 			t.Fatalf("Status after a failed switch = %q, want the prior session still active", status.Status)
 		}
 	})

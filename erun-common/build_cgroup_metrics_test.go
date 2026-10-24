@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func normalBuildCgroupExecOutputFixture() string {
@@ -20,57 +22,57 @@ func normalBuildCgroupExecOutputFixture() string {
 }
 
 func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
-	counters, ok := parseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
+	counters, ok := core.ParseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
 	if !ok {
 		t.Fatalf("expected a readable normal fixture")
 	}
-	if counters.usageUsec != 12345678 {
-		t.Errorf("usageUsec = %d, want 12345678", counters.usageUsec)
+	if counters.UsageUsec != 12345678 {
+		t.Errorf("usageUsec = %d, want 12345678", counters.UsageUsec)
 	}
-	if counters.periods != 200 || counters.throttledPeriods != 40 {
-		t.Errorf("periods = %d/%d, want 200/40", counters.throttledPeriods, counters.periods)
+	if counters.Periods != 200 || counters.ThrottledPeriods != 40 {
+		t.Errorf("periods = %d/%d, want 200/40", counters.ThrottledPeriods, counters.Periods)
 	}
-	if counters.throttledUsec != 987654 {
-		t.Errorf("throttledUsec = %d, want 987654", counters.throttledUsec)
+	if counters.ThrottledUsec != 987654 {
+		t.Errorf("throttledUsec = %d, want 987654", counters.ThrottledUsec)
 	}
-	if counters.quotaCores != 4 {
-		t.Errorf("quotaCores = %v, want 4", counters.quotaCores)
+	if counters.QuotaCores != 4 {
+		t.Errorf("quotaCores = %v, want 4", counters.QuotaCores)
 	}
 }
 
 func TestParseBuildCgroupExecOutputNormalIOAndPeak(t *testing.T) {
-	counters, ok := parseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
+	counters, ok := core.ParseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
 	if !ok {
 		t.Fatalf("expected a readable normal fixture")
 	}
-	if counters.ioReadBytes != 1048576+512 || counters.ioWriteBytes != 2097152+1024 {
-		t.Errorf("io = %d/%d, want summed across both device lines", counters.ioReadBytes, counters.ioWriteBytes)
+	if counters.IoReadBytes != 1048576+512 || counters.IoWriteBytes != 2097152+1024 {
+		t.Errorf("io = %d/%d, want summed across both device lines", counters.IoReadBytes, counters.IoWriteBytes)
 	}
-	if !counters.peakObserved || counters.peakMemoryBytes != 104857600 {
-		t.Errorf("peak = observed=%v bytes=%d, want observed=true bytes=104857600", counters.peakObserved, counters.peakMemoryBytes)
+	if !counters.PeakObserved || counters.PeakMemoryBytes != 104857600 {
+		t.Errorf("peak = observed=%v bytes=%d, want observed=true bytes=104857600", counters.PeakObserved, counters.PeakMemoryBytes)
 	}
 }
 
 func TestParseBuildCgroupExecOutputUnlimitedQuota(t *testing.T) {
 	output := "usage_usec=500\nnr_periods=1\nnr_throttled=0\nthrottled_usec=0\ncpu_max=max 100000\n"
-	counters, ok := parseBuildCgroupExecOutput(output)
+	counters, ok := core.ParseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable")
 	}
-	if counters.quotaCores != 0 {
-		t.Errorf("quotaCores = %v, want 0 for an unlimited cgroup.max", counters.quotaCores)
+	if counters.QuotaCores != 0 {
+		t.Errorf("quotaCores = %v, want 0 for an unlimited cgroup.max", counters.QuotaCores)
 	}
 }
 
 func TestParseBuildCgroupExecOutputEmpty(t *testing.T) {
-	if _, ok := parseBuildCgroupExecOutput(""); ok {
+	if _, ok := core.ParseBuildCgroupExecOutput(""); ok {
 		t.Fatalf("expected empty output (e.g. a failed exec) to be unreadable")
 	}
 }
 
 func TestParseBuildCgroupExecOutputMissingUsageUsec(t *testing.T) {
 	output := "nr_periods=1\nnr_throttled=0\n"
-	if _, ok := parseBuildCgroupExecOutput(output); ok {
+	if _, ok := core.ParseBuildCgroupExecOutput(output); ok {
 		t.Fatalf("expected output with no usage_usec key to be unreadable")
 	}
 }
@@ -81,42 +83,42 @@ func TestParseBuildCgroupExecOutputMalformedIOStatIsSkippedNotFatal(t *testing.T
 		"garbage line with no equals signs\n" +
 		"8:0 rbytes=notanumber wbytes=1024\n" +
 		"io_stat_end\n"
-	counters, ok := parseBuildCgroupExecOutput(output)
+	counters, ok := core.ParseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable despite malformed io.stat")
 	}
-	if counters.ioReadBytes != 0 {
-		t.Errorf("ioReadBytes = %d, want 0 for an unparseable rbytes value", counters.ioReadBytes)
+	if counters.IoReadBytes != 0 {
+		t.Errorf("ioReadBytes = %d, want 0 for an unparseable rbytes value", counters.IoReadBytes)
 	}
-	if counters.ioWriteBytes != 1024 {
-		t.Errorf("ioWriteBytes = %d, want 1024 (the one parseable field)", counters.ioWriteBytes)
+	if counters.IoWriteBytes != 1024 {
+		t.Errorf("ioWriteBytes = %d, want 1024 (the one parseable field)", counters.IoWriteBytes)
 	}
 }
 
 func TestParseBuildCgroupExecOutputMissingMemoryPeakIsUnobserved(t *testing.T) {
 	output := "usage_usec=1\nnr_periods=1\nnr_throttled=0\n"
-	counters, ok := parseBuildCgroupExecOutput(output)
+	counters, ok := core.ParseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable")
 	}
-	if counters.peakObserved {
+	if counters.PeakObserved {
 		t.Errorf("expected peakObserved=false when memory_peak is absent from the output")
 	}
 }
 
 func TestParseBuildCgroupExecOutputMissingIOStatMarkersYieldsZero(t *testing.T) {
 	output := "usage_usec=1\nnr_periods=1\nnr_throttled=0\n"
-	counters, ok := parseBuildCgroupExecOutput(output)
+	counters, ok := core.ParseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable")
 	}
-	if counters.ioReadBytes != 0 || counters.ioWriteBytes != 0 {
-		t.Errorf("io = %d/%d, want 0/0 with no io_stat markers present", counters.ioReadBytes, counters.ioWriteBytes)
+	if counters.IoReadBytes != 0 || counters.IoWriteBytes != 0 {
+		t.Errorf("io = %d/%d, want 0/0 with no io_stat markers present", counters.IoReadBytes, counters.IoWriteBytes)
 	}
 }
 
 func TestBuildCgroupReadScriptEmbedsTheResolvedBaseDirectory(t *testing.T) {
-	script := buildCgroupReadScript("/sys/fs/cgroup/docker/erun-build-cpu-cap-my-pod")
+	script := core.BuildCgroupReadScript("/sys/fs/cgroup/docker/erun-build-cpu-cap-my-pod")
 	if !strings.Contains(script, `dir="/sys/fs/cgroup/docker/erun-build-cpu-cap-my-pod"`) {
 		t.Errorf("expected the script to embed the resolved base dir, got:\n%s", script)
 	}
@@ -126,36 +128,36 @@ func TestBuildCgroupReadScriptEmbedsTheResolvedBaseDirectory(t *testing.T) {
 }
 
 func TestBuildCgroupMetricsFromSnapshotsNotApplicableOutsideRuntimePod(t *testing.T) {
-	metrics := buildCgroupMetricsFromSnapshots(buildCgroupSnapshot{}, buildCgroupSnapshot{}, time.Second)
+	metrics := core.BuildCgroupMetricsFromSnapshots(core.BuildCgroupSnapshot{}, core.BuildCgroupSnapshot{}, time.Second)
 	if metrics != nil {
 		t.Fatalf("expected nil when the before snapshot was not applicable, got %+v", metrics)
 	}
 }
 
 func TestBuildCgroupMetricsFromSnapshotsUnavailableWhenUnreadable(t *testing.T) {
-	before := buildCgroupSnapshot{applicable: true, ok: false}
-	after := buildCgroupSnapshot{applicable: true, ok: true}
-	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
+	before := core.BuildCgroupSnapshot{Applicable: true, Ok: false}
+	after := core.BuildCgroupSnapshot{Applicable: true, Ok: true}
+	metrics := core.BuildCgroupMetricsFromSnapshots(before, after, time.Second)
 	if metrics == nil || metrics.Available || metrics.Unavailable == "" {
 		t.Fatalf("expected Available=false with a reason, got %+v", metrics)
 	}
 }
 
-func buildCgroupDeltaAndUtilizationFixture() (buildCgroupSnapshot, buildCgroupSnapshot) {
-	before := buildCgroupSnapshot{applicable: true, ok: true, counters: buildCgroupCounters{
-		usageUsec: 1_000_000, periods: 10, throttledPeriods: 1, throttledUsec: 100_000,
-		ioReadBytes: 1000, ioWriteBytes: 2000,
+func buildCgroupDeltaAndUtilizationFixture() (core.BuildCgroupSnapshot, core.BuildCgroupSnapshot) {
+	before := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{
+		UsageUsec: 1_000_000, Periods: 10, ThrottledPeriods: 1, ThrottledUsec: 100_000,
+		IoReadBytes: 1000, IoWriteBytes: 2000,
 	}}
-	after := buildCgroupSnapshot{applicable: true, ok: true, counters: buildCgroupCounters{
-		usageUsec: 3_000_000, periods: 20, throttledPeriods: 5, throttledUsec: 300_000,
-		ioReadBytes: 1500, ioWriteBytes: 2500, quotaCores: 2, peakMemoryBytes: 555, peakObserved: true,
+	after := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{
+		UsageUsec: 3_000_000, Periods: 20, ThrottledPeriods: 5, ThrottledUsec: 300_000,
+		IoReadBytes: 1500, IoWriteBytes: 2500, QuotaCores: 2, PeakMemoryBytes: 555, PeakObserved: true,
 	}}
 	return before, after
 }
 
 func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.T) {
 	before, after := buildCgroupDeltaAndUtilizationFixture()
-	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
+	metrics := core.BuildCgroupMetricsFromSnapshots(before, after, time.Second)
 	if metrics == nil || !metrics.Available {
 		t.Fatalf("expected an available reading, got %+v", metrics)
 	}
@@ -175,7 +177,7 @@ func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.
 
 func TestBuildCgroupMetricsFromSnapshotsComputesIOAndPeakDeltas(t *testing.T) {
 	before, after := buildCgroupDeltaAndUtilizationFixture()
-	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
+	metrics := core.BuildCgroupMetricsFromSnapshots(before, after, time.Second)
 	if metrics == nil || !metrics.Available {
 		t.Fatalf("expected an available reading, got %+v", metrics)
 	}
@@ -190,9 +192,9 @@ func TestBuildCgroupMetricsFromSnapshotsComputesIOAndPeakDeltas(t *testing.T) {
 func TestBuildCgroupMetricsFromSnapshotsClampsNegativeDeltaToZero(t *testing.T) {
 	// Simulates the cgroup being recreated between samples (e.g. a pod
 	// restart mid-build): counters go backwards rather than forwards.
-	before := buildCgroupSnapshot{applicable: true, ok: true, counters: buildCgroupCounters{usageUsec: 5_000_000, periods: 50}}
-	after := buildCgroupSnapshot{applicable: true, ok: true, counters: buildCgroupCounters{usageUsec: 1_000_000, periods: 10}}
-	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
+	before := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{UsageUsec: 5_000_000, Periods: 50}}
+	after := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{UsageUsec: 1_000_000, Periods: 10}}
+	metrics := core.BuildCgroupMetricsFromSnapshots(before, after, time.Second)
 	if metrics.CPUSeconds != 0 {
 		t.Errorf("CPUSeconds = %v, want 0 when the counter went backwards", metrics.CPUSeconds)
 	}
@@ -202,16 +204,16 @@ func TestBuildCgroupMetricsFromSnapshotsClampsNegativeDeltaToZero(t *testing.T) 
 }
 
 func TestBuildCgroupSummaryOmitsUnavailableAndNil(t *testing.T) {
-	if got := buildCgroupSummary(nil); got != "" {
+	if got := core.BuildCgroupSummary(nil); got != "" {
 		t.Errorf("nil metrics: got %q, want empty", got)
 	}
-	if got := buildCgroupSummary(&BuildCgroupMetrics{Available: false, Unavailable: "no cgroup"}); got != "" {
+	if got := core.BuildCgroupSummary(&core.BuildCgroupMetrics{Available: false, Unavailable: "no cgroup"}); got != "" {
 		t.Errorf("unavailable metrics: got %q, want empty", got)
 	}
 }
 
 func TestBuildCgroupSummaryIncludesThrottlingWhenPresent(t *testing.T) {
-	summary := buildCgroupSummary(&BuildCgroupMetrics{
+	summary := core.BuildCgroupSummary(&core.BuildCgroupMetrics{
 		Available: true, CPUSeconds: 12.3, CPUPercentOfQuota: 87, ThrottledPeriods: 9, TotalPeriods: 65,
 	})
 	for _, want := range []string{"cpu=12.3s", "87% of quota", "throttled 9/65 periods"} {

@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func normalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc) (DockerStore, ProjectFinderFunc, BuildContextResolverFunc, NowFunc) {
 	if store == nil {
-		store = ConfigStore{}
+		store = config.ConfigStore{}
 	}
 	if findProjectRoot == nil {
-		findProjectRoot = FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	if resolveBuildContext == nil {
 		resolveBuildContext = ResolveDockerBuildContext
@@ -123,7 +125,7 @@ func resolveConventionDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir, pr
 // module — a misconfigured override fails loudly rather than silently falling
 // back to convention.
 func configuredDockerDir(projectRoot string) (string, bool, error) {
-	paths, err := loadProjectPaths(projectRoot)
+	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -135,7 +137,7 @@ func configuredDockerDir(projectRoot string) (string, bool, error) {
 // declares one or more (see resolveProjectComponent), otherwise the unchanged
 // paths.docker override via configuredDockerDir.
 func resolveComponentAwareDockerDir(projectRoot, selectedComponent string) (string, bool, error) {
-	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, err
 	}
@@ -146,7 +148,7 @@ func resolveComponentAwareDockerDir(projectRoot, selectedComponent string) (stri
 }
 
 func resolveAndValidateDockerDir(projectRoot, override, configKey string) (string, bool, error) {
-	dockerDir := resolveProjectPath(projectRoot, override)
+	dockerDir := config.ResolveProjectPath(projectRoot, override)
 	if dockerDir == "" {
 		return "", false, nil
 	}
@@ -262,7 +264,7 @@ func resolveDockerBuildProjectRoot(findProjectRoot ProjectFinderFunc, target Doc
 
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
-		if errors.Is(err, ErrNotInGitRepository) {
+		if errors.Is(err, config.ErrNotInGitRepository) {
 			return "", nil
 		}
 		return "", err
@@ -285,7 +287,7 @@ func resolveDockerBuildEnvironment(store DockerStore, findProjectRoot ProjectFin
 func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			return "", nil
 		}
 		return "", err
@@ -304,7 +306,7 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 func dockerBuildEnvironmentFromTenantEnvs(store DockerStore, tenant, cleanProjectRoot string) (string, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			return "", nil
 		}
 		return "", err
@@ -324,7 +326,7 @@ func dockerBuildEnvironmentFromTenantEnvs(store DockerStore, tenant, cleanProjec
 func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoot ProjectFinderFunc, cleanProjectRoot string) (string, error) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil {
-		if errors.Is(err, ErrNotInGitRepository) {
+		if errors.Is(err, config.ErrNotInGitRepository) {
 			return "", nil
 		}
 		return "", err
@@ -335,7 +337,7 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			return "", nil
 		}
 		return "", err
@@ -348,7 +350,7 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 // the seam for reading per-env build toggles such as DisableBuildScript.
 // Best-effort: any store error or a miss yields nil so the build proceeds with
 // default behaviour.
-func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
+func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *config.EnvConfig {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return injectedDockerBuildEnvConfig(nil)
@@ -360,7 +362,7 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 // usable by callers that already know the resolved project root and
 // environment name directly (e.g. newDockerBuildSpec) without re-deriving them
 // through a DockerCommandTarget.
-func resolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantEnv string) *EnvConfig {
+func resolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()
@@ -390,12 +392,12 @@ func resolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantE
 // are silent and neither is recoverable from the build output, so the pod reads
 // its own identity from the env the chart set rather than from a file anything
 // else may have written since.
-func injectedDockerBuildEnvConfig(onDisk *EnvConfig) *EnvConfig {
+func injectedDockerBuildEnvConfig(onDisk *config.EnvConfig) *config.EnvConfig {
 	injected, ok := ResolveInjectedRuntimeConfig(os.Getenv)
 	if !ok {
 		return onDisk
 	}
-	base := EnvConfig{}
+	base := config.EnvConfig{}
 	if onDisk != nil {
 		base = *onDisk
 	}
@@ -403,7 +405,7 @@ func injectedDockerBuildEnvConfig(onDisk *EnvConfig) *EnvConfig {
 	return &merged
 }
 
-func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {
+func matchDockerBuildEnvConfig(envs []config.EnvConfig, wantEnv, cleanRoot string) *config.EnvConfig {
 	for i := range envs {
 		if wantEnv != "" && envs[i].Name != wantEnv {
 			continue

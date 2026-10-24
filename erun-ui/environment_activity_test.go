@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The sidebar's busy line comes from the environment's own idle markers, so the
@@ -29,7 +31,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 			name: "a quiet environment is not busy",
 			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
 				{Name: "working-hours", Idle: false},
-				{Name: eruncommon.ActivityKindMCP, Idle: true},
+				{Name: config.ActivityKindMCP, Idle: true},
 			}},
 		},
 		{
@@ -60,7 +62,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 				Leases: []eruncommon.EnvironmentActivityLease{
 					{ID: "agent-run", Name: "agent-run", StartedAt: now, ExpiresAt: now.Add(time.Hour)},
 				},
-				Markers: []eruncommon.EnvironmentIdleMarker{activeMarker(eruncommon.ActivityKindMCP)},
+				Markers: []eruncommon.EnvironmentIdleMarker{activeMarker(config.ActivityKindMCP)},
 			},
 			wantBusy:   true,
 			wantDetail: "holding: agent-run",
@@ -76,7 +78,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 		{
 			name: "an agent over MCP is named",
 			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
-				activeMarker(eruncommon.ActivityKindMCP),
+				activeMarker(config.ActivityKindMCP),
 			}},
 			wantBusy:   true,
 			wantDetail: "an agent is driving it over MCP",
@@ -191,17 +193,17 @@ func TestResetEnvironmentActivityObservationsOnEmptyCacheIsANoop(t *testing.T) {
 func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"acme/dev": {Name: "dev", LocalRepoPath: projectRoot},
 		},
 	}
 	app := NewApp(erunUIDeps{
 		store:            store,
 		findProjectRoot:  func() (string, string, error) { return "acme", projectRoot, nil },
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.0"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.0"} },
 		resolveImageRegistry: func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
 			return eruncommon.RuntimeRegistryVersions{}, nil
 		},
@@ -234,8 +236,8 @@ func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 // for the poller's own ticker.
 func TestTriggerEnvironmentActivitySweepRunsSynchronously(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"acme": {Name: "acme"}},
-		envs:    map[string]eruncommon.EnvConfig{"acme/dev": {Name: "dev"}},
+		tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},
+		envs:    map[string]config.EnvConfig{"acme/dev": {Name: "dev"}},
 	}
 	app := NewApp(erunUIDeps{store: store})
 	t.Cleanup(func() { app.shutdown(context.Background()) })

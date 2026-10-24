@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +61,7 @@ func newE2ECmd(resolveOpen OpenResolver, findProjectRoot common.ProjectFinderFun
 	return cmd
 }
 
-func runE2ECommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, findProjectRoot common.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, findProjectRoot common.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := common.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func runE2ECommand(ctx common.Context, resolveOpen OpenResolver, params common.O
 		Version:     version,
 		TargetNamed: targetNamed,
 	})
-	if e2eResult == nil || ctx.DryRun || ctx.Output != common.OutputJSON {
+	if e2eResult == nil || ctx.DryRun || ctx.Output != core.OutputJSON {
 		return err
 	}
 	if writeErr := ctx.WriteResult(e2eResult); writeErr != nil {

@@ -12,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Starting a job detaches it, and the detachment is erun's job rather than the
@@ -155,7 +159,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 	}
 	resolved := dir
 	if !filepath.IsAbs(resolved) {
-		if _, root, err := FindProjectRoot(); err == nil {
+		if _, root, err := config.FindProjectRoot(); err == nil {
 			resolved = filepath.Join(root, resolved)
 		} else if abs, absErr := filepath.Abs(resolved); absErr == nil {
 			resolved = abs
@@ -175,7 +179,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 // addressed by, shared by starting and attaching. The id defaults to the name,
 // matching the lease store, so re-running the same named work keeps one handle.
 func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (string, error) {
-	if err := errMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(name) == "" {
@@ -281,7 +285,7 @@ func sortedEnvironmentJobEnvPairs(env map[string]string) []string {
 // front; starting anyway trades a direct, actionable refusal for the tool's
 // own failure a minute later, which for an unconfigured environment reads as
 // a credential problem with no credential fix.
-func ensureAgentJobToolAvailable(ctx Context, tool string) error {
+func ensureAgentJobToolAvailable(ctx core.Context, tool string) error {
 	if strings.TrimSpace(tool) == "" {
 		return nil
 	}
@@ -289,7 +293,7 @@ func ensureAgentJobToolAvailable(ctx Context, tool string) error {
 	// cmd.Err carries Go's own exec.LookPath phrasing, which is an
 	// implementation detail rather than something to hand to the caller
 	// verbatim; the tool name and "not available" already say what happened.
-	if cmd := Command(tool); cmd.Err != nil {
+	if cmd := core.Command(tool); cmd.Err != nil {
 		err := fmt.Errorf("agent tool %q is not available in this environment; install and configure it here, or start the job with a different --agent", tool)
 		ctx.Trace(fmt.Sprintf("job: resolving agent tool %q failed: %v", tool, err))
 		return err
@@ -373,7 +377,7 @@ func normalizeEnvironmentJobLeaseTTL(ttl time.Duration) (time.Duration, error) {
 }
 
 // StartEnvironmentJob detaches the work and returns the handle to it.
-func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (EnvironmentJob, error) {
+func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
 		return EnvironmentJob{}, err
@@ -425,7 +429,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 			return EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
 		}
 	}
-	cmd := Command(params.SupervisorPath, args...)
+	cmd := core.Command(params.SupervisorPath, args...)
 	// The supervisor inherits nothing from the caller's terminal: no working
 	// directory it could pin, no stdio it could block on, and its own session, so
 	// the transport dropping or the caller exiting cannot take it with them.
@@ -442,7 +446,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 		cmd.Stdout = startup
 		cmd.Stderr = startup
 	}
-	detachEnvironmentJobSupervisor(cmd)
+	core.DetachEnvironmentJobSupervisor(cmd)
 	startErr := cmd.Start()
 	closeEnvironmentJobStartupCapture(startup)
 	if startErr != nil {
@@ -534,7 +538,7 @@ func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJo
 // writing one record, so it is refused; reusing a finished one replaces it, and
 // says so, because the alternative is an orchestrator unable to re-run named
 // work without inventing ids.
-func reserveEnvironmentJobID(ctx Context, dir, id string) error {
+func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 	existing, err := readEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		return nil
@@ -802,8 +806,8 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	// before the work starts, not at the finish check that reads it: the
 	// reparenting it arranges is decided by the kernel at the moment the
 	// spawning process exits, and cannot be retrofitted afterwards.
-	enableEnvironmentJobSubreaper()
-	adoptedBaseline := environmentJobDescendantBaseline(os.Getpid())
+	core.EnableEnvironmentJobSubreaper()
+	adoptedBaseline := core.EnvironmentJobDescendantBaseline(os.Getpid())
 	env, err := normalizeEnvironmentJobEnv(params.Env)
 	if err != nil {
 		return err
@@ -899,7 +903,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 	command := params.Command
 	reinvocationDeadline := time.Now().Add(resolveEnvironmentJobReinvocationBudget())
 	for {
-		cmd := Command(command[0], command[1:]...)
+		cmd := core.Command(command[0], command[1:]...)
 		cmd.Dir = params.Dir
 		// ERUN_JOB_ID always rides along, not only when the caller sets Env: it is
 		// what lets a nested `job start` run from inside this work (an agent
@@ -915,7 +919,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 		// The work runs in its own process group so a cancel can reach it and every
 		// process it spawned without touching this supervisor — the bookkeeping has
 		// to survive to report what happened.
-		detachEnvironmentJobChild(cmd)
+		core.DetachEnvironmentJobChild(cmd)
 
 		var childPID int
 		var procState *os.ProcessState
@@ -931,7 +935,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 			// child this process has: cmd.Wait below is the one thing that can
 			// report that child's exit status, and the supervisor's own helper
 			// commands -- git, ps -- run outside it, under their own Waits.
-			stopReaper := startEnvironmentJobChildReaper(childPID)
+			stopReaper := core.StartEnvironmentJobChildReaper(childPID)
 			waitErr = cmd.Wait()
 			stopReaper()
 			procState = cmd.ProcessState
@@ -1187,7 +1191,7 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 	switch {
 	case state != nil:
 		code = state.ExitCode()
-		if signal = environmentJobExitSignal(state); signal != "" {
+		if signal = core.EnvironmentJobExitSignal(state); signal != "" {
 			reason = "terminated by signal " + signal
 		}
 	case waitErr != nil:
@@ -1195,9 +1199,9 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 	}
 	self := recorder.snapshot()
 	jobState = EnvironmentJobStateExited
-	if state != nil && (environmentJobProcessGroupSurvivors(childPID) ||
-		environmentJobSessionSurvivors(childPID) ||
-		environmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
+	if state != nil && (core.EnvironmentJobProcessGroupSurvivors(childPID) ||
+		core.EnvironmentJobSessionSurvivors(childPID) ||
+		core.EnvironmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
 		jobState = EnvironmentJobStateAbandoned
 		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
@@ -1591,7 +1595,7 @@ type AttachEnvironmentJobParams struct {
 }
 
 // AttachEnvironmentJob gives work started another way a handle and a lease.
-func AttachEnvironmentJob(ctx Context, params AttachEnvironmentJobParams) (EnvironmentJob, error) {
+func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (EnvironmentJob, error) {
 	dir, job, ttl, err := resolveAttachedEnvironmentJob(params)
 	if err != nil {
 		return EnvironmentJob{}, err
@@ -1705,8 +1709,8 @@ func resolveEnvironmentJobCancelTarget(job EnvironmentJob) (int, error) {
 // own shell, which is how a cancel once killed the sequence issuing it. The
 // supervisor is deliberately not signalled, so it survives to record the
 // outcome the cancel produced.
-func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (CancelEnvironmentJobResult, error) {
-	signal, err := normalizeEnvironmentJobSignal(params.Signal)
+func CancelEnvironmentJob(ctx core.Context, params CancelEnvironmentJobParams) (CancelEnvironmentJobResult, error) {
+	signal, err := core.NormalizeEnvironmentJobSignal(params.Signal)
 	if err != nil {
 		return CancelEnvironmentJobResult{}, err
 	}
@@ -1736,24 +1740,11 @@ func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (Cance
 	if dir, dirErr := environmentJobDir(params.Tenant, params.Environment); dirErr == nil {
 		recordEnvironmentJobCancelRequest(dir, job.ID, CurrentEnvironmentJobID())
 	}
-	if err := signalEnvironmentJobProcessGroup(target, signal); err != nil {
+	if err := core.SignalEnvironmentJobProcessGroup(target, signal); err != nil {
 		return CancelEnvironmentJobResult{}, err
 	}
 	result.Signalled = true
 	return result, nil
-}
-
-func normalizeEnvironmentJobSignal(signal string) (string, error) {
-	value := strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(signal)), "SIG")))
-	if value == "" {
-		return "TERM", nil
-	}
-	switch value {
-	case "TERM", "INT", "HUP", "KILL":
-		return value, nil
-	default:
-		return "", fmt.Errorf("unsupported signal %q: expected TERM, INT, HUP, or KILL", signal)
-	}
 }
 
 // ResolveErunExecutable finds the erun binary for a transport that is not itself

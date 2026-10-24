@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // guardRuntimeImageLineSwitch refuses a runtime deploy that would move the pod
@@ -38,11 +41,11 @@ import (
 //     not read as wrong either (root AGENTS.md: "never block a legitimate
 //     configuration you merely could not classify"), so it proceeds with a
 //     trace instead of a refusal.
-func guardRuntimeImageLineSwitch(ctx Context, target OpenResult, resolvedImage string, explicitLineChange bool) error {
+func guardRuntimeImageLineSwitch(ctx core.Context, target config.OpenResult, resolvedImage string, explicitLineChange bool) error {
 	if explicitLineChange {
 		return nil
 	}
-	resolvedLine, resolvedOK := runtimeImageReleaseLine(resolvedImage)
+	resolvedLine, resolvedOK := config.RuntimeImageReleaseLine(resolvedImage)
 	if !resolvedOK {
 		return nil
 	}
@@ -50,7 +53,7 @@ func guardRuntimeImageLineSwitch(ctx Context, target OpenResult, resolvedImage s
 	if previous == "" {
 		return nil
 	}
-	previousLine, previousOK := runtimeImageReleaseLine(previous)
+	previousLine, previousOK := config.RuntimeImageReleaseLine(previous)
 	if !previousOK {
 		ctx.Trace("deploy: runtime image line for " + previous + " (this env's last confirmed deploy) could not be classified; proceeding")
 		return nil
@@ -75,7 +78,7 @@ func guardRuntimeImageLineSwitch(ctx Context, target OpenResult, resolvedImage s
 // own config (resolvedRuntimeChart.searched): that is the operator's coordinate,
 // and a tenant deliberately stating the stock erun-devops chart on erun's line
 // while running its own image line must keep deploying as stated.
-func guardRuntimeLineSwitch(ctx Context, target OpenResult, chart resolvedRuntimeChart, resolvedImage string, explicitLineChange bool) error {
+func guardRuntimeLineSwitch(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, resolvedImage string, explicitLineChange bool) error {
 	if err := guardRuntimeImageLineSwitch(ctx, target, resolvedImage, explicitLineChange); err != nil {
 		return err
 	}
@@ -124,11 +127,11 @@ func guardRuntimeLineSwitch(ctx Context, target OpenResult, chart resolvedRuntim
 // is the operator's coordinate that this deploy must install as given --
 // stockRuntimePinMovesWithDeployVersion's decision, and the legitimate
 // configuration this guard must not turn into a refusal.
-func guardRuntimeChartLineSwitch(ctx Context, target OpenResult, resolvedChart string, explicitLineChange bool) error {
+func guardRuntimeChartLineSwitch(ctx core.Context, target config.OpenResult, resolvedChart string, explicitLineChange bool) error {
 	if explicitLineChange {
 		return nil
 	}
-	resolvedLine, resolvedOK := runtimeImageReleaseLine(resolvedChart)
+	resolvedLine, resolvedOK := config.RuntimeImageReleaseLine(resolvedChart)
 	if !resolvedOK {
 		return nil
 	}
@@ -136,7 +139,7 @@ func guardRuntimeChartLineSwitch(ctx Context, target OpenResult, resolvedChart s
 	if previous == "" {
 		return nil
 	}
-	previousLine, previousOK := runtimeImageReleaseLine(previous)
+	previousLine, previousOK := config.RuntimeImageReleaseLine(previous)
 	if !previousOK {
 		// Proceed without a trace of its own: guardRuntimeImageLineSwitch reads
 		// the same field, and an observed baseline it could not classify is one
@@ -192,7 +195,7 @@ func runtimeReleaseBase(version string) (semver, bool) {
 // release-line switch, then the image against the chart this deploy will
 // actually install (the operator's --runtime-chart when one is coming,
 // otherwise the resolved coordinate).
-func guardRuntimeCoordinate(ctx Context, target OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput HelmDeploySpec, explicitLineChange bool) error {
+func guardRuntimeCoordinate(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput HelmDeploySpec, explicitLineChange bool) error {
 	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
 		return err
 	}

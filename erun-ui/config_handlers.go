@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func (a *App) LoadERunConfig() (uiERunConfig, error) {
@@ -15,7 +17,7 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 		return uiERunConfig{}, err
 	}
 	ui := a.erunConfigToUI(config)
-	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
+	statuses, err := eruncommon.RefreshCloudContextStatuses(core.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiERunConfig{}, err
 	}
@@ -26,8 +28,8 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 
 func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	existing, _, err := a.deps.store.LoadERunConfig()
-	if errors.Is(err, eruncommon.ErrNotInitialized) {
-		existing = eruncommon.ERunConfig{}
+	if errors.Is(err, configpkg.ErrNotInitialized) {
+		existing = configpkg.ERunConfig{}
 	} else if err != nil {
 		return uiERunConfig{}, err
 	}
@@ -59,7 +61,7 @@ func (a *App) LoadCloudProviderStatuses() ([]uiCloudProviderStatus, error) {
 }
 
 func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
-	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
+	statuses, err := eruncommon.RefreshCloudContextStatuses(core.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +70,7 @@ func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
 }
 
 func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextStatus, error) {
-	status, err := eruncommon.InitCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.InitCloudContextParams{
+	status, err := eruncommon.InitCloudContext(core.Context{}, a.deps.store, eruncommon.InitCloudContextParams{
 		Name:               strings.TrimSpace(input.Name),
 		CloudProviderAlias: strings.TrimSpace(input.CloudProviderAlias),
 		Region:             strings.TrimSpace(input.Region),
@@ -109,7 +111,7 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 }
 
 func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
+	status, err := eruncommon.StartCloudContext(core.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
@@ -123,7 +125,7 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 // lever an operator reaches for when auto-stop is racing against an
 // unhealthy env.
 func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
+	status, err := eruncommon.SetCloudContextStopProtection(core.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: true,
 	}, a.deps.cloudContextDeps)
@@ -136,7 +138,7 @@ func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, err
 // EnableCloudContextApiStop turns AWS stop protection back off so normal
 // auto-stop and manual stop resume.
 func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
+	status, err := eruncommon.SetCloudContextStopProtection(core.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: false,
 	}, a.deps.cloudContextDeps)
@@ -151,7 +153,7 @@ func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, erro
 // round-trip per env on every poll, so the titlebar lock toggle reads it
 // lazily instead.
 func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.DescribeCloudContextStopProtection(eruncommon.Context{}, a.deps.store, name, a.deps.cloudContextDeps)
+	status, err := eruncommon.DescribeCloudContextStopProtection(core.Context{}, a.deps.store, name, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
@@ -159,9 +161,9 @@ func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, er
 }
 
 func (a *App) SaveAWSCloudProviderAlias(input uiAWSCloudAliasInput) (uiCloudProviderStatus, error) {
-	provider, err := eruncommon.SaveCloudProviderConfig(a.deps.store, eruncommon.CloudProviderConfig{
+	provider, err := eruncommon.SaveCloudProviderConfig(a.deps.store, configpkg.CloudProviderConfig{
 		Alias:         strings.TrimSpace(input.Alias),
-		Provider:      eruncommon.CloudProviderAWS,
+		Provider:      configpkg.CloudProviderAWS,
 		Username:      strings.TrimSpace(input.Username),
 		AccountID:     strings.TrimSpace(input.AccountID),
 		Profile:       strings.TrimSpace(input.Profile),
@@ -179,7 +181,7 @@ func (a *App) InitAWSCloudProvider(input uiAWSCloudAliasInput) (uiCloudProviderS
 	if strings.TrimSpace(input.Username) != "" || strings.TrimSpace(input.AccountID) != "" {
 		return a.SaveAWSCloudProviderAlias(input)
 	}
-	provider, err := eruncommon.InitAWSCloudProvider(eruncommon.Context{}, a.deps.store, eruncommon.InitAWSCloudProviderParams{
+	provider, err := eruncommon.InitAWSCloudProvider(core.Context{}, a.deps.store, eruncommon.InitAWSCloudProviderParams{
 		Profile:       strings.TrimSpace(input.Profile),
 		OIDCIssuerURL: strings.TrimSpace(input.OIDCIssuerURL),
 	}, a.deps.cloudDeps)
@@ -213,8 +215,8 @@ func (a *App) desktopCloudLoginParams(alias string) eruncommon.CloudLoginParams 
 // launched) otherwise goes to a nil Stdout and the sign-in looks like a button
 // that does nothing for as long as it waits. The message center keeps that
 // instruction reachable instead of silent.
-func (a *App) desktopCloudLoginContext() eruncommon.Context {
-	return eruncommon.Context{Stdout: desktopLoginPromptWriter{app: a}}
+func (a *App) desktopCloudLoginContext() core.Context {
+	return core.Context{Stdout: desktopLoginPromptWriter{app: a}}
 }
 
 type desktopLoginPromptWriter struct {
@@ -229,7 +231,7 @@ func (w desktopLoginPromptWriter) Write(p []byte) (int, error) {
 }
 
 func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
-	status, err := eruncommon.LogoutCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
+	status, err := eruncommon.LogoutCloudProviderAlias(core.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
@@ -255,7 +257,7 @@ func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, 
 }
 
 func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error) {
-	status, _, err := eruncommon.SetupCloudProviderOIDC(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
+	status, _, err := eruncommon.SetupCloudProviderOIDC(core.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
@@ -263,7 +265,7 @@ func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error
 }
 
 func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerToken, error) {
-	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: strings.TrimSpace(alias)}, a.deps.cloudDeps)
+	token, err := eruncommon.CloudProviderBearerToken(core.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: strings.TrimSpace(alias)}, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderBearerToken{}, err
 	}
@@ -312,7 +314,7 @@ func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
 	return a.tenantConfigToUI(updated, tenant), nil
 }
 
-func (a *App) erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
+func (a *App) erunConfigToUI(config configpkg.ERunConfig) uiERunConfig {
 	return uiERunConfig{
 		DefaultTenant:  strings.TrimSpace(config.DefaultTenant),
 		CloudProviders: cloudProviderStatusesToUI(a.statusesForCloudProviders(config.CloudProviders)),
@@ -335,7 +337,7 @@ func (a *App) hostGatewayDefaults() *uiHostGatewayDefaults {
 	return &defaults
 }
 
-func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConfig {
+func openRouterConfigToUI(config *configpkg.OpenRouterConfig) *uiOpenRouterConfig {
 	if config == nil {
 		return nil
 	}
@@ -350,11 +352,11 @@ func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConf
 	return out
 }
 
-func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterConfig {
+func openRouterConfigFromUI(config *uiOpenRouterConfig) *configpkg.OpenRouterConfig {
 	if config == nil {
 		return nil
 	}
-	out := &eruncommon.OpenRouterConfig{
+	out := &configpkg.OpenRouterConfig{
 		BaseURL:      strings.TrimSpace(config.BaseURL),
 		AuthTokenRef: strings.TrimSpace(config.AuthTokenRef),
 		DefaultModel: strings.TrimSpace(config.DefaultModel),
@@ -364,12 +366,12 @@ func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterCo
 		if id == "" {
 			continue
 		}
-		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
+		out.Models = append(out.Models, configpkg.OpenRouterModel{ID: id, Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
 }
 
-func validateGatewayCatalogModelIDs(catalog *eruncommon.OpenRouterConfig) error {
+func validateGatewayCatalogModelIDs(catalog *configpkg.OpenRouterConfig) error {
 	if catalog == nil {
 		return nil
 	}
@@ -386,7 +388,7 @@ func validateGatewayCatalogModelIDs(catalog *eruncommon.OpenRouterConfig) error 
 	return nil
 }
 
-func (a *App) tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTenantConfig {
+func (a *App) tenantConfigToUI(config configpkg.TenantConfig, fallbackName string) uiTenantConfig {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -402,15 +404,15 @@ func (a *App) tenantConfigToUI(config eruncommon.TenantConfig, fallbackName stri
 	return result
 }
 
-func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig) eruncommon.TenantConfig {
+func tenantConfigFromUI(config uiTenantConfig, existing configpkg.TenantConfig) configpkg.TenantConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
 	existing.APIURL = strings.TrimSpace(config.APIURL)
-	existing.CloudProviderAliases, existing.PrimaryCloudProviderAlias = eruncommon.NormalizeTenantCloudProviderAliases(config.CloudProviderAliases, config.PrimaryCloudProviderAlias)
-	return eruncommon.NormalizeTenantConfig(existing)
+	existing.CloudProviderAliases, existing.PrimaryCloudProviderAlias = configpkg.NormalizeTenantCloudProviderAliases(config.CloudProviderAliases, config.PrimaryCloudProviderAlias)
+	return configpkg.NormalizeTenantConfig(existing)
 }
 
-func (a *App) statusesForCloudProviders(providers []eruncommon.CloudProviderConfig) []eruncommon.CloudProviderStatus {
+func (a *App) statusesForCloudProviders(providers []configpkg.CloudProviderConfig) []eruncommon.CloudProviderStatus {
 	statuses := make([]eruncommon.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		statuses = append(statuses, eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps))
@@ -451,7 +453,7 @@ func statusesForCloudProvidersFromStore(store eruncommon.CloudReadStore, deps er
 	return statuses
 }
 
-func statusesForCloudContexts(contexts []eruncommon.CloudContextConfig) []eruncommon.CloudContextStatus {
+func statusesForCloudContexts(contexts []configpkg.CloudContextConfig) []eruncommon.CloudContextStatus {
 	statuses := make([]eruncommon.CloudContextStatus, 0, len(contexts))
 	for _, context := range contexts {
 		statuses = append(statuses, eruncommon.CloudContextStatus{CloudContextConfig: eruncommon.NormalizeCloudContextConfig(context)})

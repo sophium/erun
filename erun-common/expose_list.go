@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ExposedService is one active exposure erun-expose created for an
@@ -57,7 +59,7 @@ func ListExposedServices(req ShellLaunchParams) ([]ExposedService, error) {
 		}
 		return nil, err
 	}
-	certs, err := fetchObservedCertificates(Context{}, req, observeGetArgs(req, "certificates.cert-manager.io"))
+	certs, err := fetchObservedCertificates(core.Context{}, req, observeGetArgs(req, "certificates.cert-manager.io"))
 	if err != nil {
 		if isForbiddenKubectlError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrListExposedServicesForbidden, err)

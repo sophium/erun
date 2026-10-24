@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -70,6 +71,10 @@ func stubPodExecDownload(t *testing.T, setup env.Setup, stubs, name string, payl
 
 // stubPodExecDownloadDir stages a folder rather than a file, so the download
 // takes the branch that archives it in the pod first.
+// archiveSizePattern is the byte count `erun outputs download` reports for a
+// downloaded archive.
+var archiveSizePattern = regexp.MustCompile(`\(\d+B, `)
+
 func stubPodExecDownloadDir(t *testing.T, setup env.Setup, stubs, name string, files map[string]string) []string {
 	t.Helper()
 	root := filepath.Join(setup.Cwd, "pod")
@@ -303,7 +308,10 @@ func TestOutputs(t *testing.T) {
 		// The archive is what proves the pod staged the folder and the download
 		// read that staged copy, not the folder itself.
 		requireArchiveEntries(t, filepath.Join(setup.Cwd, "results.tar.gz"), []string{"results/", "results/summary.txt"})
-		golden.Equal(t, "outputs/download_real_run_dir", normalize.Apply(result.Combined))
+		// The archive is built by the host's own tar, and GNU and BSD tar write
+		// the same entries at different sizes, so its byte count says nothing
+		// about erun: the entries above are what the download is checked by.
+		golden.Equal(t, "outputs/download_real_run_dir", archiveSizePattern.ReplaceAllString(normalize.Apply(result.Combined), "(<SIZE>, "))
 	})
 
 	// arm64 macOS SIGKILLs a Mach-O that carries no signature at all, silently, so

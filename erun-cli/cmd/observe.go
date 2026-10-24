@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +68,7 @@ func parseObserveSecretChecks(raw []string) ([]common.ObserveSecretCheck, error)
 	return checks, nil
 }
 
-func runObserveCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, checks []common.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, checks []common.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -80,7 +81,7 @@ func runObserveCommand(ctx common.Context, resolveOpen OpenResolver, params comm
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(observed)
 	}
 	return writeObserveResult(ctx, observed)

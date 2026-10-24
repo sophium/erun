@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Changing an environment's erun version means moving every place that version
@@ -98,8 +100,8 @@ func (a *App) runPinCommand(selection uiSelection, target string, preview, rever
 // command's own words rather than a generic one.
 func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, error) {
 	cmd := exec.CommandContext(ctx, cliPath, args...)
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	cmd.Env = os.Environ()
 
 	var stderr strings.Builder
@@ -185,8 +187,8 @@ func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 		ctx = context.Background()
 	}
 	cmd := exec.CommandContext(ctx, a.deps.resolveCLIPath(), "pin", selection.Tenant, selection.Environment, "--list", "--output", "json")
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
@@ -234,7 +236,7 @@ func (a *App) PinRepoCheckoutStatus(selection uiSelection) (uiPinRepoCheckoutSta
 	if err != nil {
 		return uiPinRepoCheckoutStatus{}, err
 	}
-	if _, ok := eruncommon.TenantLocalCheckoutRoot(siblings); ok {
+	if _, ok := config.TenantLocalCheckoutRoot(siblings); ok {
 		return uiPinRepoCheckoutStatus{Resolvable: true}, nil
 	}
 	return uiPinRepoCheckoutStatus{

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // orchestratorLaunchPlan is one persisted orchestrator's launch, resolved at
@@ -39,7 +40,7 @@ func resolvedLaunchOf(launch eruncommon.OrchestratorLaunch) orchestratorResolved
 // orchestratorLaunchDiffers reports whether def, resolved against catalog now,
 // would launch on something other than launched. A definition that no longer
 // resolves cannot be what is running, so it differs.
-func orchestratorLaunchDiffers(def eruncommon.OrchestratorConfig, catalog *eruncommon.OpenRouterConfig, launched orchestratorResolvedLaunch) bool {
+func orchestratorLaunchDiffers(def config.OrchestratorConfig, catalog *config.OpenRouterConfig, launched orchestratorResolvedLaunch) bool {
 	launch, err := eruncommon.ResolveOrchestratorLaunch(def, catalog)
 	return err != nil || resolvedLaunchOf(launch) != launched
 }
@@ -51,7 +52,7 @@ const orchestratorGatewayTokenEnvVar = "ANTHROPIC_AUTH_TOKEN"
 // defaultOrchestratorLaunch is how an orchestrator with no settings launches.
 // A zero OrchestratorConfig always resolves, so the error cannot occur.
 func defaultOrchestratorLaunch() eruncommon.OrchestratorLaunch {
-	launch, _ := eruncommon.ResolveOrchestratorLaunch(eruncommon.OrchestratorConfig{}, nil)
+	launch, _ := eruncommon.ResolveOrchestratorLaunch(config.OrchestratorConfig{}, nil)
 	return launch
 }
 
@@ -62,7 +63,7 @@ func defaultOrchestratorLaunchPlan() orchestratorLaunchPlan {
 
 // orchestratorLaunchSettingsOf reads an orchestrator's launch settings as
 // recorded, trimmed the way the writers store them.
-func orchestratorLaunchSettingsOf(def eruncommon.OrchestratorConfig) orchestratorLaunchInput {
+func orchestratorLaunchSettingsOf(def config.OrchestratorConfig) orchestratorLaunchInput {
 	return orchestratorLaunchInput{
 		UseGateway: def.UseGateway,
 		Model:      strings.TrimSpace(def.Model),
@@ -70,7 +71,7 @@ func orchestratorLaunchSettingsOf(def eruncommon.OrchestratorConfig) orchestrato
 	}
 }
 
-func withOrchestratorLaunchSettings(def eruncommon.OrchestratorConfig, settings orchestratorLaunchInput) eruncommon.OrchestratorConfig {
+func withOrchestratorLaunchSettings(def config.OrchestratorConfig, settings orchestratorLaunchInput) config.OrchestratorConfig {
 	def.UseGateway = settings.UseGateway
 	def.Model = settings.Model
 	def.Effort = settings.Effort
@@ -88,7 +89,7 @@ func orchestratorInfoWithLaunchSettings(info orchestratorInfo, settings orchestr
 // orchestratorLaunchSettingsRemedy names what the operator can do about
 // settings eruncommon.ValidateOrchestratorLaunchSettings refused, whose reasons
 // deliberately name no surface.
-func orchestratorLaunchSettingsRemedy(settings orchestratorLaunchInput, catalog *eruncommon.OpenRouterConfig) string {
+func orchestratorLaunchSettingsRemedy(settings orchestratorLaunchInput, catalog *config.OpenRouterConfig) string {
 	if settings.UseGateway && !catalog.Configured() {
 		return "configure the gateway catalog in the desktop's ERun settings, or turn this orchestrator's gateway off"
 	}
@@ -98,14 +99,14 @@ func orchestratorLaunchSettingsRemedy(settings orchestratorLaunchInput, catalog 
 // validateOrchestratorSettings validates the dialog's alias and launch settings
 // against what this host has configured, returning them normalized together
 // with the catalog they were validated against.
-func (a *App) validateOrchestratorSettings(alias string, launch orchestratorLaunchInput) (string, orchestratorLaunchInput, *eruncommon.OpenRouterConfig, error) {
+func (a *App) validateOrchestratorSettings(alias string, launch orchestratorLaunchInput) (string, orchestratorLaunchInput, *config.OpenRouterConfig, error) {
 	alias = strings.TrimSpace(alias)
 	if err := eruncommon.ValidateOrchestratorAlias(a.deps.store, alias); err != nil {
 		return "", orchestratorLaunchInput{}, nil, fmt.Errorf("orchestrator alias: %w", err)
 	}
 	launch.Model, launch.Effort = clearedLaunchSetting(launch.Model), clearedLaunchSetting(launch.Effort)
 	catalog := a.resolveOpenRouterConfig()
-	if err := eruncommon.ValidateOrchestratorLaunchSettings(withOrchestratorLaunchSettings(eruncommon.OrchestratorConfig{}, launch), catalog); err != nil {
+	if err := eruncommon.ValidateOrchestratorLaunchSettings(withOrchestratorLaunchSettings(config.OrchestratorConfig{}, launch), catalog); err != nil {
 		return "", orchestratorLaunchInput{}, nil, fmt.Errorf("orchestrator launch settings: %w -- %s", err, orchestratorLaunchSettingsRemedy(launch, catalog))
 	}
 	return alias, launch, catalog, nil
@@ -125,10 +126,10 @@ func clearedLaunchSetting(value string) string {
 // resolvePersistedOrchestratorLaunch resolves def's launch, credential
 // included, before anything about a running session is torn down. Settings
 // that cannot be honoured refuse the start rather than launching something else.
-func (a *App) resolvePersistedOrchestratorLaunch(def eruncommon.OrchestratorConfig) (orchestratorLaunchPlan, error) {
+func (a *App) resolvePersistedOrchestratorLaunch(def config.OrchestratorConfig) (orchestratorLaunchPlan, error) {
 	settings := orchestratorLaunchSettingsOf(def)
-	catalog, err := eruncommon.ResolveOpenRouterConfig(a.deps.store)
-	if err != nil && settings.UseGateway && !errors.Is(err, eruncommon.ErrNotInitialized) {
+	catalog, err := config.ResolveOpenRouterConfig(a.deps.store)
+	if err != nil && settings.UseGateway && !errors.Is(err, config.ErrNotInitialized) {
 		return orchestratorLaunchPlan{}, fmt.Errorf("start orchestrator %s: cannot read the gateway catalog: %w", def.ID, err)
 	}
 	launch, err := eruncommon.ResolveOrchestratorLaunch(def, catalog)
@@ -159,7 +160,7 @@ func (a *App) orchestratorLaunchEnv(launch eruncommon.OrchestratorLaunch) ([]str
 // orchestratorLaunchSettingsChanged reports whether def's live session would
 // launch differently if restarted against catalog; false when nothing is
 // running for it.
-func (a *App) orchestratorLaunchSettingsChanged(def eruncommon.OrchestratorConfig, catalog *eruncommon.OpenRouterConfig) bool {
+func (a *App) orchestratorLaunchSettingsChanged(def config.OrchestratorConfig, catalog *config.OpenRouterConfig) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	session := a.orchestrators[def.ID]
@@ -186,7 +187,7 @@ func (a *App) withConfiguredLaunchSettings(info orchestratorInfo) orchestratorIn
 	return info
 }
 
-func orchestratorLaunchChoicesFor(catalog *eruncommon.OpenRouterConfig) orchestratorLaunchChoices {
+func orchestratorLaunchChoicesFor(catalog *config.OpenRouterConfig) orchestratorLaunchChoices {
 	models := catalog.ModelIDs()
 	if models == nil {
 		models = []string{}
@@ -204,7 +205,7 @@ func orchestratorLaunchChoicesFor(catalog *eruncommon.OpenRouterConfig) orchestr
 
 // undriveableGatewayModels lists the catalog's entries the gateway cannot
 // drive, in configured order without blanks or duplicates; never nil.
-func undriveableGatewayModels(catalog *eruncommon.OpenRouterConfig) []string {
+func undriveableGatewayModels(catalog *config.OpenRouterConfig) []string {
 	out := []string{}
 	if catalog == nil {
 		return out

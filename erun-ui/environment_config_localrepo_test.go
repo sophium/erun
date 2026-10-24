@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestManageDialogRepoPathMatchesInit pins the property that the dialog and init
@@ -40,28 +40,28 @@ func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 		{name: "absolute path to a file", path: file},
 	}
 
-	for _, envType := range []eruncommon.EnvironmentType{
-		eruncommon.EnvironmentTypeLocalAgent,
-		eruncommon.EnvironmentTypeHost,
+	for _, envType := range []configpkg.EnvironmentType{
+		configpkg.EnvironmentTypeLocalAgent,
+		configpkg.EnvironmentTypeHost,
 	} {
 		for _, tc := range fixtures {
 			app := &App{}
-			existing := eruncommon.EnvConfig{Name: "dev", Type: envType}
+			existing := configpkg.EnvConfig{Name: "dev", Type: envType}
 			config := uiEnvironmentConfig{
 				Name:          "dev",
 				Type:          envType,
 				LocalRepoPath: tc.path,
 			}
 			updated, err := app.updatedEnvironmentConfig(config, existing)
-			initErr := eruncommon.ValidateHostRepoPath(envType, tc.path)
+			initErr := configpkg.ValidateHostRepoPath(envType, tc.path)
 
 			switch {
 			case (err == nil) != (initErr == nil):
 				t.Errorf("%s / %s: dialog err=%v but init err=%v for %q — the two sides disagree",
 					envType, tc.name, err, initErr, tc.path)
-			case err != nil && !strings.Contains(err.Error(), eruncommon.HostRepoPathRequirement(envType)):
+			case err != nil && !strings.Contains(err.Error(), configpkg.HostRepoPathRequirement(envType)):
 				t.Errorf("%s / %s: dialog refusal %q does not carry init's reason %q",
-					envType, tc.name, err, eruncommon.HostRepoPathRequirement(envType))
+					envType, tc.name, err, configpkg.HostRepoPathRequirement(envType))
 			case err == nil && strings.TrimSpace(updated.LocalRepoPath) != strings.TrimSpace(tc.path):
 				t.Errorf("%s / %s: dialog accepted %q but saved %q",
 					envType, tc.name, tc.path, updated.LocalRepoPath)
@@ -74,12 +74,12 @@ func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 // runtime env's recorded path names an in-pod directory, so the dialog must keep
 // saving it unchecked rather than start refusing deploys' worth of edits.
 func TestManageDialogRepoPathIgnoresOtherTypes(t *testing.T) {
-	for _, envType := range []eruncommon.EnvironmentType{
-		eruncommon.EnvironmentTypeRemoteAgent,
-		eruncommon.EnvironmentTypeRuntime,
+	for _, envType := range []configpkg.EnvironmentType{
+		configpkg.EnvironmentTypeRemoteAgent,
+		configpkg.EnvironmentTypeRuntime,
 	} {
 		app := &App{}
-		existing := eruncommon.EnvConfig{Name: "dev", Type: envType}
+		existing := configpkg.EnvConfig{Name: "dev", Type: envType}
 		config := uiEnvironmentConfig{Name: "dev", Type: envType, LocalRepoPath: "/in-pod/worktree"}
 		if _, err := app.updatedEnvironmentConfig(config, existing); err != nil {
 			t.Errorf("%s: dialog refused an in-pod path: %v", envType, err)

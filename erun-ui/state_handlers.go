@@ -7,7 +7,10 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func (a *App) LoadState() (uiState, error) {
@@ -16,7 +19,7 @@ func (a *App) LoadState() (uiState, error) {
 		UseDefaultEnvironment: true,
 	})
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			// A fresh install with no tool config at all is not a distinct
 			// state from "initialized but zero tenants configured" — both
 			// recover the same way, from the sidebar's own "Initialize
@@ -35,7 +38,7 @@ func (a *App) LoadState() (uiState, error) {
 				VersionSuggestionNotices: notices,
 			}, nil
 		}
-		if errors.Is(err, eruncommon.ErrConfigCorrupted) {
+		if errors.Is(err, config.ErrConfigCorrupted) {
 			// A torn or genuinely corrupt config file is not "zero
 			// environments configured" -- rendering it that way tells the
 			// operator their tenants are gone when they are merely unread,
@@ -78,9 +81,9 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 		ctx = context.Background()
 	}
 	if namespace = strings.TrimSpace(namespace); namespace == "" {
-		namespace = eruncommon.DefaultContainerRegistry
+		namespace = config.DefaultContainerRegistry
 	}
-	repository := eruncommon.DefaultRuntimeImageName
+	repository := config.DefaultRuntimeImageName
 	if tenant = strings.TrimSpace(tenant); tenant != "" {
 		repository = eruncommon.RuntimeReleaseName(tenant)
 	}
@@ -115,9 +118,9 @@ func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	return ""
 }
 
-func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, environment string) ([]uiVersion, []uiVersionNotice) {
+func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environment string) ([]uiVersion, []uiVersionNotice) {
 	tenant = strings.TrimSpace(tenant)
-	defaultImage := eruncommon.DefaultContainerRegistry + "/" + eruncommon.DefaultRuntimeImageName
+	defaultImage := config.DefaultContainerRegistry + "/" + config.DefaultRuntimeImageName
 	if tenant == "" {
 		suggestions, notice := a.suggestionsForImage(info, "ERun", defaultImage, "", "")
 		return suggestions, appendVersionNotice(nil, notice)
@@ -134,7 +137,7 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, envir
 	}
 	// Tenant images are thin wrappers rebuilt from the canonical ERun image, so
 	// its channel-latest is also a valid deploy target for the env.
-	if tenantImage != eruncommon.DefaultRuntimeImageName {
+	if tenantImage != config.DefaultRuntimeImageName {
 		got, notice := a.suggestionsForImage(info, "ERun", defaultImage, "", "")
 		suggestions = append(suggestions, got...)
 		notices = appendVersionNotice(notices, notice)
@@ -145,7 +148,7 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, envir
 // suggestionsForImage resolves one image's deployable versions, returning a
 // notice instead of silently dropping the source when listing fails (private
 // image needs auth, or the registry is unreachable).
-func (a *App) suggestionsForImage(info eruncommon.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
+func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
 	versions, err := a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)
 	if err != nil {
 		return nil, &uiVersionNotice{Image: image, Kind: versionNoticeKind(err)}
@@ -191,32 +194,32 @@ func (a *App) environmentDiscoveryRegistries(tenant, environment string) []strin
 	}
 	add(a.runtimeRegistryNamespace(tenant, environment))
 	if env, ok := a.lookupEnvConfig(tenant, environment); ok {
-		for _, registry := range eruncommon.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
+		for _, registry := range config.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
 			add(registry)
 		}
 	}
 	if len(registries) == 0 {
-		add(eruncommon.DefaultContainerRegistry)
+		add(config.DefaultContainerRegistry)
 	}
 	return registries
 }
 
-func (a *App) lookupEnvConfig(tenant, environment string) (eruncommon.EnvConfig, bool) {
+func (a *App) lookupEnvConfig(tenant, environment string) (config.EnvConfig, bool) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" || a.deps.store == nil {
-		return eruncommon.EnvConfig{}, false
+		return config.EnvConfig{}, false
 	}
 	envs, err := a.deps.store.ListEnvConfigs(tenant)
 	if err != nil {
-		return eruncommon.EnvConfig{}, false
+		return config.EnvConfig{}, false
 	}
 	for _, env := range envs {
 		if strings.EqualFold(strings.TrimSpace(env.Name), environment) {
 			return env, true
 		}
 	}
-	return eruncommon.EnvConfig{}, false
+	return config.EnvConfig{}, false
 }
 
 func (a *App) LoadVersionSuggestions(selection uiSelection) (uiVersionSuggestions, error) {
@@ -250,7 +253,7 @@ func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersio
 	return labeled
 }
 
-func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo) uiState {
+func stateFromListResult(result eruncommon.ListResult, info model.BuildInfo) uiState {
 	state := uiState{
 		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
 		Build:          buildDetailsFrom(info),
@@ -294,8 +297,8 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 	return state
 }
 
-func mcpEndpointForOpenResult(result eruncommon.OpenResult) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/mcp", eruncommon.MCPPortForResult(result))
+func mcpEndpointForOpenResult(result config.OpenResult) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
 }
 
 func mcpEndpointForListEnvironment(environment eruncommon.ListEnvironmentResult) string {
@@ -306,7 +309,7 @@ func mcpEndpointForListEnvironment(environment eruncommon.ListEnvironmentResult)
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 }
 
-func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {
+func buildDetailsFrom(info model.BuildInfo) uiBuildDetails {
 	return uiBuildDetails{
 		Version: info.Version,
 		Commit:  info.Commit,
@@ -316,7 +319,7 @@ func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {
 
 func listKubernetesContexts() ([]string, error) {
 	contextsCmd := exec.Command("kubectl", "config", "get-contexts", "-o=name")
-	eruncommon.HideConsoleWindow(contextsCmd)
+	core.HideConsoleWindow(contextsCmd)
 	output, err := contextsCmd.Output()
 	if err != nil {
 		return nil, wrapKubectlError(err)
@@ -324,7 +327,7 @@ func listKubernetesContexts() ([]string, error) {
 	contexts := strings.Split(string(output), "\n")
 
 	currentCmd := exec.Command("kubectl", "config", "current-context")
-	eruncommon.HideConsoleWindow(currentCmd)
+	core.HideConsoleWindow(currentCmd)
 	currentOutput, err := currentCmd.Output()
 	if err == nil {
 		contexts = preferCurrentKubernetesContext(contexts, string(currentOutput))

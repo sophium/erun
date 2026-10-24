@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The exclusive activity lease release_claim.go added scopes its claim to one
@@ -148,7 +150,7 @@ type releaseRepoClaimLocalHolder func() bool
 // recorded, and must be read before the caller takes its own local claim: what
 // it reports is whether somebody else in this environment is still holding the
 // version.
-func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
+func takeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
 	ref := releaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
@@ -207,7 +209,7 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string,
 // local git object lookup, not a network call, and it happens before the
 // push below, so it neither reads nor writes the ref and cannot weaken the
 // force-with-lease compare-and-swap that follows.
-func renewReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
+func renewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
 	existing, err := readReleaseRepoClaimBlob(ctx, projectRoot, currentSHA)
 	if err != nil {
 		return "", err
@@ -228,7 +230,7 @@ func renewReleaseRepoClaim(ctx Context, projectRoot, environment, version string
 // force-with-lease only removes the ref if it still holds the caller's own
 // sha, so a claim already reclaimed by someone else (this caller's TTL having
 // lapsed) is left alone rather than deleting a legitimate new holder.
-func deleteReleaseRepoClaim(ctx Context, projectRoot, version, currentSHA string) error {
+func deleteReleaseRepoClaim(ctx core.Context, projectRoot, version, currentSHA string) error {
 	ref := releaseRepoClaimRef(version)
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, currentSHA)
 	ctx.TraceCommand(projectRoot, "git", "push", lease, releaseRepoClaimRemote, "--delete", ref)
@@ -266,7 +268,7 @@ func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time, environm
 	return localHolderAlive()
 }
 
-func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
+func writeReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
 	record := releaseRepoClaimRecord{
 		Holder:      holder,
 		Environment: environment,
@@ -278,7 +280,7 @@ func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, hol
 		return "", err
 	}
 	ctx.TraceCommand(projectRoot, "git", "hash-object", "-w", "--stdin")
-	cmd := Command("git", "-C", projectRoot, "hash-object", "-w", "--stdin")
+	cmd := core.Command("git", "-C", projectRoot, "hash-object", "-w", "--stdin")
 	cmd.Stdin = strings.NewReader(string(data))
 	output, err := cmd.Output()
 	if err != nil {
@@ -295,9 +297,9 @@ func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, hol
 // object is already present in the local object database — no fetch, no ref
 // read — which is what lets the renewal path recover the original StartedAt
 // without touching the CAS in takeReleaseRepoClaim/renewReleaseRepoClaim.
-func readReleaseRepoClaimBlob(ctx Context, projectRoot, sha string) (releaseRepoClaimRecord, error) {
+func readReleaseRepoClaimBlob(ctx core.Context, projectRoot, sha string) (releaseRepoClaimRecord, error) {
 	ctx.TraceCommand(projectRoot, "git", "cat-file", "-p", sha)
-	output, err := Command("git", "-C", projectRoot, "cat-file", "-p", sha).Output()
+	output, err := core.Command("git", "-C", projectRoot, "cat-file", "-p", sha).Output()
 	if err != nil {
 		return releaseRepoClaimRecord{}, err
 	}
@@ -313,9 +315,9 @@ func readReleaseRepoClaimBlob(ctx Context, projectRoot, sha string) (releaseRepo
 // git commands run concurrently in the same checkout. ok is false both when
 // the ref does not exist and when the read failed outright; the caller tells
 // these apart via err.
-func gitLsRemoteRef(ctx Context, projectRoot, remote, ref string) (sha string, ok bool, err error) {
+func gitLsRemoteRef(ctx core.Context, projectRoot, remote, ref string) (sha string, ok bool, err error) {
 	ctx.TraceCommand(projectRoot, "git", "ls-remote", remote, ref)
-	output, err := Command("git", "-C", projectRoot, "ls-remote", remote, ref).Output()
+	output, err := core.Command("git", "-C", projectRoot, "ls-remote", remote, ref).Output()
 	if err != nil {
 		return "", false, err
 	}
@@ -334,18 +336,18 @@ func gitLsRemoteRef(ctx Context, projectRoot, remote, ref string) (sha string, o
 // local probe ref (never FETCH_HEAD — see releaseRepoClaimProbeRefPrefix)
 // and reads its content back, cleaning up the probe ref afterward regardless
 // of outcome.
-func loadReleaseRepoClaimRecord(ctx Context, projectRoot, remote, ref, version string) (releaseRepoClaimRecord, error) {
+func loadReleaseRepoClaimRecord(ctx core.Context, projectRoot, remote, ref, version string) (releaseRepoClaimRecord, error) {
 	probe := releaseRepoClaimProbeRef(version)
 	defer func() {
-		_ = Command("git", "-C", projectRoot, "update-ref", "-d", probe).Run()
+		_ = core.Command("git", "-C", projectRoot, "update-ref", "-d", probe).Run()
 	}()
 
 	fetchSpec := "+" + ref + ":" + probe
 	ctx.TraceCommand(projectRoot, "git", "fetch", "--no-write-fetch-head", remote, fetchSpec)
-	if err := Command("git", "-C", projectRoot, "fetch", "--no-write-fetch-head", remote, fetchSpec).Run(); err != nil {
+	if err := core.Command("git", "-C", projectRoot, "fetch", "--no-write-fetch-head", remote, fetchSpec).Run(); err != nil {
 		return releaseRepoClaimRecord{}, err
 	}
-	output, err := Command("git", "-C", projectRoot, "cat-file", "-p", probe).Output()
+	output, err := core.Command("git", "-C", projectRoot, "cat-file", "-p", probe).Output()
 	if err != nil {
 		if stderr := stderrFromExitError(err); stderr != "" {
 			return releaseRepoClaimRecord{}, fmt.Errorf("%w: %s", err, stderr)
@@ -359,12 +361,12 @@ func loadReleaseRepoClaimRecord(ctx Context, projectRoot, remote, ref, version s
 	return record, nil
 }
 
-func gitPushCreateRef(ctx Context, projectRoot, remote, sha, ref string) error {
+func gitPushCreateRef(ctx core.Context, projectRoot, remote, sha, ref string) error {
 	ctx.TraceCommand(projectRoot, "git", "push", remote, sha+":"+ref)
 	return runReleaseClaimPush(ctx, projectRoot, "push", remote, sha+":"+ref)
 }
 
-func gitPushUpdateRefWithLease(ctx Context, projectRoot, remote, sha, ref, expectedSHA string) error {
+func gitPushUpdateRefWithLease(ctx core.Context, projectRoot, remote, sha, ref, expectedSHA string) error {
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, expectedSHA)
 	ctx.TraceCommand(projectRoot, "git", "push", lease, remote, sha+":"+ref)
 	return runReleaseClaimPush(ctx, projectRoot, "push", lease, remote, sha+":"+ref)
@@ -376,9 +378,9 @@ func gitPushUpdateRefWithLease(ctx Context, projectRoot, remote, sha, ref, expec
 // rather than staying the one push erun makes that could be admitted by a
 // bypass in silence. These pushes deliberately do not go through the injected
 // git seam, so the capture is wired onto the command here.
-func runReleaseClaimPush(ctx Context, projectRoot string, args ...string) error {
+func runReleaseClaimPush(ctx core.Context, projectRoot string, args ...string) error {
 	var pushOutput strings.Builder
-	cmd := Command("git", append([]string{"-C", projectRoot}, args...)...)
+	cmd := core.Command("git", append([]string{"-C", projectRoot}, args...)...)
 	cmd.Stderr = releasePushStderrWriter(ctx, &pushOutput)
 	err := cmd.Run()
 	reportRulesetBypassFromPushArgs(ctx, args, pushOutput.String())

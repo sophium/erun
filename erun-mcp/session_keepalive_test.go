@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // sessionTestTimeout is small enough that a test outlives it in seconds. Every
@@ -30,7 +30,7 @@ func sessionTestEdge(t *testing.T) *httptest.Server {
 	mcpSessionTimeout = sessionTestTimeout
 	t.Cleanup(func() { mcpSessionTimeout = previousTimeout })
 
-	server := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, RuntimeConfig{}, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, RuntimeConfig{}, nil))
 	t.Cleanup(server.Close)
 	return server
 }

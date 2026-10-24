@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // pastedFileDir reuses the generic Codex attachments dir; it predates this
@@ -20,7 +22,7 @@ const pastedFileDir = "/home/erun/.codex/attachments"
 const maxPastedFileBytes = 100 * 1024 * 1024
 
 type pastedFileSaveParams struct {
-	Result   eruncommon.OpenResult
+	Result   config.OpenResult
 	Data     []byte
 	MIMEType string
 	Name     string
@@ -39,7 +41,7 @@ func savePastedFileToRuntime(params pastedFileSaveParams) (string, error) {
 	name, args, _ := buildPastedFileCopyCommand(params.Result, remoteDir, remotePath)
 
 	cmd := exec.Command(name, args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	cmd.Stdin = strings.NewReader(base64.StdEncoding.EncodeToString(params.Data))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -52,7 +54,7 @@ func savePastedFileToRuntime(params pastedFileSaveParams) (string, error) {
 	return remotePath, nil
 }
 
-func buildPastedFileCopyCommand(result eruncommon.OpenResult, remoteDir, remotePath string) (string, []string, string) {
+func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath string) (string, []string, string) {
 	shellParams := eruncommon.ShellLaunchParamsFromResult(result)
 	release := eruncommon.RuntimeReleaseName(result.Tenant)
 	script := fmt.Sprintf("mkdir -p %s && base64 -d > %s", shellQuote(remoteDir), shellQuote(remotePath))

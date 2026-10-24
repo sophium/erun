@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/internal"
 )
 
@@ -54,7 +55,7 @@ func TestSelectTenantPromptStillPromptsOnATerminal(t *testing.T) {
 		return 1, "frs", nil
 	}
 
-	result, err := selectTenantPrompt(run, []common.TenantConfig{{Name: "erun"}, {Name: "frs"}})
+	result, err := selectTenantPrompt(run, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
 	if err != nil {
 		t.Fatalf("selectTenantPrompt: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestSelectTenantPromptSoleTenantStillPromptsOnATerminal(t *testing.T) {
 		return 0, "erun", nil
 	}
 
-	if _, err := selectTenantPrompt(run, []common.TenantConfig{{Name: "erun"}}); err != nil {
+	if _, err := selectTenantPrompt(run, []config.TenantConfig{{Name: "erun"}}); err != nil {
 		t.Fatalf("selectTenantPrompt: %v", err)
 	}
 	if !called {
@@ -105,7 +106,7 @@ func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
 	if !errors.Is(passed, common.ErrPlatformAliasUnusable) {
 		t.Fatal("an unresolvable platform alias must keep its own sentinel to report 127")
 	}
-	if errors.Is(passed, common.ErrNotInGitRepository) {
+	if errors.Is(passed, config.ErrNotInGitRepository) {
 		t.Fatal("alias failure was reclassified")
 	}
 }
@@ -120,8 +121,8 @@ func TestTenantSelectionUnavailableExitCodeIsItsOwnContract(t *testing.T) {
 }
 
 func TestBootstrapInitExitErrorStillReportsAMissingRepository(t *testing.T) {
-	err := bootstrapInitExitError(fmt.Errorf("outer: %w", common.ErrNotInGitRepository))
-	if !errors.Is(err, common.ErrNotInGitRepository) || !internal.IsReported(err) {
+	err := bootstrapInitExitError(fmt.Errorf("outer: %w", config.ErrNotInGitRepository))
+	if !errors.Is(err, config.ErrNotInGitRepository) || !internal.IsReported(err) {
 		t.Fatalf("missing-repository error lost its reported marking: %v", err)
 	}
 }

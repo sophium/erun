@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimeImagePullTraceContext returns a Context whose Trace/Info output
@@ -15,9 +17,9 @@ import (
 // under test -- the same WithTraceSink shape as traceCapturingContext
 // (cloud_aws_sdk_test.go), plus the DryRun parameter this package's dry-run
 // branches need.
-func runtimeImagePullTraceContext(dryRun bool) (Context, *bytes.Buffer) {
+func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	var buf bytes.Buffer
-	return Context{Logger: NewLogger(VerbosityInfo).WithTraceSink(&buf), DryRun: dryRun}, &buf
+	return core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&buf), DryRun: dryRun}, &buf
 }
 
 // failingProbe fails the test if the anonymous-pullability probe runs at all,
@@ -264,7 +266,7 @@ func TestRunHelmDeployRefusesBeforeAnyMutationForPrivateRuntimeImage(t *testing.
 	t.Cleanup(func() { deployRuntimeImagePullProbe = realProbe })
 
 	deployerCalled := false
-	err := RunHelmDeploy(Context{}, spec, func(HelmDeployParams) error {
+	err := RunHelmDeploy(core.Context{}, spec, func(HelmDeployParams) error {
 		deployerCalled = true
 		return nil
 	})

@@ -6,6 +6,8 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // atlasSumBasename is the file name Atlas writes for a migration directory's
@@ -31,7 +33,7 @@ type AtlasMigrateHashRunnerFunc func(root, migrationsDir string) error
 // regenerated atlas.sum is exactly what atlas itself would have written for
 // the migration files on disk, never an approximation erun invents.
 func runAtlasMigrateHash(root, migrationsDir string) error {
-	cmd := Command("atlas", "migrate", "hash", "--dir", "file://"+filepath.ToSlash(migrationsDir))
+	cmd := core.Command("atlas", "migrate", "hash", "--dir", "file://"+filepath.ToSlash(migrationsDir))
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

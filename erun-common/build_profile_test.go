@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // withTimingHome points the timing history at a fresh temp dir for the duration
@@ -15,12 +17,12 @@ import (
 // so the kubeconfig and cloud config these tests still read keep resolving.
 func withTimingHome(t *testing.T) {
 	t.Helper()
-	t.Setenv(TimingRecordDirEnv, t.TempDir())
+	t.Setenv(core.TimingRecordDirEnv, t.TempDir())
 }
 
 func writeFakeTimingRecord(t *testing.T, dir, command string, startedAt time.Time, failed bool) string {
 	t.Helper()
-	record := TimingRecord{
+	record := core.TimingRecord{
 		Command:         command,
 		StartedAt:       startedAt,
 		DurationSeconds: 12.5,
@@ -31,7 +33,7 @@ func writeFakeTimingRecord(t *testing.T, dir, command string, startedAt time.Tim
 	if err != nil {
 		t.Fatalf("marshal fixture record: %v", err)
 	}
-	name := timingRecordFileName(command, startedAt)
+	name := core.TimingRecordFileName(command, startedAt)
 	if err := os.WriteFile(filepath.Join(dir, name), encoded, 0o600); err != nil {
 		t.Fatalf("write fixture record: %v", err)
 	}
@@ -40,7 +42,7 @@ func writeFakeTimingRecord(t *testing.T, dir, command string, startedAt time.Tim
 
 func TestListTimingRecordsReturnsNewestFirst(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -73,7 +75,7 @@ func TestListTimingRecordsReturnsNewestFirst(t *testing.T) {
 
 func TestListTimingRecordsRespectsLimit(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -106,7 +108,7 @@ func TestListTimingRecordsNoDirectoryReturnsEmptyNotError(t *testing.T) {
 
 func TestListTimingRecordsSkipsCorruptFile(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestListTimingRecordsSkipsCorruptFile(t *testing.T) {
 	}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	writeFakeTimingRecord(t, dir, "build", base, false)
-	corruptName := timingRecordFileName("build", base.Add(time.Hour))
+	corruptName := core.TimingRecordFileName("build", base.Add(time.Hour))
 	if err := os.WriteFile(filepath.Join(dir, corruptName), []byte("{not json"), 0o600); err != nil {
 		t.Fatalf("write corrupt record: %v", err)
 	}
@@ -130,7 +132,7 @@ func TestListTimingRecordsSkipsCorruptFile(t *testing.T) {
 
 func TestLoadTimingRecordResolvesLatest(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -152,7 +154,7 @@ func TestLoadTimingRecordResolvesLatest(t *testing.T) {
 
 func TestLoadTimingRecordByExplicitID(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestLoadTimingRecordNoRecordsIsAClearError(t *testing.T) {
 
 func TestLoadTimingRecordUnknownIDIsAClearError(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -201,7 +203,7 @@ func TestLoadTimingRecordUnknownIDIsAClearError(t *testing.T) {
 
 func TestWriteTimingRecordPrunesOldestBeyondRetentionLimit(t *testing.T) {
 	withTimingHome(t)
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -209,30 +211,30 @@ func TestWriteTimingRecordPrunesOldestBeyondRetentionLimit(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < maxTimingRecordsRetained+5; i++ {
+	for i := 0; i < core.MaxTimingRecordsRetained+5; i++ {
 		writeFakeTimingRecord(t, dir, "build", base.Add(time.Duration(i)*time.Minute), false)
 	}
-	pruneTimingRecords(dir, "build")
+	core.PruneTimingRecords(dir, "build")
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
-	names := timingRecordFileNamesForCommand(entries, "build")
-	if len(names) != maxTimingRecordsRetained {
-		t.Fatalf("expected pruning to cap at %d records, got %d", maxTimingRecordsRetained, len(names))
+	names := core.TimingRecordFileNamesForCommand(entries, "build")
+	if len(names) != core.MaxTimingRecordsRetained {
+		t.Fatalf("expected pruning to cap at %d records, got %d", core.MaxTimingRecordsRetained, len(names))
 	}
 }
 
 func TestRenderTimingRecordRowsSortsByDurationAndShowsCgroup(t *testing.T) {
-	record := TimingRecord{
+	record := core.TimingRecord{
 		Command:  "build",
 		Duration: "10s",
-		Steps: []TimingStepJSON{
+		Steps: []core.TimingStepJSON{
 			{Name: "fast-image", Duration: "1s", DurationSeconds: 1},
 			{
 				Name: "slow-image", Duration: "9s", DurationSeconds: 9,
-				Cgroup: &BuildCgroupMetrics{Available: true, CPUSeconds: 8.5, ThrottledPeriods: 3, TotalPeriods: 10},
+				Cgroup: &core.BuildCgroupMetrics{Available: true, CPUSeconds: 8.5, ThrottledPeriods: 3, TotalPeriods: 10},
 			},
 		},
 	}

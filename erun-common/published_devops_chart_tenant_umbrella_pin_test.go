@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // tenantUmbrellaTarget is the shape the reported failure was reproduced in: a
@@ -17,10 +20,10 @@ import (
 // TestDeploy/dry_run_says_when_it_holds_the_tenant_umbrella_back in
 // erun-integration; what is left here are the two no-ops a golden cannot
 // distinguish, where the deploy must do nothing at all.
-func tenantUmbrellaTarget() OpenResult {
-	return OpenResult{
+func tenantUmbrellaTarget() config.OpenResult {
+	return config.OpenResult{
 		Tenant: "frs",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			Name:            "prod",
 			RuntimeVersion:  "1.0.142",
 			RuntimeChart:    "oci://ghcr.io/sophium/charts/frs-devops:1.0.142",
@@ -37,7 +40,7 @@ func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 	const version = "1.0.143"
 	t.Setenv(publishedChartProbeOverrideEnv, "")
 	var trace bytes.Buffer
-	ctx := Context{Logger: NewLogger(VerbosityInfo).WithTraceSink(&trace)}
+	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&trace)}
 	target := tenantUmbrellaTarget()
 	target.EnvConfig.RuntimeChart = "oci://ghcr.io/sophium/charts/frs-devops:" + version
 	spec, err := resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "no local runtime chart", "", false)
@@ -58,7 +61,7 @@ func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 func TestTenantUmbrellaHoldIsNotReportedWhenTheOperatorOverridesTheChart(t *testing.T) {
 	t.Setenv(publishedChartProbeOverrideEnv, "")
 	var trace bytes.Buffer
-	ctx := Context{Logger: NewLogger(VerbosityInfo).WithTraceSink(&trace)}
+	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&trace)}
 	override := "oci://ghcr.io/sophium/charts/frs-devops:1.0.143"
 	if _, err := resolvePublishedDevopsDeploySpecWithReason(ctx, tenantUmbrellaTarget(), "1.0.143", "no local runtime chart", override, false); err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)

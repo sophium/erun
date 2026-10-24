@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The go build cache is bounded by size here, evicting the entries that have
@@ -65,7 +67,7 @@ type goBuildCacheEntry struct {
 // already within its cap is not touched and reports nothing; a missing one is
 // not created. Under ctx.DryRun nothing is removed and the result counts what
 // would have been evicted.
-func TrimGoBuildCache(ctx Context, dir string, maxBytes int64) (GoBuildCacheTrimResult, error) {
+func TrimGoBuildCache(ctx core.Context, dir string, maxBytes int64) (GoBuildCacheTrimResult, error) {
 	result := GoBuildCacheTrimResult{Dir: dir, MaxBytes: maxBytes, DryRun: ctx.DryRun}
 	if strings.TrimSpace(dir) == "" {
 		return result, errors.New("the go build cache directory is empty")
@@ -130,7 +132,7 @@ func trimGoBuildCachePasses(dir string, maxBytes int64, result *GoBuildCacheTrim
 	return err
 }
 
-func reportGoBuildCacheTrim(ctx Context, result GoBuildCacheTrimResult) {
+func reportGoBuildCacheTrim(ctx core.Context, result GoBuildCacheTrimResult) {
 	ctx.Info(fmt.Sprintf("erun: trimmed the go build cache at %s from %d to %d bytes, evicting %d least recently used entries against a %d byte cap", result.Dir, result.BeforeBytes, result.AfterBytes, result.Evicted, result.MaxBytes))
 	if result.AfterBytes > result.MaxBytes {
 		ctx.Info(fmt.Sprintf("erun: the go build cache at %s is still %d bytes over its %d byte cap after %d passes; its remaining entries are not the ones this bound can free", result.Dir, result.AfterBytes, result.MaxBytes, result.Passes))

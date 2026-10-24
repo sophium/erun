@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func ResolveDockerBuildContext() (DockerBuildContext, error) {
@@ -89,12 +91,12 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 	// resolves deterministically rather than by a same-named directory found
 	// elsewhere.
 	searchRoot := projectRoot
-	declared, ok, err := declaredComponentPaths(projectRoot, componentName)
+	declared, ok, err := config.DeclaredComponentPaths(projectRoot, componentName)
 	if err != nil {
 		return DockerBuildContext{}, false, err
 	}
 	if ok {
-		if dockerRoot := resolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
+		if dockerRoot := config.ResolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
 			searchRoot = dockerRoot
 		}
 	}

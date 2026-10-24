@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // writeDockerLoginCaptureStub points ERUN_DOCKER_BIN at a script that records
@@ -54,7 +56,7 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	writeDockerLoginCaptureStub(t, argsPath, stdinPath)
 
 	provider := erunTestProvider()
-	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{provider}}}
+	store := erunTestCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
 	secretStore := NewFileCloudSecretStore(t.TempDir())
 	if err := saveCachedERunAccessToken(secretStore, provider.Alias, ERunTokens{AccessToken: "test-bearer-token", ExpiresIn: time.Hour}); err != nil {
 		t.Fatalf("seed cached access token: %v", err)
@@ -69,7 +71,7 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read captured args: %v", err)
 	}
-	wantArgs := "login\n" + HostedRegistryHost + "\n-u\n" + HostedRegistryLoginUsername + "\n--password-stdin\n"
+	wantArgs := "login\n" + config.HostedRegistryHost + "\n-u\n" + config.HostedRegistryLoginUsername + "\n--password-stdin\n"
 	if string(gotArgs) != wantArgs {
 		t.Fatalf("docker args = %q, want %q", string(gotArgs), wantArgs)
 	}
@@ -121,7 +123,7 @@ func TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries(t *
 
 func TestIsHostedRegistry(t *testing.T) {
 	cases := map[string]bool{
-		HostedRegistryHost:           true,
+		config.HostedRegistryHost:    true,
 		"REGISTRY.ERUNPAAS.COM":      true,
 		" registry.erunpaas.com ":    true,
 		"registry.erunpaas.com/acme": false,

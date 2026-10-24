@@ -8,10 +8,12 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
-func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw common.RawCommandRunnerFunc, resolveOpen OpenResolver, store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen OpenResolver, store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
 	// job's supervise leaf is mounted only here, under exec, since
 	// environmentJobSupervisorArgs always re-execs `exec job supervise`
 	// regardless of which entry point (this one, or the deprecated top-level
@@ -65,7 +67,7 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 	return cmd
 }
 
-func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw common.RawCommandRunnerFunc) *cobra.Command {
+func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "raw COMMAND [ARG...]",
 		Short: "Run a raw command from the project root",
@@ -157,9 +159,9 @@ func newExecWriteCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecWriteCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, path string) error {
+func runExecWriteCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, path string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -207,9 +209,9 @@ func newExecCommitCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch string, paths []string) error {
+func runExecCommitCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, branch string, paths []string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -257,9 +259,9 @@ func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store common.Cloud
 	return cmd
 }
 
-func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies, pushDeps common.PushWorkingTreeBranchDependencies, branch, remote string) error {
+func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies, pushDeps common.PushWorkingTreeBranchDependencies, branch, remote string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -320,9 +322,9 @@ func newExecMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, targetBranch, remote string) error {
+func runExecMergeCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, targetBranch, remote string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -408,7 +410,7 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
+func runExecGateMergeCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}
@@ -416,7 +418,7 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 		return fmt.Errorf("--target is required")
 	}
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -443,7 +445,7 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 
 // readGateMergeSources reads one NUL-separated commit message per source
 // branch from stdin, in the same order as the --source flags.
-func readGateMergeSources(ctx common.Context, sourceBranches []string) ([]common.GateMergeSource, error) {
+func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]common.GateMergeSource, error) {
 	stdin, err := io.ReadAll(ctx.Stdin)
 	if err != nil {
 		return nil, fmt.Errorf("read commit message(s) from stdin: %w", err)
@@ -473,7 +475,7 @@ func gateMergeCarriedTrailerSummary(trailers []string) string {
 // reportGateMergeResult prints each landed and skipped source, then refuses
 // if the batch landed nothing at all — there is nothing to build against an
 // unchanged target.
-func reportGateMergeResult(ctx common.Context, result common.GateMergeWorkingTreeResult) error {
+func reportGateMergeResult(ctx core.Context, result common.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
 		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",
 			result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit,
@@ -529,7 +531,7 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 	return cmd
 }
 
-func runExecReportCommitStatusCommand(ctx common.Context, commit, state, statusCtx, description, targetURL, remoteURL string) error {
+func runExecReportCommitStatusCommand(ctx core.Context, commit, state, statusCtx, description, targetURL, remoteURL string) error {
 	result, err := common.ReportCommitStatus(ctx, common.ReportCommitStatusParams{
 		RemoteURL:   remoteURL,
 		Commit:      commit,
@@ -584,7 +586,7 @@ func newExecClosePRCmd() *cobra.Command {
 	return cmd
 }
 
-func runExecClosePRCommand(ctx common.Context, branch, target, remoteURL, gatedCommit, landingCommit string) error {
+func runExecClosePRCommand(ctx core.Context, branch, target, remoteURL, gatedCommit, landingCommit string) error {
 	result, err := common.ClosePullRequest(ctx, common.ClosePullRequestParams{
 		RemoteURL:     remoteURL,
 		Branch:        branch,
@@ -697,7 +699,7 @@ func newExecPlanRulesetBypassCmd() *cobra.Command {
 	return cmd
 }
 
-func runExecPlanRulesetBypassCommand(ctx common.Context, params common.PlanRulesetBypassParams) error {
+func runExecPlanRulesetBypassCommand(ctx core.Context, params common.PlanRulesetBypassParams) error {
 	result, err := common.PlanRulesetBypass(ctx, params, common.PlanRulesetBypassDependencies{})
 	if err != nil {
 		return err
@@ -706,7 +708,7 @@ func runExecPlanRulesetBypassCommand(ctx common.Context, params common.PlanRules
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec plan-ruleset-bypass planned.")
 		return err
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if err := writeRulesetBypassPlan(ctx, result); err != nil {
 			return err
 		}
@@ -718,7 +720,7 @@ func runExecPlanRulesetBypassCommand(ctx common.Context, params common.PlanRules
 // operator runs: apply, verify, and — if any of it goes wrong — revert. A plan
 // that named the edit without naming its verification and its way back would
 // be exactly the dead end this command exists to avoid.
-func writeRulesetBypassPlan(ctx common.Context, result common.PlanRulesetBypassResult) error {
+func writeRulesetBypassPlan(ctx core.Context, result common.PlanRulesetBypassResult) error {
 	out := new(strings.Builder)
 	fmt.Fprintf(out, "Ruleset %d (%q) on %s/%s\n", result.RulesetID, result.RulesetName, result.Owner, result.Repo)
 	fmt.Fprintf(out, "  bypass actors today (%d):\n", len(result.CurrentBypassActors))
@@ -810,7 +812,7 @@ func newExecRouteCheckCmd(store common.CloudReadStore, deps common.CloudDependen
 	return cmd
 }
 
-func runExecRouteCheckCommand(ctx common.Context, store common.CloudReadStore, alias string, params common.RouteCheckParams, deps common.CloudDependencies) error {
+func runExecRouteCheckCommand(ctx core.Context, store common.CloudReadStore, alias string, params common.RouteCheckParams, deps common.CloudDependencies) error {
 	result, err := common.RunRouteCheck(ctx, store, alias, params, deps)
 	if err != nil {
 		return err
@@ -819,7 +821,7 @@ func runExecRouteCheckCommand(ctx common.Context, store common.CloudReadStore, a
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec route-check planned.")
 		return err
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if err := writeRouteCheckReport(ctx, result); err != nil {
 			return err
 		}
@@ -833,7 +835,7 @@ func runExecRouteCheckCommand(ctx common.Context, store common.CloudReadStore, a
 // writeRouteCheckReport prints one line per missing route -- the loud
 // failure this command exists to surface -- and a summary line always, so a
 // clean run is visibly clean rather than silent.
-func writeRouteCheckReport(ctx common.Context, result common.RouteCheckResult) error {
+func writeRouteCheckReport(ctx core.Context, result common.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		_, err := fmt.Fprintf(ctx.Stdout, "%s did not answer the sanity probe (%s); no routes were checked.\n",
 			result.APIURL, result.UnreachableReason)
@@ -876,7 +878,7 @@ func routeCheckExitError(result common.RouteCheckResult) error {
 	return fmt.Errorf("of %d route(s) checked on %s: %s", result.RoutesChecked, result.APIURL, strings.Join(problems, "; "))
 }
 
-func runExecReconcileBypassCommand(ctx common.Context, store common.CloudReadStore, alias string, params common.ReconcileBypassParams, deps common.CloudDependencies) error {
+func runExecReconcileBypassCommand(ctx core.Context, store common.CloudReadStore, alias string, params common.ReconcileBypassParams, deps common.CloudDependencies) error {
 	result, err := common.ReconcileBypass(ctx, store, alias, params, deps, common.ReconcileBypassDependencies{})
 	if err != nil {
 		return err
@@ -885,7 +887,7 @@ func runExecReconcileBypassCommand(ctx common.Context, store common.CloudReadSto
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec reconcile-bypass planned.")
 		return err
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if err := writeReconcileBypassReport(ctx, result); err != nil {
 			return err
 		}
@@ -916,7 +918,7 @@ func reconcileBypassExitError(result common.ReconcileBypassResult) error {
 		len(result.Pushes), result.TargetBranch, strings.Join(problems, "; "))
 }
 
-func writeReconcileBypassReport(ctx common.Context, result common.ReconcileBypassResult) error {
+func writeReconcileBypassReport(ctx core.Context, result common.ReconcileBypassResult) error {
 	if len(result.Pushes) == 0 {
 		_, err := fmt.Fprintf(ctx.Stdout, "No bypassed pushes found for %s/%s ruleset %d on %s.\n",
 			result.Owner, result.Repo, result.RulesetID, result.TargetBranch)
@@ -943,9 +945,9 @@ type execDiffOptions struct {
 	SelectedCommit string
 }
 
-func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, opts execDiffOptions) error {
+func runExecDiffCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, opts execDiffOptions) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -980,15 +982,15 @@ func resolveExecDiff(projectRoot string, runGit common.GitCommandRunnerFunc, opt
 	}, runGit)
 }
 
-func runExecRawCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runRaw common.RawCommandRunnerFunc, args []string) error {
+func runExecRawCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc, args []string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
 		return err
 	}
-	return common.RunRawCommand(ctx, common.RawCommandSpec{
+	return core.RunRawCommand(ctx, core.RawCommandSpec{
 		Dir:  projectRoot,
 		Args: args,
 	}, runRaw)

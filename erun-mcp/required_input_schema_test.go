@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // toolsExcludedFromRequiredInputAudit are tools TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema
@@ -61,7 +61,7 @@ func TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	t.Setenv("ERUN_CODEX_BIN", "true")
 	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{Version: "1.2.3"}, runtime)
+	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, runtime)
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {

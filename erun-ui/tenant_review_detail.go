@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // tenant_review_detail.go extends the tenant dashboard's Reviews tab with a
@@ -80,7 +81,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 // loadReviewDetailReviewers loads a review's assigned reviewers, degrading
 // independently like loadReviewDetailComments/loadReviewDetailBuilds: a
 // caller who cannot read reviewers still sees the rest of the detail.
-func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
+func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
 		detail.ReviewersRestricted = restricted
 		return
@@ -101,7 +102,7 @@ func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformC
 // the Add reviewers picker, best effort: a caller who cannot read /v1/users,
 // or a read that fails, gets back nil rather than failing the whole detail —
 // the Add reviewers action itself simply has nothing to offer.
-func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) []uiReviewer {
+func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities) []uiReviewer {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return nil
 	}
@@ -116,7 +117,7 @@ func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncom
 	return choices
 }
 
-func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
+func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments); restricted != "" {
 		detail.CommentsRestricted = restricted
 		return
@@ -130,7 +131,7 @@ func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformCl
 	detail.UnresolvedThreads = eruncommon.CountUnresolvedThreads(comments)
 }
 
-func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {
+func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
 		detail.BuildsRestricted = restricted
 		return
@@ -147,7 +148,7 @@ func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClie
 // may not read the queue and when the read itself fails — the position is
 // supplemental detail in the dialog header, not something worth its own
 // error line the way comments and builds get.
-func loadReviewDetailQueuePosition(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, review eruncommon.PlatformReview, reviewID string) int {
+func loadReviewDetailQueuePosition(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, reviewID string) int {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
 		return 0
 	}

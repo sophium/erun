@@ -4,6 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const testGatewayURL = "https://openrouter.ai/api"
@@ -172,12 +175,12 @@ func TestResolveGatewayCredentialReportsAnUnreadableStore(t *testing.T) {
 }
 
 func TestRenderGatewayCredentialsSecret(t *testing.T) {
-	manifest := renderGatewayCredentialsSecret(GatewaySecretName, "team-dev", "sk-or-v1-abc")
+	manifest := renderGatewayCredentialsSecret(config.GatewaySecretName, "team-dev", "sk-or-v1-abc")
 	for _, want := range []string{
 		"namespace: team-dev",
-		"name: " + GatewaySecretName,
+		"name: " + config.GatewaySecretName,
 		// The key the chart reads, so the two cannot drift apart.
-		GatewaySecretKey + ":",
+		config.GatewaySecretKey + ":",
 		"sk-or-v1-abc",
 		// The label every erun-applied Secret carries.
 		"app.kubernetes.io/managed-by: erun-deploy",
@@ -198,13 +201,13 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	spec := HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
-		Claude:      EnvironmentClaudeConfig{UseGateway: &no},
-		OpenRouter:  &OpenRouterConfig{BaseURL: testGatewayURL},
+		Claude:      config.EnvironmentClaudeConfig{UseGateway: &no},
+		OpenRouter:  &config.OpenRouterConfig{BaseURL: testGatewayURL},
 	}
 	if err := applyGatewayCredentialsSecret(ctx, spec); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(trace.String(), GatewaySecretName) {
+	if strings.Contains(trace.String(), config.GatewaySecretName) {
 		t.Fatalf("an opted-out environment must get no gateway Secret, trace:\n%s", trace.String())
 	}
 }
@@ -217,12 +220,12 @@ func TestApplyGatewayCredentialsSecretDeliversForAnEnvironmentUsingIt(t *testing
 	spec := HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
-		OpenRouter:  &OpenRouterConfig{BaseURL: testGatewayURL},
+		OpenRouter:  &config.OpenRouterConfig{BaseURL: testGatewayURL},
 	}
 	if err := applyGatewayCredentialsSecret(ctx, spec); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(trace.String(), GatewaySecretName) {
+	if !strings.Contains(trace.String(), config.GatewaySecretName) {
 		t.Fatalf("expected the gateway Secret in the trace:\n%s", trace.String())
 	}
 }
@@ -234,14 +237,14 @@ func TestAppliedSecretNamesMatchTheChartValues(t *testing.T) {
 	spec := HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
-		OpenRouter:  &OpenRouterConfig{BaseURL: testGatewayURL},
+		OpenRouter:  &config.OpenRouterConfig{BaseURL: testGatewayURL},
 	}
-	args := helmClaudeSetArgs(EnvironmentClaudeConfig{}, spec.OpenRouter)
+	args := helmClaudeSetArgs(config.EnvironmentClaudeConfig{}, spec.OpenRouter)
 	set := strings.Join(args, " ")
-	if !strings.Contains(set, "claude.openRouterAuthTokenSecret="+GatewaySecretName) {
+	if !strings.Contains(set, "claude.openRouterAuthTokenSecret="+config.GatewaySecretName) {
 		t.Fatalf("the chart is not told the Secret deploy creates:\n%s", set)
 	}
-	if !strings.Contains(set, "claude.openRouterAuthTokenKey="+GatewaySecretKey) {
+	if !strings.Contains(set, "claude.openRouterAuthTokenKey="+config.GatewaySecretKey) {
 		t.Fatalf("the chart is not told the entry that Secret carries:\n%s", set)
 	}
 }
@@ -253,8 +256,8 @@ func TestAppliedSecretNamesMatchTheChartValues(t *testing.T) {
 // the gateway keeps its own provider choice.
 func TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff(t *testing.T) {
 	on, off := true, false
-	catalog := &OpenRouterConfig{BaseURL: testGatewayURL}
-	providers := EnvironmentClaudeConfig{UseBedrock: &on, UseMantle: &on}
+	catalog := &config.OpenRouterConfig{BaseURL: testGatewayURL}
+	providers := config.EnvironmentClaudeConfig{UseBedrock: &on, UseMantle: &on}
 
 	set := strings.Join(helmClaudeSetArgs(providers, catalog), " ")
 	for _, want := range []string{"claude.useBedrock=0", "claude.useMantle=0", "claude.openRouterBaseURL="} {
@@ -294,20 +297,20 @@ func stubGatewaySecretDelete(t *testing.T) *[][]string {
 func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T) {
 	no := false
 	for name, spec := range map[string]HelmDeploySpec{
-		"catalog switched off": {OpenRouter: &OpenRouterConfig{Models: []OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
+		"catalog switched off": {OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
 		"no catalog":           {},
 		"environment opted out": {
-			Claude:     EnvironmentClaudeConfig{UseGateway: &no},
-			OpenRouter: &OpenRouterConfig{BaseURL: testGatewayURL},
+			Claude:     config.EnvironmentClaudeConfig{UseGateway: &no},
+			OpenRouter: &config.OpenRouterConfig{BaseURL: testGatewayURL},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			calls := stubGatewaySecretDelete(t)
 			spec.ReleaseName, spec.Tenant, spec.Namespace, spec.KubernetesContext = "erun-devops", "erun", "erun-build", "erun-build"
-			if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+			if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
 				t.Fatal(err)
 			}
-			want := "--context erun-build -n erun-build delete secret " + GatewaySecretName + " --ignore-not-found"
+			want := "--context erun-build -n erun-build delete secret " + config.GatewaySecretName + " --ignore-not-found"
 			if len(*calls) != 1 || strings.Join((*calls)[0], " ") != want {
 				t.Fatalf("calls = %v, want %q", *calls, want)
 			}
@@ -317,8 +320,8 @@ func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T)
 
 func TestPruneGatewayCredentialsSecretKeepsItWhileTheGatewayApplies(t *testing.T) {
 	calls := stubGatewaySecretDelete(t)
-	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build", OpenRouter: &OpenRouterConfig{BaseURL: testGatewayURL}}
-	if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build", OpenRouter: &config.OpenRouterConfig{BaseURL: testGatewayURL}}
+	if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 0 {
@@ -331,7 +334,7 @@ func TestPruneGatewayCredentialsSecretKeepsItWhileTheGatewayApplies(t *testing.T
 func TestPruneGatewayCredentialsSecretLeavesItToTheRuntimeRelease(t *testing.T) {
 	calls := stubGatewaySecretDelete(t)
 	spec := HelmDeploySpec{ReleaseName: "erun-backend-postgres", Tenant: "erun", Namespace: "erun-build"}
-	if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+	if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 0 {
@@ -347,7 +350,7 @@ func TestPruneGatewayCredentialsSecretDryRunOnlyTraces(t *testing.T) {
 	if err := pruneGatewayCredentialsSecret(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 0 || !strings.Contains(trace.String(), GatewaySecretName) {
+	if len(*calls) != 0 || !strings.Contains(trace.String(), config.GatewaySecretName) {
 		t.Fatalf("calls=%v trace:\n%s", *calls, trace.String())
 	}
 }

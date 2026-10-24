@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +48,7 @@ func newInputsUploadCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runInputsUploadCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -60,7 +61,7 @@ func runInputsUploadCommand(ctx common.Context, resolveOpen OpenResolver, params
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(out)
 	}
 	ctx.Info(fmt.Sprintf("Uploaded %s (%s, sha256 %s) to %s", localPath, formatOutputSize(out.Bytes), out.SHA256, out.RemotePath))

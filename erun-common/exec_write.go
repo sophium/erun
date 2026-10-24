@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // WriteWorkingTreeFileParams names the write explicitly: Path is never
@@ -28,7 +30,7 @@ type WriteWorkingTreeFileResult struct {
 // path is traced and the write is refused outright when it would land outside
 // root, so granting this operation can never become a path traversal into the
 // rest of the pod.
-func WriteWorkingTreeFile(ctx Context, root string, params WriteWorkingTreeFileParams) (WriteWorkingTreeFileResult, error) {
+func WriteWorkingTreeFile(ctx core.Context, root string, params WriteWorkingTreeFileParams) (WriteWorkingTreeFileResult, error) {
 	resolved, _, err := resolveWorkingTreePath(root, params.Path)
 	if err != nil {
 		return WriteWorkingTreeFileResult{}, err

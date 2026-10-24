@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type UsageInput struct {
@@ -101,10 +102,10 @@ func usageIntervalFromSeconds(seconds float64) time.Duration {
 // module applies -- before asking the store to resolve the rest of the
 // OpenResult, so `usage` can never be pointed at a different environment than
 // the one this server's pod actually runs in.
-func resolveUsageOpenResult(runtime RuntimeConfig, input UsageInput) (eruncommon.OpenResult, error) {
+func resolveUsageOpenResult(runtime RuntimeConfig, input UsageInput) (config.OpenResult, error) {
 	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
-		return eruncommon.OpenResult{}, err
+		return config.OpenResult{}, err
 	}
 	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }

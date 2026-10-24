@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // uiGatewayRouting is one environment whose running pod routes Claude Code
@@ -82,7 +83,7 @@ func (a *App) LoadGatewayRoutingDrift() ([]uiGatewayRouting, error) {
 
 type gatewayRoutingCandidate struct {
 	tenant string
-	env    eruncommon.EnvConfig
+	env    config.EnvConfig
 }
 
 // gatewayRoutingCandidates lists every configured environment that has a
@@ -109,7 +110,7 @@ func (a *App) gatewayRoutingCandidates() ([]gatewayRoutingCandidate, error) {
 
 // readGatewayRoutingDrift reads one environment's running pod, returning the
 // zero value when it matches its saved configuration or cannot be read.
-func (a *App) readGatewayRoutingDrift(tenant string, env eruncommon.EnvConfig, catalog *eruncommon.OpenRouterConfig) uiGatewayRouting {
+func (a *App) readGatewayRoutingDrift(tenant string, env config.EnvConfig, catalog *config.OpenRouterConfig) uiGatewayRouting {
 	parent := a.ctx
 	if parent == nil {
 		parent = context.Background()
@@ -141,6 +142,6 @@ func (a *App) LoadEnvironmentGatewayRouting(selection uiSelection) (uiGatewayRou
 
 // gatewayRoutingReadable is an environment with a runtime pod erun deploys: a
 // host environment has none, and one without a cluster has nowhere to look.
-func gatewayRoutingReadable(env eruncommon.EnvConfig) bool {
-	return env.Type != eruncommon.EnvironmentTypeHost && strings.TrimSpace(env.KubernetesContext) != ""
+func gatewayRoutingReadable(env config.EnvConfig) bool {
+	return env.Type != config.EnvironmentTypeHost && strings.TrimSpace(env.KubernetesContext) != ""
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // parallelRaceTestSpecCount is deliberately > 1 so runDeployStep takes its
@@ -52,9 +54,9 @@ func TestRunDeployStepParallelSpecsShareNoWriter(t *testing.T) {
 	t.Cleanup(func() { ensureDeployNamespace = original })
 
 	var stdout, stderr bytes.Buffer
-	ctx := Context{
-		Logger:    NewLoggerWithWriters(VerbosityTrace, &stdout, &stderr),
-		Verbosity: VerbosityTrace,
+	ctx := core.Context{
+		Logger:    core.NewLoggerWithWriters(core.VerbosityTrace, &stdout, &stderr),
+		Verbosity: core.VerbosityTrace,
 		Stdout:    &stdout,
 		Stderr:    &stderr,
 	}
@@ -80,9 +82,9 @@ func TestRunDeployStepParallelOutputAttributableToComponent(t *testing.T) {
 	t.Cleanup(func() { ensureDeployNamespace = original })
 
 	var stdout, stderr bytes.Buffer
-	ctx := Context{
-		Logger:    NewLoggerWithWriters(VerbosityTrace, &stdout, &stderr),
-		Verbosity: VerbosityTrace,
+	ctx := core.Context{
+		Logger:    core.NewLoggerWithWriters(core.VerbosityTrace, &stdout, &stderr),
+		Verbosity: core.VerbosityTrace,
 		Stdout:    &stdout,
 		Stderr:    &stderr,
 	}

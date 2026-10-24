@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // powerDNSConfigDir holds the PowerDNS backend config and DB password, so the
@@ -50,7 +52,7 @@ func powerDNSDeleteArgs(params DNSRecordDeleteParams) []string {
 
 // upsertPowerDNSRecord is live-only: it must never run under a dry-run.
 func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
-	if out, err := Command("kubectl", powerDNSUpsertArgs(params)...).CombinedOutput(); err != nil {
+	if out, err := core.Command("kubectl", powerDNSUpsertArgs(params)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl exec pdnsutil replace-rrset: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -59,7 +61,7 @@ func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
 // deletePowerDNSRecord is live-only: RunUnexposeService short-circuits before
 // calling it, so it never runs under a dry-run.
 func deletePowerDNSRecord(params DNSRecordDeleteParams) error {
-	if out, err := Command("kubectl", powerDNSDeleteArgs(params)...).CombinedOutput(); err != nil {
+	if out, err := core.Command("kubectl", powerDNSDeleteArgs(params)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl exec pdnsutil delete-rrset: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -68,7 +70,7 @@ func deletePowerDNSRecord(params DNSRecordDeleteParams) error {
 // applyHostRoutingIngress is live-only: RunExposeService short-circuits before
 // calling it, so it never runs under a dry-run.
 func applyHostRoutingIngress(params IngressApplyParams) error {
-	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderHostRoutingIngress(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply ingress: %w: %s", err, strings.TrimSpace(string(out)))
@@ -80,7 +82,7 @@ func applyHostRoutingIngress(params IngressApplyParams) error {
 // perform: the token Secret's apply command only (its content is a credential
 // and stays redacted, matching applyMCPAuthSecret), and the Issuer/Certificate
 // commands plus their non-secret manifests in full.
-func traceTLSCertPlan(ctx Context, params TLSCertApplyParams) {
+func traceTLSCertPlan(ctx core.Context, params TLSCertApplyParams) {
 	args := kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
 	ctx.Trace(fmt.Sprintf("expose: tls: dns01 token secret %s (namespace %s, token read from %s, content redacted)", params.TokenSecretName, params.Namespace, params.Cert.DNS01TokenPath))
 	ctx.TraceCommand("", "kubectl", args...)
@@ -122,7 +124,7 @@ func applyDNS01TokenSecret(params TLSCertApplyParams) error {
 // algorithm reached through discovery and a dynamic client (see
 // kubectlSecretApplyExecutionOperation).
 func applyPerEnvIssuer(params TLSCertApplyParams) error {
-	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvIssuer(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env issuer: %w: %s", err, strings.TrimSpace(string(out)))
@@ -131,7 +133,7 @@ func applyPerEnvIssuer(params TLSCertApplyParams) error {
 }
 
 func applyPerEnvCertificate(params TLSCertApplyParams) error {
-	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvCertificate(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env certificate: %w: %s", err, strings.TrimSpace(string(out)))

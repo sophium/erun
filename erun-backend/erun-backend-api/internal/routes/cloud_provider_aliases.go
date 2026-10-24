@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // CloudProviderAliasWriter stores a tenant's BYO-cloud credentials. The
@@ -47,9 +47,9 @@ func (r CloudProviderAliasRoutes) setAlias(w http.ResponseWriter, req *http.Requ
 	}
 	provider := strings.TrimSpace(body.Provider)
 	if provider == "" {
-		provider = eruncommon.CloudProviderAWS
+		provider = config.CloudProviderAWS
 	}
-	if provider != eruncommon.CloudProviderAWS {
+	if provider != config.CloudProviderAWS {
 		writeError(w, http.StatusBadRequest, "provider must be aws")
 		return
 	}

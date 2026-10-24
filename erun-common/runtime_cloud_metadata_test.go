@@ -6,6 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // fakeIMDS serves the two reads the boot makes. With v2 it requires the token a
@@ -65,10 +68,10 @@ func TestRuntimeBootFillsAnUninjectedRegionAndInstanceIDFromIMDS(t *testing.T) {
 		if requests.Load() != seen {
 			t.Fatalf("v2=%v: the metadata must be read once per boot", v2)
 		}
-		if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+		if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 			t.Fatal(err)
 		}
-		var root ERunConfig
+		var root config.ERunConfig
 		readTestYAML(t, runtimeRootConfigPath(boot.configHome()), &root)
 		if len(root.CloudContexts) != 1 || root.CloudContexts[0].InstanceID != "i-0abc123" || root.CloudContexts[0].Region != "eu-west-2" {
 			t.Fatalf("v2=%v: the boot config should record the instance's cloud context, got %+v", v2, root.CloudContexts)

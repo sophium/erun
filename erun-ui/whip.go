@@ -6,7 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // WhipNow is the desktop's own operator-triggered whip pass -- the control
@@ -132,7 +133,7 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 			Error:     err.Error(),
 		}
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		if a.classifyMCPUnreachable(mcpPort) == eruncommon.LocalMCPStaleForward {
 			return eruncommon.WhipResult{

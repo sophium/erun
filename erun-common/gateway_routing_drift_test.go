@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 const testRuntimeDeploymentWithGateway = `{"spec":{"template":{"spec":{"containers":[
@@ -32,11 +34,11 @@ func stubRuntimeDeployment(t *testing.T, raw string, found bool) *[]string {
 // nothing, because only a redeploy applies it.
 func TestReadGatewayRoutingReportsAPodStillOnASwitchedOffGateway(t *testing.T) {
 	calls := stubRuntimeDeployment(t, testRuntimeDeploymentWithGateway, true)
-	switchedOff := &OpenRouterConfig{
+	switchedOff := &config.OpenRouterConfig{
 		DefaultModel: "deepseek/deepseek-v4.1-flash",
-		Models:       []OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}},
+		Models:       []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}},
 	}
-	env := EnvConfig{Name: "build", KubernetesContext: "erun-build"}
+	env := config.EnvConfig{Name: "build", KubernetesContext: "erun-build"}
 
 	routing, found, err := ReadGatewayRouting(context.Background(), env, "erun", switchedOff)
 	if err != nil || !found {
@@ -56,9 +58,9 @@ func TestReadGatewayRoutingReportsAPodStillOnASwitchedOffGateway(t *testing.T) {
 func TestReadGatewayRoutingReportsAnOptedOutEnvironmentStillOnTheGateway(t *testing.T) {
 	stubRuntimeDeployment(t, testRuntimeDeploymentWithGateway, true)
 	no := false
-	env := EnvConfig{Name: "ux", KubernetesContext: "erun", Claude: EnvironmentClaudeConfig{UseGateway: &no}}
+	env := config.EnvConfig{Name: "ux", KubernetesContext: "erun", Claude: config.EnvironmentClaudeConfig{UseGateway: &no}}
 
-	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &OpenRouterConfig{BaseURL: testGatewayURL})
+	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &config.OpenRouterConfig{BaseURL: testGatewayURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +71,9 @@ func TestReadGatewayRoutingReportsAnOptedOutEnvironmentStillOnTheGateway(t *test
 
 func TestReadGatewayRoutingReportsAPodNotYetOnASwitchedOnGateway(t *testing.T) {
 	stubRuntimeDeployment(t, testRuntimeDeploymentWithoutGateway, true)
-	env := EnvConfig{Name: "build", KubernetesContext: "erun-build"}
+	env := config.EnvConfig{Name: "build", KubernetesContext: "erun-build"}
 
-	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &OpenRouterConfig{BaseURL: testGatewayURL})
+	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &config.OpenRouterConfig{BaseURL: testGatewayURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,10 +84,10 @@ func TestReadGatewayRoutingReportsAPodNotYetOnASwitchedOnGateway(t *testing.T) {
 
 func TestReadGatewayRoutingAgreesWhenThePodMatches(t *testing.T) {
 	stubRuntimeDeployment(t, testRuntimeDeploymentWithGateway, true)
-	env := EnvConfig{Name: "build", KubernetesContext: "erun-build"}
+	env := config.EnvConfig{Name: "build", KubernetesContext: "erun-build"}
 
 	// A trailing slash is the same endpoint, not a reason to redeploy.
-	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &OpenRouterConfig{BaseURL: testGatewayURL + "/"})
+	routing, _, err := ReadGatewayRouting(context.Background(), env, "erun", &config.OpenRouterConfig{BaseURL: testGatewayURL + "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestReadGatewayRoutingAgreesWhenThePodMatches(t *testing.T) {
 
 func TestReadGatewayRoutingWithoutADeployedRuntime(t *testing.T) {
 	stubRuntimeDeployment(t, "", false)
-	_, found, err := ReadGatewayRouting(context.Background(), EnvConfig{Name: "build"}, "erun", &OpenRouterConfig{BaseURL: testGatewayURL})
+	_, found, err := ReadGatewayRouting(context.Background(), config.EnvConfig{Name: "build"}, "erun", &config.OpenRouterConfig{BaseURL: testGatewayURL})
 	if err != nil || found {
 		t.Fatalf("found=%v err=%v, want not found and no error", found, err)
 	}

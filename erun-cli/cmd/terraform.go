@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -79,9 +81,9 @@ func newTerraformOperationCmd(store common.TerraformStore, findProjectRoot commo
 	return cmd
 }
 
-func runTerraformCommand(ctx common.Context, store common.TerraformStore, findProjectRoot common.ProjectFinderFunc, op common.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store common.TerraformStore, findProjectRoot common.ProjectFinderFunc, op common.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -105,7 +107,7 @@ func runTerraformCommand(ctx common.Context, store common.TerraformStore, findPr
 // writeTerraformCommandOutput prints the dispatched run's captured output (a
 // dispatch has no local Directory to print progress against) and the final
 // status line, non-dry-run only — dry-run already traced the full plan.
-func writeTerraformCommandOutput(ctx common.Context, result common.TerraformResult) error {
+func writeTerraformCommandOutput(ctx core.Context, result common.TerraformResult) error {
 	stdout := strings.TrimSpace(result.Stdout)
 	stderr := strings.TrimSpace(result.Stderr)
 	if stdout != "" {
@@ -145,7 +147,7 @@ func terraformConfirmer(op common.TerraformOperation, confirmEnvironment string)
 	if op != common.TerraformApply && op != common.TerraformDestroy {
 		return nil
 	}
-	return func(ctx common.Context, environment string) error {
+	return func(ctx core.Context, environment string) error {
 		provided := strings.TrimSpace(confirmEnvironment)
 		if provided == "" {
 			_, _ = fmt.Fprintf(ctx.Stderr, "Type the environment name to %s (%s): ", op, environment)

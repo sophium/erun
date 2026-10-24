@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -37,7 +39,7 @@ func describeRuntimeEnvironmentMonitor(boot runtimeBoot) string {
 // the sleep, so the first tick sets the CPU baseline the next compares against.
 // Auto-stop rides the same tick, only for a cloud-managed environment, the only
 // kind with a host to stop.
-func startRuntimeEnvironmentMonitor(_ Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func startRuntimeEnvironmentMonitor(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	dir := boot.path(".erun", boot.tenant(), boot.environment())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -64,7 +66,7 @@ func startRuntimeEnvironmentMonitor(_ Context, boot runtimeBoot, supervisor *run
 }
 
 func (b runtimeBoot) erunCommand(args ...string) *exec.Cmd {
-	return Command(b.erunPath, args...)
+	return core.Command(b.erunPath, args...)
 }
 
 // runtimeIdleStopTick asks the idle policy whether to stop, records the answer,
@@ -138,7 +140,7 @@ func stopRuntimeCloudHost(boot runtimeBoot, supervisor *runtimeSupervisor, log i
 	if region == "" || instanceID == "" {
 		return errors.New("cloud host region or instance id is not available; cannot stop cloud host")
 	}
-	cmd := Command("aws", "--cli-connect-timeout", "5", "--cli-read-timeout", "20", "ec2", "stop-instances", "--region", region, "--instance-ids", instanceID)
+	cmd := core.Command("aws", "--cli-connect-timeout", "5", "--cli-read-timeout", "20", "ec2", "stop-instances", "--region", region, "--instance-ids", instanceID)
 	cmd.Env = append(os.Environ(), "AWS_MAX_ATTEMPTS=5", "AWS_RETRY_MODE=standard")
 	cmd.Stderr = log
 	return supervisor.run(cmd)

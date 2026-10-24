@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // EnvironmentService is one Service in an environment's namespace as the
@@ -53,7 +55,7 @@ var ErrListEnvironmentServicesForbidden = errors.New("list environment services:
 // would make, in the same order. Traced and returned up front rather than
 // discovered during execution because ListEnvironmentServices itself holds no
 // Context -- it is the desktop's call, and the desktop has no trace to emit.
-func RunListEnvironmentServices(ctx Context, req ShellLaunchParams) (EnvironmentServiceList, error) {
+func RunListEnvironmentServices(ctx core.Context, req ShellLaunchParams) (EnvironmentServiceList, error) {
 	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "service")...)
 	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "ingress")...)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // writeInflightMarkerFile writes a marker JSON file to path with the same
@@ -66,7 +68,7 @@ func TestDryRunReclaimsAnAgedMarkerWithALivePIDLikeTheRealRun(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 	deps := helmDeploySingleFlightDeps{
 		configDir: func() (string, error) { return configDir, nil },
 		now:       func() time.Time { return startedAt.Add(helmDeploySingleFlightMaxAge + time.Minute) },
@@ -118,7 +120,7 @@ func TestDryRunReclaimsAnAgedMarkerInsteadOfRefusingAsConcurrent(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 	deps := helmDeploySingleFlightDeps{
 		configDir: func() (string, error) { return configDir, nil },
 		now:       func() time.Time { return startedAt.Add(helmDeploySingleFlightMaxAge + time.Minute) },
@@ -171,7 +173,7 @@ func TestDryRunKeepsSkipBehaviorForAFreshMarkerWithIdenticalParams(t *testing.T)
 	}
 
 	var logBuf bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 	deps := helmDeploySingleFlightDeps{
 		configDir: func() (string, error) { return configDir, nil },
 		now:       func() time.Time { return fixedNow },
@@ -223,7 +225,7 @@ func TestDryRunKeepsRefuseBehaviorForAFreshMarkerWithDifferentParams(t *testing.
 		t.Fatalf("read marker before: %v", err)
 	}
 
-	ctx := Context{DryRun: true, Logger: NewLogger(0)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0)}
 	deps := helmDeploySingleFlightDeps{
 		configDir: func() (string, error) { return configDir, nil },
 		now:       func() time.Time { return fixedNow },

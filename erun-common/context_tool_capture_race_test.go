@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestToolCaptureDrainsHeavyOutputConcurrently exercises Context.ToolCapture
@@ -18,14 +20,14 @@ import (
 func TestToolCaptureDrainsHeavyOutputConcurrently(t *testing.T) {
 	stub := writeExecutableScript(t, heavyDualStreamScript)
 
-	for _, verbosity := range []int{VerbosityInfo, VerbosityDebug} {
+	for _, verbosity := range []int{core.VerbosityInfo, core.VerbosityDebug} {
 		// Stdout/Stderr must be non-nil at VerbosityDebug: teeWriter shortcuts
 		// to returning the bare capture buffer unwrapped when its primary
 		// writer is nil, which would collapse stdout/stderr onto the exact
 		// same object (safe) and mask the very bug this test exists to catch.
-		ctx := Context{Verbosity: verbosity, Stdout: io.Discard, Stderr: io.Discard}
+		ctx := core.Context{Verbosity: verbosity, Stdout: io.Discard, Stderr: io.Discard}
 		capture := ctx.ToolCapture()
-		cmd := Command(stub)
+		cmd := core.Command(stub)
 		cmd.Stdout = capture.Stdout()
 		cmd.Stderr = capture.Stderr()
 

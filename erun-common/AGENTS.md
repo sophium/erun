@@ -30,12 +30,13 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
-### Target package layers (planned, not yet in place)
+### Package layers
 
-https://github.com/sophium/erun/issues/2741 splits this one package into layers
-so an edit recompiles only its dependents and the compiler enforces primitive
-independence. Today everything is still package `eruncommon`; new code is
-written so it would already sit in one layer:
+https://github.com/sophium/erun/issues/2741 splits this module into layers so
+an edit recompiles only its dependents and the compiler enforces primitive
+independence. The base layer is in place (`base/model`, `base/core`,
+`base/config`); everything else is still the root package `eruncommon` until
+its step lands, and new code is written so it would already sit in one layer:
 
 ```
 erun-common/
@@ -56,10 +57,22 @@ erun-common/
 | `command/*` | anything below; never another `command/*` |
 | erun-backend-api | `base/*`, `infra/mcpauth`, `infra/cloud` only |
 
-Until the split lands: a primitive's files never call another primitive (the
-composition goes in an orchestration-shaped file), types and config code never
-call build, deploy or release, and no new file mixes layers. depguard rules
-enforce the table once each step lands.
+- depguard in `.golangci.yml` enforces the table for every layer that exists:
+  each package denies the module and allows only what lies beneath it.
+- Move declarations between packages with `go run ./cmd/pkgmove`, never by
+  hand. `plan -map` simulates a map (the import graph it makes, every cycle
+  with the references that hold it, the fields it would export); `apply`
+  rewrites this module and its importers. Each step's map is committed under
+  `cmd/pkgmove/maps/`; a branch that predates a step re-runs that step's map
+  after rebasing rather than resolving the move by hand.
+- Test helpers are not shared across packages. A `_test.go` declaration
+  cannot be exported, so a helper a moved test needs is copied into that
+  package's tests, and moved instead when its own package no longer uses it.
+- Until the rest lands: a primitive's files never call another primitive (the
+  composition goes in an orchestration-shaped file), types and config code
+  never call build, deploy or release, and no new file mixes layers.
+- `cmd/buildcost` measures what one edit costs every module's build, vet and
+  test compile; compare a layer's edit before and after its step.
 
 ### Platform identity: one per environment, and its form says which grant
 
@@ -385,7 +398,10 @@ demonstrated:
 ## Visibility
 
 - Default to package-private; export only for a current external caller, not
-  same-package tests. Lower a symbol when its last external use disappears.
+  same-package tests. Another erun-common package is an external caller: a
+  symbol a lower layer offers to a higher one is exported, which is what the
+  layered split does at every boundary it draws. Lower a symbol when its last
+  external use disappears.
 
 ## Naming
 

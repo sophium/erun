@@ -8,6 +8,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -228,7 +229,7 @@ func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.Sta
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job started: %s (id %s), output at %s\n", job.Name, job.ID, job.LogPath); err != nil {
 			return err
 		}
@@ -236,7 +237,7 @@ func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.Sta
 	return ctx.WriteResult(job)
 }
 
-func startJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if !environmentTargetsItself() {
 		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -307,7 +308,7 @@ func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params common.At
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job attached: %s (id %s), tracking pid %d\n", job.Name, job.ID, job.PID); err != nil {
 			return err
 		}
@@ -315,7 +316,7 @@ func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params common.At
 	return ctx.WriteResult(job)
 }
 
-func attachJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if !environmentTargetsItself() {
 		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -386,14 +387,14 @@ func runJobStatus(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environm
 		return nil
 	}
 	if single {
-		if ctx.Output != common.OutputJSON {
+		if ctx.Output != core.OutputJSON {
 			if _, err := fmt.Fprintln(ctx.Stdout, jobStatusLine(job)); err != nil {
 				return err
 			}
 		}
 		return ctx.WriteResult(job)
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if err := writeJobList(ctx, jobs); err != nil {
 			return err
 		}
@@ -401,14 +402,14 @@ func runJobStatus(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environm
 	return ctx.WriteResult(jobs)
 }
 
-func readJobStatus(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readJobStatus(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
 	if !environmentTargetsItself() {
 		return readJobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
 	}
 	return readStoredJobStatus(commandCtx, tenant, environment, id)
 }
 
-func readJobStatusFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readJobStatusFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
 	result, resolved, err := jobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
 	if err != nil || !resolved {
 		return common.EnvironmentJob{}, nil, resolved, err
@@ -426,7 +427,7 @@ func readJobStatusFromEnvironment(ctx context.Context, commandCtx common.Context
 	return *result.Job, jobs, resolved, nil
 }
 
-func readStoredJobStatus(commandCtx common.Context, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readStoredJobStatus(commandCtx core.Context, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
 	if commandCtx.DryRun {
 		commandCtx.TraceCommand("", "job", "status", tenant, environment, id)
 		return common.EnvironmentJob{}, nil, false, nil
@@ -449,7 +450,7 @@ func readStoredJobStatus(commandCtx common.Context, tenant, environment, id stri
 	return common.EnvironmentJob{}, jobs, true, nil
 }
 
-func writeJobList(ctx common.Context, jobs []common.EnvironmentJob) error {
+func writeJobList(ctx core.Context, jobs []common.EnvironmentJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -729,7 +730,7 @@ func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params common.Awa
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if _, err := fmt.Fprintln(ctx.Stdout, jobAwaitLine(result)); err != nil {
 			return err
 		}
@@ -740,7 +741,7 @@ func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params common.Awa
 	return jobAwaitExit(result)
 }
 
-func awaitJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
+func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
 	if !environmentTargetsItself() {
 		return awaitJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -850,7 +851,7 @@ func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params common.Re
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if _, err := fmt.Fprint(ctx.Stdout, output.Output); err != nil {
 			return err
 		}
@@ -863,7 +864,7 @@ func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params common.Re
 	return ctx.WriteResult(output)
 }
 
-func readJobOutput(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
+func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
 	if !environmentTargetsItself() {
 		return jobOutputFromEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -922,7 +923,7 @@ func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params common.Ca
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != common.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		message := fmt.Sprintf("job already finished: %s (%s)", result.Job.ID, result.Job.State)
 		if result.Signalled {
 			message = fmt.Sprintf("job cancelled: %s, SIG%s to process group %d", result.Job.ID, result.Signal, result.TargetPID)
@@ -934,7 +935,7 @@ func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params common.Ca
 	return ctx.WriteResult(result)
 }
 
-func cancelJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
+func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
 	if !environmentTargetsItself() {
 		return cancelJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}

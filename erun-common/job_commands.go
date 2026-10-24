@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // job_commands.go is the shared planning/execution layer `erun jobs
@@ -115,7 +117,7 @@ type JobListParams struct {
 // RunJobList lists the caller's tenant's jobs, the live queue first. It is
 // the operator's view of what is being worked on right now and what recently
 // finished.
-func RunJobList(ctx Context, store CloudReadStore, alias string, params JobListParams, deps CloudDependencies) ([]PlatformJob, error) {
+func RunJobList(ctx core.Context, store CloudReadStore, alias string, params JobListParams, deps CloudDependencies) ([]PlatformJob, error) {
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
 		return nil, err
@@ -154,7 +156,7 @@ type JobClaimParams struct {
 // RunJobClaim records a job starting. With Scope set it is a claim on that
 // scope; a 409 becomes a *JobScopeHeldError naming the holder, so a caller
 // can pick up something else instead of duplicating the work.
-func RunJobClaim(ctx Context, store CloudReadStore, alias string, params JobClaimParams, deps CloudDependencies) (PlatformJob, error) {
+func RunJobClaim(ctx core.Context, store CloudReadStore, alias string, params JobClaimParams, deps CloudDependencies) (PlatformJob, error) {
 	params, err := normalizeJobClaim(params)
 	if err != nil {
 		return PlatformJob{}, err
@@ -252,7 +254,7 @@ type JobUpdateParams struct {
 }
 
 // RunJobUpdate reports a job's progress or its outcome.
-func RunJobUpdate(ctx Context, store CloudReadStore, alias string, params JobUpdateParams, deps CloudDependencies) (PlatformJob, error) {
+func RunJobUpdate(ctx core.Context, store CloudReadStore, alias string, params JobUpdateParams, deps CloudDependencies) (PlatformJob, error) {
 	if strings.TrimSpace(params.JobID) == "" {
 		return PlatformJob{}, fmt.Errorf("job id is required")
 	}
@@ -281,7 +283,7 @@ func RunJobUpdate(ctx Context, store CloudReadStore, alias string, params JobUpd
 }
 
 // RunJobShow fetches one job by id.
-func RunJobShow(ctx Context, store CloudReadStore, alias, jobID string, deps CloudDependencies) (PlatformJob, error) {
+func RunJobShow(ctx core.Context, store CloudReadStore, alias, jobID string, deps CloudDependencies) (PlatformJob, error) {
 	if strings.TrimSpace(jobID) == "" {
 		return PlatformJob{}, fmt.Errorf("job id is required")
 	}

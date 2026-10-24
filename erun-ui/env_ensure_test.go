@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // deploymentAbsentErrorForTest builds the exact "runtime ... is not deployed"
@@ -28,10 +30,10 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 	t.Helper()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -42,7 +44,7 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		reconnectMCP: func(context.Context, eruncommon.OpenResult, func(string)) error {
+		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
 			ensuresMu.Lock()
 			*ensures++
 			ensuresMu.Unlock()
@@ -135,10 +137,10 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -149,7 +151,7 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		reconnectMCP: func(context.Context, eruncommon.OpenResult, func(string)) error {
+		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
 			ensuresMu.Lock()
 			ensures++
 			ensuresMu.Unlock()
@@ -207,17 +209,17 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 // stopped" so a failure surfaces as a failure.
 func capturedEnsureApp(
 	t *testing.T,
-	reconnect func(context.Context, eruncommon.OpenResult, func(string)) error,
-	readRunState func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	reconnect func(context.Context, config.OpenResult, func(string)) error,
+	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -244,7 +246,7 @@ func capturedEnsureApp(
 // banner on top of the running deploy is the confusion this fixes, so the
 // failure must stay quiet while a deploy locks the env's terminals.
 func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -301,9 +303,9 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 // would report their command as an outage and offer a deploy that is not the
 // recovery. The row reads stopped and the banner names opening as the way back.
 func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
-	}, func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+	}, func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 		return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
 	})
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -338,7 +340,7 @@ func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 // stale, so a successful ensure clears it (tagged by env + source so an
 // unrelated toast is left alone).
 func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -369,7 +371,7 @@ func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 // one branch that still earns the Deploy action: ensureRuntimeDeployed found
 // no deployment at all.
 func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -399,7 +401,7 @@ func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing
 // notification must not carry the deploy action, and must not claim
 // unreachability the check never established.
 func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -430,7 +432,7 @@ func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T
 // The closing principle: an error erun does not recognize must still
 // read as unknown and must not default to offering deploy.
 func TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure(t *testing.T) {
-	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}

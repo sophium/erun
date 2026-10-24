@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // DeployDiagnosisResult holds the deploy-failure diagnosis for the caller to
@@ -68,7 +70,7 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 // rediscover the exact fact the helm read just established. ClusterUnreachable
 // carries that determination forward so every later doctor section can skip
 // its own probe the same way instead of independently rediscovering it.
-func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
+func RunDeployDiagnosis(ctx core.Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	podArgs := deployDiagnosisPodArgs(req)
@@ -110,7 +112,7 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 // caller always has something to show, while still returning the command's own
 // error so a caller that needs to know whether the read succeeded can tell.
 func runDoctorDiagnosisCommand(name string, args []string) (string, error) {
-	cmd := Command(name, args...)
+	cmd := core.Command(name, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -221,7 +223,7 @@ func helmRollbackArgs(req ShellLaunchParams) []string {
 
 // RunDeployRecovery runs the chosen helm-level recovery against the runtime
 // release, mutating the cluster only on a real (non-dry-run) run.
-func RunDeployRecovery(ctx Context, req ShellLaunchParams, action DeployRecoveryAction) (string, error) {
+func RunDeployRecovery(ctx core.Context, req ShellLaunchParams, action DeployRecoveryAction) (string, error) {
 	switch action {
 	case DeployRecoveryClearPendingHelm:
 		clear := HelmReleaseRecoveryParams{
@@ -245,7 +247,7 @@ func RunDeployRecovery(ctx Context, req ShellLaunchParams, action DeployRecovery
 		if ctx.DryRun {
 			return "", nil
 		}
-		cmd := Command("helm", args...)
+		cmd := core.Command("helm", args...)
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out

@@ -1,6 +1,10 @@
 package main
 
-import eruncommon "github.com/sophium/erun/erun-common"
+import (
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+)
 
 type uiState struct {
 	Tenants                  []uiTenant              `json:"tenants"`
@@ -687,9 +691,9 @@ type uiTenantDashboardBuild struct {
 	// Profile is the bounded per-step profile this build self-reported, when
 	// it collected one -- nil for a build reported before this feature
 	// existed, or one whose caller collected none.
-	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty"`
-	CreatedAt string                          `json:"createdAt,omitempty"`
-	UpdatedAt string                          `json:"updatedAt,omitempty"`
+	Profile   *core.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt string                    `json:"createdAt,omitempty"`
+	UpdatedAt string                    `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardAudit struct {
@@ -1080,7 +1084,7 @@ type uiDeployComponents struct {
 
 type uiEnvironmentConfig struct {
 	Name                string                     `json:"name"`
-	Type                eruncommon.EnvironmentType `json:"type,omitempty"`
+	Type                config.EnvironmentType     `json:"type,omitempty"`
 	LocalRepoPath       string                     `json:"localRepoPath,omitempty"`
 	RepoPath            string                     `json:"repoPath"`
 	KubernetesContext   string                     `json:"kubernetesContext"`

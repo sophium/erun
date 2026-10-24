@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A persisted orchestrator runs as a Claude Code background agent named after
@@ -72,7 +73,7 @@ func (execClaudeAgentCLI) run(dir string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, defaultAITool, args...)
 	cmd.Dir = dir
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	return cmd.CombinedOutput()
 }
 
@@ -80,7 +81,7 @@ func (cli execClaudeAgentCLI) List() ([]claudeBackgroundAgent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeAgentCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, defaultAITool, "agents", "--json", "--all")
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("cannot list Claude background agents: %w", err)

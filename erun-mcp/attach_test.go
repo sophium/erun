@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
@@ -45,7 +46,7 @@ func newAuthedAttachServer(t *testing.T, runtime RuntimeConfig, issuer, tenant s
 	t.Setenv(envMCPAudience, "erun-mcp")
 	t.Setenv(envTenant, tenant)
 
-	server := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
 	t.Cleanup(server.Close)
 	return server
 }

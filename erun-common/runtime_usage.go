@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // `kubectl top` needs a metrics-server add-on that clusters like orbstack
@@ -335,7 +337,7 @@ type RuntimeDiskUsage struct {
 // the pod on (runtime_pod_requests.go) and attaches them as Requests. That is
 // a second source by necessity, not by preference: the numbers above are cgroup
 // readings, and no cgroup file records a request. It too fails soft.
-func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
@@ -545,21 +547,21 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 		m.Unavailable = "cgroup v2 not detected under /sys/fs/cgroup; memory usage needs memory.current/memory.max"
 		return m
 	}
-	current, ok := parseRuntimeInt64(v["memory_current"])
+	current, ok := core.ParseRuntimeInt64(v["memory_current"])
 	if !ok {
 		m.Unavailable = "memory.current was not readable"
 		return m
 	}
 	m.CurrentBytes = current
-	if peak, ok := parseRuntimeInt64(v["memory_peak"]); ok {
+	if peak, ok := core.ParseRuntimeInt64(v["memory_peak"]); ok {
 		m.PeakBytes = peak
 		m.PeakObserved = true
 	}
-	if killed, ok := parseRuntimeInt64(v["memory_oom_kill"]); ok {
+	if killed, ok := core.ParseRuntimeInt64(v["memory_oom_kill"]); ok {
 		m.OOMKills = killed
 		m.OOMKillsObserved = true
 	}
-	if hits, ok := parseRuntimeInt64(v["memory_ceiling_hits"]); ok {
+	if hits, ok := core.ParseRuntimeInt64(v["memory_ceiling_hits"]); ok {
 		m.CeilingHits = hits
 		m.CeilingHitsObserved = true
 	}
@@ -568,7 +570,7 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 		m.Unlimited = true
 		return m
 	}
-	limit, ok := parseRuntimeInt64(maxRaw)
+	limit, ok := core.ParseRuntimeInt64(maxRaw)
 	if !ok {
 		m.Unavailable = "memory.max was not readable"
 		return m
@@ -594,16 +596,16 @@ type runtimeCPUCounters struct {
 
 func runtimeCPUCountersFromValues(v map[string]string) (runtimeCPUCounters, bool) {
 	var counters runtimeCPUCounters
-	if usage, ok := parseRuntimeInt64(v["cpu_usage_after"]); ok {
+	if usage, ok := core.ParseRuntimeInt64(v["cpu_usage_after"]); ok {
 		counters.UsageUsec = usage
 	}
-	if periods, ok := parseRuntimeInt64(v["cpu_periods"]); ok {
+	if periods, ok := core.ParseRuntimeInt64(v["cpu_periods"]); ok {
 		counters.Periods = periods
 	}
-	if throttled, ok := parseRuntimeInt64(v["cpu_throttled_periods"]); ok {
+	if throttled, ok := core.ParseRuntimeInt64(v["cpu_throttled_periods"]); ok {
 		counters.ThrottledPeriods = throttled
 	}
-	quotaUsec, periodUsec, ok := parseRuntimeCPUMax(v["cpu_max"])
+	quotaUsec, periodUsec, ok := core.ParseRuntimeCPUMax(v["cpu_max"])
 	if !ok {
 		return counters, false
 	}
@@ -627,10 +629,10 @@ func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) Runt
 	}
 	c.QuotaCores = counters.QuotaCores
 
-	before, beforeOk := parseRuntimeInt64(v["cpu_usage_before"])
-	after, afterOk := parseRuntimeInt64(v["cpu_usage_after"])
-	t1, t1Ok := parseRuntimeInt64(v["cpu_time_before_ns"])
-	t2, t2Ok := parseRuntimeInt64(v["cpu_time_after_ns"])
+	before, beforeOk := core.ParseRuntimeInt64(v["cpu_usage_before"])
+	after, afterOk := core.ParseRuntimeInt64(v["cpu_usage_after"])
+	t1, t1Ok := core.ParseRuntimeInt64(v["cpu_time_before_ns"])
+	t2, t2Ok := core.ParseRuntimeInt64(v["cpu_time_after_ns"])
 	if !beforeOk || !afterOk || !t1Ok || !t2Ok || t2 <= t1 || after < before {
 		c.Unavailable = "cpu.stat usage_usec was not readable across the sample interval"
 		return c
@@ -641,37 +643,9 @@ func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) Runt
 	return c
 }
 
-// parseRuntimeCPUMax reads cpu.max's "<quota> <period>" pair, both in
-// microseconds. A quota of "max" means the container has no CPU ceiling, so
-// there is nothing to compute a percentage-of-quota against.
-func parseRuntimeCPUMax(raw string) (quotaUsec, periodUsec int64, ok bool) {
-	fields := strings.Fields(raw)
-	if len(fields) != 2 || fields[0] == "max" {
-		return 0, 0, false
-	}
-	quota, err1 := strconv.ParseInt(fields[0], 10, 64)
-	period, err2 := strconv.ParseInt(fields[1], 10, 64)
-	if err1 != nil || err2 != nil || quota <= 0 || period <= 0 {
-		return 0, 0, false
-	}
-	return quota, period, true
-}
-
-func parseRuntimeInt64(raw string) (int64, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return 0, false
-	}
-	value, err := strconv.ParseInt(trimmed, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
-}
-
 func runtimeDiskUsageFromValues(v map[string]string) RuntimeDiskUsage {
 	d := RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true}
-	if ownKB, ok := parseRuntimeInt64(v["disk_own_used_kb"]); ok {
+	if ownKB, ok := core.ParseRuntimeInt64(v["disk_own_used_kb"]); ok {
 		d.OwnUsedBytes = ownKB * 1024
 		d.OwnUsageObserved = true
 	}
@@ -799,7 +773,7 @@ func runtimeMemoryUsageWarnings(scope string, memory RuntimeMemoryUsage) []strin
 		if memory.PercentOfLimit >= RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				scope, memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
+				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)
@@ -825,10 +799,6 @@ func parseRuntimeDindUsage(output string, interval time.Duration) *RuntimeDindUs
 		CPU:    runtimeCPUUsageFromValues(values, interval),
 		Memory: runtimeMemoryUsageFromValues(values),
 	}
-}
-
-func formatMebibytes(bytes int64) string {
-	return fmt.Sprintf("%.0fMi", float64(bytes)/(1<<20))
 }
 
 // ReadLocalRuntimeUsage reads the container's own cgroup v2 files directly,

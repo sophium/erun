@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // imagePullSecretGetArgs reads a named Secret back as JSON, so its existing
@@ -65,7 +68,7 @@ stringData:
 // exactly as it was, the same fallback provisionRegistryCredentialSecret uses
 // for the ghcr registry-credential secret; the other hosts' credentials still
 // refresh.
-func refreshImagePullSecrets(ctx Context, deployInput HelmDeploySpec) error {
+func refreshImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec) error {
 	if len(deployInput.ImagePullSecrets) == 0 {
 		return nil
 	}
@@ -79,7 +82,7 @@ func refreshImagePullSecrets(ctx Context, deployInput HelmDeploySpec) error {
 // resolveImagePullSecretCredentials resolves a credential for every registry
 // host the deploy's images actually pull from, tracing (and skipping) any
 // host none resolves for rather than failing the whole refresh over it.
-func resolveImagePullSecretCredentials(ctx Context, deployInput HelmDeploySpec) map[string]registryBasicAuth {
+func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeploySpec) map[string]registryBasicAuth {
 	hosts := imagePullSecretRegistryHosts(deployInput)
 	credentials := make(map[string]registryBasicAuth, len(hosts))
 	var unresolved []string
@@ -122,7 +125,7 @@ const kubectlSecretGetExecutionOperation = "kubectl-secret-get"
 // it. args is the exact get command already traced by the caller, used by
 // the subprocess path only.
 func existingImagePullSecretAuths(contextName, namespace, name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
-	if currentExecutionMode(kubectlSecretGetExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlSecretGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryImagePullSecretAuths(contextName, namespace, name)
 	}
 	return defaultExistingImagePullSecretAuths(name, args)
@@ -139,7 +142,7 @@ func existingImagePullSecretAuths(contextName, namespace, name string, args []st
 // function exists to protect; a genuine cluster read failure (RBAC denial,
 // unreachable API server) is refused for the same reason.
 func defaultExistingImagePullSecretAuths(name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		if KubernetesResourceNotFound(string(output)) {
 			return nil, nil
@@ -189,7 +192,7 @@ func mergeImagePullSecretAuths(existing map[string]dockerConfigJSONAuthEntry, cr
 // back and applies the merged result; dry-run traces both commands it would
 // run but executes neither, stating the merge as conditional on what the get
 // above would find (see existingImagePullSecretAuths for why).
-func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials map[string]registryBasicAuth) error {
+func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credentials map[string]registryBasicAuth) error {
 	applyArgs := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
 		name = strings.TrimSpace(name)
@@ -232,7 +235,7 @@ func imagePullSecretRegistryHosts(deployInput HelmDeploySpec) []string {
 	seen := make(map[string]struct{}, 2)
 	hosts := make([]string, 0, 2)
 	add := func(namespace string) {
-		host, _, ok := ociRegistryHostFromNamespace(namespace)
+		host, _, ok := config.OciRegistryHostFromNamespace(namespace)
 		if !ok {
 			return
 		}
@@ -244,7 +247,7 @@ func imagePullSecretRegistryHosts(deployInput HelmDeploySpec) []string {
 	}
 	add(deployInput.ContainerRegistry)
 	for _, key := range sortedStringMapKeys(deployInput.ImageOverrides) {
-		add(runtimeImageRegistry(deployInput.ImageOverrides[key]))
+		add(config.RuntimeImageRegistry(deployInput.ImageOverrides[key]))
 	}
 	return hosts
 }

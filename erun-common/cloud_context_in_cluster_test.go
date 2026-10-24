@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"io"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // inClusterPodEnv is the env a runtime pod's chart injects: a cloud provider,
@@ -19,14 +22,14 @@ func inClusterPodEnv() func(string) string {
 	return func(key string) string { return values[key] }
 }
 
-func inClusterPreflightTestContext() Context {
-	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}
+func inClusterPreflightTestContext() core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 }
 
 // countingRunAWS fails the test's intent if any AWS call is made: an in-cluster
 // context has nothing to power on, so preflight must not reach AWS at all.
-func countingRunAWS(calls *int) func(Context, CloudProviderConfig, string, []string) (string, error) {
-	return func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) {
+func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, _ []string) (string, error) {
 		*calls++
 		return "", nil
 	}
@@ -43,7 +46,7 @@ func inClusterPreflightStore(t *testing.T) CloudContextStore {
 	if len(injected.Contexts) != 1 {
 		t.Fatalf("injected contexts = %+v, want exactly the pod's own context", injected.Contexts)
 	}
-	return stubCloudContextStore{config: ERunConfig{
+	return stubCloudContextStore{config: configpkg.ERunConfig{
 		CloudProviders: injected.Providers,
 		CloudContexts:  injected.Contexts,
 	}}
@@ -110,11 +113,11 @@ func TestCloudContextPreflightInClusterRepeatedCallsStayClean(t *testing.T) {
 // TestCloudContextPreflightInClusterMatchedByKubernetesContext covers a context
 // whose name differs from the kube-context it serves.
 func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) {
-	store := stubCloudContextStore{config: ERunConfig{
-		CloudProviders: []CloudProviderConfig{{Alias: "dev-aws", Provider: CloudProviderAWS}},
-		CloudContexts: []CloudContextConfig{{
+	store := stubCloudContextStore{config: configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS}},
+		CloudContexts: []configpkg.CloudContextConfig{{
 			Name:               "prod-platform",
-			Provider:           CloudProviderAWS,
+			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
 			Region:             "eu-central-1",
 			KubernetesContext:  inClusterKubernetesContext,
@@ -134,11 +137,11 @@ func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) 
 // direction: a genuinely power-managed context with no instance ID is a real
 // error, not an in-cluster one, and must keep failing with today's message.
 func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing.T) {
-	store := stubCloudContextStore{config: ERunConfig{
-		CloudProviders: []CloudProviderConfig{{Alias: "dev-aws", Provider: CloudProviderAWS, Profile: "dev-profile"}},
-		CloudContexts: []CloudContextConfig{{
+	store := stubCloudContextStore{config: configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
+		CloudContexts: []configpkg.CloudContextConfig{{
 			Name:               "petios-ctx",
-			Provider:           CloudProviderAWS,
+			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
 			Region:             "eu-west-1",
 			KubernetesContext:  "petios-ctx",
@@ -165,14 +168,14 @@ func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing
 func TestIsInClusterCloudContextDistinguishesPowerManagedContexts(t *testing.T) {
 	cases := []struct {
 		name   string
-		config CloudContextConfig
+		config configpkg.CloudContextConfig
 		want   bool
 	}{
-		{"pod-injected context", CloudContextConfig{Name: inClusterKubernetesContext, KubernetesContext: inClusterKubernetesContext}, true},
-		{"kube context only", CloudContextConfig{Name: "prod-platform", KubernetesContext: inClusterKubernetesContext}, true},
-		{"power-managed without an instance", CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx"}, false},
-		{"power-managed with an instance", CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx", InstanceID: "i-0abc123"}, false},
-		{"blank", CloudContextConfig{}, false},
+		{"pod-injected context", configpkg.CloudContextConfig{Name: inClusterKubernetesContext, KubernetesContext: inClusterKubernetesContext}, true},
+		{"kube context only", configpkg.CloudContextConfig{Name: "prod-platform", KubernetesContext: inClusterKubernetesContext}, true},
+		{"power-managed without an instance", configpkg.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx"}, false},
+		{"power-managed with an instance", configpkg.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx", InstanceID: "i-0abc123"}, false},
+		{"blank", configpkg.CloudContextConfig{}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

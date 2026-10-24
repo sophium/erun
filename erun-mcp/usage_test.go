@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestUsageToolCarriesTheStandingSizingRecommendation covers the fix for the
@@ -174,12 +175,12 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 
 	cases := []struct {
 		name    string
-		envType eruncommon.EnvironmentType
+		envType config.EnvironmentType
 		want    bool
 	}{
-		{"remote-agent carries the dind sidecar", eruncommon.EnvironmentTypeRemoteAgent, true},
-		{"local-agent carries the dind sidecar", eruncommon.EnvironmentTypeLocalAgent, true},
-		{"runtime builds nowhere in this container", eruncommon.EnvironmentTypeRuntime, false},
+		{"remote-agent carries the dind sidecar", config.EnvironmentTypeRemoteAgent, true},
+		{"local-agent carries the dind sidecar", config.EnvironmentTypeLocalAgent, true},
+		{"runtime builds nowhere in this container", config.EnvironmentTypeRuntime, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,11 +204,11 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 // (envConfigs) and the port-range allocator's ListEnvConfigs (envsByTenant)
 // to agree on the one environment.
 func usageTestStore(tenant, environment string) listToolStore {
-	return usageTestStoreOfType(tenant, environment, eruncommon.EnvironmentTypeRuntime, "/home/erun/work")
+	return usageTestStoreOfType(tenant, environment, config.EnvironmentTypeRuntime, "/home/erun/work")
 }
 
-func usageTestStoreOfType(tenant, environment string, envType eruncommon.EnvironmentType, repoPath string) listToolStore {
-	env := eruncommon.EnvConfig{
+func usageTestStoreOfType(tenant, environment string, envType config.EnvironmentType, repoPath string) listToolStore {
+	env := config.EnvConfig{
 		Name:                environment,
 		Type:                envType,
 		KubernetesContext:   "test-context",
@@ -215,10 +216,10 @@ func usageTestStoreOfType(tenant, environment string, envType eruncommon.Environ
 		LocalPortRangeStart: 17000,
 	}
 	return listToolStore{
-		toolConfig:    eruncommon.ERunConfig{DefaultTenant: tenant},
-		tenantConfigs: map[string]eruncommon.TenantConfig{tenant: {Name: tenant, DefaultEnvironment: environment}},
-		envConfigs:    map[string]eruncommon.EnvConfig{tenant + "/" + environment: env},
-		envsByTenant:  map[string][]eruncommon.EnvConfig{tenant: {env}},
+		toolConfig:    config.ERunConfig{DefaultTenant: tenant},
+		tenantConfigs: map[string]config.TenantConfig{tenant: {Name: tenant, DefaultEnvironment: environment}},
+		envConfigs:    map[string]config.EnvConfig{tenant + "/" + environment: env},
+		envsByTenant:  map[string][]config.EnvConfig{tenant: {env}},
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // previewAdoptOrConflict mirrors in dry-run what the live path would do
@@ -20,7 +20,7 @@ import (
 // carriesTraffic is the service's own reachability probe. It is what stops the
 // preview from promising an adoption of a forward whose far end is gone — the
 // holder's argv proves only that it is the right shape, never that it works.
-func previewAdoptOrConflict(ctx common.Context, kind string, localPort int, expectedArgs []string, carriesTraffic func(int) bool) (bool, int) {
+func previewAdoptOrConflict(ctx core.Context, kind string, localPort int, expectedArgs []string, carriesTraffic func(int) bool) (bool, int) {
 	// Don't add a canConnectLocalPort/Dial gate here: lsof alone is
 	// authoritative for "is anything listening", and a separate Dial would
 	// make the probe sensitive to transient connect races.
@@ -55,7 +55,7 @@ func holderCarriesTraffic(localPort int, carriesTraffic func(int) bool) bool {
 // port-forward shape and stopPortForwardProcess re-checks that the PID is a
 // kubectl port-forward: a port some other process legitimately holds is a
 // conflict to report, never something to kill.
-func replaceStalePortForwardHolder(ctx common.Context, kind string, pid, localPort int) bool {
+func replaceStalePortForwardHolder(ctx core.Context, kind string, pid, localPort int) bool {
 	if _, err := stopPortForwardProcess(pid); err != nil {
 		return false
 	}
@@ -208,7 +208,7 @@ func reapRecordedPortForwardProcess(matches bool, processID, localPort int) bool
 // different decision the caller's own holder probe already owns (adopt or
 // refuse), and is silent when there is nothing to report — the ordinary case
 // of a state file whose process already exited cleanly.
-func previewClearRecordedPortForward(ctx common.Context, kind string, matches bool, processID, localPort int) {
+func previewClearRecordedPortForward(ctx core.Context, kind string, matches bool, processID, localPort int) {
 	if !matches || processID <= 0 || canConnectLocalPort(localPort) || !isPortForwardProcess(processID) {
 		return
 	}
@@ -225,7 +225,7 @@ func previewClearRecordedPortForward(ctx common.Context, kind string, matches bo
 // what still finds that one. Best-effort and unix-only
 // (kubectlPortForwardProcessIDs is empty on Windows): a caller that cannot
 // enumerate processes just skips the sweep, it does not fail the open.
-func sweepDeadPortForwardsMatching(ctx common.Context, kind string, expectedArgs []string, localPort int) {
+func sweepDeadPortForwardsMatching(ctx core.Context, kind string, expectedArgs []string, localPort int) {
 	if localPort <= 0 || canConnectLocalPort(localPort) {
 		return
 	}
@@ -242,7 +242,7 @@ func sweepDeadPortForwardsMatching(ctx common.Context, kind string, expectedArgs
 
 // previewSweepDeadPortForwardsMatching mirrors sweepDeadPortForwardsMatching
 // for --dry-run: it names any zombie it would clear without touching it.
-func previewSweepDeadPortForwardsMatching(ctx common.Context, kind string, expectedArgs []string, localPort int) {
+func previewSweepDeadPortForwardsMatching(ctx core.Context, kind string, expectedArgs []string, localPort int) {
 	if localPort <= 0 || canConnectLocalPort(localPort) {
 		return
 	}
@@ -264,10 +264,10 @@ func previewSweepDeadPortForwardsMatching(ctx common.Context, kind string, expec
 // command-based implementation on every platform and the ERUN_HOST_OS_OVERRIDE
 // test seam can exercise the unix path on any host.
 func findLocalPortHolder(port int) (int, []string, bool) {
-	if port <= 0 || common.DetectHost().OS == common.HostOSWindows {
+	if port <= 0 || core.DetectHost().OS == core.HostOSWindows {
 		return 0, nil, false
 	}
-	out, err := common.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
+	out, err := core.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
 	if err != nil {
 		return 0, nil, false
 	}
@@ -295,7 +295,7 @@ func readProcessArgv(pid int) ([]string, bool) {
 	if pid <= 0 {
 		return nil, false
 	}
-	out, err := common.Command("ps", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	out, err := core.Command("ps", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return nil, false
 	}

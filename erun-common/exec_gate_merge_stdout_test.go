@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestGateMergeOneSourceNamesACommitFailureReportedOnStdout reproduces a
@@ -27,7 +29,7 @@ import (
 func TestGateMergeOneSourceNamesACommitFailureReportedOnStdout(t *testing.T) {
 	const explanation = "On branch main\nnothing to commit, working tree clean"
 	deps := GateMergeWorkingTreeDependencies{
-		ResolveRef: func(_ Context, _ string, ref string) (string, error) {
+		ResolveRef: func(_ core.Context, _ string, ref string) (string, error) {
 			return "abc123", nil
 		},
 		RunGit: func(_ string, stdout io.Writer, _ io.Writer, args ...string) error {
@@ -41,7 +43,7 @@ func TestGateMergeOneSourceNamesACommitFailureReportedOnStdout(t *testing.T) {
 		},
 		// One staged path, so the source is a real contribution and the run
 		// reaches the commit rather than being skipped as a no-op.
-		StagedPaths: func(Context, string) ([]string, error) {
+		StagedPaths: func(core.Context, string) ([]string, error) {
 			return []string{"feature.txt"}, nil
 		},
 	}

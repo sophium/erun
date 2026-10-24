@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The runtime pod's declared resource *requests* are the scheduler's own input:
@@ -86,7 +88,7 @@ func RuntimePodRequestsArgs(req ShellLaunchParams) []string {
 // its caller: everything that can go wrong here is reported on the reading as
 // Unavailable, because losing the reservation figures must not cost the cgroup
 // reading beside them.
-func readRuntimeUsageRequests(ctx Context, runner RuntimePodRequestsRunnerFunc, req ShellLaunchParams) *RuntimeUsageRequests {
+func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req ShellLaunchParams) *RuntimeUsageRequests {
 	ctx.TraceCommand("", "kubectl", RuntimePodRequestsArgs(req)...)
 	if ctx.DryRun {
 		// Nothing was read, and a zero reading would be a reservation of

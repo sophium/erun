@@ -16,21 +16,21 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func postRestartControl(t *testing.T, port int, orchestratorID string) eruncommon.DesktopRestartResponse {
+func postRestartControl(t *testing.T, port int, orchestratorID string) core.DesktopRestartResponse {
 	t.Helper()
-	body, err := json.Marshal(eruncommon.DesktopRestartRequest{OrchestratorID: orchestratorID})
+	body, err := json.Marshal(core.DesktopRestartRequest{OrchestratorID: orchestratorID})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, eruncommon.DesktopControlPath), "application/json", bytes.NewReader(body))
+	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, core.DesktopControlPath), "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST restart control: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var decoded eruncommon.DesktopRestartResponse
+	var decoded core.DesktopRestartResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRestartControlServer_InvokesRestartAppExactlyOnce(t *testing.T) {
 	// there is no process left that could fire the restart again on its own —
 	// the entire mechanism was this one request/response, not a standing job.
 	server.Close()
-	if _, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, eruncommon.DesktopControlPath), "application/json", bytes.NewReader(nil)); err == nil {
+	if _, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, core.DesktopControlPath), "application/json", bytes.NewReader(nil)); err == nil {
 		t.Fatal("expected the control server to refuse connections once closed, proving nothing supervises it")
 	}
 }
@@ -137,19 +137,19 @@ func TestAppStartRestartControl_WritesAndRemovesMarker(t *testing.T) {
 	if app.restartControl == nil {
 		t.Fatal("expected the control server to have started")
 	}
-	marker, err := eruncommon.ReadDesktopControlMarker(markerPath)
+	marker, err := core.ReadDesktopControlMarker(markerPath)
 	if err != nil {
 		t.Fatalf("expected a marker to be written: %v", err)
 	}
 	if marker.PID <= 0 || marker.ControlPort <= 0 {
 		t.Fatalf("expected a live pid and control port, got %+v", marker)
 	}
-	if !eruncommon.DesktopProcessAlive(marker.PID) {
+	if !core.DesktopProcessAlive(marker.PID) {
 		t.Fatalf("marker names pid %d, which must read as alive (it is this test process)", marker.PID)
 	}
 
 	app.shutdown(context.Background())
-	if _, err := eruncommon.ReadDesktopControlMarker(markerPath); err == nil {
+	if _, err := core.ReadDesktopControlMarker(markerPath); err == nil {
 		t.Fatal("expected shutdown to remove the restart control marker")
 	}
 }
@@ -183,7 +183,7 @@ func restartControlTestApp(t *testing.T, markerPath string) *App {
 func TestAppStartRestartControl_LeavesALiveOwnersRecordAndAdoptsItAfterwards(t *testing.T) {
 	markerPath := filepath.Join(t.TempDir(), "state", "desktop-control.json")
 	predecessor := startRestartControlHolder(t)
-	predecessorMarker := eruncommon.DesktopControlMarker{PID: predecessor.pid(), ControlPort: 59775, StartedAtUnix: 100}
+	predecessorMarker := core.DesktopControlMarker{PID: predecessor.pid(), ControlPort: 59775, StartedAtUnix: 100}
 	if _, err := claimDesktopControlMarker(markerPath, predecessorMarker, neverAlive); err != nil {
 		t.Fatalf("stage the predecessor's record: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestAppStartRestartControl_LeavesALiveOwnersRecordAndAdoptsItAfterwards(t *
 		t.Fatal("expected the control server to have started")
 	}
 
-	got, err := eruncommon.ReadDesktopControlMarker(markerPath)
+	got, err := core.ReadDesktopControlMarker(markerPath)
 	if err != nil {
 		t.Fatalf("the predecessor's record was removed by a process that is not it: %v", err)
 	}
@@ -220,7 +220,7 @@ func waitForRestartControlMarkerPID(t *testing.T, path string, pid int) {
 	// otherwise unsynchronized with this test.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		marker, err := eruncommon.ReadDesktopControlMarker(path)
+		marker, err := core.ReadDesktopControlMarker(path)
 		if err == nil && marker.PID == pid {
 			return
 		}
@@ -291,7 +291,7 @@ func startRestartControlHolder(t *testing.T) *restartControlHolder {
 	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
 		t.Fatalf("holder process did not come up: line %q, err %v", line, err)
 	}
-	if !eruncommon.DesktopProcessAlive(holder.pid()) {
+	if !core.DesktopProcessAlive(holder.pid()) {
 		t.Fatalf("holder process pid %d does not read as alive", holder.pid())
 	}
 	return holder
@@ -304,8 +304,8 @@ func startRestartControlHolder(t *testing.T) *restartControlHolder {
 // what makes a restart land, so it is asserted, not assumed.
 func TestAdoptRestartControl_TakesOverOnceTheHolderExits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
-	predecessor := eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 59775, StartedAtUnix: 100}
-	successor := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
+	predecessor := core.DesktopControlMarker{PID: 50193, ControlPort: 59775, StartedAtUnix: 100}
+	successor := core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
 	alive := map[int]bool{predecessor.PID: true, successor.PID: true}
 	processAlive := func(pid int) bool { return alive[pid] }
 	if _, err := claimDesktopControlMarker(path, predecessor, processAlive); err != nil {
@@ -338,7 +338,7 @@ func TestAdoptRestartControl_TakesOverOnceTheHolderExits(t *testing.T) {
 	if sleeps != 1 {
 		t.Fatalf("slept %d times, want the one wait between the refused and the successful claim", sleeps)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != successor {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != successor {
 		t.Fatalf("got %+v, err %v; want the successor %+v", got, err, successor)
 	}
 }
@@ -436,8 +436,8 @@ func TestAdoptRestartControlSteadily_TakesOverAHolderThatOutlivesTheHandoffWindo
 // instance keeps trying — not process control.
 type strandedRestartControl struct {
 	path        string
-	predecessor eruncommon.DesktopControlMarker
-	successor   eruncommon.DesktopControlMarker
+	predecessor core.DesktopControlMarker
+	successor   core.DesktopControlMarker
 	alive       map[int]bool
 }
 
@@ -445,8 +445,8 @@ func stageStrandedRestartControl(t *testing.T) *strandedRestartControl {
 	t.Helper()
 	stage := &strandedRestartControl{
 		path:        filepath.Join(t.TempDir(), "desktop-control.json"),
-		predecessor: eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 59775, StartedAtUnix: 100},
-		successor:   eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200},
+		predecessor: core.DesktopControlMarker{PID: 50193, ControlPort: 59775, StartedAtUnix: 100},
+		successor:   core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200},
 	}
 	stage.alive = map[int]bool{stage.predecessor.PID: true, stage.successor.PID: true}
 	if _, err := claimDesktopControlMarker(stage.path, stage.predecessor, stage.processAlive); err != nil {
@@ -469,9 +469,9 @@ func (s *strandedRestartControl) predecessorExits() error {
 }
 
 // recorded reports which process the record on disk names right now.
-func (s *strandedRestartControl) recorded(t *testing.T) eruncommon.DesktopControlMarker {
+func (s *strandedRestartControl) recorded(t *testing.T) core.DesktopControlMarker {
 	t.Helper()
-	got, err := eruncommon.ReadDesktopControlMarker(s.path)
+	got, err := core.ReadDesktopControlMarker(s.path)
 	if err != nil {
 		t.Fatalf("read the control record: %v", err)
 	}
@@ -506,13 +506,13 @@ func TestAdoptRestartControlSteadily_EndsWhenThisProcessShutsDown(t *testing.T) 
 // has to resolve it by.
 func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
-	owner := eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
+	owner := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
 	if _, err := claimDesktopControlMarker(path, owner, neverAlive); err != nil {
 		t.Fatalf("claimDesktopControlMarker (owner): %v", err)
 	}
 	ownerAlive := func(pid int) bool { return pid == owner.PID }
 
-	claim, err := claimDesktopControlMarker(path, eruncommon.DesktopControlMarker{PID: 92201, ControlPort: 56614, StartedAtUnix: 200}, ownerAlive)
+	claim, err := claimDesktopControlMarker(path, core.DesktopControlMarker{PID: 92201, ControlPort: 56614, StartedAtUnix: 200}, ownerAlive)
 	if err != nil {
 		t.Fatalf("claimDesktopControlMarker (second instance): %v", err)
 	}
@@ -522,7 +522,7 @@ func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.
 	if claim.HolderPID != owner.PID {
 		t.Fatalf("HolderPID = %d, want the live owner %d", claim.HolderPID, owner.PID)
 	}
-	got, err := eruncommon.ReadDesktopControlMarker(path)
+	got, err := core.ReadDesktopControlMarker(path)
 	if err != nil {
 		t.Fatalf("read the owner's record: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.
 	if err := removeDesktopControlMarker(path, 92201); err != nil {
 		t.Fatalf("removeDesktopControlMarker: %v", err)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != owner {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != owner {
 		t.Fatalf("a non-owner's shutdown stranded the live desktop: got %+v, err %v", got, err)
 	}
 }
@@ -546,11 +546,11 @@ func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.
 // manual cleanup.
 func TestClaimDesktopControlMarker_AdoptsAStaleRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
-	stale := eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
+	stale := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
 	if _, err := claimDesktopControlMarker(path, stale, neverAlive); err != nil {
 		t.Fatalf("claimDesktopControlMarker (stale): %v", err)
 	}
-	fresh := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
+	fresh := core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
 	claim, err := claimDesktopControlMarker(path, fresh, func(pid int) bool { return pid == os.Getpid() })
 	if err != nil {
 		t.Fatalf("claimDesktopControlMarker (adopting): %v", err)
@@ -558,27 +558,27 @@ func TestClaimDesktopControlMarker_AdoptsAStaleRecord(t *testing.T) {
 	if !claim.Recorded {
 		t.Fatalf("expected the stale record to be adopted, got %+v", claim)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != fresh {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != fresh {
 		t.Fatalf("got %+v, err %v; want %+v", got, err, fresh)
 	}
 }
 
 func TestClaimReadRemoveRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "desktop-control.json")
-	if _, err := eruncommon.ReadDesktopControlMarker(path); err == nil {
+	if _, err := core.ReadDesktopControlMarker(path); err == nil {
 		t.Fatal("expected an error reading a record that was never written")
 	}
-	want := eruncommon.DesktopControlMarker{PID: 42, ControlPort: 4242, StartedAtUnix: 100}
+	want := core.DesktopControlMarker{PID: 42, ControlPort: 4242, StartedAtUnix: 100}
 	if claim, err := claimDesktopControlMarker(path, want, neverAlive); err != nil || !claim.Recorded {
 		t.Fatalf("claimDesktopControlMarker: claim %+v, err %v", claim, err)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != want {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != want {
 		t.Fatalf("got %+v, err %v; want %+v", got, err, want)
 	}
 	if err := removeDesktopControlMarker(path, want.PID); err != nil {
 		t.Fatalf("removeDesktopControlMarker: %v", err)
 	}
-	if _, err := eruncommon.ReadDesktopControlMarker(path); err == nil {
+	if _, err := core.ReadDesktopControlMarker(path); err == nil {
 		t.Fatal("expected an error reading the record after removal")
 	}
 	// Removing an already-removed record is not an error: shutdown may run
@@ -593,10 +593,10 @@ func TestClaimReadRemoveRoundTrip(t *testing.T) {
 // worse than none at all, because a trigger reads it as a desktop that exists.
 func TestClaimDesktopControlMarker_RefusesAnUnusableRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
-	if _, err := claimDesktopControlMarker("", eruncommon.DesktopControlMarker{PID: 42, ControlPort: 4242}, neverAlive); err == nil {
+	if _, err := claimDesktopControlMarker("", core.DesktopControlMarker{PID: 42, ControlPort: 4242}, neverAlive); err == nil {
 		t.Fatal("expected a claim with no record path to be refused")
 	}
-	if _, err := claimDesktopControlMarker(path, eruncommon.DesktopControlMarker{PID: 42}, neverAlive); err == nil {
+	if _, err := claimDesktopControlMarker(path, core.DesktopControlMarker{PID: 42}, neverAlive); err == nil {
 		t.Fatal("expected a claim naming no live target to be refused")
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -609,7 +609,7 @@ func TestClaimDesktopControlMarker_RefusesAnUnusableRecord(t *testing.T) {
 // removes its own and nobody else's.
 func TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
-	writer := eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
+	writer := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
 	if _, err := claimDesktopControlMarker(path, writer, neverAlive); err != nil {
 		t.Fatalf("claimDesktopControlMarker: %v", err)
 	}
@@ -617,14 +617,14 @@ func TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord(t *testing.T) {
 	if err := removeDesktopControlMarker(path, 92201); err != nil {
 		t.Fatalf("removeDesktopControlMarker (other pid): %v", err)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != writer {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != writer {
 		t.Fatalf("a record naming another pid was removed: got %+v, err %v", got, err)
 	}
 
 	if err := removeDesktopControlMarker(path, writer.PID); err != nil {
 		t.Fatalf("removeDesktopControlMarker (own pid): %v", err)
 	}
-	if _, err := eruncommon.ReadDesktopControlMarker(path); err == nil {
+	if _, err := core.ReadDesktopControlMarker(path); err == nil {
 		t.Fatal("expected the writer's own record to be removed")
 	}
 
@@ -653,7 +653,7 @@ func TestDesktopControlCrashHelperProcess(t *testing.T) {
 	if path == "" {
 		return
 	}
-	if _, err := claimDesktopControlMarker(path, eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 59775, StartedAtUnix: 100}, eruncommon.DesktopProcessAlive); err != nil {
+	if _, err := claimDesktopControlMarker(path, core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 59775, StartedAtUnix: 100}, core.DesktopProcessAlive); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "claim control marker: %v\n", err)
 		os.Exit(3)
 	}
@@ -676,24 +676,24 @@ func TestDesktopControlMarker_UncleanExitLeavesAStaleRecord(t *testing.T) {
 	}
 	deadPID := cmd.Process.Pid
 
-	marker, err := eruncommon.ReadDesktopControlMarker(path)
+	marker, err := core.ReadDesktopControlMarker(path)
 	if err != nil {
 		t.Fatalf("an unclean exit must leave the record behind: %v", err)
 	}
 	if marker.PID != deadPID {
 		t.Fatalf("record names pid %d, want the crashed process %d", marker.PID, deadPID)
 	}
-	if eruncommon.DesktopProcessAlive(deadPID) {
+	if core.DesktopProcessAlive(deadPID) {
 		t.Fatalf("pid %d exited and must not read as alive", deadPID)
 	}
 	assertCrashedRecordReadsAsStale(t, path)
 
-	next := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
-	claim, err := claimDesktopControlMarker(path, next, eruncommon.DesktopProcessAlive)
+	next := core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200}
+	claim, err := claimDesktopControlMarker(path, next, core.DesktopProcessAlive)
 	if err != nil || !claim.Recorded {
 		t.Fatalf("the crashed desktop's record must be adoptable: claim %+v, err %v", claim, err)
 	}
-	if got, err := eruncommon.ReadDesktopControlMarker(path); err != nil || got != next {
+	if got, err := core.ReadDesktopControlMarker(path); err != nil || got != next {
 		t.Fatalf("got %+v, err %v; want %+v", got, err, next)
 	}
 }
@@ -703,19 +703,19 @@ func TestDesktopControlMarker_UncleanExitLeavesAStaleRecord(t *testing.T) {
 func assertCrashedRecordReadsAsStale(t *testing.T, path string) {
 	t.Helper()
 	posted := false
-	outcome := eruncommon.RestartDesktopApp(context.Background(), eruncommon.DesktopRestartDeps{
+	outcome := core.RestartDesktopApp(context.Background(), core.DesktopRestartDeps{
 		MarkerPath:   path,
-		ReadMarker:   eruncommon.ReadDesktopControlMarker,
-		ProcessAlive: eruncommon.DesktopProcessAlive,
-		Post: func(context.Context, int, string) (eruncommon.DesktopRestartResponse, error) {
+		ReadMarker:   core.ReadDesktopControlMarker,
+		ProcessAlive: core.DesktopProcessAlive,
+		Post: func(context.Context, int, string) (core.DesktopRestartResponse, error) {
 			posted = true
-			return eruncommon.DesktopRestartResponse{OK: true}, nil
+			return core.DesktopRestartResponse{OK: true}, nil
 		},
 	}, "orch-1", false)
 	if posted {
 		t.Fatal("must not post a restart to a dead desktop's record")
 	}
-	if outcome.Status != eruncommon.DesktopRestartRefused || !strings.Contains(outcome.Reason, "stale") {
+	if outcome.Status != core.DesktopRestartRefused || !strings.Contains(outcome.Reason, "stale") {
 		t.Fatalf("outcome = %+v, want the dead desktop's record refused as stale", outcome)
 	}
 }
@@ -728,7 +728,7 @@ func TestAppClaimRestartControlMarker_RefusesToRepublishAfterShutdown(t *testing
 	app := restartControlTestApp(t, markerPath)
 
 	app.releaseRestartControlMarker()
-	_, err := app.claimRestartControlMarker(eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 100})
+	_, err := app.claimRestartControlMarker(core.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 100})
 	if !errors.Is(err, errRestartControlReleased) {
 		t.Fatalf("err = %v, want errRestartControlReleased", err)
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // heavyDualStreamScript is a shell one-liner that writes well over 64KB (the
@@ -47,7 +49,7 @@ func TestRunDockerBuildOnceDrainsHeavyOutputConcurrently(t *testing.T) {
 	stub := writeExecutableScript(t, heavyDualStreamScript)
 	t.Setenv("ERUN_DOCKER_BIN", stub)
 
-	for _, verbosity := range []int{VerbosityInfo, VerbosityDebug} {
+	for _, verbosity := range []int{core.VerbosityInfo, core.VerbosityDebug} {
 		var stdout, stderr strings.Builder
 		err := runWithHangGuard(t, 20*time.Second, func() error {
 			_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, verbosity, &stdout, &stderr)
@@ -56,7 +58,7 @@ func TestRunDockerBuildOnceDrainsHeavyOutputConcurrently(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verbosity %d: runDockerBuildOnce: %v", verbosity, err)
 		}
-		if verbosity >= VerbosityDebug {
+		if verbosity >= core.VerbosityDebug {
 			if !strings.Contains(stdout.String(), "out-1 ") {
 				t.Errorf("verbosity %d: stdout missing its own content", verbosity)
 			}
@@ -77,7 +79,7 @@ func TestRunDockerPushOnceDrainsHeavyOutputConcurrently(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	err := runWithHangGuard(t, 20*time.Second, func() error {
-		return runDockerPushOnce("tag", VerbosityDebug, &stdout, &stderr)
+		return runDockerPushOnce("tag", core.VerbosityDebug, &stdout, &stderr)
 	})
 	if err != nil {
 		t.Fatalf("runDockerPushOnce: %v", err)

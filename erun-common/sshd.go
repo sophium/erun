@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 const DefaultSSHUser = "erun"
@@ -26,12 +28,12 @@ type SSHConnectionInfo struct {
 	PrivateKeyPath string
 }
 
-func SSHConnectionInfoForResult(result OpenResult) SSHConnectionInfo {
+func SSHConnectionInfoForResult(result config.OpenResult) SSHConnectionInfo {
 	req := ShellLaunchParamsFromResult(result)
 	return SSHConnectionInfo{
 		User:           DefaultSSHUser,
 		Host:           "127.0.0.1",
-		Port:           SSHLocalPortForResult(result),
+		Port:           config.SSHLocalPortForResult(result),
 		WorkspacePath:  RemoteShellWorktreePath(req),
 		HostAlias:      SSHHostAlias(result.Tenant, result.Environment),
 		PrivateKeyPath: SSHPrivateKeyPath(result.EnvConfig.SSHD.PublicKeyPath),
@@ -76,7 +78,7 @@ func sanitizeSSHHostAliasToken(value string) string {
 	return value
 }
 
-func ValidateSSHDTarget(result OpenResult) error {
+func ValidateSSHDTarget(result config.OpenResult) error {
 	if !result.RemoteRepo() {
 		return fmt.Errorf("sshd requires a remote environment initialized with --remote")
 	}

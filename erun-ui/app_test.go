@@ -18,7 +18,10 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
@@ -33,12 +36,12 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 			{
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
-					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: eruncommon.ListSSHResult{Enabled: true}},
-					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: eruncommon.EnvironmentTypeRemoteAgent, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
+					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: eruncommon.ListSSHResult{Enabled: true}},
+					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: configpkg.EnvironmentTypeRemoteAgent, LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
 			},
 		},
-	}, eruncommon.BuildInfo{Version: "1.0.50"})
+	}, model.BuildInfo{Version: "1.0.50"})
 
 	if state.Selected == nil {
 		t.Fatal("expected selected environment")
@@ -67,7 +70,7 @@ func assertEffectiveSelectionEnvironments(t *testing.T, envs []uiEnvironment) {
 	if !envs[0].SSHDEnabled || envs[1].SSHDEnabled {
 		t.Fatalf("unexpected SSHD flags: %+v", envs)
 	}
-	if envs[0].Type == string(eruncommon.EnvironmentTypeRemoteAgent) || envs[1].Type != string(eruncommon.EnvironmentTypeRemoteAgent) {
+	if envs[0].Type == string(configpkg.EnvironmentTypeRemoteAgent) || envs[1].Type != string(configpkg.EnvironmentTypeRemoteAgent) {
 		t.Fatalf("unexpected env types: %+v", envs)
 	}
 }
@@ -83,7 +86,7 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 				},
 			},
 		},
-	}, eruncommon.BuildInfo{Version: "1.0.50"})
+	}, model.BuildInfo{Version: "1.0.50"})
 
 	if len(state.Tenants) != 1 || state.Tenants[0].Name != "active" {
 		t.Fatalf("unexpected tenants: %+v", state.Tenants)
@@ -99,10 +102,10 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			listTenantsErr: eruncommon.ErrNotInitialized,
+			listTenantsErr: configpkg.ErrNotInitialized,
 		},
-		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInitialized },
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		findProjectRoot:  func() (string, string, error) { return "", "", configpkg.ErrNotInitialized },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 	})
 
 	state, err := app.LoadState()
@@ -130,10 +133,10 @@ func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 func TestLoadStateConfigCorruptedRendersDistinctFromEmptyList(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			listTenantsErr: eruncommon.ErrConfigCorrupted,
+			listTenantsErr: configpkg.ErrConfigCorrupted,
 		},
-		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		findProjectRoot:  func() (string, string, error) { return "", "", configpkg.ErrNotInGitRepository },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 	})
 
 	state, err := app.LoadState()
@@ -158,13 +161,13 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]configpkg.TenantConfig{
 				"frs": {
 					Name:               "frs",
 					DefaultEnvironment: "prod",
 				},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]configpkg.EnvConfig{
 				"frs/prod": {
 					Name:              "prod",
 					LocalRepoPath:     projectRoot,
@@ -173,9 +176,9 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 			},
 		},
 		findProjectRoot:  func() (string, string, error) { return "frs", projectRoot, nil },
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
@@ -186,7 +189,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 					LatestStable:   "1.0.11",
 					LatestSnapshot: "1.0.12-snapshot-20260414165809",
 				}, nil
-			case eruncommon.DefaultRuntimeImageName:
+			case configpkg.DefaultRuntimeImageName:
 				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
@@ -209,7 +212,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:                stubUIStore{},
-		resolveBuildInfo:     func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo:     func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
 
@@ -223,7 +226,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != configpkg.DefaultContainerRegistry+"/frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != configpkg.DefaultContainerRegistry+"/"+configpkg.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -237,11 +240,11 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 	var tenantImageNamespace string
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]configpkg.EnvConfig{
 				"team/prod": {Name: "prod", RuntimeRegistry: customRegistry},
 			},
 		},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			switch repository {
 			case "team-devops":
@@ -252,8 +255,8 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 					LatestStable:   "1.0.11",
 					LatestSnapshot: "1.0.12-snapshot-20260608120000",
 				}, nil
-			case eruncommon.DefaultRuntimeImageName:
-				if namespace != eruncommon.DefaultContainerRegistry {
+			case configpkg.DefaultRuntimeImageName:
+				if namespace != configpkg.DefaultContainerRegistry {
 					t.Fatalf("ERun fallback image must use the default registry, got %s", namespace)
 				}
 				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
@@ -278,17 +281,17 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 	queried := map[string]bool{}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]configpkg.EnvConfig{
 				"team/prod": {
 					Name: "prod",
-					ContainerRegistries: eruncommon.ContainerRegistries{
-						{Registry: "ghcr.io/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleBuild, eruncommon.RegistryRoleFrom}},
-						{Registry: "registry.internal/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleTo, eruncommon.RegistryRoleDeploy}},
+					ContainerRegistries: configpkg.ContainerRegistries{
+						{Registry: "ghcr.io/acme", Roles: []configpkg.RegistryRole{configpkg.RegistryRoleBuild, configpkg.RegistryRoleFrom}},
+						{Registry: "registry.internal/acme", Roles: []configpkg.RegistryRole{configpkg.RegistryRoleTo, configpkg.RegistryRoleDeploy}},
 					},
 				},
 			},
 		},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if repository == "team-devops" {
 				queried[namespace] = true
@@ -312,7 +315,7 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 	t.Helper()
 
 	return func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-		if namespace != eruncommon.DefaultContainerRegistry {
+		if namespace != configpkg.DefaultContainerRegistry {
 			t.Fatalf("unexpected registry namespace: %s", namespace)
 		}
 		if repository == "frs-devops" {
@@ -323,7 +326,7 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 				LatestSnapshot: "1.0.12-snapshot-20260414165809",
 			}, nil
 		}
-		if repository == eruncommon.DefaultRuntimeImageName {
+		if repository == configpkg.DefaultRuntimeImageName {
 			return eruncommon.RuntimeRegistryVersions{
 				Image:        namespace + "/" + repository,
 				Tags:         []string{"1.0.50", "1.0.49"},
@@ -339,13 +342,13 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 	var repositories []string
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			repositories = append(repositories, repository)
-			if repository != eruncommon.DefaultRuntimeImageName {
+			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
 			return eruncommon.RuntimeRegistryVersions{
@@ -367,7 +370,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if strings.Join(repositories, "\n") != eruncommon.DefaultRuntimeImageName {
+	if strings.Join(repositories, "\n") != configpkg.DefaultRuntimeImageName {
 		t.Fatalf("expected one registry lookup for default runtime image, got %+v", repositories)
 	}
 }
@@ -375,15 +378,15 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissing(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "test-devops":
 				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
-			case eruncommon.DefaultRuntimeImageName:
+			case configpkg.DefaultRuntimeImageName:
 				return eruncommon.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"},
@@ -412,9 +415,9 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			if repository == "test-devops" {
@@ -424,7 +427,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 					LatestStable: "1.0.48",
 				}, nil
 			}
-			if repository != eruncommon.DefaultRuntimeImageName {
+			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
 			return eruncommon.RuntimeRegistryVersions{
@@ -446,7 +449,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Image != configpkg.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != configpkg.DefaultContainerRegistry+"/"+configpkg.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -454,7 +457,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
 				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", eruncommon.ErrRegistryAuthRequired)
@@ -479,7 +482,7 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 	if len(result.Notices) != 1 {
 		t.Fatalf("expected one notice, got %+v", result.Notices)
 	}
-	if notice := result.Notices[0]; notice.Kind != "auth" || notice.Image != eruncommon.DefaultContainerRegistry+"/frs-devops" {
+	if notice := result.Notices[0]; notice.Kind != "auth" || notice.Image != configpkg.DefaultContainerRegistry+"/frs-devops" {
 		t.Fatalf("unexpected notice: %+v", notice)
 	}
 }
@@ -487,7 +490,7 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
 				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
@@ -545,13 +548,13 @@ func versionValues(values []uiVersion) []string {
 func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -569,7 +572,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
+		ensureMCP: func(_ context.Context, _ configpkg.OpenResult) error {
 			ensureCalls++
 			return nil
 		},
@@ -600,13 +603,13 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/test": {
 				Name:              "test",
 				LocalRepoPath:     projectRoot,
@@ -624,7 +627,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return false
 		},
-		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
+		ensureMCP: func(_ context.Context, _ configpkg.OpenResult) error {
 			ensureCalls++
 			return nil
 		},
@@ -660,13 +663,13 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/test": {
 				Name:              "test",
 				LocalRepoPath:     projectRoot,
@@ -702,13 +705,13 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/test": {
 				Name:              "test",
 				LocalRepoPath:     projectRoot,
@@ -725,7 +728,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
+		ensureMCP: func(_ context.Context, _ configpkg.OpenResult) error {
 			ensureCalls++
 			return nil
 		},
@@ -755,13 +758,13 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/test": {
 				Name:              "test",
 				LocalRepoPath:     projectRoot,
@@ -773,7 +776,7 @@ func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 	var lines []string
 	app := NewApp(erunUIDeps{
 		store: store,
-		reconnectMCP: func(_ context.Context, result eruncommon.OpenResult, onLine func(string)) error {
+		reconnectMCP: func(_ context.Context, result configpkg.OpenResult, onLine func(string)) error {
 			calls++
 			if result.Tenant != "erun" || result.Environment != "test" {
 				t.Fatalf("unexpected target: %+v", result)
@@ -1122,10 +1125,10 @@ func TestResolveTerminalStartDirFallsBackToWorkingDirectory(t *testing.T) {
 func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1174,13 +1177,13 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
@@ -1215,10 +1218,10 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1258,10 +1261,10 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1299,10 +1302,10 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1337,10 +1340,10 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1381,10 +1384,10 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1427,10 +1430,10 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1467,10 +1470,10 @@ func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -1504,19 +1507,19 @@ func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Type:              eruncommon.EnvironmentTypeRuntime,
-				SSHD: eruncommon.SSHDConfig{
+				Type:              configpkg.EnvironmentTypeRuntime,
+				SSHD: configpkg.SSHDConfig{
 					Enabled: true,
 				},
 			},
@@ -1557,13 +1560,13 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -1624,18 +1627,18 @@ func TestLocalOpenIDECommandBuildsDarwinCommands(t *testing.T) {
 func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1682,18 +1685,18 @@ func TestTerminalSessionExitReasonIgnoresCleanEOF(t *testing.T) {
 
 func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name:               "frs",
 				DefaultEnvironment: "prod",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
 				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-prod",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1742,14 +1745,14 @@ func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvi
 }
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:         "team-cloud",
-		Provider:      eruncommon.CloudProviderAWS,
+		Provider:      configpkg.CloudProviderAWS,
 		OIDCIssuerURL: "https://issuer.team.example",
 	}}}
 	store := stubUIStore{
 		config: &rootConfig,
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name:                      "frs",
 				DefaultEnvironment:        "dev",
@@ -1797,9 +1800,9 @@ func assertLoadedTenantConfig(t *testing.T, loaded uiTenantConfig) {
 }
 
 func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
+		Provider: configpkg.CloudProviderAWS,
 		Profile:  "team",
 		Username: "Rihards.Freimanis",
 	}}}
@@ -1807,14 +1810,14 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: store,
 		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
-				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
+			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
+				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
 				}
 				return testUIJWT("https://sts.aws.example/.well-known/openid-configuration"), nil
 			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -1830,23 +1833,23 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 
 func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	jwt := testUIJWT("https://sts.aws.example/.well-known/openid-configuration")
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
+		Provider: configpkg.CloudProviderAWS,
 		Profile:  "team",
 		Username: "Rihards.Freimanis",
 	}}}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig},
 		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
-				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
+			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
+				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
 				}
 				return jwt, nil
 			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -1858,7 +1861,7 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	if token.Token != jwt || token.Issuer != "https://sts.aws.example" {
 		t.Fatalf("unexpected bearer token result: %+v", token)
 	}
-	if token.Provider.Alias != "team-cloud" || token.Provider.Status != eruncommon.CloudTokenStatusActive {
+	if token.Provider.Alias != "team-cloud" || token.Provider.Status != configpkg.CloudTokenStatusActive {
 		t.Fatalf("expected active provider status, got %+v", token.Provider)
 	}
 }
@@ -2424,7 +2427,7 @@ exit "$(cat "` + exitPath + `")"
 }
 
 func TestLoadAndSaveERunConfig(t *testing.T) {
-	config := eruncommon.ERunConfig{DefaultTenant: "old-tenant"}
+	config := configpkg.ERunConfig{DefaultTenant: "old-tenant"}
 	store := stubUIStore{
 		config: &config,
 	}
@@ -2458,14 +2461,14 @@ func testUIJWTWithSubject(issuer, subject string) string {
 }
 
 func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
-	rootConfig := &eruncommon.ERunConfig{
-		CloudProviders: []eruncommon.CloudProviderConfig{
-			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+	rootConfig := &configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []eruncommon.CloudContextConfig{
+		CloudContexts: []configpkg.CloudContextConfig{
 			{
 				Name:               "team-context",
-				Provider:           eruncommon.CloudProviderAWS,
+				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
 				Region:             eruncommon.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
@@ -2477,7 +2480,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: rootConfig},
 		cloudContextDeps: eruncommon.CloudContextDependencies{
-			RunAWS: func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, _ string, args []string) (string, error) {
+			RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 				awsCalls = append(awsCalls, strings.Join(args, " "))
 				return "i-test\tstopped\n", nil
 			},
@@ -2515,11 +2518,11 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
 		{
-			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-a"},
+			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
 			Status:             eruncommon.CloudContextStatusRunning,
 		},
 		{
-			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-b"},
+			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
 			Status:             eruncommon.CloudContextStatusStopped,
 		},
 	})
@@ -2532,16 +2535,16 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
 		{
-			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-a"},
+			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
 			Status:             eruncommon.CloudContextStatusUnknown,
 			Message:            "status refresh failed: token expired",
 		},
 		{
-			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-b"},
+			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
 			Status:             eruncommon.CloudContextStatusRunning,
 		},
 		{
-			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-c"},
+			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-c"},
 			Status:             eruncommon.CloudContextStatusUnknown,
 		},
 	})
@@ -2558,14 +2561,14 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	projectRoot := t.TempDir()
-	rootConfig := &eruncommon.ERunConfig{
-		CloudProviders: []eruncommon.CloudProviderConfig{
-			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+	rootConfig := &configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []eruncommon.CloudContextConfig{
+		CloudContexts: []configpkg.CloudContextConfig{
 			{
 				Name:               "team-context",
-				Provider:           eruncommon.CloudProviderAWS,
+				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
 				Region:             eruncommon.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
@@ -2578,32 +2581,32 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
-		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/project")},
+		projectConfigs: map[string]configpkg.ProjectConfig{
+			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/project")},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:                "prod",
 				LocalRepoPath:       projectRoot,
 				KubernetesContext:   "cluster-old",
-				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/old"),
+				ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/old"),
 				CloudProviderAlias:  "team-cloud",
 				RuntimeVersion:      "1.0.0",
-				RuntimePod: eruncommon.RuntimePodResources{
+				RuntimePod: configpkg.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
-				SSHD: eruncommon.SSHDConfig{
+				SSHD: configpkg.SSHDConfig{
 					Enabled:       false,
 					LocalPort:     60022,
 					PublicKeyPath: "/tmp/old.pub",
 				},
-				Type: eruncommon.EnvironmentTypeLocalAgent,
+				Type: configpkg.EnvironmentTypeLocalAgent,
 			},
 		},
 	}
@@ -2636,7 +2639,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 			LocalPort:     62222,
 			PublicKeyPath: " /tmp/id_ed25519.pub ",
 		},
-		Type: eruncommon.EnvironmentTypeRuntime,
+		Type: configpkg.EnvironmentTypeRuntime,
 	})
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
@@ -2652,14 +2655,14 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config:  &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &configpkg.ERunConfig{},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:           "prod",
 				LocalRepoPath:  projectRoot,
 				RuntimeVersion: "1.0.0",
-				Type:           eruncommon.EnvironmentTypeLocalAgent,
+				Type:           configpkg.EnvironmentTypeLocalAgent,
 			},
 		},
 	}
@@ -2701,15 +2704,15 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config:  &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &configpkg.ERunConfig{},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "test-context",
 				RuntimeVersion:    "1.0.106",
-				Type:              eruncommon.EnvironmentTypeLocalAgent,
+				Type:              configpkg.EnvironmentTypeLocalAgent,
 			},
 		},
 	}
@@ -2725,7 +2728,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: store,
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
 			return eruncommon.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
@@ -2777,15 +2780,15 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config:  &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &configpkg.ERunConfig{},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "test-context",
 				RuntimeVersion:    "1.0.106",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2799,7 +2802,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	app := NewApp(erunUIDeps{
 		store: store,
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
 			return eruncommon.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
@@ -2843,15 +2846,15 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config:  &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &configpkg.ERunConfig{},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "test-context",
 				RuntimeVersion:    "1.0.20",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2933,11 +2936,11 @@ func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
 	}
 }
 
-func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, projectRoot string) {
+func assertStoredEnvironmentConfig(t *testing.T, stored configpkg.EnvConfig, projectRoot string) {
 	t.Helper()
 
 	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
-	if stored.EffectiveLocalRepoPath() != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" {
+	if stored.EffectiveLocalRepoPath() != projectRoot || stored.Type != configpkg.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	assertStoredEnvironmentSSHD(t, stored)
@@ -2946,7 +2949,7 @@ func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, pr
 	}
 }
 
-func assertStoredEnvironmentSSHD(t *testing.T, stored eruncommon.EnvConfig) {
+func assertStoredEnvironmentSSHD(t *testing.T, stored configpkg.EnvConfig) {
 	t.Helper()
 
 	if stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
@@ -2957,20 +2960,20 @@ func assertStoredEnvironmentSSHD(t *testing.T, stored eruncommon.EnvConfig) {
 func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		projectConfigs: map[string]eruncommon.ProjectConfig{
+		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {
-				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared"),
-				Environments: map[string]eruncommon.ProjectEnvironmentConfig{
-					"prod": {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/prod")},
+				ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/shared"),
+				Environments: map[string]configpkg.ProjectEnvironmentConfig{
+					"prod": {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/prod")},
 				},
 			},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3005,20 +3008,20 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared")},
+		projectConfigs: map[string]configpkg.ProjectConfig{
+			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/shared")},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
-				RuntimePod: eruncommon.RuntimePodResources{
+				RuntimePod: configpkg.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
@@ -3036,8 +3039,8 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 			Memory: "12Gi",
 		},
 		Idle: uiIdleConfig{
-			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
-			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
 	})
 	if err != nil {
@@ -3058,12 +3061,12 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("ghcr.io/acme")},
+		projectConfigs: map[string]configpkg.ProjectConfig{
+			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("ghcr.io/acme")},
 		},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
-			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
+			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: configpkg.EnvironmentTypeLocalAgent},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
@@ -3072,12 +3075,12 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "c",
-		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		Type:              configpkg.EnvironmentTypeLocalAgent,
 		ContainerRegistries: []uiContainerRegistryEntry{
 			{Registry: "ghcr.io/acme", Roles: []string{"build", "from"}},
 			{Registry: "registry.internal/acme", Roles: []string{"to", "deploy"}},
 		},
-		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig: %v", err)
@@ -3102,9 +3105,9 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
-			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
+			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeLocalAgent},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
@@ -3112,11 +3115,11 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	_, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:     "local",
 		RepoPath: projectRoot,
-		Type:     eruncommon.EnvironmentTypeLocalAgent,
+		Type:     configpkg.EnvironmentTypeLocalAgent,
 		ContainerRegistries: []uiContainerRegistryEntry{
 			{Registry: "ghcr.io/acme", Roles: []string{"build"}},
 		},
-		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err == nil {
 		t.Fatal("expected a validation error for a registry list with no deploy registry")
@@ -3130,20 +3133,20 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
-			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
+			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeRuntime},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name: "prod",
-		Type: eruncommon.EnvironmentTypeRuntime,
+		Type: configpkg.EnvironmentTypeRuntime,
 		ContainerRegistries: []uiContainerRegistryEntry{
 			{Registry: "ghcr.io/sophium", Roles: []string{"deploy"}},
 		},
-		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err != nil {
 		t.Fatalf("deploy-only registry must be accepted, got %v", err)
@@ -3161,10 +3164,10 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3209,15 +3212,15 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	useBedrock := false
 	maxTokens := 8192
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
-				Claude: eruncommon.EnvironmentClaudeConfig{
+				Claude: configpkg.EnvironmentClaudeConfig{
 					UseBedrock:      &useBedrock,
 					Models:          []string{"opus", "sonnet"},
 					MaxOutputTokens: &maxTokens,
@@ -3262,7 +3265,7 @@ func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
 	if !equalStringSlices(defaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
 		t.Fatalf("expected default models, got %+v", defaults.Models)
 	}
-	if !equalStringSlices(defaults.KnownModels, eruncommon.KnownClaudeModels()) {
+	if !equalStringSlices(defaults.KnownModels, configpkg.KnownClaudeModels()) {
 		t.Fatalf("expected known models list, got %+v", defaults.KnownModels)
 	}
 }
@@ -3270,15 +3273,15 @@ func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
 func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
-				RuntimePod: eruncommon.RuntimePodResources{
+				RuntimePod: configpkg.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
@@ -3298,8 +3301,8 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 			Memory: "8916Mi",
 		},
 		Idle: uiIdleConfig{
-			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
-			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
 		Claude: uiClaudeConfig{
 			UseMantle:       &useMantle,
@@ -3334,10 +3337,10 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3353,8 +3356,8 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
 		Idle: uiIdleConfig{
-			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
-			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
 		Claude: uiClaudeConfig{
 			Models:       []string{"opus", "fable"},
@@ -3388,15 +3391,15 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	// without rewriting unrelated fields.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:                "prod",
 				LocalRepoPath:       projectRoot,
 				KubernetesContext:   "cluster-prod",
-				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/keep"),
+				ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/keep"),
 			},
 		},
 	}
@@ -3470,8 +3473,8 @@ func equalStringSlices(a, b []string) bool {
 
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	projectRoot := eruncommon.RemoteWorktreePathForRepoName("frs")
-	rootConfig := &eruncommon.ERunConfig{
-		CloudContexts: []eruncommon.CloudContextConfig{{
+	rootConfig := &configpkg.ERunConfig{
+		CloudContexts: []configpkg.CloudContextConfig{{
 			Name:               "team-context",
 			CloudProviderAlias: "team-cloud",
 			KubernetesContext:  "cluster-dev",
@@ -3479,19 +3482,19 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {
 				Name:               "frs",
 				DefaultEnvironment: "dev",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/dev": {
 				Name:               "dev",
 				LocalRepoPath:      projectRoot,
 				KubernetesContext:  "cluster-dev",
 				CloudProviderAlias: "old-cloud",
-				Type:               eruncommon.EnvironmentTypeRuntime,
+				Type:               configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3503,12 +3506,12 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (configpkg.EnvConfig, error) {
 			remoteEndpoint = endpoint
 			remoteTenant = tenant
 			remoteEnvironment = environment
 			remoteAlias = alias
-			return eruncommon.EnvConfig{Name: environment, CloudProviderAlias: alias}, nil
+			return configpkg.EnvConfig{Name: environment, CloudProviderAlias: alias}, nil
 		},
 	})
 
@@ -3529,14 +3532,14 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 
 func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	projectRoot := t.TempDir()
-	rootConfig := &eruncommon.ERunConfig{
-		CloudProviders: []eruncommon.CloudProviderConfig{
-			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+	rootConfig := &configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []eruncommon.CloudContextConfig{
+		CloudContexts: []configpkg.CloudContextConfig{
 			{
 				Name:               "team-context",
-				Provider:           eruncommon.CloudProviderAWS,
+				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
 				Region:             eruncommon.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
@@ -3552,15 +3555,15 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			config: rootConfig,
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]configpkg.TenantConfig{
 				"frs": {Name: "frs", DefaultEnvironment: "prod"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]configpkg.EnvConfig{
 				"frs/prod": {
 					Name:              "prod",
 					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-prod",
-					Type:              eruncommon.EnvironmentTypeRuntime,
+					Type:              configpkg.EnvironmentTypeRuntime,
 				},
 			},
 		},
@@ -3591,15 +3594,15 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 
 func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	projectRoot := t.TempDir()
-	rootConfig := &eruncommon.ERunConfig{
+	rootConfig := &configpkg.ERunConfig{
 		DefaultTenant: "frs",
-		CloudProviders: []eruncommon.CloudProviderConfig{
-			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+		CloudProviders: []configpkg.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []eruncommon.CloudContextConfig{
+		CloudContexts: []configpkg.CloudContextConfig{
 			{
 				Name:               "team-context",
-				Provider:           eruncommon.CloudProviderAWS,
+				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
 				Region:             eruncommon.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
@@ -3613,15 +3616,15 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "prod"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-prod",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3655,7 +3658,7 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	if strings.Index(got, "aws ec2 start-instances") > strings.Index(got, "delete-namespace") || strings.Index(got, "delete-namespace") > strings.Index(got, "aws ec2 stop-instances") {
 		t.Fatalf("unexpected delete ordering:\n%s", got)
 	}
-	if _, _, err := store.LoadEnvConfig("frs", "prod"); !errors.Is(err, eruncommon.ErrNotInitialized) {
+	if _, _, err := store.LoadEnvConfig("frs", "prod"); !errors.Is(err, configpkg.ErrNotInitialized) {
 		t.Fatalf("expected environment config to be deleted, got %v", err)
 	}
 	// Cloud-context Status is no longer persisted; the action log
@@ -3688,13 +3691,13 @@ func TestLocalPortStatusReportsAvailability(t *testing.T) {
 func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3706,7 +3709,7 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 	startCalls := 0
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		findProjectRoot: func() (string, string, error) { return "", "", configpkg.ErrNotInGitRepository },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			startCalls++
@@ -3745,10 +3748,10 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 func TestSendSessionInputRoutesPerSession(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -3756,7 +3759,7 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 	var stubs []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		findProjectRoot: func() (string, string, error) { return "", "", configpkg.ErrNotInGitRepository },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			s := newStubTerminalSession()
@@ -3796,13 +3799,13 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3814,7 +3817,7 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	startCalls := 0
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		findProjectRoot: func() (string, string, error) { return "", "", configpkg.ErrNotInGitRepository },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			startCalls++
@@ -3844,13 +3847,13 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -3894,7 +3897,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		t.Fatalf("recorded %d activity events, want 2 (session start and input): %+v", len(recorded), recorded)
 	}
 	for _, event := range recorded {
-		if event.Tenant != "erun" || event.Environment != "local" || event.Kind != eruncommon.ActivityKindCLI {
+		if event.Tenant != "erun" || event.Environment != "local" || event.Kind != configpkg.ActivityKindCLI {
 			t.Fatalf("unexpected activity params: %+v", event)
 		}
 	}
@@ -3908,10 +3911,10 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 	// output once again refreshes the idle marker.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
@@ -3955,14 +3958,14 @@ func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 	remote := eruncommon.EnvironmentIdleStatus{
 		Markers: []eruncommon.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
-			{Name: eruncommon.ActivityKindCLI, LastActivity: now.Add(-4 * time.Minute), SecondsRemaining: 60},
-			{Name: eruncommon.ActivityKindMCP, LastActivity: now.Add(-1 * time.Minute), SecondsRemaining: 240},
+			{Name: configpkg.ActivityKindCLI, LastActivity: now.Add(-4 * time.Minute), SecondsRemaining: 60},
+			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-1 * time.Minute), SecondsRemaining: 240},
 		},
 	}
 	local := eruncommon.EnvironmentIdleStatus{
 		Markers: []eruncommon.EnvironmentIdleMarker{
-			{Name: eruncommon.ActivityKindCLI, LastActivity: now, SecondsRemaining: 300},
-			{Name: eruncommon.ActivityKindMCP, LastActivity: now.Add(-2 * time.Minute), SecondsRemaining: 180},
+			{Name: configpkg.ActivityKindCLI, LastActivity: now, SecondsRemaining: 300},
+			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-2 * time.Minute), SecondsRemaining: 180},
 		},
 	}
 
@@ -3971,7 +3974,7 @@ func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 		t.Fatalf("activitySecondsUntilIdle = %d, want 300", got)
 	}
 	for _, marker := range merged.Markers {
-		if marker.Name == eruncommon.ActivityKindMCP && marker.SecondsRemaining != 240 {
+		if marker.Name == configpkg.ActivityKindMCP && marker.SecondsRemaining != 240 {
 			t.Fatalf("older local MCP marker should not replace remote marker: %+v", marker)
 		}
 	}
@@ -3983,13 +3986,13 @@ func TestMergeNewerActivityMarkersAddsMissingLocalTerminalActivity(t *testing.T)
 		ManagedCloud: true,
 		Markers: []eruncommon.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
-			{Name: eruncommon.ActivityKindMCP, Idle: true, LastActivity: now.Add(-10 * time.Minute), SecondsRemaining: 0},
+			{Name: configpkg.ActivityKindMCP, Idle: true, LastActivity: now.Add(-10 * time.Minute), SecondsRemaining: 0},
 		},
 	}
 	local := eruncommon.EnvironmentIdleStatus{
 		ManagedCloud: true,
 		Markers: []eruncommon.EnvironmentIdleMarker{
-			{Name: eruncommon.ActivityKindCLI, Idle: false, LastActivity: now, SecondsRemaining: 60},
+			{Name: configpkg.ActivityKindCLI, Idle: false, LastActivity: now, SecondsRemaining: 60},
 		},
 	}
 
@@ -4000,23 +4003,23 @@ func TestMergeNewerActivityMarkersAddsMissingLocalTerminalActivity(t *testing.T)
 	if got := activitySecondsUntilIdle(merged); got != 60 {
 		t.Fatalf("activitySecondsUntilIdle = %d, want 60", got)
 	}
-	if merged.StopBlockedReason != eruncommon.ActivityKindCLI {
-		t.Fatalf("StopBlockedReason = %q, want %q", merged.StopBlockedReason, eruncommon.ActivityKindCLI)
+	if merged.StopBlockedReason != configpkg.ActivityKindCLI {
+		t.Fatalf("StopBlockedReason = %q, want %q", merged.StopBlockedReason, configpkg.ActivityKindCLI)
 	}
 }
 
 func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	now := time.Now()
 	store := stubUIStore{
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"team-stop/dev-stop": {
 				Name: "dev-stop",
-				Idle: eruncommon.EnvironmentIdleConfig{
+				Idle: configpkg.EnvironmentIdleConfig{
 					Timeout:      "10s",
 					WorkingHours: "00:00-23:59",
 				},
 				ManagedCloud: true,
-				Type:         eruncommon.EnvironmentTypeRuntime,
+				Type:         configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -4024,20 +4027,20 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	remote := eruncommon.EnvironmentIdleStatus{
-		Policy: eruncommon.EnvironmentIdlePolicy{
+		Policy: configpkg.EnvironmentIdlePolicy{
 			Timeout:      5 * time.Minute,
 			WorkingHours: "00:00-23:59",
 		},
 		ManagedCloud: true,
 		Markers: []eruncommon.EnvironmentIdleMarker{
-			{Name: eruncommon.ActivityKindCLI, Idle: false, SecondsRemaining: 295},
+			{Name: configpkg.ActivityKindCLI, Idle: false, SecondsRemaining: 295},
 		},
 		Activity: map[string]eruncommon.EnvironmentActivitySnapshot{
-			eruncommon.ActivityKindCLI: {LastActivity: now.Add(-5 * time.Second), LastSeen: now.Add(-5 * time.Second)},
+			configpkg.ActivityKindCLI: {LastActivity: now.Add(-5 * time.Second), LastSeen: now.Add(-5 * time.Second)},
 		},
 	}
 
-	merged := app.mergeLocalIdleActivity(eruncommon.OpenResult{
+	merged := app.mergeLocalIdleActivity(configpkg.OpenResult{
 		Tenant:      "team-stop",
 		Environment: "dev-stop",
 		EnvConfig:   store.envs["team-stop/dev-stop"],
@@ -4063,26 +4066,26 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 
 func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"team-stop": {
 				Name:               "team-stop",
 				DefaultEnvironment: "dev-stop",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"team-stop/dev-stop": {
 				Name:               "dev-stop",
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Type:               eruncommon.EnvironmentTypeRuntime,
+				Type:               configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -4101,27 +4104,27 @@ func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"team-busy": {
 				Name:               "team-busy",
 				DefaultEnvironment: "dev-busy",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"team-busy/dev-busy": {
 				Name:               "dev-busy",
 				LocalRepoPath:      projectRoot,
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Type:               eruncommon.EnvironmentTypeRuntime,
+				Type:               configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -4139,15 +4142,15 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 			return eruncommon.EnvironmentIdleStatus{
 				ManagedCloud: true,
 				StopEligible: true,
-				Policy: eruncommon.EnvironmentIdlePolicy{
+				Policy: configpkg.EnvironmentIdlePolicy{
 					Timeout: 5 * time.Minute,
 				},
 				Markers: []eruncommon.EnvironmentIdleMarker{
 					{Name: "working-hours", Idle: true},
-					{Name: eruncommon.ActivityKindSSH, Idle: true},
-					{Name: eruncommon.ActivityKindMCP, Idle: true},
-					{Name: eruncommon.ActivityKindCLI, Idle: true},
-					{Name: eruncommon.ActivityKindCodex, Idle: true},
+					{Name: configpkg.ActivityKindSSH, Idle: true},
+					{Name: configpkg.ActivityKindMCP, Idle: true},
+					{Name: configpkg.ActivityKindCLI, Idle: true},
+					{Name: configpkg.ActivityKindCodex, Idle: true},
 				},
 			}, nil
 		},
@@ -4178,12 +4181,12 @@ func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
 		StopEligible:      false,
 		StopBlockedReason: "waiting for activity timeout",
 		StopError:         "failed to stop instance: access denied",
-		Policy: eruncommon.EnvironmentIdlePolicy{
+		Policy: configpkg.EnvironmentIdlePolicy{
 			Timeout: 5 * time.Minute,
 		},
 		Markers: []eruncommon.EnvironmentIdleMarker{
-			{Name: eruncommon.ActivityKindSSH, Idle: false, Reason: "recent activity", SecondsRemaining: 42},
-			{Name: eruncommon.ActivityKindMCP, Idle: true, Reason: "last activity exceeded timeout"},
+			{Name: configpkg.ActivityKindSSH, Idle: false, Reason: "recent activity", SecondsRemaining: 42},
+			{Name: configpkg.ActivityKindMCP, Idle: true, Reason: "last activity exceeded timeout"},
 		},
 	})
 
@@ -4208,7 +4211,7 @@ func assertIdleStatusBlockers(t *testing.T, status uiIdleStatus) {
 func assertIdleStatusMarkers(t *testing.T, markers []uiIdleMarker) {
 	t.Helper()
 
-	if len(markers) != 2 || markers[0].Name != eruncommon.ActivityKindSSH || markers[0].Reason != "recent activity" || markers[0].SecondsRemaining != 42 {
+	if len(markers) != 2 || markers[0].Name != configpkg.ActivityKindSSH || markers[0].Reason != "recent activity" || markers[0].SecondsRemaining != 42 {
 		t.Fatalf("unexpected markers: %+v", markers)
 	}
 }
@@ -4220,10 +4223,10 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	// projection is generic so any future per-client surface gets the
 	// same treatment without re-plumbing.
 	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
-		Policy: eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		Markers: []eruncommon.EnvironmentIdleMarker{
 			{
-				Name:             eruncommon.ActivityKindSSH,
+				Name:             configpkg.ActivityKindSSH,
 				Idle:             false,
 				Reason:           "recent activity",
 				SecondsRemaining: 50,
@@ -4232,7 +4235,7 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 					{Address: "127.0.0.1", Bytes: 548, SecondsAgo: 9},
 				},
 			},
-			{Name: eruncommon.ActivityKindCLI, Idle: true, Reason: "no activity recorded"},
+			{Name: configpkg.ActivityKindCLI, Idle: true, Reason: "no activity recorded"},
 		},
 	})
 	if len(status.Markers) != 2 {
@@ -4260,7 +4263,7 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 func TestIdleStatusToUICarriesLeases(t *testing.T) {
 	now := time.Now()
 	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
-		Policy: eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		Leases: []eruncommon.EnvironmentActivityLease{
 			{ID: "job-fix-1201", Name: "job-fix-1201", PID: 4242, StartedAt: now.Add(-90 * time.Second)},
 		},
@@ -4280,13 +4283,13 @@ func TestIdleStatusToUICarriesLeases(t *testing.T) {
 func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
 			},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
@@ -4344,17 +4347,17 @@ func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
 
 func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "rancher-desktop"},
 		},
 	}
-	var gotResult eruncommon.OpenResult
+	var gotResult configpkg.OpenResult
 	app := NewApp(erunUIDeps{
 		store: store,
-		listAgentOutputs: func(result eruncommon.OpenResult, _ eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
+		listAgentOutputs: func(result configpkg.OpenResult, _ eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
 			gotResult = result
 			return eruncommon.RuntimeOutputsListResult{
 				Dir:     "/home/erun/.erun/outputs",
@@ -4539,11 +4542,11 @@ func TestBuildPastedFileCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 	// from the runtime container literal (erun-devops). For tenant "erun" the two
 	// coincide, which previously masked the bug where the release name was passed
 	// as the kubectl -c container flag.
-	result := eruncommon.OpenResult{
+	result := configpkg.OpenResult{
 		Tenant:      "petios",
 		Environment: "local",
 		RepoPath:    "/Users/example/git/petios",
-		EnvConfig: eruncommon.EnvConfig{
+		EnvConfig: configpkg.EnvConfig{
 			KubernetesContext: "rancher-desktop",
 		},
 	}
@@ -4576,10 +4579,10 @@ func TestBuildPastedFileCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 }
 
 type stubUIStore struct {
-	config         *eruncommon.ERunConfig
-	projectConfigs map[string]eruncommon.ProjectConfig
-	tenants        map[string]eruncommon.TenantConfig
-	envs           map[string]eruncommon.EnvConfig
+	config         *configpkg.ERunConfig
+	projectConfigs map[string]configpkg.ProjectConfig
+	tenants        map[string]configpkg.TenantConfig
+	envs           map[string]configpkg.EnvConfig
 	// listTenantsErr lets a test simulate a genuinely fresh install, where
 	// ResolveListResult's ListTenantConfigs call itself fails with
 	// ErrNotInitialized rather than succeeding with zero tenants.
@@ -4588,14 +4591,14 @@ type stubUIStore struct {
 
 func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
 	return eruncommon.CloudContextDependencies{
-		RunAWS: func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, _ string, args []string) (string, error) {
+		RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 			*actions = append(*actions, "aws "+strings.Join(args, " "))
 			if strings.Join(args, " ") == "ec2 describe-instances --instance-ids i-test --query Reservations[0].Instances[0].PublicIpAddress --output text" {
 				return "203.0.113.10", nil
 			}
 			return "", nil
 		},
-		RunKubectl: func(_ eruncommon.Context, args []string) error {
+		RunKubectl: func(_ core.Context, args []string) error {
 			*actions = append(*actions, "kubectl "+strings.Join(args, " "))
 			return nil
 		},
@@ -4612,31 +4615,31 @@ func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies
 // cannot live on the stub itself.
 var stubUIStoreConfigMu sync.Mutex
 
-func (s stubUIStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s stubUIStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	stubUIStoreConfigMu.Lock()
 	defer stubUIStoreConfigMu.Unlock()
 	if s.config == nil {
-		return eruncommon.ERunConfig{}, "", nil
+		return configpkg.ERunConfig{}, "", nil
 	}
 	return *s.config, "", nil
 }
 
-func (s stubUIStore) LoadProjectConfig(projectRoot string) (eruncommon.ProjectConfig, string, error) {
+func (s stubUIStore) LoadProjectConfig(projectRoot string) (configpkg.ProjectConfig, string, error) {
 	config, ok := s.projectConfigs[projectRoot]
 	if !ok {
-		return eruncommon.ProjectConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.ProjectConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s stubUIStore) SaveProjectConfig(projectRoot string, config eruncommon.ProjectConfig) error {
+func (s stubUIStore) SaveProjectConfig(projectRoot string, config configpkg.ProjectConfig) error {
 	if s.projectConfigs != nil {
 		s.projectConfigs[projectRoot] = config
 	}
 	return nil
 }
 
-func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {
+func (s stubUIStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	stubUIStoreConfigMu.Lock()
 	defer stubUIStoreConfigMu.Unlock()
 	if s.config != nil {
@@ -4645,17 +4648,17 @@ func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {
 	return nil
 }
 
-func (s stubUIStore) LoadTenantConfig(name string) (eruncommon.TenantConfig, string, error) {
+func (s stubUIStore) LoadTenantConfig(name string) (configpkg.TenantConfig, string, error) {
 	config, ok := s.tenants[name]
 	if !ok {
-		return eruncommon.TenantConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s stubUIStore) SaveTenantConfig(config eruncommon.TenantConfig) error {
+func (s stubUIStore) SaveTenantConfig(config configpkg.TenantConfig) error {
 	if s.tenants == nil {
-		s.tenants = make(map[string]eruncommon.TenantConfig)
+		s.tenants = make(map[string]configpkg.TenantConfig)
 	}
 	s.tenants[config.Name] = config
 	return nil
@@ -4666,17 +4669,17 @@ func (s stubUIStore) DeleteTenantConfig(tenant string) error {
 	return nil
 }
 
-func (s stubUIStore) LoadEnvConfig(tenant, environment string) (eruncommon.EnvConfig, string, error) {
+func (s stubUIStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	config, ok := s.envs[tenant+"/"+environment]
 	if !ok {
-		return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s stubUIStore) SaveEnvConfig(tenant string, config eruncommon.EnvConfig) error {
+func (s stubUIStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) error {
 	if s.envs == nil {
-		s.envs = make(map[string]eruncommon.EnvConfig)
+		s.envs = make(map[string]configpkg.EnvConfig)
 	}
 	s.envs[tenant+"/"+config.Name] = config
 	return nil
@@ -4687,19 +4690,19 @@ func (s stubUIStore) DeleteEnvConfig(tenant, environment string) error {
 	return nil
 }
 
-func (s stubUIStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
+func (s stubUIStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
 	if s.listTenantsErr != nil {
 		return nil, s.listTenantsErr
 	}
-	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenants))
+	tenants := make([]configpkg.TenantConfig, 0, len(s.tenants))
 	for _, tenant := range s.tenants {
 		tenants = append(tenants, tenant)
 	}
 	return tenants, nil
 }
 
-func (s stubUIStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, error) {
-	envs := make([]eruncommon.EnvConfig, 0)
+func (s stubUIStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
+	envs := make([]configpkg.EnvConfig, 0)
 	for key, env := range s.envs {
 		if strings.HasPrefix(key, tenant+"/") {
 			envs = append(envs, env)
@@ -4810,10 +4813,10 @@ func (s *stubTerminalSession) Close() error {
 func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -4852,10 +4855,10 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -4915,8 +4918,8 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
-		envs:    map[string]eruncommon.EnvConfig{"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"}},
+		tenants: map[string]configpkg.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
+		envs:    map[string]configpkg.EnvConfig{"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"}},
 	}
 	session := newStubTerminalSession()
 	app := NewApp(erunUIDeps{
@@ -4977,10 +4980,10 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -5037,21 +5040,21 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 	// recovers via the titlebar start button.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -5108,21 +5111,21 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	// recovery in tabRespawnThunks does not regress into a no-op.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -5204,21 +5207,21 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	// LoadIdleStatus path so the merge + recompute chain stays honest.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -5264,21 +5267,21 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	// a "stop failed" badge next to a healthy env is always wrong.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -5293,7 +5296,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	}
 	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
@@ -5312,21 +5315,21 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	// projection must pass it through unchanged.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &configpkg.ERunConfig{
+			CloudContexts: []configpkg.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              configpkg.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -5341,7 +5344,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	}
 	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
@@ -5356,10 +5359,10 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -5407,10 +5410,10 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -5434,10 +5437,10 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}

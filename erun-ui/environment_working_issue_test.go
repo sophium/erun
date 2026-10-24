@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func TestParseIssueNumberFromBranch(t *testing.T) {
@@ -32,13 +32,13 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 // remote env resolved here would probe the developer machine's real ports,
 // where a live erun could be listening, turning the reachability check into
 // real network traffic.
-func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCommandRunner) *App {
+func workingIssueApp(t *testing.T, env config.EnvConfig, run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"acme/dev": env,
 		},
 	}
@@ -69,9 +69,9 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		}
 		return "", nil
 	}
-	app := workingIssueApp(t, eruncommon.EnvConfig{
+	app := workingIssueApp(t, config.EnvConfig{
 		Name:              "dev",
-		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		Type:              config.EnvironmentTypeLocalAgent,
 		KubernetesContext: "ctx",
 		LocalRepoPath:     t.TempDir(),
 	}, run)
@@ -109,10 +109,10 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 		t.Fatalf("runner must not be invoked for a remote-worktree env")
 		return "", nil
 	}
-	app := workingIssueApp(t, eruncommon.EnvConfig{
+	app := workingIssueApp(t, config.EnvConfig{
 		Name:              "dev",
 		LocalRepoPath:     "/home/erun/git/acme",
-		Type:              eruncommon.EnvironmentTypeRemoteAgent,
+		Type:              config.EnvironmentTypeRemoteAgent,
 		KubernetesContext: "ctx",
 	}, run)
 
@@ -131,14 +131,14 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"acme/dev": {
 				Name:                "dev",
 				LocalRepoPath:       "/home/erun/git/acme",
-				Type:                eruncommon.EnvironmentTypeRemoteAgent,
+				Type:                config.EnvironmentTypeRemoteAgent,
 				KubernetesContext:   "ctx",
 				LocalPortRangeStart: 17500,
 			},
@@ -245,9 +245,9 @@ func TestEnvironmentWorkingIssueBranchWithoutIssue(t *testing.T) {
 		}
 		return "main", nil
 	}
-	app := workingIssueApp(t, eruncommon.EnvConfig{
+	app := workingIssueApp(t, config.EnvConfig{
 		Name:              "dev",
-		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		Type:              config.EnvironmentTypeLocalAgent,
 		KubernetesContext: "ctx",
 		LocalRepoPath:     t.TempDir(),
 	}, run)

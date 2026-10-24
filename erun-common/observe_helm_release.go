@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ObservedHelmRelease is the runtime helm release's own record of what should
@@ -14,15 +17,15 @@ import (
 // caller must never treat an empty release as "nothing deployed" when the
 // truth is "observe could not look" (see Error).
 type ObservedHelmRelease struct {
-	Name           string              `json:"name"`
-	Found          bool                `json:"found"`
-	Revision       int                 `json:"revision,omitempty"`
-	Status         string              `json:"status,omitempty"`
-	Chart          string              `json:"chart,omitempty"`
-	ChartVersion   string              `json:"chartVersion,omitempty"`
-	AppVersion     string              `json:"appVersion,omitempty"`
-	ImageOverrides map[string]string   `json:"imageOverrides,omitempty"`
-	RuntimePod     RuntimePodResources `json:"runtimePod,omitempty"`
+	Name           string                     `json:"name"`
+	Found          bool                       `json:"found"`
+	Revision       int                        `json:"revision,omitempty"`
+	Status         string                     `json:"status,omitempty"`
+	Chart          string                     `json:"chart,omitempty"`
+	ChartVersion   string                     `json:"chartVersion,omitempty"`
+	AppVersion     string                     `json:"appVersion,omitempty"`
+	ImageOverrides map[string]string          `json:"imageOverrides,omitempty"`
+	RuntimePod     config.RuntimePodResources `json:"runtimePod,omitempty"`
 	// Error explains why a field above could not be populated: insufficient
 	// RBAC, an unreachable cluster, or a release whose chart does not look
 	// like erun's runtime chart. Empty means the read above is trustworthy.
@@ -180,7 +183,7 @@ func appendObserveHelmReleaseError(existing, addition string) string {
 // runObserveHelm runs a read-only `helm` invocation, matching
 // runObserveKubectl's stdout/stderr split so callers can classify failures.
 func runObserveHelm(args []string) (stdout []byte, stderr string, err error) {
-	cmd := Command("helm", args...)
+	cmd := core.Command("helm", args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	out, runErr := cmd.Output()
@@ -242,34 +245,34 @@ func stringifyMap(m map[string]interface{}) map[string]string {
 // findRuntimePodResourceLimits searches values for the runtime chart's own
 // "runtime.resources.limits.{cpu,memory}" shape, at any depth, the same way
 // findNestedStringMap does for imageOverrides.
-func findRuntimePodResourceLimits(values map[string]interface{}) RuntimePodResources {
+func findRuntimePodResourceLimits(values map[string]interface{}) config.RuntimePodResources {
 	if v, ok := values["runtime"]; ok {
 		if m, ok := v.(map[string]interface{}); ok {
-			if resources := runtimePodResourcesFromRuntimeValue(m); resources != (RuntimePodResources{}) {
+			if resources := runtimePodResourcesFromRuntimeValue(m); resources != (config.RuntimePodResources{}) {
 				return resources
 			}
 		}
 	}
 	for _, v := range values {
 		if child, ok := v.(map[string]interface{}); ok {
-			if resources := findRuntimePodResourceLimits(child); resources != (RuntimePodResources{}) {
+			if resources := findRuntimePodResourceLimits(child); resources != (config.RuntimePodResources{}) {
 				return resources
 			}
 		}
 	}
-	return RuntimePodResources{}
+	return config.RuntimePodResources{}
 }
 
-func runtimePodResourcesFromRuntimeValue(runtime map[string]interface{}) RuntimePodResources {
+func runtimePodResourcesFromRuntimeValue(runtime map[string]interface{}) config.RuntimePodResources {
 	resources, ok := runtime["resources"].(map[string]interface{})
 	if !ok {
-		return RuntimePodResources{}
+		return config.RuntimePodResources{}
 	}
 	limits, ok := resources["limits"].(map[string]interface{})
 	if !ok {
-		return RuntimePodResources{}
+		return config.RuntimePodResources{}
 	}
 	cpu, _ := limits["cpu"].(string)
 	memory, _ := limits["memory"].(string)
-	return RuntimePodResources{CPU: cpu, Memory: memory}
+	return config.RuntimePodResources{CPU: cpu, Memory: memory}
 }

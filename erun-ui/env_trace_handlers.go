@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // envTraceTailBytes bounds how much of the per-env trace log one console
@@ -66,7 +67,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 // A missing file is the normal "nothing ran yet" state, not an error; only
 // real read failures return an issue string, so a failed host read never
 // blanks the pod vantage point.
-func hostEnvTraceTail(result eruncommon.OpenResult) (string, string) {
+func hostEnvTraceTail(result config.OpenResult) (string, string) {
 	path, err := eruncommon.EnvTraceLogPath(result.Tenant, result.Environment)
 	if err != nil {
 		return "", err.Error()
@@ -83,8 +84,8 @@ func hostEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 
 // Unreachable or failed pod reads degrade to a notice instead of blanking
 // the pane, so the host side still renders.
-func (a *App) podEnvTraceTail(result eruncommon.OpenResult) (string, string) {
-	mcpPort := eruncommon.MCPPortForResult(result)
+func (a *App) podEnvTraceTail(result config.OpenResult) (string, string) {
+	mcpPort := config.MCPPortForResult(result)
 	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
 		return "", "in-pod trace unavailable — open the environment to include it"
 	}

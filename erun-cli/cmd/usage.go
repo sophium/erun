@@ -4,6 +4,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +78,7 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runUsageCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, intervalSeconds float64) error {
+func runUsageCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, intervalSeconds float64) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -93,7 +94,7 @@ func runUsageCommand(ctx common.Context, resolveOpen OpenResolver, params common
 		return nil
 	}
 	report := common.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(report)
 	}
 	return writeUsageResult(ctx, report)

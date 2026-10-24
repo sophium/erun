@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type UpgradeInput struct {
@@ -22,7 +23,7 @@ type UpgradeInput struct {
 // tenant/environment, so the plan is scoped to that single target.
 func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			target := eruncommon.UpgradeTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
@@ -34,7 +35,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				return err
 			}
 
-			deployer := func(ctx eruncommon.Context, item eruncommon.UpgradePlanItem) error {
+			deployer := func(ctx core.Context, item eruncommon.UpgradePlanItem) error {
 				findProjectRoot := func() (string, string, error) {
 					return runtimeFindProjectRoot(runtime.Context, workDir)
 				}

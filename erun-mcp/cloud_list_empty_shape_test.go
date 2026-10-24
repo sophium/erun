@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // unconfiguredStore is the state the reported defect is about: a store that
 // resolves fine and has no cloud aliases and no cloud contexts in it.
 type unconfiguredStore struct{}
 
-func (unconfiguredStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{}, "", nil
+func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{}, "", nil
 }
 
 // TestCollectionToolsReportAnEmptyCollectionAsAnArray pins both tools the
@@ -32,7 +34,7 @@ func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
 		t.Fatalf("list cloud provider statuses: %v", err)
 	}
 	contexts, err := eruncommon.RefreshCloudContextList(
-		eruncommon.Context{}, unconfiguredStore{}, eruncommon.CloudContextDependencies{})
+		core.Context{}, unconfiguredStore{}, eruncommon.CloudContextDependencies{})
 	if err != nil {
 		t.Fatalf("refresh cloud context list: %v", err)
 	}

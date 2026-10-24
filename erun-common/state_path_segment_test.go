@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // displayShapedStateNames are the strings a tenant and an environment take on
@@ -83,8 +86,8 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 		what  string
 		build func() (string, error)
 	}{
-		{"EnvConfigPath tenant", func() (string, error) { return EnvConfigPath(name, "local") }},
-		{"EnvConfigPath environment", func() (string, error) { return EnvConfigPath("frs", name) }},
+		{"EnvConfigPath tenant", func() (string, error) { return config.EnvConfigPath(name, "local") }},
+		{"EnvConfigPath environment", func() (string, error) { return config.EnvConfigPath("frs", name) }},
 		{"PortForwardStatePath tenant", func() (string, error) { return PortForwardStatePath("mcp", name, "local") }},
 		{"PortForwardStatePath environment", func() (string, error) { return PortForwardStatePath("mcp", "frs", name) }},
 	} {
@@ -97,12 +100,12 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 		what string
 		err  error
 	}{
-		{"SaveEnvConfig tenant", SaveEnvConfig(name, EnvConfig{Name: "local"})},
-		{"SaveEnvConfig environment", SaveEnvConfig("frs", EnvConfig{Name: name})},
-		{"SaveTenantConfig", SaveTenantConfig(TenantConfig{Name: name})},
-		{"DeleteEnvConfig tenant", DeleteEnvConfig(name, "local")},
-		{"DeleteEnvConfig environment", DeleteEnvConfig("frs", name)},
-		{"DeleteTenantConfig", DeleteTenantConfig(name)},
+		{"SaveEnvConfig tenant", config.SaveEnvConfig(name, config.EnvConfig{Name: "local"})},
+		{"SaveEnvConfig environment", config.SaveEnvConfig("frs", config.EnvConfig{Name: name})},
+		{"SaveTenantConfig", config.SaveTenantConfig(config.TenantConfig{Name: name})},
+		{"DeleteEnvConfig tenant", config.DeleteEnvConfig(name, "local")},
+		{"DeleteEnvConfig environment", config.DeleteEnvConfig("frs", name)},
+		{"DeleteTenantConfig", config.DeleteTenantConfig(name)},
 	} {
 		if write.err == nil {
 			t.Errorf("%s accepted %q", write.what, name)
@@ -112,10 +115,10 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	// A read answers "not configured", the way an environment that was never
 	// created does, so listing the tree skips a name it cannot hold instead of
 	// failing on it or resolving outside the tree.
-	if _, _, err := LoadEnvConfig(name, "local"); !errors.Is(err, ErrNotInitialized) {
+	if _, _, err := config.LoadEnvConfig(name, "local"); !errors.Is(err, config.ErrNotInitialized) {
 		t.Errorf("LoadEnvConfig(%q, ...) = %v, want ErrNotInitialized", name, err)
 	}
-	if _, _, err := LoadTenantConfig(name); !errors.Is(err, ErrNotInitialized) {
+	if _, _, err := config.LoadTenantConfig(name); !errors.Is(err, config.ErrNotInitialized) {
 		t.Errorf("LoadTenantConfig(%q) = %v, want ErrNotInitialized", name, err)
 	}
 }
@@ -128,14 +131,14 @@ func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
 
-	if err := SaveTenantConfig(TenantConfig{Name: "frs"}); err != nil {
+	if err := config.SaveTenantConfig(config.TenantConfig{Name: "frs"}); err != nil {
 		t.Fatalf("SaveTenantConfig(frs): %v", err)
 	}
-	if err := SaveEnvConfig("frs", EnvConfig{Name: "local"}); err != nil {
+	if err := config.SaveEnvConfig("frs", config.EnvConfig{Name: "local"}); err != nil {
 		t.Fatalf("SaveEnvConfig(frs, local): %v", err)
 	}
 
-	path, err := EnvConfigPath("frs", "local")
+	path, err := config.EnvConfigPath("frs", "local")
 	if err != nil {
 		t.Fatalf("EnvConfigPath(frs, local): %v", err)
 	}
@@ -152,21 +155,21 @@ func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
 // future caller can rely on what "unusable" means without re-reading the store.
 func TestStatePathSegmentValidatesTheShapeOfAName(t *testing.T) {
 	for _, value := range []string{"frs", "frs-local", "frs_local", "frs123", "FRS"} {
-		if err := validateStatePathSegment("tenant", value); err != nil {
+		if err := config.ValidateStatePathSegment("tenant", value); err != nil {
 			t.Errorf("validateStatePathSegment(%q) = %v, want nil", value, err)
 		}
 	}
 	for _, value := range append(append([]string{}, displayShapedStateNames...), unusableStatePathNames...) {
-		err := validateStatePathSegment("tenant", value)
+		err := config.ValidateStatePathSegment("tenant", value)
 		if err == nil {
 			t.Errorf("validateStatePathSegment(%q) = nil, want a refusal", value)
 			continue
 		}
-		if !errors.Is(err, ErrUnusableStateName) {
+		if !errors.Is(err, config.ErrUnusableStateName) {
 			t.Errorf("validateStatePathSegment(%q) = %v, want ErrUnusableStateName", value, err)
 		}
 	}
-	if err := validateStatePathSegment("tenant", ""); !errors.Is(err, ErrUnusableStateName) {
+	if err := config.ValidateStatePathSegment("tenant", ""); !errors.Is(err, config.ErrUnusableStateName) {
 		t.Errorf("validateStatePathSegment(\"\") = %v, want ErrUnusableStateName", err)
 	}
 }
@@ -183,12 +186,12 @@ func TestBootstrapDryRunTracesNoWriteItWouldRefuse(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			store := tracedBootstrapStore{
-				ctx: Context{Logger: NewLoggerWithWriters(VerbosityTrace, &stdout, &stderr), DryRun: true},
+				ctx: core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &stdout, &stderr), DryRun: true},
 			}
-			if err := store.SaveEnvConfig("frs", EnvConfig{Name: name}); !errors.Is(err, ErrUnusableStateName) {
+			if err := store.SaveEnvConfig("frs", config.EnvConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveEnvConfig environment %q = %v, want ErrUnusableStateName", name, err)
 			}
-			if err := store.SaveTenantConfig(TenantConfig{Name: name}); !errors.Is(err, ErrUnusableStateName) {
+			if err := store.SaveTenantConfig(config.TenantConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveTenantConfig %q = %v, want ErrUnusableStateName", name, err)
 			}
 			traced := stdout.String() + stderr.String()
@@ -207,7 +210,7 @@ func TestSaveTenantConfigNormalizesWhitespaceAroundANameThatIsOtherwiseUsable(t 
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
 
-	if err := SaveTenantConfig(TenantConfig{Name: " frs "}); err != nil {
+	if err := config.SaveTenantConfig(config.TenantConfig{Name: " frs "}); err != nil {
 		t.Fatalf("SaveTenantConfig: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "erun", "frs", "config.yaml")); err != nil {

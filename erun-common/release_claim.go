@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A release used to have nothing standing in for "I am releasing this
@@ -101,8 +103,8 @@ func releaseVersionClaimRefusalError(version string, err error) error {
 // Off-pod (a developer's own laptop) there is exactly one caller by
 // construction, so this is a no-op — refusing a solo release against itself
 // would be a false positive, not a safety net.
-func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string) (func(), error) {
-	tenant, environment, ok := injectedRuntimePodIdentity(env)
+func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) string) (func(), error) {
+	tenant, environment, ok := core.InjectedRuntimePodIdentity(env)
 	if !ok {
 		return func() {}, nil
 	}
@@ -215,7 +217,7 @@ func (h *releaseRepoClaimHandle) set(sha string) {
 // claim is best-effort, matching the local lease's own renewal: a failed
 // renewal keeps the last-known sha and tries again next tick rather than
 // tearing down a release over a transient push failure.
-func renewReleaseClaims(ctx Context, spec ReleaseSpec, tenant, environment string, holder EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
+func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
 	_, _ = takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
 
 	sha := repo.get()
@@ -229,7 +231,7 @@ func renewReleaseClaims(ctx Context, spec ReleaseSpec, tenant, environment strin
 
 // releaseRepoClaimIfHeld drops the repository-global claim if this run ever
 // actually took one (an inconclusive remote read leaves repo holding "").
-func releaseRepoClaimIfHeld(ctx Context, spec ReleaseSpec, repo *releaseRepoClaimHandle) {
+func releaseRepoClaimIfHeld(ctx core.Context, spec ReleaseSpec, repo *releaseRepoClaimHandle) {
 	if sha := repo.get(); sha != "" {
 		_ = deleteReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, sha)
 	}

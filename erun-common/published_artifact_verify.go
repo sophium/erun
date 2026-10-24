@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // registryVerifyMaxAttempts bounds a post-push read-back and
@@ -24,7 +26,7 @@ const (
 // VerifyPublishedHelmChart re-pulls the just-pushed chart so a release never
 // assumes remote state: the artifact later steps and consuming envs depend on
 // must be provably fetchable.
-func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) error {
+func VerifyPublishedHelmChart(ctx core.Context, ociRepo, chartName, version string) error {
 	destination := filepath.Join(os.TempDir(), "erun-chart-verify")
 	args := []string{
 		"pull",
@@ -55,7 +57,7 @@ func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) e
 // a tag. Nothing else proves the image half of a version exists, and a release
 // that assumed it does is how a tag gets announced for an image no deploy can
 // pull.
-func VerifyPublishedDockerImage(ctx Context, tag string, insecure bool) error {
+func VerifyPublishedDockerImage(ctx core.Context, tag string, insecure bool) error {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return nil
@@ -74,7 +76,7 @@ func VerifyPublishedDockerImage(ctx Context, tag string, insecure bool) error {
 	return nil
 }
 
-func readBackPublishedArtifact(ctx Context, describe string, read func() (string, error)) error {
+func readBackPublishedArtifact(ctx core.Context, describe string, read func() (string, error)) error {
 	var lastErr error
 	for attempt := 1; attempt <= registryVerifyMaxAttempts; attempt++ {
 		output, err := read()
@@ -117,12 +119,12 @@ func isTransientRegistryReadError(output string) bool {
 // manifest body is not what the operator asked for — while still surfacing the
 // tool's own diagnostics and capturing everything for failure classification.
 // See commandOutputCapture for why stdout and stderr need separate buffers.
-func runCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
-	capture := &commandOutputCapture{}
-	cmd := Command(spec.Name, spec.Args...)
+func runCommandCapturingOutput(ctx core.Context, spec commandSpec) (string, error) {
+	capture := &core.CommandOutputCapture{}
+	cmd := core.Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = &capture.stdout
-	cmd.Stderr = teeWriter(ctx.Stderr, &capture.stderr)
+	cmd.Stdout = &capture.Stdout
+	cmd.Stderr = core.TeeWriter(ctx.Stderr, &capture.Stderr)
 	err := cmd.Run()
-	return capture.combined(), err
+	return capture.Combined(), err
 }

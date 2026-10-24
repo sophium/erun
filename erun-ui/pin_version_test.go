@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestPinRepoCheckoutStatusResolvesForALocalWorktree covers the common case: a
@@ -13,8 +13,8 @@ func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
 			store: stubUIStore{
-				envs: map[string]eruncommon.EnvConfig{
-					"team/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: t.TempDir()},
+				envs: map[string]config.EnvConfig{
+					"team/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: t.TempDir()},
 				},
 			},
 		},
@@ -37,9 +37,9 @@ func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
 			store: stubUIStore{
-				envs: map[string]eruncommon.EnvConfig{
-					"frs/dev":  {Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: checkout},
-					"frs/prod": {Name: "prod", Type: eruncommon.EnvironmentTypeRuntime},
+				envs: map[string]config.EnvConfig{
+					"frs/dev":  {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: checkout},
+					"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
 				},
 			},
 		},
@@ -62,8 +62,8 @@ func TestPinRepoCheckoutStatusRefusesASourcelessEnvWithNoTenantCheckout(t *testi
 	app := &App{
 		deps: erunUIDeps{
 			store: stubUIStore{
-				envs: map[string]eruncommon.EnvConfig{
-					"frs/prod": {Name: "prod", Type: eruncommon.EnvironmentTypeRuntime},
+				envs: map[string]config.EnvConfig{
+					"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
 				},
 			},
 		},

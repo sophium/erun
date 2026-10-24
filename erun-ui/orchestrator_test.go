@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // newOrchestratorStubStore backs the store with a persistent in-memory root
@@ -24,14 +25,14 @@ import (
 // to and so is not orchestratable.
 func newOrchestratorStubStore(laptopRepoPath string) stubUIStore {
 	return stubUIStore{
-		config: &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{
+		config: &configpkg.ERunConfig{},
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
-			"frs/dev":     {Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx"},
-			"frs/laptop":  {Name: "laptop", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: laptopRepoPath},
-			"frs/runtime": {Name: "runtime", Type: eruncommon.EnvironmentTypeRuntime},
+		envs: map[string]configpkg.EnvConfig{
+			"frs/dev":     {Name: "dev", Type: configpkg.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx"},
+			"frs/laptop":  {Name: "laptop", Type: configpkg.EnvironmentTypeLocalAgent, LocalRepoPath: laptopRepoPath},
+			"frs/runtime": {Name: "runtime", Type: configpkg.EnvironmentTypeRuntime},
 		},
 	}
 }
@@ -98,7 +99,7 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 		// Never the real secret store: a test that launches through the gateway
 		// stages its own credential.
-		resolveGatewayCredential: func(*eruncommon.OpenRouterConfig) (string, error) {
+		resolveGatewayCredential: func(*configpkg.OpenRouterConfig) (string, error) {
 			return "", errors.New("no gateway credential staged by this test")
 		},
 	})
@@ -128,20 +129,20 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 // since its answer depends on the role, not just the type.
 func TestOrchestratableEnvCoversHost(t *testing.T) {
 	cases := []struct {
-		envType eruncommon.EnvironmentType
+		envType configpkg.EnvironmentType
 		want    bool
 	}{
-		{eruncommon.EnvironmentTypeLocalAgent, true},
-		{eruncommon.EnvironmentTypeRemoteAgent, true},
-		{eruncommon.EnvironmentTypeHost, true},
+		{configpkg.EnvironmentTypeLocalAgent, true},
+		{configpkg.EnvironmentTypeRemoteAgent, true},
+		{configpkg.EnvironmentTypeHost, true},
 		{"", false},
 	}
 	for _, tc := range cases {
-		env := eruncommon.EnvConfig{Type: tc.envType}
+		env := configpkg.EnvConfig{Type: tc.envType}
 		if got := orchestratableEnv(env, ""); got != tc.want {
 			t.Errorf("orchestratableEnv(type=%q, role=undeclared) = %v, want %v", tc.envType, got, tc.want)
 		}
-		if got := orchestratableEnv(env, eruncommon.OrchestratorEnvRoleCode); got != tc.want {
+		if got := orchestratableEnv(env, configpkg.OrchestratorEnvRoleCode); got != tc.want {
 			t.Errorf("orchestratableEnv(type=%q, role=code) = %v, want %v", tc.envType, got, tc.want)
 		}
 	}
@@ -154,14 +155,14 @@ func TestOrchestratableEnvCoversHost(t *testing.T) {
 // unconditionally, now narrowed to every role except runtime rather than
 // dropped.
 func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
-	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeRuntime}
 	cases := []struct {
-		role eruncommon.OrchestratorEnvRole
+		role configpkg.OrchestratorEnvRole
 		want bool
 	}{
-		{eruncommon.OrchestratorEnvRoleRuntime, true},
-		{eruncommon.OrchestratorEnvRoleCode, false},
-		{eruncommon.OrchestratorEnvRoleBuild, false},
+		{configpkg.OrchestratorEnvRoleRuntime, true},
+		{configpkg.OrchestratorEnvRoleCode, false},
+		{configpkg.OrchestratorEnvRoleBuild, false},
 		{"", false},
 	}
 	for _, tc := range cases {
@@ -175,7 +176,7 @@ func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
 // local-agent case: a host env's review directory is exactly its local repo
 // path, with mirrored=false — there is no pod to sync from.
 func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
-	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeHost, LocalRepoPath: "/home/erun/work"}
+	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeHost, LocalRepoPath: "/home/erun/work"}
 	dir, mirrored := orchestratorReviewDirectory("frs", env)
 	if dir != "/home/erun/work" || mirrored {
 		t.Fatalf("orchestratorReviewDirectory(host) = (%q, %v), want (%q, false)", dir, mirrored, "/home/erun/work")
@@ -188,7 +189,7 @@ func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
 // through to the mirror default meant for a remote-agent env that does have
 // a pod to sync a mirror from.
 func TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv(t *testing.T) {
-	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeRuntime}
 	dir, mirrored := orchestratorReviewDirectory("frs", env)
 	if dir != "" || mirrored {
 		t.Fatalf("orchestratorReviewDirectory(runtime) = (%q, %v), want (\"\", false)", dir, mirrored)
@@ -250,7 +251,7 @@ func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *test
 	if rt.DefaultDirectory != "" || rt.Mirrored {
 		t.Fatalf("expected the runtime env to carry no review directory, got %+v", rt)
 	}
-	if rt.RequiredRole != eruncommon.OrchestratorEnvRoleRuntime {
+	if rt.RequiredRole != configpkg.OrchestratorEnvRoleRuntime {
 		t.Fatalf("expected the runtime env to require the runtime role, got %+v", rt)
 	}
 	if rt.IneligibleReason != "" {
@@ -266,21 +267,21 @@ func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *test
 // than "".
 func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
 	cases := []struct {
-		envType    eruncommon.EnvironmentType
-		role       eruncommon.OrchestratorEnvRole
+		envType    configpkg.EnvironmentType
+		role       configpkg.OrchestratorEnvRole
 		wantEmpty  bool
 		wantSubstr string
 	}{
-		{eruncommon.EnvironmentTypeLocalAgent, "", true, ""},
-		{eruncommon.EnvironmentTypeRemoteAgent, "", true, ""},
-		{eruncommon.EnvironmentTypeHost, "", true, ""},
-		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleRuntime, true, ""},
-		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleCode, false, "no worktree"},
-		{eruncommon.EnvironmentTypeRuntime, "", false, "runtime role"},
+		{configpkg.EnvironmentTypeLocalAgent, "", true, ""},
+		{configpkg.EnvironmentTypeRemoteAgent, "", true, ""},
+		{configpkg.EnvironmentTypeHost, "", true, ""},
+		{configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleRuntime, true, ""},
+		{configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleCode, false, "no worktree"},
+		{configpkg.EnvironmentTypeRuntime, "", false, "runtime role"},
 		{"", "", false, "type"},
 	}
 	for _, tc := range cases {
-		got := orchestratorIneligibilityReason(eruncommon.EnvConfig{Type: tc.envType}, tc.role)
+		got := orchestratorIneligibilityReason(configpkg.EnvConfig{Type: tc.envType}, tc.role)
 		if tc.wantEmpty && got != "" {
 			t.Errorf("orchestratorIneligibilityReason(type=%q, role=%q) = %q, want empty", tc.envType, tc.role, got)
 		}
@@ -300,7 +301,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
-		{Tenant: "frs", Environment: "runtime", Role: eruncommon.OrchestratorEnvRoleRuntime},
+		{Tenant: "frs", Environment: "runtime", Role: configpkg.OrchestratorEnvRoleRuntime},
 	}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
@@ -309,7 +310,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 		t.Fatalf("expected one linked environment, got %+v", info.Environments)
 	}
 	linked := info.Environments[0]
-	if linked.Role != eruncommon.OrchestratorEnvRoleRuntime {
+	if linked.Role != configpkg.OrchestratorEnvRoleRuntime {
 		t.Fatalf("expected the runtime role to persist, got %+v", linked)
 	}
 	if linked.Directory != "" {
@@ -325,7 +326,7 @@ func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T)
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
-	for _, role := range []eruncommon.OrchestratorEnvRole{eruncommon.OrchestratorEnvRoleCode, eruncommon.OrchestratorEnvRoleBuild, ""} {
+	for _, role := range []configpkg.OrchestratorEnvRole{configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, ""} {
 		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 			{Tenant: "frs", Environment: "runtime", Role: role},
 		}, nil, "", orchestratorLaunchInput{})
@@ -373,8 +374,8 @@ func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
 
 	missing := filepath.Join(t.TempDir(), "not-there")
 	store := app.deps.store.(stubUIStore)
-	store.envs["frs/gone"] = eruncommon.EnvConfig{Name: "gone", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: missing}
-	store.envs["frs/unset"] = eruncommon.EnvConfig{Name: "unset", Type: eruncommon.EnvironmentTypeLocalAgent}
+	store.envs["frs/gone"] = configpkg.EnvConfig{Name: "gone", Type: configpkg.EnvironmentTypeLocalAgent, LocalRepoPath: missing}
+	store.envs["frs/unset"] = configpkg.EnvConfig{Name: "unset", Type: configpkg.EnvironmentTypeLocalAgent}
 
 	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}, nil, "", orchestratorLaunchInput{}); err == nil {
 		t.Fatal("expected a local-agent env whose worktree is absent to be rejected")
@@ -393,10 +394,10 @@ func TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree(t *testing.T) {
 
 	moved := t.TempDir()
 	store := app.deps.store.(stubUIStore)
-	store.envs["frs/laptop"] = eruncommon.EnvConfig{Name: "laptop", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: moved}
+	store.envs["frs/laptop"] = configpkg.EnvConfig{Name: "laptop", Type: configpkg.EnvironmentTypeLocalAgent, LocalRepoPath: moved}
 	chosenMirror := filepath.Join(t.TempDir(), "my-mirror")
 
-	refreshed := app.refreshLinkedEnvDirectories([]eruncommon.OrchestratorEnvConfig{
+	refreshed := app.refreshLinkedEnvDirectories([]configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "laptop", Directory: "/stale/path"},
 		{Tenant: "frs", Environment: "dev", Directory: chosenMirror},
 	})

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const runtimeDindContainerName = "erun-dind"
@@ -26,7 +29,7 @@ type DoctorInspectionResult struct {
 	Stderr string
 }
 
-func ResolveDoctorTarget(store OpenStore, params OpenParams) (OpenResult, error) {
+func ResolveDoctorTarget(store config.OpenStore, params OpenParams) (config.OpenResult, error) {
 	return ResolveOpen(store, params)
 }
 
@@ -38,7 +41,7 @@ func DoctorActions() []DoctorAction {
 	}
 }
 
-func DoctorActionPromptLabel(action DoctorAction, result OpenResult) string {
+func DoctorActionPromptLabel(action DoctorAction, result config.OpenResult) string {
 	target := result.Tenant + "/" + result.Environment
 	switch action {
 	case DoctorActionPruneImages:
@@ -72,7 +75,7 @@ func DoctorActionDescription(action DoctorAction) string {
 // came from; an environment with no daemon holding build images refuses with
 // DoctorDockerDaemonUnavailableError rather than reading whatever daemon
 // happens to be reachable.
-func RunDoctorInspection(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams) (DoctorInspectionResult, error) {
+func RunDoctorInspection(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -89,7 +92,7 @@ func RunDoctorInspection(ctx Context, runner RuntimeContainerCommandRunnerFunc, 
 // the daemon beside the output so the caller can name it, and the store
 // readings taken around the prune so a prune that freed nothing can be reported
 // as that instead of as a success.
-func RunDoctorAction(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+func RunDoctorAction(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -109,20 +112,20 @@ func RunDoctorAction(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 // (the host kind) needs no wait and no cluster: waiting on a deployment a host
 // environment does not have would fail the read for a reason that is not about
 // the daemon at all.
-func waitForDoctorDaemon(ctx Context, req ShellLaunchParams, daemon DoctorDockerDaemon) error {
+func waitForDoctorDaemon(ctx core.Context, req ShellLaunchParams, daemon DoctorDockerDaemon) error {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return nil
 	}
 	return traceAndWaitForRuntime(ctx, req)
 }
 
-func traceAndWaitForRuntime(ctx Context, req ShellLaunchParams) error {
+func traceAndWaitForRuntime(ctx core.Context, req ShellLaunchParams) error {
 	args := kubectlDeploymentWaitArgs(req)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
-	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
 		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
 			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
 			// pattern-match literal kubectl CLI stderr text, which a client-go
@@ -146,7 +149,7 @@ func PreviewRuntimeContainerCommand(req ShellLaunchParams, container, script str
 	}
 }
 
-func RunTracedRuntimeContainerCommand(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, container, label, script string) (RemoteCommandResult, error) {
+func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, container, label, script string) (RemoteCommandResult, error) {
 	preview := PreviewRuntimeContainerCommand(req, container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
@@ -168,7 +171,7 @@ func RunTracedRuntimeContainerCommand(ctx Context, runner RuntimeContainerComman
 }
 
 func RunRuntimeContainerCommand(req ShellLaunchParams, container, script string) (RemoteCommandResult, error) {
-	cmd := Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
+	cmd := core.Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -181,7 +184,7 @@ func RunRuntimeContainerCommand(req ShellLaunchParams, container, script string)
 }
 
 func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}

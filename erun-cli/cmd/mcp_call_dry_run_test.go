@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestCallMCPToolWithReattachDryRunNeverReattaches locks the preview contract on
@@ -27,7 +28,7 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 	seedDesktopIdentityForTest(t)
 
 	var spawned []string
-	restore := swapReattachMCPChannel(func(_ common.Context, tenant, environment string) error {
+	restore := swapReattachMCPChannel(func(_ core.Context, tenant, environment string) error {
 		spawned = append(spawned, tenant+"/"+environment)
 		return nil
 	})
@@ -57,13 +58,13 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 	}
 }
 
-func testCommandContext(t *testing.T, dryRun bool) common.Context {
+func testCommandContext(t *testing.T, dryRun bool) core.Context {
 	t.Helper()
 	var out bytes.Buffer
-	return common.Context{Logger: common.NewLoggerWithWriters(0, &out, &out), DryRun: dryRun}
+	return core.Context{Logger: core.NewLoggerWithWriters(0, &out, &out), DryRun: dryRun}
 }
 
-func swapReattachMCPChannel(replacement func(common.Context, string, string) error) func() {
+func swapReattachMCPChannel(replacement func(core.Context, string, string) error) func() {
 	original := reattachMCPChannel
 	reattachMCPChannel = replacement
 	return func() { reattachMCPChannel = original }
@@ -92,7 +93,7 @@ func seedDesktopIdentityForTest(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", os.Getenv("XDG_CONFIG_HOME"))
 
-	dir := common.DefaultDesktopIdentityDir()
+	dir := core.DefaultDesktopIdentityDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // pacingEnvBusyTestApp builds one orchestrator, alive and stale (its own
@@ -28,7 +28,7 @@ func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordi
 		serial:    5,
 		name:      "agent",
 		startedAt: startedAt,
-		envs:      []eruncommon.OrchestratorEnvConfig{{Tenant: "acme", Environment: "dev"}},
+		envs:      []config.OrchestratorEnvConfig{{Tenant: "acme", Environment: "dev"}},
 	}
 	return app, session
 }
@@ -217,7 +217,7 @@ func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 // unknown beats idle, and only this orchestrator's own lease holder counts as
 // busy.
 func TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder(t *testing.T) {
-	envs := []eruncommon.OrchestratorEnvConfig{
+	envs := []config.OrchestratorEnvConfig{
 		{Tenant: "acme", Environment: "dev"},
 		{Tenant: "acme", Environment: "build"},
 	}

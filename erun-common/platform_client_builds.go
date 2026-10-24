@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // platform_client_builds.go extends PlatformClient with the tenant-wide
@@ -25,7 +27,7 @@ type PlatformCreateUnattachedBuildParams struct {
 	FailureDetail string `json:"failureDetail,omitempty"`
 	// Profile is the bounded per-step profile this build collected, when the
 	// caller has one.
-	Profile *BuildProfileSummary `json:"profile,omitempty"`
+	Profile *core.BuildProfileSummary `json:"profile,omitempty"`
 }
 
 // CreateUnattachedBuild records a build against an environment with no

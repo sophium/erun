@@ -11,7 +11,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ContextRepository interface {
@@ -164,7 +166,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 
 	created, err := r.contexts.Create(req.Context(), model.Context{
 		Name:               input.name,
-		Provider:           eruncommon.CloudProviderAWS,
+		Provider:           configpkg.CloudProviderAWS,
 		CloudProviderAlias: input.alias,
 		Region:             input.region,
 		InstanceType:       input.instanceType,
@@ -213,8 +215,8 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 // real bootstrap would run — via a dry-run that never reaches AWS.
 func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, error) {
 	var trace bytes.Buffer
-	logger := eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(&trace)
-	ctx := eruncommon.Context{
+	logger := core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(&trace)
+	ctx := core.Context{
 		Logger: logger,
 		DryRun: true,
 		Stdout: io.Discard,
@@ -254,25 +256,25 @@ func splitTraceLines(trace string) []string {
 // alias without touching disk or AWS; the dry-run never persists, so
 // SaveERunConfig is unused.
 type inMemoryCloudStore struct {
-	config eruncommon.ERunConfig
+	config configpkg.ERunConfig
 }
 
 func newInMemoryCloudStore(alias string) *inMemoryCloudStore {
 	return &inMemoryCloudStore{
-		config: eruncommon.ERunConfig{
-			CloudProviders: []eruncommon.CloudProviderConfig{{
+		config: configpkg.ERunConfig{
+			CloudProviders: []configpkg.CloudProviderConfig{{
 				Alias:    alias,
-				Provider: eruncommon.CloudProviderAWS,
+				Provider: configpkg.CloudProviderAWS,
 			}},
 		},
 	}
 }
 
-func (s *inMemoryCloudStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s *inMemoryCloudStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
-func (s *inMemoryCloudStore) SaveERunConfig(config eruncommon.ERunConfig) error {
+func (s *inMemoryCloudStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	s.config = config
 	return nil
 }

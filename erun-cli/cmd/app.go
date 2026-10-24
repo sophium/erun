@@ -13,7 +13,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -97,21 +98,21 @@ func newAppRestartCmd() *cobra.Command {
 // defers entirely to eruncommon.RestartDesktopApp: the running desktop is the
 // only thing that holds the open orchestrators, so this command never
 // re-implements the restart.
-func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
+func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
 		id = strings.TrimSpace(os.Getenv(eruncommon.OrchestratorIDEnvVar))
 	}
 	ctx.Trace(fmt.Sprintf("app restart: orchestrator=%q", id))
-	markerPath := eruncommon.DefaultDesktopControlMarkerPath()
+	markerPath := core.DefaultDesktopControlMarkerPath()
 	ctx.Trace(fmt.Sprintf("app restart: resolving the running desktop app from %s", markerPath))
-	outcome := eruncommon.RestartDesktopApp(context.Background(), eruncommon.DefaultDesktopRestartDeps(), id, ctx.DryRun)
+	outcome := core.RestartDesktopApp(context.Background(), core.DefaultDesktopRestartDeps(), id, ctx.DryRun)
 	ctx.Trace(fmt.Sprintf("app restart: status=%s pid=%d controlPort=%d", outcome.Status, outcome.PID, outcome.ControlPort))
-	if outcome.Status == eruncommon.DesktopRestartRefused || outcome.Status == eruncommon.DesktopRestartFailed {
+	if outcome.Status == core.DesktopRestartRefused || outcome.Status == core.DesktopRestartFailed {
 		_ = ctx.WriteResult(outcome)
 		return fmt.Errorf("restart %s: %s", outcome.Status, outcome.Reason)
 	}
-	if ctx.Output != eruncommon.OutputJSON {
+	if ctx.Output != core.OutputJSON {
 		if ctx.DryRun {
 			appRestartDryRunReport(ctx, outcome)
 		} else {
@@ -124,7 +125,7 @@ func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
 // appRestartSummary renders the two non-error outcomes; RestartDesktopApp
 // never returns would-restart for a real (non-dry-run) call, so this only
 // ever prints for a successful restart.
-func appRestartSummary(outcome eruncommon.DesktopRestartOutcome) string {
+func appRestartSummary(outcome core.DesktopRestartOutcome) string {
 	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
 }
 
@@ -138,7 +139,7 @@ func appRestartSummary(outcome eruncommon.DesktopRestartOutcome) string {
 // refused" is precisely what an answer nobody received must not be mistaken
 // for, and the outcome is still would-restart either way, because the marker and
 // the liveness probe already established that a real target is there.
-func appRestartDryRunReport(ctx eruncommon.Context, outcome eruncommon.DesktopRestartOutcome) {
+func appRestartDryRunReport(ctx core.Context, outcome core.DesktopRestartOutcome) {
 	if ctx.Stdout == nil {
 		return
 	}
@@ -151,7 +152,7 @@ func appRestartDryRunReport(ctx eruncommon.Context, outcome eruncommon.DesktopRe
 		_, _ = fmt.Fprintln(ctx.Stdout, "it has no orchestrator to reopen")
 		return
 	}
-	refused := make([]eruncommon.DesktopRestartReopen, 0, len(outcome.Preview))
+	refused := make([]core.DesktopRestartReopen, 0, len(outcome.Preview))
 	for _, reopen := range outcome.Preview {
 		if reopen.Notice != "" {
 			refused = append(refused, reopen)
@@ -211,16 +212,16 @@ func launchAppProcess(stdout, stderr io.Writer, executable string, args []string
 // newAppProcessCommand delegates to the shared eruncommon.DesktopAppCommand so
 // the CLI and the desktop app's self-restart build the launch identically.
 func newAppProcessCommand(goos string, executable string, args []string) *exec.Cmd {
-	return eruncommon.DesktopAppCommand(goos, executable, args)
+	return core.DesktopAppCommand(goos, executable, args)
 }
 
 // resolveAppExecutable resolves which desktop app to launch and the line
 // reporting that choice, falling back to the bare program name — found on PATH
 // — when this CLI sits beside no copy at all.
 func resolveAppExecutable() (string, string) {
-	hostOS := eruncommon.DetectHost().OS
-	executableName := eruncommon.DesktopAppName
-	if hostOS == eruncommon.HostOSWindows {
+	hostOS := core.DetectHost().OS
+	executableName := core.DesktopAppName
+	if hostOS == core.HostOSWindows {
 		executableName += ".exe"
 	}
 
@@ -254,9 +255,9 @@ type desktopAppLayout struct {
 // sit relative to the running CLI: beside the binary, which is where a
 // packaged install and a hand-placed copy put it, and in the checkout's
 // erun-ui/bin, which is where a local ./erun-ui/build.sh writes its rebuild.
-func desktopAppLayouts(executableDir, executableName string, hostOS eruncommon.HostOS) []desktopAppLayout {
+func desktopAppLayouts(executableDir, executableName string, hostOS core.HostOS) []desktopAppLayout {
 	checkoutBin := filepath.Clean(filepath.Join(executableDir, "..", "..", "erun-ui", "bin"))
-	if hostOS == eruncommon.HostOSDarwin {
+	if hostOS == core.HostOSDarwin {
 		bundleBinary := filepath.Join("Contents", "MacOS", executableName)
 		return []desktopAppLayout{
 			{Launch: filepath.Join(executableDir, desktopAppBundleName), Bundle: true, Binary: bundleBinary},
@@ -296,7 +297,7 @@ type presentDesktopApp struct {
 // the CLI stays the default when the filesystem cannot separate them. A tie is
 // the only case freshness cannot answer: a layout that stat reports at all has
 // already yielded its own stamp.
-func resolveAppExecutableNear(executable, executableName string, hostOS eruncommon.HostOS) (string, string) {
+func resolveAppExecutableNear(executable, executableName string, hostOS core.HostOS) (string, string) {
 	var present []presentDesktopApp
 	for _, layout := range desktopAppLayouts(filepath.Dir(executable), executableName, hostOS) {
 		info, err := os.Stat(layout.Launch)

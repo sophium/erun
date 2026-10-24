@@ -8,16 +8,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // pushNoticeStore is the smallest CloudReadStore the notice needs: a config
 // that either has an erun platform alias or has none at all, which is the
 // distinction that decides whether the check runs.
 type pushNoticeStore struct {
-	config ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s pushNoticeStore) LoadERunConfig() (ERunConfig, string, error) { return s.config, "", nil }
+func (s pushNoticeStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return s.config, "", nil
+}
 
 // pushNoticeSecrets is a CloudSecretStore holding one alias's cached access
 // token, so the lookup reaches the test server without minting anything: a
@@ -41,10 +46,10 @@ func (s pushNoticeSecrets) DeleteCloudSecret(ref string) error { delete(s.secret
 const pushNoticeAlias = "dev@erun"
 
 func pushNoticeStoreWithAlias(apiURL string) pushNoticeStore {
-	return pushNoticeStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+	return pushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:    pushNoticeAlias,
-		Provider: CloudProviderERun,
-		ERun:     &ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
+		Provider: configpkg.CloudProviderERun,
+		ERun:     &configpkg.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
 	}}}}
 }
 
@@ -66,8 +71,8 @@ func pushNoticeDeps(t *testing.T) CloudDependencies {
 // pushNoticeContext is the CLI's own wiring: a push's diagnostics reach the
 // operator on stderr, so both of the logger's writers point at the one buffer
 // the test reads -- which is exactly where the warning is asserted to land.
-func pushNoticeContext(out *bytes.Buffer) Context {
-	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, out, out)}
+func pushNoticeContext(out *bytes.Buffer) core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out)}
 }
 
 func pushNoticeParams(branch string) PushedBranchReviewNoticeParams {

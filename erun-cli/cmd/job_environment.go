@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The job verbs run the work inside the environment wherever they are invoked
@@ -51,7 +52,7 @@ type environmentJobCancelResult struct {
 // did (exec_raw's does not carry one at all, since it is also used
 // synchronously), so the command branch follows up with one exec_job_status
 // call to return the same complete record callers of this function expect.
-func startJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if err := common.ValidateEnvironmentJobStart(params); err != nil {
 		return common.EnvironmentJob{}, false, err
 	}
@@ -61,7 +62,7 @@ func startJobInEnvironment(ctx context.Context, commandCtx common.Context, resol
 	return startCommandJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 }
 
-func startAgentJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "name", params.Name)
 	putEnvironmentToolArgument(arguments, "id", params.ID)
@@ -95,7 +96,7 @@ func startedByJobIDForOffEnvironmentStart(params common.StartEnvironmentJobParam
 	return common.CurrentEnvironmentJobID()
 }
 
-func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startCommandJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "name", params.Name)
 	putEnvironmentToolArgument(arguments, "id", params.ID)
@@ -128,7 +129,7 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context
 	return *status.Job, resolved, nil
 }
 
-func attachJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func attachJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if err := common.ValidateEnvironmentJobAttach(params); err != nil {
 		return common.EnvironmentJob{}, false, err
 	}
@@ -142,13 +143,13 @@ func attachJobInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	return result.Job, resolved, err
 }
 
-func jobStatusFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (environmentJobStatusResult, bool, error) {
+func jobStatusFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id string) (environmentJobStatusResult, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", id)
 	return callEnvironmentTool[environmentJobStatusResult](ctx, commandCtx, resolveOpen, tenant, environment, "exec_job_status", arguments, true)
 }
 
-func awaitJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
+func awaitJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
 	if err := common.ValidateEnvironmentJobAwaitTimeout(params.Timeout); err != nil {
 		return common.AwaitEnvironmentJobResult{}, false, err
 	}
@@ -158,7 +159,7 @@ func awaitJobInEnvironment(ctx context.Context, commandCtx common.Context, resol
 	return callEnvironmentTool[common.AwaitEnvironmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_job_await", arguments, true)
 }
 
-func jobOutputFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
+func jobOutputFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "offset", params.Offset)
@@ -166,7 +167,7 @@ func jobOutputFromEnvironment(ctx context.Context, commandCtx common.Context, re
 	return callEnvironmentTool[common.EnvironmentJobOutput](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_job_output", arguments, true)
 }
 
-func cancelJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
+func cancelJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "signal", params.Signal)

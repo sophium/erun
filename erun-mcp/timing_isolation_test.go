@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestMain keeps this binary's timing records out of the operator's real
@@ -18,14 +18,14 @@ import (
 // destination is left alone -- a caller who set one meant it.
 func TestMain(m *testing.M) {
 	var timingTempDir string
-	if _, ok := os.LookupEnv(eruncommon.TimingRecordDirEnv); !ok {
+	if _, ok := os.LookupEnv(core.TimingRecordDirEnv); !ok {
 		dir, err := os.MkdirTemp("", "erun-mcp-timing-test-")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create timing temp dir: %v\n", err)
 			os.Exit(1)
 		}
-		if err := os.Setenv(eruncommon.TimingRecordDirEnv, dir); err != nil {
-			fmt.Fprintf(os.Stderr, "set %s: %v\n", eruncommon.TimingRecordDirEnv, err)
+		if err := os.Setenv(core.TimingRecordDirEnv, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "set %s: %v\n", core.TimingRecordDirEnv, err)
 			os.Exit(1)
 		}
 		timingTempDir = dir

@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A pin plan is only as current as the checkout it was resolved from. Every
@@ -67,7 +69,7 @@ func (p PinPlan) BaseFreshnessNote() string {
 // failing it. The tree is still a usable base for a pin; what is not acceptable
 // is silently presenting a *known* divergence as if it were agreement, and only
 // a successful read of both sides can establish that there is one.
-func AnnotatePinPlanBaseFreshness(ctx Context, plan *PinPlan) {
+func AnnotatePinPlanBaseFreshness(ctx core.Context, plan *PinPlan) {
 	if plan == nil {
 		return
 	}
@@ -80,7 +82,7 @@ func AnnotatePinPlanBaseFreshness(ctx Context, plan *PinPlan) {
 
 // resolvePinBaseFreshness answers how projectRoot stands against the ref it
 // tracks, reporting false when there is no ref to compare against.
-func resolvePinBaseFreshness(ctx Context, projectRoot string) (PinBaseFreshness, bool) {
+func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (PinBaseFreshness, bool) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return PinBaseFreshness{}, false
 	}
@@ -105,7 +107,7 @@ func resolvePinBaseFreshness(ctx Context, projectRoot string) (PinBaseFreshness,
 // own upstream when it has one, and the remote's default branch when the
 // checkout is detached and so has no upstream of its own. remoteBranch is the
 // branch to fetch on that remote, empty when the ref cannot be fetched by name.
-func pinBaseTrackingRef(ctx Context, projectRoot, branch string) (ref, remoteBranch string, ok bool) {
+func pinBaseTrackingRef(ctx core.Context, projectRoot, branch string) (ref, remoteBranch string, ok bool) {
 	if branch != "" && branch != "HEAD" {
 		upstream, found := resolveBranchUpstreamCandidate(ctx, projectRoot, branch)
 		if !found {
@@ -129,9 +131,9 @@ func pinBaseTrackingRef(ctx Context, projectRoot, branch string) (ref, remoteBra
 // pinBaseRemoteHeadBranch names the branch origin/HEAD points at, so a detached
 // checkout can refresh it. Empty when the symref cannot be read, which leaves
 // the count against this checkout's own last look.
-func pinBaseRemoteHeadBranch(ctx Context, projectRoot string) string {
+func pinBaseRemoteHeadBranch(ctx core.Context, projectRoot string) string {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-	output, err := Command("git", "-C", projectRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output()
+	output, err := core.Command("git", "-C", projectRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output()
 	if err != nil {
 		return ""
 	}
@@ -147,10 +149,10 @@ func pinBaseRemoteHeadBranch(ctx Context, projectRoot string) string {
 // Best-effort: it reports whether the remote was reached instead of failing, so
 // an unreachable remote weakens the answer visibly rather than turning a pin
 // into an error.
-func refreshPinBaseTrackingRef(ctx Context, projectRoot, remoteBranch string) bool {
+func refreshPinBaseTrackingRef(ctx core.Context, projectRoot, remoteBranch string) bool {
 	if remoteBranch == "" {
 		return false
 	}
 	ctx.TraceCommand("", "git", "-C", projectRoot, "fetch", "origin", remoteBranch)
-	return Command("git", "-C", projectRoot, "fetch", "origin", remoteBranch).Run() == nil
+	return core.Command("git", "-C", projectRoot, "fetch", "origin", remoteBranch).Run() == nil
 }

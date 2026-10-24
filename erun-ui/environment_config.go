@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -23,7 +25,7 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
@@ -44,30 +46,30 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
 }
 
-func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
+func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated, err := a.updatedEnvironmentConfig(config, existing)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	registries, err := uiToContainerRegistries(config.ContainerRegistries)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
 	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.HasAWSCloudAlias())
@@ -80,9 +82,9 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 // keep it on the env config because their project config is not on the local
 // machine. A host env never actually deploys against a registry, so this only
 // matters if a project build pushes images independent of any pod.
-func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
+func (a *App) applyContainerRegistries(selection uiSelection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	switch updated.ResolvedType() {
-	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
+	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
 		updated.ContainerRegistries = nil
 		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
 	default:
@@ -94,13 +96,13 @@ func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommo
 // saveEnvironmentProjectRegistries writes a local-agent env's registry list to
 // its repo's .erun/config.yaml — the only place such a list can live — so it
 // fails clearly when the project root can't be resolved.
-func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
+func (a *App) saveEnvironmentProjectRegistries(tenant string, config configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
 		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
 	}
 	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
-	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return err
 	}
 	projectConfig.SetContainerRegistriesForEnvironment(environmentName(config.Name, config), registries)
@@ -128,7 +130,7 @@ func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnv
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, existing); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
@@ -205,28 +207,28 @@ func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 	})
 }
 
-func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
+func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
 	// The repository path is the one field the desktop runs on the same machine
 	// as, so it is refused here — with the reason env-init gives for the same
 	// value — rather than written and left to surface at the next deploy as a
 	// failure of the mount. Both callers share ValidateEnvRepoPath, so the
 	// dialog accepts exactly the paths init accepts.
-	if err := eruncommon.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
-		return eruncommon.EnvConfig{}, err
+	if err := configpkg.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
+		return configpkg.EnvConfig{}, err
 	}
 	if _, err := updated.Idle.Resolve(); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if err := eruncommon.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if updated.RemoteWorktree() && strings.TrimSpace(updated.CloudProviderAlias) != "" {
 		if _, ok, err := a.linkedCloudContext(updated); err != nil {
-			return eruncommon.EnvConfig{}, err
+			return configpkg.EnvConfig{}, err
 		} else if ok {
 			updated.ManagedCloud = true
 		}
@@ -234,7 +236,7 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 	return updated, nil
 }
 
-func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
+func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	if !config.SSHD.WorkspaceSync.Enabled {
 		return nil
 	}
@@ -248,7 +250,7 @@ func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
 	return nil
 }
 
-func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated eruncommon.EnvConfig) error {
+func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated configpkg.EnvConfig) error {
 	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
@@ -271,7 +273,7 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	return err
 }
 
-func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports configpkg.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -279,7 +281,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
 	effectiveRegistries, registriesInherited := a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config)
 	registries := containerRegistriesToUI(effectiveRegistries)
-	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
+	ports = configpkg.LocalPortsForResult(configpkg.OpenResult{
 		EnvConfig:  config,
 		LocalPorts: ports,
 	})
@@ -313,8 +315,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			WorkspaceSyncStatusMessage: syncStatus.Message,
 		},
 		Idle: uiIdleConfig{
-			Timeout:          idleConfigValue(config.Idle.Timeout, eruncommon.DefaultEnvironmentIdleTimeout.String()),
-			WorkingHours:     idleConfigValue(config.Idle.WorkingHours, eruncommon.DefaultEnvironmentWorkingHours),
+			Timeout:          idleConfigValue(config.Idle.Timeout, configpkg.DefaultEnvironmentIdleTimeout.String()),
+			WorkingHours:     idleConfigValue(config.Idle.WorkingHours, configpkg.DefaultEnvironmentWorkingHours),
 			IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 		},
 		Claude:            claudeConfigToUI(config.Claude),
@@ -351,7 +353,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	return result, nil
 }
 
-func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerRegistryEntry {
+func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRegistryEntry {
 	entries := make([]uiContainerRegistryEntry, 0, len(list))
 	for _, entry := range list {
 		roles := make([]string, 0, len(entry.Roles))
@@ -380,20 +382,20 @@ func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerR
 // uiToContainerRegistries builds the marked list from the editor's rows; an
 // empty result (all rows blank) clears the env's override so it inherits the
 // project default.
-func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.ContainerRegistries, error) {
-	list := make(eruncommon.ContainerRegistries, 0, len(entries))
+func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
+	list := make(configpkg.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
-		roles := make([]eruncommon.RegistryRole, 0, len(entry.Roles))
+		roles := make([]configpkg.RegistryRole, 0, len(entry.Roles))
 		for _, role := range entry.Roles {
 			if trimmed := strings.TrimSpace(role); trimmed != "" {
-				roles = append(roles, eruncommon.RegistryRole(trimmed))
+				roles = append(roles, configpkg.RegistryRole(trimmed))
 			}
 		}
 		// A cluster entry has no static host: preserve it as a cluster block so a
 		// context-resolved registry is not silently dropped on save.
 		if entry.Cluster != nil {
-			list = append(list, eruncommon.ContainerRegistryEntry{
-				Cluster: &eruncommon.ClusterRegistry{
+			list = append(list, configpkg.ContainerRegistryEntry{
+				Cluster: &configpkg.ClusterRegistry{
 					Service:   strings.TrimSpace(entry.Cluster.Service),
 					Namespace: strings.TrimSpace(entry.Cluster.Namespace),
 					Port:      entry.Cluster.Port,
@@ -407,7 +409,7 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.Con
 		if registry == "" {
 			continue
 		}
-		list = append(list, eruncommon.ContainerRegistryEntry{Registry: registry, Roles: roles})
+		list = append(list, configpkg.ContainerRegistryEntry{Registry: registry, Roles: roles})
 	}
 	if list.IsZero() {
 		return nil, nil
@@ -423,7 +425,7 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.Con
 // list they will act on. The second return is true when the list was resolved
 // from the project's .erun/config.yaml (inherited-from-project) rather than
 // carried on the env config.
-func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config eruncommon.EnvConfig) (eruncommon.ContainerRegistries, bool) {
+func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config configpkg.EnvConfig) (configpkg.ContainerRegistries, bool) {
 	if !config.ContainerRegistries.IsZero() {
 		return config.ContainerRegistries, false
 	}
@@ -435,19 +437,19 @@ func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string
 	return list, !list.IsZero()
 }
 
-func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {
+func (a *App) loadEnvironmentProjectConfig(tenant string, config configpkg.EnvConfig) (configpkg.ProjectConfig, bool) {
 	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
-		return eruncommon.ProjectConfig{}, false
+		return configpkg.ProjectConfig{}, false
 	}
 	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
 	if err != nil {
-		return eruncommon.ProjectConfig{}, false
+		return configpkg.ProjectConfig{}, false
 	}
 	return projectConfig, true
 }
 
-func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
+func (a *App) environmentProjectConfigStore(config configpkg.EnvConfig) (string, projectConfigStore, bool) {
 	if a.deps.store == nil {
 		return "", nil, false
 	}
@@ -462,7 +464,7 @@ func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string
 	return projectRoot, store, true
 }
 
-func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
+func environmentName(fallbackName string, config configpkg.EnvConfig) string {
 	if name := strings.TrimSpace(config.Name); name != "" {
 		return name
 	}
@@ -473,8 +475,8 @@ func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
 // first as the legacy primary. Adding a type here gives it its own env selector
 // and sidebar login row.
 var environmentCloudProviderTypes = []string{
-	eruncommon.CloudProviderAWS,
-	eruncommon.CloudProviderCloudflare,
+	configpkg.CloudProviderAWS,
+	configpkg.CloudProviderCloudflare,
 }
 
 // environmentCloudAliasSlots builds the per-provider-type cloud-alias slots for
@@ -483,7 +485,7 @@ var environmentCloudProviderTypes = []string{
 // that type exists; and keep a currently-attached alias whose provider config
 // was deleted as an option, so the operator can still see and clear it
 // (recognition over recall).
-func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config eruncommon.EnvConfig) []uiEnvironmentCloudAlias {
+func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config configpkg.EnvConfig) []uiEnvironmentCloudAlias {
 	optionsByType := configuredCloudAliasesByType(store)
 	attached := config.ResolvedCloudAliases()
 	slots := make([]uiEnvironmentCloudAlias, 0, len(environmentCloudProviderTypes))
@@ -583,7 +585,7 @@ func canConnectLocalTCP(port int) bool {
 	return true
 }
 
-func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
+func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvConfig) configpkg.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	applyEnvironmentCloudAliasSlots(&existing, config)
 	// ContainerRegistries are intentionally not set here; SaveEnvironmentConfig
@@ -591,7 +593,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)
-	existing.Idle = eruncommon.EnvironmentIdleConfig{
+	existing.Idle = configpkg.EnvironmentIdleConfig{
 		Timeout:          strings.TrimSpace(config.Idle.Timeout),
 		WorkingHours:     strings.TrimSpace(config.Idle.WorkingHours),
 		IdleTrafficBytes: config.Idle.IdleTrafficBytes,
@@ -623,7 +625,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	// edited here. An empty slice clears the saved default (omitempty), reverting
 	// the env to the repo plan / runtime-only default.
 	existing.Deploy.Components = trimmedComponentNames(config.DeployComponents)
-	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
+	if configpkg.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
 	}
 	return existing
@@ -654,7 +656,7 @@ func trimmedNonEmpty(values []string) []string {
 // CloudProviderAliases map. An empty slot value clears that type's attachment.
 // When the UI sends no slots (the AWS-only single-selector path), the legacy
 // scalar is applied directly to preserve older-caller behavior.
-func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEnvironmentConfig) {
+func applyEnvironmentCloudAliasSlots(existing *configpkg.EnvConfig, config uiEnvironmentConfig) {
 	if len(config.CloudAliasSlots) == 0 {
 		existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
 		return
@@ -662,7 +664,7 @@ func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEn
 	for _, slot := range config.CloudAliasSlots {
 		providerType := strings.ToLower(strings.TrimSpace(slot.Provider))
 		alias := strings.TrimSpace(slot.Alias)
-		if providerType == "" || providerType == eruncommon.CloudProviderAWS {
+		if providerType == "" || providerType == configpkg.CloudProviderAWS {
 			existing.CloudProviderAlias = alias
 			continue
 		}
@@ -677,7 +679,7 @@ func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEn
 	}
 }
 
-func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {
+func claudeConfigToUI(config configpkg.EnvironmentClaudeConfig) uiClaudeConfig {
 	out := uiClaudeConfig{
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
@@ -693,12 +695,12 @@ func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig 
 	return out
 }
 
-func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfig {
+func claudeConfigFromUI(config uiClaudeConfig) configpkg.EnvironmentClaudeConfig {
 	models := []string(nil)
 	if normalized := normalizeUIClaudeModels(config.Models); len(normalized) > 0 {
 		models = normalized
 	}
-	return eruncommon.EnvironmentClaudeConfig{
+	return configpkg.EnvironmentClaudeConfig{
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
 		UseGateway:      copyBoolPtr(config.UseGateway),
@@ -710,7 +712,7 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 	}
 }
 
-func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults {
+func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
 	minTokens, maxTokens := eruncommon.ClaudeMaxOutputTokensRange()
 	gatewayModels := gateway.ModelIDs()
 	if gatewayModels == nil {
@@ -726,7 +728,7 @@ func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults 
 		// environment's own sign-in can.
 		Models:          eruncommon.DefaultClaudeAvailableModels(),
 		MaxOutputTokens: eruncommon.DefaultClaudeMaxOutputTokens,
-		KnownModels:     eruncommon.KnownClaudeModels(),
+		KnownModels:     configpkg.KnownClaudeModels(),
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
 		Effort:          eruncommon.DefaultClaudeEffortLevel,
@@ -745,8 +747,8 @@ func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults 
 // read models. A root config that cannot be read yields no catalog rather than
 // failing an environment's config view: the unreadable case is the unconfigured
 // one, and every path that acts on a gateway re-resolves it where it matters.
-func (a *App) resolveOpenRouterConfig() *eruncommon.OpenRouterConfig {
-	gateway, err := eruncommon.ResolveOpenRouterConfig(a.deps.store)
+func (a *App) resolveOpenRouterConfig() *configpkg.OpenRouterConfig {
+	gateway, err := configpkg.ResolveOpenRouterConfig(a.deps.store)
 	if err != nil {
 		return nil
 	}
@@ -787,7 +789,7 @@ func copyStringPtr(value *string) *string {
 	return &v
 }
 
-func runtimePodConfigToUI(config eruncommon.RuntimePodResources) uiRuntimePodConfig {
+func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConfig {
 	config = eruncommon.NormalizeRuntimePodResources(config)
 	return uiRuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
@@ -795,8 +797,8 @@ func runtimePodConfigToUI(config eruncommon.RuntimePodResources) uiRuntimePodCon
 	}
 }
 
-func runtimePodConfigFromUI(config uiRuntimePodConfig) eruncommon.RuntimePodResources {
-	return eruncommon.NormalizeRuntimePodResources(eruncommon.RuntimePodResources{
+func runtimePodConfigFromUI(config uiRuntimePodConfig) configpkg.RuntimePodResources {
+	return eruncommon.NormalizeRuntimePodResources(configpkg.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	})
@@ -814,7 +816,7 @@ func idleConfigValue(value, fallback string) string {
 // filled from the background poller's in-memory cache. The persisted config no
 // longer carries Status, so a missing cache entry surfaces as Status="" that
 // callers must treat as "not yet observed," not "stopped."
-func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+func (a *App) linkedCloudContext(config configpkg.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
 	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
 }
 
@@ -845,7 +847,7 @@ func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string
 	return eruncommon.CloudContextStatus{}, false, nil
 }
 
-func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
 	status, ok, err := a.linkedCloudContext(config)
 	if err != nil || !ok {
 		return status, ok, err
@@ -855,7 +857,7 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 		return status, true, nil
 	}
 	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
-	status, err = eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
+	status, err = eruncommon.StartCloudContext(core.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return eruncommon.CloudContextStatus{}, true, err
 	}

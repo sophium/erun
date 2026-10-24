@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing verifies
@@ -17,20 +18,20 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"petios": {Name: "petios"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"petios/rihards-develop": {
 					Name:           "rihards-develop",
 					AutoUpgrade:    true,
-					UpgradeChannel: eruncommon.UpgradeChannelSnapshot,
+					UpgradeChannel: config.UpgradeChannelSnapshot,
 					RuntimeVersion: "1.0.85-snapshot-20260101000000",
 				},
 			},
 		},
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
+			if namespace != config.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
@@ -38,7 +39,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 				// A successful-but-empty lookup (not a failed one) is what triggers
 				// the fallback to the default image.
 				return eruncommon.RuntimeRegistryVersions{}, nil
-			case eruncommon.DefaultRuntimeImageName:
+			case config.DefaultRuntimeImageName:
 				return eruncommon.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.85", fallbackSnapshot},
@@ -60,7 +61,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 		t.Fatalf("expected 1 plan item, got %d: %+v", len(plan.Items), plan.Items)
 	}
 	item := plan.Items[0]
-	if item.Channel != eruncommon.UpgradeChannelSnapshot {
+	if item.Channel != config.UpgradeChannelSnapshot {
 		t.Fatalf("expected snapshot channel, got %q", item.Channel)
 	}
 	if item.Target != fallbackSnapshot {
@@ -80,14 +81,14 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"petios": {Name: "petios"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"petios/rihards-develop": {
 					Name:           "rihards-develop",
 					AutoUpgrade:    true,
-					UpgradeChannel: eruncommon.UpgradeChannelSnapshot,
+					UpgradeChannel: config.UpgradeChannelSnapshot,
 					RuntimeVersion: "1.0.85-snapshot-20260101000000",
 				},
 			},
@@ -126,7 +127,7 @@ func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot s
 				Tags:           []string{tenantSnapshot},
 				LatestSnapshot: tenantSnapshot,
 			}, nil
-		case eruncommon.DefaultRuntimeImageName:
+		case config.DefaultRuntimeImageName:
 			return eruncommon.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				LatestSnapshot: defaultSnapshot,
@@ -160,20 +161,20 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"petios": {Name: "petios"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"petios/rihards-develop": {
 					Name:           "rihards-develop",
 					AutoUpgrade:    true,
-					UpgradeChannel: eruncommon.UpgradeChannelSnapshot,
+					UpgradeChannel: config.UpgradeChannelSnapshot,
 					RuntimeVersion: "1.0.86-snapshot-20260610133238",
 				},
 			},
 		},
 		resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if repository == eruncommon.DefaultRuntimeImageName {
+			if repository == config.DefaultRuntimeImageName {
 				return eruncommon.RuntimeRegistryVersions{
 					LatestStable:   "1.0.85",
 					LatestSnapshot: canonicalSnapshot,
@@ -203,20 +204,20 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"petios": {Name: "petios"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"petios/rihards-develop": {
 					Name:           "rihards-develop",
 					AutoUpgrade:    true,
-					UpgradeChannel: eruncommon.UpgradeChannelSnapshot,
+					UpgradeChannel: config.UpgradeChannelSnapshot,
 					RuntimeVersion: "1.0.86-snapshot-20260610133238",
 				},
 			},
 		},
 		resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if repository == eruncommon.DefaultRuntimeImageName {
+			if repository == config.DefaultRuntimeImageName {
 				return eruncommon.RuntimeRegistryVersions{}, errors.New("registry unreachable")
 			}
 			return eruncommon.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")

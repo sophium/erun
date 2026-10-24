@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A task job runs Go work asynchronously in this process instead of a
@@ -102,7 +104,7 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (EnvironmentJob, e
 	if err != nil {
 		return EnvironmentJob{}, err
 	}
-	if err := reserveEnvironmentJobID(Context{}, dir, params.ID); err != nil {
+	if err := reserveEnvironmentJobID(core.Context{}, dir, params.ID); err != nil {
 		return EnvironmentJob{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {

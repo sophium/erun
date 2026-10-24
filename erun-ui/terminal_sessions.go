@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY, queued through the
@@ -376,7 +378,7 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	if err != nil {
 		return startSessionResult{}, err
 	}
-	if result.EnvConfig.ResolvedType() == eruncommon.EnvironmentTypeHost {
+	if result.EnvConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		return startSessionResult{}, fmt.Errorf("%s/%s is a host environment; it has no pod and no cluster to deploy to", selection.Tenant, selection.Environment)
 	}
 	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
@@ -731,7 +733,7 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 
 	// A later re-create of this env must fire environment-initialized again.
 	a.clearInitEmitted(selection.Tenant, selection.Environment)
-	result, err := eruncommon.RunDeleteEnvironment(eruncommon.Context{}, eruncommon.DeleteEnvironmentParams{
+	result, err := eruncommon.RunDeleteEnvironment(core.Context{}, eruncommon.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}, store, a.deps.deleteNamespace)
@@ -809,7 +811,7 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	_ = a.deps.recordActivity(eruncommon.EnvironmentActivityParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
-		Kind:        eruncommon.ActivityKindCLI,
+		Kind:        configpkg.ActivityKindCLI,
 	})
 }
 
@@ -867,7 +869,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := configpkg.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
@@ -894,8 +896,8 @@ func (a *App) classifyMCPUnreachable(port int) eruncommon.LocalMCPUnreachableKin
 	return eruncommon.LocalMCPNotOpen
 }
 
-func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {
-	mcpPort := eruncommon.MCPPortForResult(result)
+func (a *App) ensureMCPAvailable(ctx context.Context, result configpkg.OpenResult) error {
+	mcpPort := configpkg.MCPPortForResult(result)
 	// Reachability is a round trip, not a dial. A stale forward holds the port
 	// and answers nothing, so gating recovery on a dial left the env
 	// permanently unreachable behind a listener that looked fine.
@@ -1149,7 +1151,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		// matching how a missing env config is tolerated just above: this only
 		// decides whether the launch is verbatim, and the unreadable case is the
 		// unconfigured one.
-		var gateway *eruncommon.OpenRouterConfig
+		var gateway *configpkg.OpenRouterConfig
 		if config, _, err := a.deps.store.LoadERunConfig(); err == nil {
 			gateway = config.OpenRouter
 		}

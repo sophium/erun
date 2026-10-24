@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type ObserveSecretCheckInput struct {
@@ -54,10 +55,10 @@ func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []eruncommon
 // module applies -- before asking the store to resolve the rest of the
 // OpenResult, so `observe` can never be pointed at a different environment
 // than the one this server's pod actually runs in.
-func resolveObserveOpenResult(runtime RuntimeConfig, input ObserveInput) (eruncommon.OpenResult, error) {
+func resolveObserveOpenResult(runtime RuntimeConfig, input ObserveInput) (config.OpenResult, error) {
 	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
-		return eruncommon.OpenResult{}, err
+		return config.OpenResult{}, err
 	}
 	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }

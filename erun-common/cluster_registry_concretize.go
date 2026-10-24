@@ -1,12 +1,17 @@
 package eruncommon
 
+import (
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+)
+
 // concretizeRegistriesForContext expands any cluster entry in list into concrete
 // push/pull hosts using ctx's forward lifecycle and the given kube-context. A
 // list with no cluster entry is returned unchanged (kube-context and forwards
 // unused), so non-cluster envs are byte-for-byte unaffected. The port-forward a
 // host build needs is opened against ctx.RegistryForwards so the command entry
 // closes it once; a nil handle falls back to a local throwaway (dry-run, tests).
-func concretizeRegistriesForContext(ctx Context, kubeContext string, list ContainerRegistries) (ContainerRegistries, error) {
+func concretizeRegistriesForContext(ctx core.Context, kubeContext string, list config.ContainerRegistries) (config.ContainerRegistries, error) {
 	if !list.HasClusterEntry() {
 		return list, nil
 	}
@@ -24,8 +29,8 @@ func concretizeRegistriesForContext(ctx Context, kubeContext string, list Contai
 // concrete hosts) and the pull host on ClusterPullRegistry (so the chart renders
 // it). A target with no cluster entry is returned unchanged, keeping plain envs
 // byte-for-byte identical.
-func concretizeDeployTargetRegistries(ctx Context, target OpenResult) (OpenResult, error) {
-	list, err := deployTargetContainerRegistries(target)
+func concretizeDeployTargetRegistries(ctx core.Context, target config.OpenResult) (config.OpenResult, error) {
+	list, err := config.DeployTargetContainerRegistries(target)
 	if err != nil {
 		return target, err
 	}

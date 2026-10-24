@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // close_pull_request.go closes the GitHub pull request a merge queue
@@ -102,7 +104,7 @@ type closePullRequestInputs struct {
 // resolveClosePullRequestInputs validates and traces ClosePullRequest's
 // inputs, isolated so ClosePullRequest itself stays under the module's
 // cyclomatic complexity limit.
-func resolveClosePullRequestInputs(ctx Context, params ClosePullRequestParams) (closePullRequestInputs, error) {
+func resolveClosePullRequestInputs(ctx core.Context, params ClosePullRequestParams) (closePullRequestInputs, error) {
 	ctx.Trace("close-pr: resolving inputs")
 	inputs := closePullRequestInputs{
 		branch:        strings.TrimSpace(params.Branch),
@@ -129,7 +131,7 @@ func resolveClosePullRequestInputs(ctx Context, params ClosePullRequestParams) (
 // ClosePullRequest finds Branch's open pull request against TargetBranch on
 // GitHub, refuses if its head has moved past GatedCommit, otherwise comments
 // LandingCommit on it and closes it.
-func ClosePullRequest(ctx Context, params ClosePullRequestParams, deps ClosePullRequestDependencies) (ClosePullRequestResult, error) {
+func ClosePullRequest(ctx core.Context, params ClosePullRequestParams, deps ClosePullRequestDependencies) (ClosePullRequestResult, error) {
 	inputs, err := resolveClosePullRequestInputs(ctx, params)
 	if err != nil {
 		return ClosePullRequestResult{}, err
@@ -156,7 +158,7 @@ func ClosePullRequest(ctx Context, params ClosePullRequestParams, deps ClosePull
 // findAndClosePullRequest runs the mutating half of ClosePullRequest, isolated
 // so the validation and dry-run branching above it don't inflate that
 // function's complexity -- the same split GateMergeWorkingTree uses.
-func findAndClosePullRequest(ctx Context, deps ClosePullRequestDependencies, listURL, token string, inputs closePullRequestInputs, result ClosePullRequestResult) (ClosePullRequestResult, error) {
+func findAndClosePullRequest(ctx core.Context, deps ClosePullRequestDependencies, listURL, token string, inputs closePullRequestInputs, result ClosePullRequestResult) (ClosePullRequestResult, error) {
 	pulls, err := listOpenGitHubPullRequests(context.Background(), deps.Client, token, listURL, inputs.owner, inputs.repo)
 	if err != nil {
 		return ClosePullRequestResult{}, err

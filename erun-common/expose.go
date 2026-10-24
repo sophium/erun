@@ -3,12 +3,15 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ExposeStore is the read surface RunExposeService needs to resolve the target
 // environment (its namespace and kubernetes context).
 type ExposeStore interface {
-	LoadEnvConfig(string, string) (EnvConfig, string, error)
+	LoadEnvConfig(string, string) (config.EnvConfig, string, error)
 }
 
 // DNSRecordUpserterFunc writes (creates or replaces) a single DNS record in the
@@ -255,7 +258,7 @@ const defaultExposeWildcardTTL = 60
 // the caller instead has an erun platform alias configured (a developer's
 // local cluster, most concretely) — see resolveExposeDNSUpserter.
 // upsertDNSRecord, when non-nil, overrides the decision outright (tests).
-func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
+func RunExposeService(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, applyIngress = normalizeExposeDependencies(store, applyIngress)
 
 	if params.SkipIfUnconfigured && !exposePlatformConfigured(params) {
@@ -301,20 +304,20 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 // write path to use -- split out of RunExposeService purely to keep that
 // function's own branch count down; see resolveExposeDNSUpserter for the
 // actual decision.
-func resolveExposePlanAndDNSWriter(ctx Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, CloudProviderConfig, error) {
+func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
 	result, err := resolveExposeServicePlan(params, store)
 	if err != nil {
-		return ExposeServiceResult{}, nil, CloudProviderConfig{}, err
+		return ExposeServiceResult{}, nil, config.CloudProviderConfig{}, err
 	}
 	hasDirectOverride := strings.TrimSpace(params.ServicesZone) != "" || strings.TrimSpace(params.PlatformNamespace) != ""
 	upsertDNSRecord, dnsProvider, err := resolveExposeDNSUpserter(ctx, result.Environment, params.ErunAlias, cloudStore, deps, hasDirectOverride, upsertDNSRecord)
 	if err != nil {
-		return ExposeServiceResult{}, nil, CloudProviderConfig{}, err
+		return ExposeServiceResult{}, nil, config.CloudProviderConfig{}, err
 	}
 	return result, upsertDNSRecord, dnsProvider, nil
 }
 
-func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, dnsProvider CloudProviderConfig) {
+func traceExposePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, dnsProvider config.CloudProviderConfig) {
 	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.BackendService, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
 	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
@@ -334,7 +337,7 @@ func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecor
 // will run and what it will do, so a dry-run names the record it would write
 // before it ever writes it (root AGENTS.md's "DNS changes are externally
 // visible and slow to undo").
-func traceExposeDNSWritePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, dnsProvider CloudProviderConfig) {
+func traceExposeDNSWritePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, dnsProvider config.CloudProviderConfig) {
 	if dnsProvider.Alias == "" {
 		ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 		ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
@@ -348,7 +351,7 @@ func traceExposeDNSWritePlan(ctx Context, result ExposeServiceResult, dnsParams 
 // lands in the target env's cluster, so require that context here; the DNS
 // write targets the platform cluster and is left to kubectl's resolution
 // (explicit platform context or current).
-func applyExposeWrites(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) error {
+func applyExposeWrites(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) error {
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
 		return fmt.Errorf("expose %s/%s: %w", result.Tenant, result.Environment, err)
 	}
@@ -439,7 +442,7 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 	}
 	// The service name becomes a DNS label in the public hostname, so validate it
 	// up front — before any DNS record is written — rather than failing mid-flight.
-	if !isDNSLabel(service) || len(service) > 63 {
+	if !config.IsDNSLabel(service) || len(service) > 63 {
 		return "", "", "", fmt.Errorf("service name %q must be a DNS-1035 label: lowercase letters, digits, and hyphens, not starting or ending with a hyphen, at most 63 characters", service)
 	}
 	return tenant, environment, service, nil
@@ -543,7 +546,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 		// the DNS write falls back to kubectl's current context — correct for the
 		// single-cluster hosted deployment a deploy Job (the caller this override
 		// exists for) always runs in.
-		return zone, normalizeNamespaceName(namespace), TenantResourcePrefix(platTenant) + "-powerdns", "", nil
+		return zone, config.NormalizeNamespaceName(namespace), TenantResourcePrefix(platTenant) + "-powerdns", "", nil
 	}
 
 	platform := resolveProjectPlatform(params.ProjectRoot)
@@ -566,7 +569,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace
 	// label, so its tenant prefix gives the Deployment name the exec targets.
 	platTenant, _, _ := splitTenantEnv(platform.Env)
-	return platform.ServicesZone, normalizeNamespaceName(platform.Env), TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
+	return platform.ServicesZone, config.NormalizeNamespaceName(platform.Env), TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
 }
 
 // resolveExposeBackendService picks the Service the Ingress routes to: the one
@@ -647,7 +650,7 @@ func splitTenantEnv(label string) (tenant, env string, ok bool) {
 
 func normalizeExposeDependencies(store ExposeStore, applyIngress IngressApplierFunc) (ExposeStore, IngressApplierFunc) {
 	if store == nil {
-		store = ConfigStore{}
+		store = config.ConfigStore{}
 	}
 	if applyIngress == nil {
 		applyIngress = applyHostRoutingIngress

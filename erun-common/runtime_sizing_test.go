@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 const (
@@ -40,7 +42,7 @@ func verdictFor(t *testing.T, recommendation RuntimeSizingRecommendation, resour
 type memoryDirectionCase struct {
 	name           string
 	history        RuntimeUsageHistory
-	ceiling        NamespaceResourceQuota
+	ceiling        config.NamespaceResourceQuota
 	wantAction     RuntimeSizingAction
 	wantConfidence RuntimeSizingConfidence
 	wantSuggested  string
@@ -117,7 +119,7 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 				h.ObservedOOMKills = 2
 				return h
 			}(),
-			ceiling:        NamespaceResourceQuota{CPU: "8", Memory: "32Gi", Storage: "80Gi"},
+			ceiling:        config.NamespaceResourceQuota{CPU: "8", Memory: "32Gi", Storage: "80Gi"},
 			wantAction:     RuntimeSizingRaise,
 			wantConfidence: RuntimeSizingConfidenceHigh,
 			wantSuggested:  "12288Mi",

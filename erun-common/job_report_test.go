@@ -6,15 +6,18 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // jobReportStore is the config store the reporting contract is exercised
 // against. job_record.go reads it only to decide whether a platform alias
 // exists at all, so the zero value is the case that matters most: an install
 // that has never configured one.
-type jobReportStore struct{ config ERunConfig }
+type jobReportStore struct{ config configpkg.ERunConfig }
 
-func (s jobReportStore) LoadERunConfig() (ERunConfig, string, error) {
+func (s jobReportStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
@@ -22,16 +25,16 @@ func (s jobReportStore) LoadERunConfig() (ERunConfig, string, error) {
 // configured but no usable API URL on it (an interrupted login), which is the
 // first thing that can go wrong after the alias check.
 func erunAliasStore() jobReportStore {
-	return jobReportStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
-		{Alias: "erun", Provider: CloudProviderERun, ERun: &ERunProviderConfig{}},
+	return jobReportStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+		{Alias: "erun", Provider: configpkg.CloudProviderERun, ERun: &configpkg.ERunProviderConfig{}},
 	}}}
 }
 
 // traceBuffer wires a Context whose trace lines are captured rather than
 // printed, so a test can assert on what a caller would actually see.
-func traceBuffer() (Context, *bytes.Buffer) {
+func traceBuffer() (core.Context, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, buf, buf)}, buf
+	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, buf, buf)}, buf
 }
 
 // TestReportJobStartWithoutAnAliasSaysNothingAtAll is the contract's sharpest

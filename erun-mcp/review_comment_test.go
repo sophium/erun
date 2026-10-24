@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const reviewCommentTestAlias = "erun-test"
@@ -20,21 +21,21 @@ const reviewCommentTestAlias = "erun-test"
 // panics loudly rather than silently passing.
 type stubReviewCommentStore struct {
 	runtimeStore
-	config eruncommon.ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s stubReviewCommentStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s stubReviewCommentStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "/tmp/.erun/config.yaml", nil
 }
 
 func reviewCommentTestRuntime() RuntimeConfig {
 	return RuntimeConfig{
 		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
-		Store: stubReviewCommentStore{config: eruncommon.ERunConfig{
-			CloudProviders: []eruncommon.CloudProviderConfig{{
+		Store: stubReviewCommentStore{config: configpkg.ERunConfig{
+			CloudProviders: []configpkg.CloudProviderConfig{{
 				Alias:    reviewCommentTestAlias,
-				Provider: eruncommon.CloudProviderERun,
-				ERun:     &eruncommon.ERunProviderConfig{APIURL: "https://api.test"},
+				Provider: configpkg.CloudProviderERun,
+				ERun:     &configpkg.ERunProviderConfig{APIURL: "https://api.test"},
 			}},
 		}},
 	}
@@ -45,7 +46,7 @@ func reviewCommentTestRuntime() RuntimeConfig {
 // the caller omitted is caught here rather than only in the handler.
 func callReviewCommentTool(t *testing.T, arguments map[string]any) ReviewCommentResult {
 	t.Helper()
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
+	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "review_comment", Arguments: arguments})
 	if err != nil {
 		t.Fatalf("CallTool failed: %v", err)
@@ -184,7 +185,7 @@ func TestReviewCommentToolRefusesACallMissingReviewIDOrBody(t *testing.T) {
 // validates against it, must see the anchor as optional -- declaring it
 // required was enough on its own to make the call unreachable.
 func TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody(t *testing.T) {
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
+	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)

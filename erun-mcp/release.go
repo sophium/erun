@@ -6,7 +6,8 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ReleaseInput struct {
@@ -19,7 +20,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReleaseInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var spec eruncommon.ReleaseSpec
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				// Release marks source control only: it stamps, tags and pushes the
 				// version and never builds or publishes an artifact. Build and
 				// publish are `build --release` and `push --version`.

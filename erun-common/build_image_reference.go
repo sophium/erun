@@ -8,13 +8,16 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // resolveDockerBuildRegistryForEnvironment errors when no registry is marked
 // for the build role; that message is the user-facing contract and must read
 // identically in dry-run and real runs.
-func resolveDockerBuildRegistryForEnvironment(ctx Context, projectRoot, environment string) (string, bool, error) {
-	list, err := effectiveContainerRegistries(projectRoot, environment)
+func resolveDockerBuildRegistryForEnvironment(ctx core.Context, projectRoot, environment string) (string, bool, error) {
+	list, err := config.EffectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
 		return "", false, err
 	}
@@ -69,7 +72,7 @@ func ResolveDockerBuildContextDirForProject(buildDir, projectRoot, selectedCompo
 // unset, and a loud error for any other value — a misconfigured override fails
 // the build rather than silently falling back to the positional heuristic.
 func configuredDockerContext(projectRoot string) (string, bool, error) {
-	paths, err := loadProjectPaths(projectRoot)
+	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -82,7 +85,7 @@ func configuredDockerContext(projectRoot string) (string, bool, error) {
 // resolveProjectComponent), otherwise the unchanged paths.dockercontext
 // override via configuredDockerContext.
 func resolveComponentAwareDockerContext(projectRoot, selectedComponent string) (string, bool, error) {
-	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, err
 	}
@@ -164,7 +167,7 @@ func replaceProjectRootVersionCandidate(candidates []string, projectRoot, config
 // otherwise the unchanged paths.version override. Returns (path, true,
 // configKey, nil) when set, (,false,,nil) when unset.
 func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (string, bool, string, error) {
-	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -180,7 +183,7 @@ func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (st
 // the VERSION file path. A configured directory resolves to <dir>/VERSION.
 // Returns (path, true, nil) when set, (,false,nil) when unset.
 func configuredVersionFile(projectRoot string) (string, bool, error) {
-	paths, err := loadProjectPaths(projectRoot)
+	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -192,7 +195,7 @@ func configuredVersionFile(projectRoot string) (string, bool, error) {
 // to the VERSION file path. A configured directory resolves to <dir>/VERSION.
 // Returns (path, true) when set, (,false) when unset.
 func resolveVersionFilePath(projectRoot, override string) (string, bool) {
-	versionPath := resolveProjectPath(projectRoot, override)
+	versionPath := config.ResolveProjectPath(projectRoot, override)
 	if versionPath == "" {
 		return "", false
 	}

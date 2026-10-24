@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // A registry that is neither ghcr nor Docker Hub used to fall through to the
@@ -28,7 +30,7 @@ func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing
 	runECRLoginPassword = func(string) (string, bool) { return "", false }
 	t.Cleanup(func() { runECRLoginPassword = restoreECR })
 
-	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), RuntimeRegistryConfig{
+	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), config.RuntimeRegistryConfig{
 		Namespace:  "020362606330.dkr.ecr.eu-west-2.amazonaws.com",
 		Repository: "petios-devops",
 		BaseURL:    server.URL,
@@ -108,7 +110,7 @@ func TestResolvedBaseURLFollowsTheRegistryHost(t *testing.T) {
 		{"10.43.0.100:5000/charts", true, "http://10.43.0.100:5000"},
 		{"ghcr.io/sophium", true, "https://ghcr.io"},
 	} {
-		got := RuntimeRegistryConfig{Namespace: tc.namespace, Insecure: tc.insecure, Repository: "petios-devops"}.Resolved().BaseURL
+		got := config.RuntimeRegistryConfig{Namespace: tc.namespace, Insecure: tc.insecure, Repository: "petios-devops"}.Resolved().BaseURL
 		if got != tc.want {
 			t.Errorf("namespace %q insecure=%v resolved base %q, want %q", tc.namespace, tc.insecure, got, tc.want)
 		}
@@ -134,7 +136,7 @@ func TestResolveConfiguredRuntimeRegistryVersionsHonoursInsecure(t *testing.T) {
 	defer func() { dockerConfigDir = restore }()
 
 	host := strings.TrimPrefix(server.URL, "http://")
-	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), RuntimeRegistryConfig{
+	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), config.RuntimeRegistryConfig{
 		Namespace:  host,
 		Repository: "charts/team-backend-api",
 		Insecure:   true,

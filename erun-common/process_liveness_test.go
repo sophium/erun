@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ProcessAlive is what a lease and a job record are reconciled against, so it
@@ -38,7 +40,7 @@ func TestProcessAliveRejectsAnExitedProcessThatWasNeverReaped(t *testing.T) {
 
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if zombie, ok := platformProcessZombie(proc.Pid); ok && zombie {
+		if zombie, ok := core.PlatformProcessZombie(proc.Pid); ok && zombie {
 			break
 		}
 		if !time.Now().Before(deadline) {

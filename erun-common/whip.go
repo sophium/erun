@@ -1,6 +1,10 @@
 package eruncommon
 
-import "time"
+import (
+	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // The pacing nudge (orchestrator_pacing.go, erun-ui) already re-states the
 // pacing contract into a stalled orchestrator's own pane, automatically, on
@@ -124,22 +128,11 @@ type WhipConfig struct {
 	AutoEnabled bool
 }
 
-// WhipConfigOverride is what a caller may persist in ~/.erun/config.yaml to
-// change WhipConfig without a rebuild. Pointer fields so an unset field is
-// distinguishable from an explicit zero (a StaleAfterSeconds of 0 or a
-// disabled AutoEnabled are meaningful values, not "use the default").
-type WhipConfigOverride struct {
-	Message           *string `yaml:"message,omitempty" json:"message,omitempty"`
-	StaleAfterSeconds *int    `yaml:"staleafterseconds,omitempty" json:"staleAfterSeconds,omitempty"`
-	MaxNudges         *int    `yaml:"maxnudges,omitempty" json:"maxNudges,omitempty"`
-	AutoEnabled       *bool   `yaml:"autoenabled,omitempty" json:"autoEnabled,omitempty"`
-}
-
 // ResolveWhipConfig fills every unset field with today's constant, so an
 // override left nil entirely (the common case: nobody has configured
 // anything) resolves to exactly what orchestrator_pacing.go hard-coded before
 // this file existed.
-func ResolveWhipConfig(override *WhipConfigOverride) WhipConfig {
+func ResolveWhipConfig(override *config.WhipConfigOverride) WhipConfig {
 	cfg := WhipConfig{
 		Message:     DefaultWhipMessage,
 		StaleAfter:  DefaultWhipStaleAfter,
@@ -214,7 +207,7 @@ type WhipReport struct {
 // MCP run as separate processes from the desktop that holds an orchestrator's
 // live PTY, so every one of them is reported, truthfully, as unreachable from
 // here rather than silently omitted.
-func ListWhipOrchestratorCandidates(orchestrators []OrchestratorConfig) []WhipCandidate {
+func ListWhipOrchestratorCandidates(orchestrators []config.OrchestratorConfig) []WhipCandidate {
 	candidates := make([]WhipCandidate, 0, len(orchestrators))
 	for _, o := range orchestrators {
 		candidates = append(candidates, WhipCandidate{

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // route_check.go implements `erun exec route-check`: proving every route
@@ -93,7 +96,7 @@ func resolveRouteCheckRoutesDir(explicit string) (string, error) {
 	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
 		return trimmed, nil
 	}
-	_, root, err := FindProjectRoot()
+	_, root, err := config.FindProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve routes directory: %w (pass --routes-dir explicitly outside a checkout of the erun repository)", err)
 	}
@@ -107,7 +110,7 @@ func resolveRouteCheckRoutesDir(explicit string) (string, error) {
 // read) -- a reachable plane that turns out to be missing routes, or an
 // unreachable plane, are findings reported in the result, not errors, so a
 // caller can always print the full report before deciding to fail loudly.
-func RunRouteCheck(ctx Context, store CloudReadStore, alias string, params RouteCheckParams, deps CloudDependencies) (RouteCheckResult, error) {
+func RunRouteCheck(ctx core.Context, store CloudReadStore, alias string, params RouteCheckParams, deps CloudDependencies) (RouteCheckResult, error) {
 	routesDir, err := resolveRouteCheckRoutesDir(params.RoutesDir)
 	if err != nil {
 		return RouteCheckResult{}, err
@@ -155,7 +158,7 @@ func sortRoutes(routes []APIRoute) {
 
 // traceRouteCheckInventory traces the GET each registered route would
 // receive, satisfying the --dry-run contract without sending any request.
-func traceRouteCheckInventory(ctx Context, provider CloudProviderConfig, inventory []APIRoute) {
+func traceRouteCheckInventory(ctx core.Context, provider config.CloudProviderConfig, inventory []APIRoute) {
 	for _, route := range inventory {
 		tracePlatformCall(ctx, provider, "GET", substitutePathParameters(route.Path),
 			fmt.Sprintf("probing registered route %s %s", route.Method, route.Path))
@@ -164,7 +167,7 @@ func traceRouteCheckInventory(ctx Context, provider CloudProviderConfig, invento
 
 // probeRouteInventory probes every route in inventory and buckets each
 // outcome, leaving APIURL/PlaneReachable for the caller to set.
-func probeRouteInventory(ctx Context, provider CloudProviderConfig, client *PlatformClient, inventory []APIRoute) RouteCheckResult {
+func probeRouteInventory(ctx core.Context, provider config.CloudProviderConfig, client *PlatformClient, inventory []APIRoute) RouteCheckResult {
 	var result RouteCheckResult
 	for _, route := range inventory {
 		probePath := substitutePathParameters(route.Path)

@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // control_plane_version_drift_test.go covers the branches of the advertised
@@ -20,7 +22,7 @@ type fakeHostResolver struct {
 	calls       []string
 }
 
-func (r *fakeHostResolver) resolve(_ Context, host string) ([]string, error) {
+func (r *fakeHostResolver) resolve(_ core.Context, host string) ([]string, error) {
 	r.calls = append(r.calls, host)
 	addrs, ok := r.hostToAddrs[host]
 	if !ok {
@@ -37,7 +39,7 @@ func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 			"api.vanity.example.com": {"203.0.113.10"},
 			"api.real.example.com":   {"203.0.113.10"},
 		}}
-		reason := detectAdvertisedAPIURLMismatch(Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.vanity.example.com", resolve.resolve)
+		reason := detectAdvertisedAPIURLMismatch(core.Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.vanity.example.com", resolve.resolve)
 		if reason != "" {
 			t.Fatalf("expected no mismatch for a benign canonical alias, got %q", reason)
 		}
@@ -47,7 +49,7 @@ func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 		resolve := &fakeHostResolver{hostToAddrs: map[string][]string{
 			"api.real.example.com": {"203.0.113.10"},
 		}}
-		reason := detectAdvertisedAPIURLMismatch(Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.other-plane.example.com", resolve.resolve)
+		reason := detectAdvertisedAPIURLMismatch(core.Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.other-plane.example.com", resolve.resolve)
 		if reason != "" {
 			t.Fatalf("expected no verdict when the discovered host does not resolve, got %q", reason)
 		}
@@ -57,7 +59,7 @@ func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 		resolve := &fakeHostResolver{hostToAddrs: map[string][]string{
 			"api.other-plane.example.com": {"198.51.100.99"},
 		}}
-		reason := detectAdvertisedAPIURLMismatch(Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.other-plane.example.com", resolve.resolve)
+		reason := detectAdvertisedAPIURLMismatch(core.Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.other-plane.example.com", resolve.resolve)
 		if reason != "" {
 			t.Fatalf("expected no verdict when this plane's own host does not resolve, got %q", reason)
 		}
@@ -65,7 +67,7 @@ func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 
 	t.Run("a discovered apiUrl identical to the plane's own is not flagged without resolving anything", func(t *testing.T) {
 		resolve := &fakeHostResolver{}
-		reason := detectAdvertisedAPIURLMismatch(Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.real.example.com/", resolve.resolve)
+		reason := detectAdvertisedAPIURLMismatch(core.Context{}, "erun+test@erun", "https://api.real.example.com", "https://api.real.example.com/", resolve.resolve)
 		if reason != "" {
 			t.Fatalf("expected no mismatch, got %q", reason)
 		}
@@ -76,7 +78,7 @@ func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 
 	t.Run("an empty discovered apiUrl is not flagged", func(t *testing.T) {
 		resolve := &fakeHostResolver{}
-		reason := detectAdvertisedAPIURLMismatch(Context{}, "erun+test@erun", "https://api.real.example.com", "", resolve.resolve)
+		reason := detectAdvertisedAPIURLMismatch(core.Context{}, "erun+test@erun", "https://api.real.example.com", "", resolve.resolve)
 		if reason != "" {
 			t.Fatalf("expected no mismatch, got %q", reason)
 		}

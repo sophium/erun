@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ExecReportCommitStatusInput reports a GitHub commit status for a merge
@@ -25,7 +26,7 @@ type ExecReportCommitStatusInput struct {
 func execReportCommitStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReportCommitStatusInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReportCommitStatusInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var reported *eruncommon.ReportCommitStatusResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, _ string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
 			result, err := eruncommon.ReportCommitStatus(runCtx, eruncommon.ReportCommitStatusParams{
 				RemoteURL:   input.RemoteURL,
 				Commit:      input.Commit,

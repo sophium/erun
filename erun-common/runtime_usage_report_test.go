@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 const (
@@ -187,7 +189,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 		t.Fatalf("a reading at 99%% of the limit was scored as %q (%s)", verdict.Action, verdict.Reason)
 	}
 
-	raise, ok := runtimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, NamespaceResourceQuota{})
+	raise, ok := runtimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, config.NamespaceResourceQuota{})
 	if !ok {
 		t.Fatal("the raise helper disagrees with the recommendation it is the only source of")
 	}

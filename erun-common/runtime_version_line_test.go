@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // TestRuntimeImageLineMismatch pins the static half of erun#1754: comparing
 // the operative RuntimeImage against the observed RuntimeRunningImage needs
@@ -9,14 +13,14 @@ import "testing"
 func TestRuntimeImageLineMismatch(t *testing.T) {
 	cases := []struct {
 		name         string
-		env          EnvConfig
+		env          config.EnvConfig
 		wantRecorded string
 		wantObserved string
 		wantMismatch bool
 	}{
 		{
 			name: "frs/build's drifted shape: recorded stock, observed the tenant's own line",
-			env: EnvConfig{
+			env: config.EnvConfig{
 				RuntimeImage:        "ghcr.io/sophium/erun-devops",
 				RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.86",
 			},
@@ -26,7 +30,7 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 		},
 		{
 			name: "frs/local's consistent stock-on-erun's-line shape",
-			env: EnvConfig{
+			env: config.EnvConfig{
 				RuntimeImage:        "erun-devops",
 				RuntimeRunningImage: "ghcr.io/sophium/erun-devops:1.0.203",
 			},
@@ -36,7 +40,7 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 		},
 		{
 			name: "frs/prod's consistent tenant-line shape",
-			env: EnvConfig{
+			env: config.EnvConfig{
 				RuntimeImage:        "frs-devops",
 				RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.84",
 			},
@@ -46,14 +50,14 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 		},
 		{
 			name:         "no history recorded yet: never a mismatch",
-			env:          EnvConfig{},
+			env:          config.EnvConfig{},
 			wantRecorded: "",
 			wantObserved: "",
 			wantMismatch: false,
 		},
 		{
 			name: "recorded set but never observed (no deploy has run since this fix landed)",
-			env: EnvConfig{
+			env: config.EnvConfig{
 				RuntimeImage: "frs-devops",
 			},
 			wantRecorded: "frs",
@@ -80,41 +84,41 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 func TestResolveErunVersion(t *testing.T) {
 	cases := []struct {
 		name        string
-		env         EnvConfig
+		env         config.EnvConfig
 		runtimeLine *RuntimeVersionLine
 		want        *ErunVersion
 	}{
 		{
 			name: "never deployed: no runtime version to annotate",
-			env:  EnvConfig{},
+			env:  config.EnvConfig{},
 			want: nil,
 		},
 		{
 			name:        "stock image confirmed on erun's own line, no chart override: coincides with runtime version",
-			env:         EnvConfig{RuntimeVersion: "1.0.239"},
+			env:         config.EnvConfig{RuntimeVersion: "1.0.239"},
 			runtimeLine: &RuntimeVersionLine{Line: "erun"},
 			want:        &ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
 		},
 		{
 			name:        "tenant's own line, chart explicitly states erun's version",
-			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops:1.0.239"},
+			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops:1.0.239"},
 			runtimeLine: &RuntimeVersionLine{Line: "petios"},
 			want:        &ErunVersion{Version: "1.0.239"},
 		},
 		{
 			name:        "no resolved image recorded, chart empty: never guess the pairing",
-			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350"},
+			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350"},
 			runtimeLine: &RuntimeVersionLine{Undetermined: true},
 			want:        nil,
 		},
 		{
 			name: "runtime version set but the line was never resolved at all: never guess",
-			env:  EnvConfig{RuntimeVersion: "1.0.239"},
+			env:  config.EnvConfig{RuntimeVersion: "1.0.239"},
 			want: nil,
 		},
 		{
 			name:        "chart stated with no version of its own: cannot read a number from config alone",
-			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops"},
+			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops"},
 			runtimeLine: &RuntimeVersionLine{Line: "petios"},
 			want:        nil,
 		},

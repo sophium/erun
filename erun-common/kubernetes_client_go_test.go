@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // fakeKubernetesAPIServer starts a plain-HTTP fake API server and writes a
@@ -169,17 +171,17 @@ func TestKubectlGetNamespaceArgsOmitsContextFlagWhenUnset(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlNamespaceGetDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlNamespaceGetExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlNamespaceGetExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlNamespaceGetOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlNamespaceGetExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -420,17 +422,17 @@ func TestImagePullSecretGetArgsSharedByBothPaths(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlSecretGetDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlSecretGetExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlSecretGetExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlSecretGetOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlSecretGetExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -469,17 +471,17 @@ func TestKubectlGetPVCArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlPVCGetDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlPVCGetExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlPVCGetExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlPVCGetOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlPVCGetExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -691,17 +693,17 @@ func TestLibraryWaitForDeploymentAvailableRejectsInvalidTimeout(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlDeploymentWaitDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlDeploymentWaitExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlDeploymentWaitExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlDeploymentWaitOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlDeploymentWaitExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -740,17 +742,17 @@ func TestKubectlGetDeploymentArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testi
 }
 
 func TestExecutionModeForKubectlDeploymentGetDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlDeploymentGetExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlDeploymentGetExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlDeploymentGetOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlDeploymentGetExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -906,17 +908,17 @@ func TestKubectlGetPodArgsSharedByBothPaths(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlPodGetDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlPodGetExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlPodGetExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlPodGetOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlPodGetExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}

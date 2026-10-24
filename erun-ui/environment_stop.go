@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // environment_stop.go is the desktop half of the stop/wake lifecycle. Stopping
@@ -36,7 +38,7 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 	// and `erun open` now wakes a stopped env — so without the latch the
 	// reconnect would undo the stop before the cluster read could see it.
 	a.markRuntimeStopped(selection)
-	stopped, err := a.deps.stopEnvironmentRuntime(eruncommon.Context{}, eruncommon.StopEnvironmentParams{
+	stopped, err := a.deps.stopEnvironmentRuntime(core.Context{}, eruncommon.StopEnvironmentParams{
 		Result:        result,
 		SaveEnvConfig: a.deps.store.SaveEnvConfig,
 	})
@@ -149,19 +151,19 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 // Deployment and reads what the cluster reports about it. The reconnect gate
 // and the Runtime tab's own reading share this one resolution so the two can
 // never disagree about which Deployment "this environment's runtime" is.
-func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (eruncommon.OpenResult, eruncommon.RuntimeRunState, error) {
+func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.OpenResult, eruncommon.RuntimeRunState, error) {
 	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
-		return eruncommon.OpenResult{}, eruncommon.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
+		return config.OpenResult{}, eruncommon.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      strings.TrimSpace(selection.Tenant),
 		Environment: strings.TrimSpace(selection.Environment),
 	})
 	if err != nil {
-		return eruncommon.OpenResult{}, eruncommon.RuntimeRunState{}, err
+		return config.OpenResult{}, eruncommon.RuntimeRunState{}, err
 	}
 	state, err := a.deps.readRuntimeRunState(
-		eruncommon.Context{},
+		core.Context{},
 		eruncommon.RuntimeScaleTargetForResult(result),
 	)
 	return result, state, err

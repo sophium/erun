@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // pinLegacyUserConfigLayoutForTest makes the tree os.UserConfigDir named differ
@@ -46,7 +49,7 @@ func legacyCacheStatePathForTest(t *testing.T, kind, tenant, environment string)
 	if err != nil {
 		t.Fatalf("UserCacheDir: %v", err)
 	}
-	return filepath.Join(cacheDir, configRoot, kind, tenant, environment+".json")
+	return filepath.Join(cacheDir, config.ConfigRoot, kind, tenant, environment+".json")
 }
 
 // A dry run resolving the state path is a read every forward setup makes before
@@ -133,7 +136,7 @@ func TestRemovePortForwardRecordRemovesLegacyLocationRecords(t *testing.T) {
 	cacheLog := seedLegacyPortForwardRecordForTest(t, cacheState)
 
 	traces := &strings.Builder{}
-	dryRun := Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard).WithTraceSink(traces)}
+	dryRun := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(traces)}
 	if err := RemovePortForwardRecord(dryRun, "mcp", "team", "dev"); err != nil {
 		t.Fatalf("dry-run remove: %v", err)
 	}
@@ -144,7 +147,7 @@ func TestRemovePortForwardRecordRemovesLegacyLocationRecords(t *testing.T) {
 		requirePresent(t, path)
 	}
 
-	if err := RemovePortForwardRecord(Context{}, "mcp", "team", "dev"); err != nil {
+	if err := RemovePortForwardRecord(core.Context{}, "mcp", "team", "dev"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	for _, path := range []string{userConfigState, userConfigLog, userConfigLog + ".1", cacheState, cacheLog, cacheLog + ".1"} {
@@ -160,7 +163,7 @@ func TestRemovePortForwardRecordKeepsTheLegacyLogOfAForwardThatIsStillRunning(t 
 	logPath := seedLegacyPortForwardRecordForTest(t, statePath)
 	writePortForwardStateProcessID(t, statePath, os.Getpid())
 
-	if err := RemovePortForwardRecord(Context{}, "mcp", "team", "dev"); err != nil {
+	if err := RemovePortForwardRecord(core.Context{}, "mcp", "team", "dev"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 
@@ -173,13 +176,13 @@ func TestRemovePortForwardRecordKeepsTheLegacyLogOfAForwardThatIsStillRunning(t 
 // record there is never opened again, so migration never reaches it either.
 func TestReclaimOrphanedPortForwardRecordsWalksTheUserConfigDirTree(t *testing.T) {
 	legacyRoot := pinLegacyUserConfigLayoutForTest(t)
-	if err := SaveERunConfig(ERunConfig{}); err != nil {
+	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
 		t.Fatalf("save tool config: %v", err)
 	}
-	if err := SaveTenantConfig(TenantConfig{Name: "acme"}); err != nil {
+	if err := config.SaveTenantConfig(config.TenantConfig{Name: "acme"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := SaveEnvConfig("acme", EnvConfig{Name: "dev"}); err != nil {
+	if err := config.SaveEnvConfig("acme", config.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 	liveState := filepath.Join(legacyRoot, "mcp", "acme", "dev.json")
@@ -187,7 +190,7 @@ func TestReclaimOrphanedPortForwardRecordsWalksTheUserConfigDirTree(t *testing.T
 	orphanState := filepath.Join(legacyRoot, "sshd", "retired", "poc.json")
 	orphanLog := seedLegacyPortForwardRecordForTest(t, orphanState)
 
-	if err := ReclaimOrphanedPortForwardRecords(Context{}); err != nil {
+	if err := ReclaimOrphanedPortForwardRecords(core.Context{}); err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
 

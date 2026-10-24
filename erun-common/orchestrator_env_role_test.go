@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,10 +16,10 @@ import (
 func TestOrchestratorEnvConfigRoleRoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
-		role OrchestratorEnvRole
+		role configpkg.OrchestratorEnvRole
 	}{
-		{name: "build", role: OrchestratorEnvRoleBuild},
-		{name: "code", role: OrchestratorEnvRoleCode},
+		{name: "build", role: configpkg.OrchestratorEnvRoleBuild},
+		{name: "code", role: configpkg.OrchestratorEnvRoleCode},
 		{name: "unset", role: ""},
 	}
 
@@ -28,14 +30,14 @@ func TestOrchestratorEnvConfigRoleRoundTrip(t *testing.T) {
 	}
 }
 
-func assertOrchestratorEnvRoleRoundTrips(t *testing.T, role OrchestratorEnvRole) {
+func assertOrchestratorEnvRoleRoundTrips(t *testing.T, role configpkg.OrchestratorEnvRole) {
 	t.Helper()
-	config := ERunConfig{
-		Orchestrators: []OrchestratorConfig{
+	config := configpkg.ERunConfig{
+		Orchestrators: []configpkg.OrchestratorConfig{
 			{
 				ID:   "orch-1",
 				Name: "Orchestrator One",
-				Environments: []OrchestratorEnvConfig{
+				Environments: []configpkg.OrchestratorEnvConfig{
 					{Tenant: "team", Environment: "dev", Directory: "/repo", Role: role},
 				},
 			},
@@ -55,7 +57,7 @@ func assertOrchestratorEnvRoleRoundTrips(t *testing.T, role OrchestratorEnvRole)
 		t.Fatalf("declared role %q must be written, got:\n%s", role, data)
 	}
 
-	var roundTripped ERunConfig
+	var roundTripped configpkg.ERunConfig
 	if err := yaml.Unmarshal(data, &roundTripped); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
@@ -81,7 +83,7 @@ func TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged(t *testing.T) {
         environment: dev
         directory: /repo
 `
-	var config ERunConfig
+	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal([]byte(doc), &config); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
@@ -108,13 +110,13 @@ func TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged(t *testing.T) {
 
 func TestOrchestratorEnvRoleIsValid(t *testing.T) {
 	tests := []struct {
-		role OrchestratorEnvRole
+		role configpkg.OrchestratorEnvRole
 		want bool
 	}{
 		{role: "", want: true},
-		{role: OrchestratorEnvRoleCode, want: true},
-		{role: OrchestratorEnvRoleBuild, want: true},
-		{role: OrchestratorEnvRoleRuntime, want: true},
+		{role: configpkg.OrchestratorEnvRoleCode, want: true},
+		{role: configpkg.OrchestratorEnvRoleBuild, want: true},
+		{role: configpkg.OrchestratorEnvRoleRuntime, want: true},
 		{role: "review", want: false},
 		{role: "Code", want: false},
 	}
@@ -138,11 +140,11 @@ func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 	// A host environment is deliberately NOT in this set: it is the one type
 	// that admits a role list which is neither "everything" nor a single value,
 	// so it gets its own cases below rather than being folded into "any role".
-	anyRoleTypes := []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent}
-	anyRole := []OrchestratorEnvRole{"", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime}
+	anyRoleTypes := []configpkg.EnvironmentType{configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent}
+	anyRole := []configpkg.OrchestratorEnvRole{"", configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime}
 	for _, envType := range anyRoleTypes {
 		for _, role := range anyRole {
-			if !OrchestratorEnvRoleAllowed(envType, role) {
+			if !configpkg.OrchestratorEnvRoleAllowed(envType, role) {
 				t.Errorf("OrchestratorEnvRoleAllowed(%q, %q) = false, want true", envType, role)
 			}
 		}
@@ -154,36 +156,36 @@ func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 	// one of those refuses a host environment, so offering the role would promise
 	// a relationship the link cannot deliver.
 	hostCases := []struct {
-		role OrchestratorEnvRole
+		role configpkg.OrchestratorEnvRole
 		want bool
 	}{
 		{role: "", want: true},
-		{role: OrchestratorEnvRoleCode, want: true},
-		{role: OrchestratorEnvRoleBuild, want: true},
-		{role: OrchestratorEnvRoleRuntime, want: false},
+		{role: configpkg.OrchestratorEnvRoleCode, want: true},
+		{role: configpkg.OrchestratorEnvRoleBuild, want: true},
+		{role: configpkg.OrchestratorEnvRoleRuntime, want: false},
 	}
 	for _, tt := range hostCases {
-		if got := OrchestratorEnvRoleAllowed(EnvironmentTypeHost, tt.role); got != tt.want {
+		if got := configpkg.OrchestratorEnvRoleAllowed(configpkg.EnvironmentTypeHost, tt.role); got != tt.want {
 			t.Errorf("OrchestratorEnvRoleAllowed(host, %q) = %v, want %v", tt.role, got, tt.want)
 		}
 	}
 
 	runtimeCases := []struct {
-		role OrchestratorEnvRole
+		role configpkg.OrchestratorEnvRole
 		want bool
 	}{
-		{role: OrchestratorEnvRoleRuntime, want: true},
-		{role: OrchestratorEnvRoleCode, want: false},
-		{role: OrchestratorEnvRoleBuild, want: false},
+		{role: configpkg.OrchestratorEnvRoleRuntime, want: true},
+		{role: configpkg.OrchestratorEnvRoleCode, want: false},
+		{role: configpkg.OrchestratorEnvRoleBuild, want: false},
 		{role: "", want: false},
 	}
 	for _, tt := range runtimeCases {
-		if got := OrchestratorEnvRoleAllowed(EnvironmentTypeRuntime, tt.role); got != tt.want {
+		if got := configpkg.OrchestratorEnvRoleAllowed(configpkg.EnvironmentTypeRuntime, tt.role); got != tt.want {
 			t.Errorf("OrchestratorEnvRoleAllowed(runtime, %q) = %v, want %v", tt.role, got, tt.want)
 		}
 	}
 
-	if OrchestratorEnvRoleAllowed("", OrchestratorEnvRoleRuntime) {
+	if configpkg.OrchestratorEnvRoleAllowed("", configpkg.OrchestratorEnvRoleRuntime) {
 		t.Fatalf("OrchestratorEnvRoleAllowed(unrecognized type, runtime) = true, want false")
 	}
 }
@@ -195,11 +197,11 @@ func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 // (TestOrchestratorEnvRoleAllowed above), so a caller must not read "" as
 // "anything goes" and skip the allowed check.
 func TestOrchestratorEnvRoleRequiredFor(t *testing.T) {
-	if got := OrchestratorEnvRoleRequiredFor(EnvironmentTypeRuntime); got != OrchestratorEnvRoleRuntime {
-		t.Errorf("OrchestratorEnvRoleRequiredFor(runtime) = %q, want %q", got, OrchestratorEnvRoleRuntime)
+	if got := configpkg.OrchestratorEnvRoleRequiredFor(configpkg.EnvironmentTypeRuntime); got != configpkg.OrchestratorEnvRoleRuntime {
+		t.Errorf("OrchestratorEnvRoleRequiredFor(runtime) = %q, want %q", got, configpkg.OrchestratorEnvRoleRuntime)
 	}
-	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost, ""} {
-		if got := OrchestratorEnvRoleRequiredFor(envType); got != "" {
+	for _, envType := range []configpkg.EnvironmentType{configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeHost, ""} {
+		if got := configpkg.OrchestratorEnvRoleRequiredFor(envType); got != "" {
 			t.Errorf("OrchestratorEnvRoleRequiredFor(%q) = %q, want \"\"", envType, got)
 		}
 	}
@@ -216,17 +218,17 @@ func TestOrchestratorEnvRoleRequiredFor(t *testing.T) {
 // TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment below rather
 // than folded in here.
 func TestOrchestratorEnvRoleIneligibilityReason(t *testing.T) {
-	if got := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeRuntime, OrchestratorEnvRoleRuntime); got != "" {
+	if got := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleRuntime); got != "" {
 		t.Errorf("OrchestratorEnvRoleIneligibilityReason(runtime, runtime) = %q, want \"\"", got)
 	}
-	for _, role := range []OrchestratorEnvRole{OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, ""} {
-		got := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeRuntime, role)
+	for _, role := range []configpkg.OrchestratorEnvRole{configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, ""} {
+		got := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeRuntime, role)
 		if !strings.Contains(got, "no worktree") || !strings.Contains(got, "runtime role") {
 			t.Errorf("OrchestratorEnvRoleIneligibilityReason(runtime, %q) = %q, want it to name the gap and the runtime role", role, got)
 		}
 	}
 
-	if got := OrchestratorEnvRoleIneligibilityReason("", ""); !strings.Contains(got, "isn't recognized") {
+	if got := configpkg.OrchestratorEnvRoleIneligibilityReason("", ""); !strings.Contains(got, "isn't recognized") {
 		t.Errorf("OrchestratorEnvRoleIneligibilityReason(unrecognized, \"\") = %q, want an unrecognized-type reason", got)
 	}
 }
@@ -238,12 +240,12 @@ func TestOrchestratorEnvRoleIneligibilityReason(t *testing.T) {
 // environment's "no worktree" wording, which is false for a host environment:
 // it has a real directory on this machine.
 func TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment(t *testing.T) {
-	for _, role := range []OrchestratorEnvRole{OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, ""} {
-		if got := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeHost, role); got != "" {
+	for _, role := range []configpkg.OrchestratorEnvRole{configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, ""} {
+		if got := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeHost, role); got != "" {
 			t.Errorf("OrchestratorEnvRoleIneligibilityReason(host, %q) = %q, want \"\"", role, got)
 		}
 	}
-	hostRuntime := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeHost, OrchestratorEnvRoleRuntime)
+	hostRuntime := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeHost, configpkg.OrchestratorEnvRoleRuntime)
 	if !strings.Contains(hostRuntime, "no pod") {
 		t.Errorf("OrchestratorEnvRoleIneligibilityReason(host, runtime) = %q, want it to name the missing pod", hostRuntime)
 	}
@@ -264,17 +266,17 @@ func TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment(t *testing.T)
 // what proves it does.
 func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 	hostDir := "/home/erun/host-work"
-	store := newOrchestratorRoleStubStore(t, EnvConfig{
+	store := newOrchestratorRoleStubStore(t, configpkg.EnvConfig{
 		Name:          "laptop",
-		Type:          EnvironmentTypeHost,
+		Type:          configpkg.EnvironmentTypeHost,
 		LocalRepoPath: hostDir,
 	})
 
-	_, err := SetOrchestratorEnvRole(Context{}, store, SetOrchestratorEnvRoleParams{
+	_, err := SetOrchestratorEnvRole(core.Context{}, store, SetOrchestratorEnvRoleParams{
 		OrchestratorID: "orch-1",
 		Tenant:         "frs",
 		Environment:    "laptop",
-		Role:           OrchestratorEnvRoleRuntime,
+		Role:           configpkg.OrchestratorEnvRoleRuntime,
 	})
 	if err == nil {
 		t.Fatal("SetOrchestratorEnvRole(host, runtime) succeeded, want a refusal")
@@ -290,8 +292,8 @@ func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 
 	// The same host environment must still accept the roles that do work, or the
 	// refusal above would be indistinguishable from refusing host links outright.
-	for _, role := range []OrchestratorEnvRole{"", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild} {
-		if _, err := SetOrchestratorEnvRole(Context{}, store, SetOrchestratorEnvRoleParams{
+	for _, role := range []configpkg.OrchestratorEnvRole{"", configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild} {
+		if _, err := SetOrchestratorEnvRole(core.Context{}, store, SetOrchestratorEnvRoleParams{
 			OrchestratorID: "orch-1",
 			Tenant:         "frs",
 			Environment:    "laptop",
@@ -308,36 +310,36 @@ func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 // records whether a write actually reached the config, so a refused role can
 // be shown to have written nothing.
 type orchestratorRoleStubStore struct {
-	config ERunConfig
-	env    EnvConfig
+	config configpkg.ERunConfig
+	env    configpkg.EnvConfig
 	saved  bool
 }
 
-func newOrchestratorRoleStubStore(t *testing.T, env EnvConfig) *orchestratorRoleStubStore {
+func newOrchestratorRoleStubStore(t *testing.T, env configpkg.EnvConfig) *orchestratorRoleStubStore {
 	t.Helper()
 	return &orchestratorRoleStubStore{
-		config: ERunConfig{Orchestrators: []OrchestratorConfig{{
+		config: configpkg.ERunConfig{Orchestrators: []configpkg.OrchestratorConfig{{
 			ID:           "orch-1",
 			Name:         "Orchestrator One",
-			Environments: []OrchestratorEnvConfig{{Tenant: "frs", Environment: "laptop", Directory: "/repo"}},
+			Environments: []configpkg.OrchestratorEnvConfig{{Tenant: "frs", Environment: "laptop", Directory: "/repo"}},
 		}}},
 		env: env,
 	}
 }
 
-func (s *orchestratorRoleStubStore) LoadERunConfig() (ERunConfig, string, error) {
+func (s *orchestratorRoleStubStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
-func (s *orchestratorRoleStubStore) SaveERunConfig(config ERunConfig) error {
+func (s *orchestratorRoleStubStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	s.config = config
 	s.saved = true
 	return nil
 }
 
-func (s *orchestratorRoleStubStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+func (s *orchestratorRoleStubStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	if tenant != "frs" || environment != "laptop" {
-		return EnvConfig{}, "", fmt.Errorf("no environment %s/%s", tenant, environment)
+		return configpkg.EnvConfig{}, "", fmt.Errorf("no environment %s/%s", tenant, environment)
 	}
 	return s.env, "", nil
 }

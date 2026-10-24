@@ -5,18 +5,20 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
-func workspaceSyncPlanEnv(kind EnvironmentType, sshd, sync bool, localPath string) OpenResult {
-	return OpenResult{
+func workspaceSyncPlanEnv(kind config.EnvironmentType, sshd, sync bool, localPath string) config.OpenResult {
+	return config.OpenResult{
 		Tenant:      "acme",
 		Environment: "dev",
-		EnvConfig: EnvConfig{
+		EnvConfig: config.EnvConfig{
 			Name: "dev",
 			Type: kind,
-			SSHD: SSHDConfig{
+			SSHD: config.SSHDConfig{
 				Enabled: sshd,
-				WorkspaceSync: SSHDWorkspaceSyncConfig{
+				WorkspaceSync: config.SSHDWorkspaceSyncConfig{
 					Enabled:   sync,
 					LocalPath: localPath,
 				},
@@ -30,13 +32,13 @@ func workspaceSyncPlanEnv(kind EnvironmentType, sshd, sync bool, localPath strin
 func TestResolveWorkspaceSyncParamsNamesEachRefusal(t *testing.T) {
 	for _, testCase := range []struct {
 		name   string
-		result OpenResult
+		result config.OpenResult
 		want   error
 	}{
-		{"local agent has no pod worktree", workspaceSyncPlanEnv(EnvironmentTypeLocalAgent, true, true, "/host/mirror"), ErrWorkspaceSyncNotRemoteAgent},
-		{"sshd off", workspaceSyncPlanEnv(EnvironmentTypeRemoteAgent, false, true, "/host/mirror"), ErrWorkspaceSyncNotEnabled},
-		{"sync off", workspaceSyncPlanEnv(EnvironmentTypeRemoteAgent, true, false, "/host/mirror"), ErrWorkspaceSyncNotEnabled},
-		{"no local path", workspaceSyncPlanEnv(EnvironmentTypeRemoteAgent, true, true, ""), ErrWorkspaceSyncNoLocalPath},
+		{"local agent has no pod worktree", workspaceSyncPlanEnv(config.EnvironmentTypeLocalAgent, true, true, "/host/mirror"), ErrWorkspaceSyncNotRemoteAgent},
+		{"sshd off", workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, false, true, "/host/mirror"), ErrWorkspaceSyncNotEnabled},
+		{"sync off", workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, true, false, "/host/mirror"), ErrWorkspaceSyncNotEnabled},
+		{"no local path", workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, true, true, ""), ErrWorkspaceSyncNoLocalPath},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := ResolveWorkspaceSyncParams(testCase.result, nil)
@@ -48,7 +50,7 @@ func TestResolveWorkspaceSyncParamsNamesEachRefusal(t *testing.T) {
 }
 
 func TestResolveWorkspaceSyncParamsAddressesThePodWorktree(t *testing.T) {
-	params, err := ResolveWorkspaceSyncParams(workspaceSyncPlanEnv(EnvironmentTypeRemoteAgent, true, true, "/host/mirror"), nil)
+	params, err := ResolveWorkspaceSyncParams(workspaceSyncPlanEnv(config.EnvironmentTypeRemoteAgent, true, true, "/host/mirror"), nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

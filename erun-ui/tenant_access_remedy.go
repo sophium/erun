@@ -4,14 +4,15 @@ import (
 	"context"
 	"net/http"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // loadAccessRemedy resolves the copyable grant for a single restricted route,
 // for the surfaces that record one refusal rather than a panel's set. nil
 // means there is no command to hand over, which every caller renders as the
 // plain sentence it already had.
-func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, read string) *eruncommon.PlatformAccessRemedy {
+func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, userID string, read string) *eruncommon.PlatformAccessRemedy {
 	remedies := loadAccessRemedies(ctx, client, capabilities, userID, read)
 	if len(remedies) == 0 {
 		return nil
@@ -25,7 +26,7 @@ func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, ca
 // that could not learn its permissions attempts the read and reports what the
 // server says, rather than withholding a remedy it may in fact be able to
 // build.
-func canReadTenantRoles(capabilities eruncommon.PlatformCapabilities) bool {
+func canReadTenantRoles(capabilities model.PlatformCapabilities) bool {
 	return !capabilities.Known() || capabilities.Allows(http.MethodGet, "/v1/roles")
 }
 
@@ -44,7 +45,7 @@ func canReadTenantRoles(capabilities eruncommon.PlatformCapabilities) bool {
 // the caller's own user id is unknown, or no role covers the missing access —
 // in that last case there is genuinely no command to hand over, since a role
 // has to exist before anyone can be granted it.
-func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, reads ...string) map[string]eruncommon.PlatformAccessRemedy {
+func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, userID string, reads ...string) map[string]eruncommon.PlatformAccessRemedy {
 	missing := make([]string, 0, len(reads))
 	for _, read := range reads {
 		if read != "" {

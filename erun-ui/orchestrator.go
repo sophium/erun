@@ -14,7 +14,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
@@ -58,7 +59,7 @@ type orchestratorSession struct {
 	// only ever compared against the definition resolved now to flag a restart;
 	// rows report the configured values, never these.
 	launched orchestratorResolvedLaunch
-	envs     []eruncommon.OrchestratorEnvConfig
+	envs     []configpkg.OrchestratorEnvConfig
 	// wiredScope is the environment scope the agent's MCP config held when the
 	// agent last started. An agent that was already running when this PTY
 	// attached keeps the tools it started with, whatever envs says now.
@@ -68,7 +69,7 @@ type orchestratorSession struct {
 	// still reports them (the Edit dialog reads its scope from this snapshot),
 	// and read from the persisted definition rather than re-derived, since
 	// nothing about a directory changes behind the operator's back.
-	dirs      []eruncommon.OrchestratorDirectoryConfig
+	dirs      []configpkg.OrchestratorDirectoryConfig
 	startedAt time.Time
 	// aiBusy is the last turn-boundary report the poller observed. It is what
 	// orchestratorInfoFor's Busy field reads for every snapshot this session
@@ -145,10 +146,10 @@ type orchestratorSession struct {
 // Role is empty for undeclared -- the same "empty means undeclared, never a
 // default" contract eruncommon.OrchestratorEnvConfig.Role documents.
 type orchestratorEnvInput struct {
-	Tenant      string                         `json:"tenant"`
-	Environment string                         `json:"environment"`
-	Directory   string                         `json:"directory"`
-	Role        eruncommon.OrchestratorEnvRole `json:"role"`
+	Tenant      string                        `json:"tenant"`
+	Environment string                        `json:"environment"`
+	Directory   string                        `json:"directory"`
+	Role        configpkg.OrchestratorEnvRole `json:"role"`
 }
 
 // orchestratorLaunchInput is the dialog's gateway, model and effort for
@@ -202,12 +203,12 @@ type orchestratorEnvCandidate struct {
 	// re-deriving it: it decides which roles the picker offers (a host env
 	// takes no runtime role) and which words describe the directory row (a
 	// host env's is its own directory, with no pod mounting it).
-	EnvironmentType  eruncommon.EnvironmentType     `json:"environmentType"`
-	Eligible         bool                           `json:"eligible"`
-	DefaultDirectory string                         `json:"defaultDirectory"`
-	Mirrored         bool                           `json:"mirrored"`
-	RequiredRole     eruncommon.OrchestratorEnvRole `json:"requiredRole,omitempty"`
-	IneligibleReason string                         `json:"ineligibleReason"`
+	EnvironmentType  configpkg.EnvironmentType     `json:"environmentType"`
+	Eligible         bool                          `json:"eligible"`
+	DefaultDirectory string                        `json:"defaultDirectory"`
+	Mirrored         bool                          `json:"mirrored"`
+	RequiredRole     configpkg.OrchestratorEnvRole `json:"requiredRole,omitempty"`
+	IneligibleReason string                        `json:"ineligibleReason"`
 }
 
 // orchestratorEnvInfo is the JSON-safe view of one linked environment.
@@ -221,7 +222,7 @@ type orchestratorEnvInfo struct {
 	Environment string `json:"environment"`
 	Directory   string `json:"directory"`
 	// Role is empty for undeclared -- see orchestratorEnvInput.Role.
-	Role     eruncommon.OrchestratorEnvRole `json:"role"`
+	Role     configpkg.OrchestratorEnvRole  `json:"role"`
 	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
 	// Usage is the environment-usage poller's last cached reading for this env
 	// (environment_usage.go), joined the same way Activity is — nil until the
@@ -381,16 +382,16 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 // while the runtime role is not, since "operate directly" has no referent
 // without a pod. A runtime env is the mirror image, so only the runtime role
 // may be declared for it.
-func orchestratableEnv(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) bool {
-	return eruncommon.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
+func orchestratableEnv(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRole) bool {
+	return configpkg.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
 
 // orchestratorIneligibilityReason explains, in the operator's language, why
 // role cannot be declared for env — a thin wrapper over
 // eruncommon.OrchestratorEnvRoleIneligibilityReason, reusing orchestratableEnv's
 // own reasoning rather than restating it. Returns "" when the link is allowed.
-func orchestratorIneligibilityReason(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) string {
-	return eruncommon.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
+func orchestratorIneligibilityReason(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRole) string {
+	return configpkg.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
 }
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
@@ -412,11 +413,11 @@ func orchestratorIneligibilityReason(env eruncommon.EnvConfig, role eruncommon.O
 // no worktree and no mirror, so there is no review directory at all, rather than
 // falling through to the mirror default meant for an env that does have a pod to
 // sync from.
-func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
+func orchestratorReviewDirectory(tenant string, env configpkg.EnvConfig) (string, bool) {
 	switch env.ResolvedType() {
-	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
+	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
 		return strings.TrimSpace(env.LocalRepoPath), false
-	case eruncommon.EnvironmentTypeRuntime:
+	case configpkg.EnvironmentTypeRuntime:
 		return "", false
 	default:
 		return defaultOrchestratorDirectory(tenant, env.Name), true
@@ -1201,7 +1202,7 @@ func isOrchestratorSessionStartHookBlock(block any) bool {
 // sidebar's per-env state (selectionKey) — so an orchestrator's card and the
 // sidebar row for the same environment can never disagree about what "busy"
 // or "outage" means, because both read the one map the poller writes.
-func envInfos(envs []eruncommon.OrchestratorEnvConfig, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading) []orchestratorEnvInfo {
+func envInfos(envs []configpkg.OrchestratorEnvConfig, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading) []orchestratorEnvInfo {
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
 		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory, Role: env.Role}
@@ -1224,7 +1225,7 @@ func envInfos(envs []eruncommon.OrchestratorEnvConfig, envActivity map[string]en
 	return out
 }
 
-func tenantsFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
+func tenantsFromEnvs(envs []configpkg.OrchestratorEnvConfig) []string {
 	seen := make(map[string]struct{}, len(envs))
 	out := make([]string, 0, len(envs))
 	for _, env := range envs {
@@ -1241,7 +1242,7 @@ func tenantsFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
 // desktop renders. Only the non-empty ones survive, so a definition with a blank
 // entry (hand-edited config) reports the directories it actually has rather than
 // a row the operator cannot act on.
-func directoryPaths(dirs []eruncommon.OrchestratorDirectoryConfig) []string {
+func directoryPaths(dirs []configpkg.OrchestratorDirectoryConfig) []string {
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
 		if path := strings.TrimSpace(dir.Directory); path != "" {
@@ -1337,7 +1338,7 @@ func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, 
 	}
 }
 
-func orchestratorInfoFor(id, name, alias string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
+func orchestratorInfoFor(id, name, alias string, envs []configpkg.OrchestratorEnvConfig, dirs []configpkg.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                     id,
 		Name:                   name,
@@ -1374,7 +1375,7 @@ func orchestratorInfoFor(id, name, alias string, envs []eruncommon.OrchestratorE
 // now. True means the live agent still holds tools for an environment it was
 // unlinked from, is missing tools for one it was newly linked to, or both —
 // and only restarting it (RestartOrchestrator) fixes it.
-func orchestratorScopeMismatch(wiredScope []string, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
+func orchestratorScopeMismatch(wiredScope []string, configuredEnvs []configpkg.OrchestratorEnvConfig) bool {
 	return !equalOrchestratorScope(normalizedOrchestratorScope(wiredScope), orchestratorScopeOf(configuredEnvs))
 }
 
@@ -1395,8 +1396,8 @@ func normalizedOrchestratorScope(scope []string) []string {
 // It exists so the Edit orchestrator dialog can tell the operator their edit
 // is not guaranteed live yet without overloading RestartRequired's specific,
 // accurate "tools are missing" wording with a change that never affects tools.
-func orchestratorRolesChanged(wiredEnvs, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
-	wiredRoles := make(map[string]eruncommon.OrchestratorEnvRole, len(wiredEnvs))
+func orchestratorRolesChanged(wiredEnvs, configuredEnvs []configpkg.OrchestratorEnvConfig) bool {
+	wiredRoles := make(map[string]configpkg.OrchestratorEnvRole, len(wiredEnvs))
 	for _, env := range wiredEnvs {
 		wiredRoles[env.Tenant+"/"+env.Environment] = env.Role
 	}
@@ -1485,16 +1486,16 @@ func orchestratorPromptArg(goos, prompt string) string {
 	return "-- " + shellQuote(prompt)
 }
 
-func (a *App) loadOrchestratorConfigs() ([]eruncommon.OrchestratorConfig, error) {
+func (a *App) loadOrchestratorConfigs() ([]configpkg.OrchestratorConfig, error) {
 	configs, _, err := a.loadOrchestratorConfigsWithCatalog()
 	return configs, err
 }
 
 // loadOrchestratorConfigsWithCatalog is loadOrchestratorConfigs plus the
 // gateway catalog from the same read, for a poll that needs both.
-func (a *App) loadOrchestratorConfigsWithCatalog() ([]eruncommon.OrchestratorConfig, *eruncommon.OpenRouterConfig, error) {
+func (a *App) loadOrchestratorConfigsWithCatalog() ([]configpkg.OrchestratorConfig, *configpkg.OpenRouterConfig, error) {
 	config, _, err := a.deps.store.LoadERunConfig()
-	if errors.Is(err, eruncommon.ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil, nil
 	}
 	if err != nil {
@@ -1503,10 +1504,10 @@ func (a *App) loadOrchestratorConfigsWithCatalog() ([]eruncommon.OrchestratorCon
 	return config.Orchestrators, config.OpenRouter, nil
 }
 
-func (a *App) saveOrchestratorConfigs(orchestrators []eruncommon.OrchestratorConfig) error {
+func (a *App) saveOrchestratorConfigs(orchestrators []configpkg.OrchestratorConfig) error {
 	existing, _, err := a.deps.store.LoadERunConfig()
-	if errors.Is(err, eruncommon.ErrNotInitialized) {
-		existing = eruncommon.ERunConfig{}
+	if errors.Is(err, configpkg.ErrNotInitialized) {
+		existing = configpkg.ERunConfig{}
 	} else if err != nil {
 		return err
 	}
@@ -1514,17 +1515,17 @@ func (a *App) saveOrchestratorConfigs(orchestrators []eruncommon.OrchestratorCon
 	return a.deps.store.SaveERunConfig(existing)
 }
 
-func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, error) {
+func (a *App) findOrchestratorConfig(id string) (configpkg.OrchestratorConfig, error) {
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
-		return eruncommon.OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	for _, config := range configs {
 		if config.ID == id {
 			return config, nil
 		}
 	}
-	return eruncommon.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
+	return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
 }
 
 // ListOrchestratorAliasChoices returns the erun platform aliases configured on
@@ -1545,8 +1546,8 @@ func (a *App) ListOrchestratorAliasChoices() ([]string, error) {
 // save validates against and the launch resolves through, so the dialog cannot
 // offer a model the save refuses. An uninitialized root config is no catalog.
 func (a *App) ListOrchestratorLaunchChoices() (orchestratorLaunchChoices, error) {
-	catalog, err := eruncommon.ResolveOpenRouterConfig(a.deps.store)
-	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+	catalog, err := configpkg.ResolveOpenRouterConfig(a.deps.store)
+	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return orchestratorLaunchChoices{}, fmt.Errorf("cannot read the gateway catalog from the ERun settings: %w", err)
 	}
 	return orchestratorLaunchChoicesFor(catalog), nil
@@ -1562,7 +1563,7 @@ func (a *App) configuredERunAliases() ([]string, error) {
 	}
 	aliases := []string{}
 	for _, provider := range providers {
-		if provider.Provider == eruncommon.CloudProviderERun {
+		if provider.Provider == configpkg.CloudProviderERun {
 			aliases = append(aliases, provider.Alias)
 		}
 	}
@@ -1590,7 +1591,7 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 			continue
 		}
 		for _, env := range envs {
-			requiredRole := eruncommon.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
+			requiredRole := configpkg.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
 			candidate := orchestratorEnvCandidate{
 				Tenant:          tenant.Name,
 				Environment:     env.Name,
@@ -1629,8 +1630,8 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 // review directory at all (orchestratorReviewDirectory answers explicitly), so
 // its "" is expected rather than the missing-repository-path failure a
 // local-agent/host env with an unset LocalRepoPath would hit.
-func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.OrchestratorEnvConfig, error) {
-	refs := make([]eruncommon.OrchestratorEnvConfig, 0, len(inputs))
+func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]configpkg.OrchestratorEnvConfig, error) {
+	refs := make([]configpkg.OrchestratorEnvConfig, 0, len(inputs))
 	for _, input := range inputs {
 		tenant := strings.TrimSpace(input.Tenant)
 		environment := strings.TrimSpace(input.Environment)
@@ -1651,8 +1652,8 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 // orchestrator authors and builds there directly, so a path that is not there is
 // a link that cannot work. Duplicates collapse, so adding the same path twice is
 // one row rather than two identical ones.
-func resolveOrchestratorDirectories(dirs []string) ([]eruncommon.OrchestratorDirectoryConfig, error) {
-	out := make([]eruncommon.OrchestratorDirectoryConfig, 0, len(dirs))
+func resolveOrchestratorDirectories(dirs []string) ([]configpkg.OrchestratorDirectoryConfig, error) {
+	out := make([]configpkg.OrchestratorDirectoryConfig, 0, len(dirs))
 	seen := make(map[string]bool, len(dirs))
 	for _, dir := range dirs {
 		path := strings.TrimSpace(dir)
@@ -1671,7 +1672,7 @@ func resolveOrchestratorDirectories(dirs []string) ([]eruncommon.OrchestratorDir
 			return nil, fmt.Errorf("orchestrator directory %s is not a directory on this machine", clean)
 		}
 		seen[clean] = true
-		out = append(out, eruncommon.OrchestratorDirectoryConfig{Directory: clean})
+		out = append(out, configpkg.OrchestratorDirectoryConfig{Directory: clean})
 	}
 	return out, nil
 }
@@ -1681,7 +1682,7 @@ func resolveOrchestratorDirectories(dirs []string) ([]eruncommon.OrchestratorDir
 // at least one of them. It deliberately does not require an environment: a
 // directory the orchestrator works in itself is a complete definition, which is
 // the whole point of having directories at all.
-func (a *App) resolveOrchestratorScope(envs []orchestratorEnvInput, dirs []string) ([]eruncommon.OrchestratorEnvConfig, []eruncommon.OrchestratorDirectoryConfig, error) {
+func (a *App) resolveOrchestratorScope(envs []orchestratorEnvInput, dirs []string) ([]configpkg.OrchestratorEnvConfig, []configpkg.OrchestratorDirectoryConfig, error) {
 	refs, err := a.resolveEnvInputs(envs)
 	if err != nil {
 		return nil, nil, err
@@ -1699,16 +1700,16 @@ func (a *App) resolveOrchestratorScope(envs []orchestratorEnvInput, dirs []strin
 // resolveEnvInput resolves one candidate's role and review directory,
 // split out of resolveEnvInputs to keep that loop within the lint
 // complexity budget.
-func (a *App) resolveEnvInput(tenant, environment string, input orchestratorEnvInput) (eruncommon.OrchestratorEnvConfig, error) {
+func (a *App) resolveEnvInput(tenant, environment string, input orchestratorEnvInput) (configpkg.OrchestratorEnvConfig, error) {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("load %s/%s: %w", tenant, environment, err)
+		return configpkg.OrchestratorEnvConfig{}, fmt.Errorf("load %s/%s: %w", tenant, environment, err)
 	}
 	if !input.Role.IsValid() {
-		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: invalid role %q", tenant, environment, input.Role)
+		return configpkg.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: invalid role %q", tenant, environment, input.Role)
 	}
 	if !orchestratableEnv(env, input.Role) {
-		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: %s", tenant, environment, orchestratorIneligibilityReason(env, input.Role))
+		return configpkg.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: %s", tenant, environment, orchestratorIneligibilityReason(env, input.Role))
 	}
 	derived, mirrored := orchestratorReviewDirectory(tenant, env)
 	dir := derived
@@ -1716,10 +1717,10 @@ func (a *App) resolveEnvInput(tenant, environment string, input orchestratorEnvI
 		if supplied := strings.TrimSpace(input.Directory); supplied != "" {
 			dir = supplied
 		}
-	} else if dir == "" && env.ResolvedType() != eruncommon.EnvironmentTypeRuntime {
-		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
+	} else if dir == "" && env.ResolvedType() != configpkg.EnvironmentTypeRuntime {
+		return configpkg.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
 	}
-	return eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir, Role: input.Role}, nil
+	return configpkg.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir, Role: input.Role}, nil
 }
 
 // wireEnvironmentReview prepares the env's host review directory. A remote-agent
@@ -1732,12 +1733,12 @@ func (a *App) resolveEnvInput(tenant, environment string, input orchestratorEnvI
 // A runtime env needs neither either, for a different reason: it has no
 // worktree and no mirror to prepare at all, by design (see
 // orchestratorReviewDirectory), so there is nothing to wire.
-func (a *App) wireEnvironmentReview(ref eruncommon.OrchestratorEnvConfig) error {
+func (a *App) wireEnvironmentReview(ref configpkg.OrchestratorEnvConfig) error {
 	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
 	if err != nil {
 		return fmt.Errorf("load %s/%s: %w", ref.Tenant, ref.Environment, err)
 	}
-	if env.ResolvedType() == eruncommon.EnvironmentTypeRuntime {
+	if env.ResolvedType() == configpkg.EnvironmentTypeRuntime {
 		return nil
 	}
 	if _, mirrored := orchestratorReviewDirectory(ref.Tenant, env); !mirrored {
@@ -1770,7 +1771,7 @@ func (a *App) wireEnvironmentReview(ref eruncommon.OrchestratorEnvConfig) error 
 // not-force-start and surfaced-failure contract, so a stopped or undeployed
 // environment is left alone and a genuine failure to open still reaches the
 // operator rather than leaving a configured MCP entry pointed at nothing.
-func (a *App) linkOrchestratorEnvironments(refs []eruncommon.OrchestratorEnvConfig) error {
+func (a *App) linkOrchestratorEnvironments(refs []configpkg.OrchestratorEnvConfig) error {
 	for _, ref := range refs {
 		if err := a.wireEnvironmentReview(ref); err != nil {
 			return err
@@ -1792,15 +1793,15 @@ func (a *App) linkOrchestratorEnvironments(refs []eruncommon.OrchestratorEnvConf
 // environment. A ref whose env config no longer loads answers false, so the
 // caller's ensure path still runs and surfaces that failure rather than this
 // silently absorbing it.
-func (a *App) orchestratorRefNamesHostEnv(ref eruncommon.OrchestratorEnvConfig) bool {
+func (a *App) orchestratorRefNamesHostEnv(ref configpkg.OrchestratorEnvConfig) bool {
 	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
 	if err != nil {
 		return false
 	}
-	return env.ResolvedType() == eruncommon.EnvironmentTypeHost
+	return env.ResolvedType() == configpkg.EnvironmentTypeHost
 }
 
-func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfig) string {
+func orchestratorDisplayName(name string, envs []configpkg.OrchestratorEnvConfig) string {
 	if trimmed := strings.TrimSpace(name); trimmed != "" {
 		return trimmed
 	}
@@ -1832,7 +1833,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	}
 	id := uniqueOrchestratorID(orchestratorDisplayName(name, refs), configs)
 	displayName := orchestratorDisplayName(name, refs)
-	def := withOrchestratorLaunchSettings(eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
+	def := withOrchestratorLaunchSettings(configpkg.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -1878,7 +1879,7 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 		return orchestratorInfo{}, err
 	}
 	displayName := orchestratorDisplayName(name, refs)
-	configs[index] = withOrchestratorLaunchSettings(eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
+	configs[index] = withOrchestratorLaunchSettings(configpkg.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -1891,7 +1892,7 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 // session state, split out to keep that function's complexity within budget.
 // "stopped" (the zero snapshots, restartRequired false) when nothing is
 // running for id.
-func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eruncommon.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired, roleChanged bool) {
+func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []configpkg.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired, roleChanged bool) {
 	info, ok := a.runningOrchestratorInfo(id)
 	if !ok {
 		// Not running is not "never nudged": read the persisted cumulative
@@ -1960,8 +1961,8 @@ func (a *App) StartOrchestrator(id string, cols, rows int) (orchestratorInfo, er
 // from the env config as a session starts, so an orchestrator keeps reviewing a
 // worktree whose repository path moved after it was linked. A mirror path is the
 // operator's own choice, so it is left exactly as persisted.
-func (a *App) refreshLinkedEnvDirectories(envs []eruncommon.OrchestratorEnvConfig) []eruncommon.OrchestratorEnvConfig {
-	out := make([]eruncommon.OrchestratorEnvConfig, 0, len(envs))
+func (a *App) refreshLinkedEnvDirectories(envs []configpkg.OrchestratorEnvConfig) []configpkg.OrchestratorEnvConfig {
+	out := make([]configpkg.OrchestratorEnvConfig, 0, len(envs))
 	for _, ref := range envs {
 		env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
 		if err == nil {
@@ -2025,7 +2026,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 // with and the scope its agent's MCP config actually holds — what the agent
 // last started with, not necessarily what the orchestrator is configured with
 // right now — or ok=false when nothing is running for it.
-func (a *App) orchestratorWiredEnvs(id string) ([]eruncommon.OrchestratorEnvConfig, []string, bool) {
+func (a *App) orchestratorWiredEnvs(id string) ([]configpkg.OrchestratorEnvConfig, []string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	session := a.orchestrators[id]
@@ -2039,7 +2040,7 @@ func (a *App) orchestratorWiredEnvs(id string) ([]eruncommon.OrchestratorEnvConf
 // orchestratorScopeOf renders linked environments as sorted tenant/environment
 // pairs. Review directories are deliberately left out: where an environment is
 // reviewed on this host can move without changing what the orchestrator drives.
-func orchestratorScopeOf(envs []eruncommon.OrchestratorEnvConfig) []string {
+func orchestratorScopeOf(envs []configpkg.OrchestratorEnvConfig) []string {
 	out := make([]string, 0, len(envs))
 	for _, env := range envs {
 		tenant, environment := strings.TrimSpace(env.Tenant), strings.TrimSpace(env.Environment)
@@ -2059,8 +2060,8 @@ type orchestratorSpawn struct {
 	name          string
 	alias         string
 	launch        orchestratorLaunchPlan
-	envs          []eruncommon.OrchestratorEnvConfig
-	dirs          []eruncommon.OrchestratorDirectoryConfig
+	envs          []configpkg.OrchestratorEnvConfig
+	dirs          []configpkg.OrchestratorDirectoryConfig
 	initialPrompt string
 	transient     bool
 	// restart stops a running background agent before attaching, so it starts
@@ -2081,7 +2082,7 @@ type orchestratorSpawn struct {
 // environment's tools is worse -- it works, right up to the first call into the
 // environment that is not there, which an agent reads as "not linked" rather
 // than "failed to wire".
-func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
+func (a *App) wireOrchestratorMCP(id, name string, envs []configpkg.OrchestratorEnvConfig) string {
 	// The config written below is read once, by a client that connects through it
 	// as it launches, so an environment that is merely unopened is indistinguishable
 	// to that client from one that is broken. Open the edges that are not answering
@@ -2345,7 +2346,7 @@ func (a *App) orchestratorRespawnFunc(spawn orchestratorSpawn, launch orchestrat
 // cannot pace from here: one report read each, since the question is whether the
 // orchestrator's OWN hooks are reporting a session, which no in-memory state can
 // answer. See orchestratorPacingUnreachable.
-func unreachableOrchestratorIDs(configs []eruncommon.OrchestratorConfig, now time.Time) map[string]bool {
+func unreachableOrchestratorIDs(configs []configpkg.OrchestratorConfig, now time.Time) map[string]bool {
 	out := make(map[string]bool, len(configs))
 	for _, config := range configs {
 		id := strings.TrimSpace(config.ID)
@@ -2497,7 +2498,7 @@ func (a *App) DeleteOrchestrator(id string) error {
 	if err != nil {
 		return err
 	}
-	filtered := make([]eruncommon.OrchestratorConfig, 0, len(configs))
+	filtered := make([]configpkg.OrchestratorConfig, 0, len(configs))
 	for _, config := range configs {
 		if config.ID != id {
 			filtered = append(filtered, config)
@@ -2508,7 +2509,7 @@ func (a *App) DeleteOrchestrator(id string) error {
 
 // uniqueOrchestratorID derives a stable, human-readable id from the name that
 // does not collide with an existing definition.
-func uniqueOrchestratorID(name string, existing []eruncommon.OrchestratorConfig) string {
+func uniqueOrchestratorID(name string, existing []configpkg.OrchestratorConfig) string {
 	stem := orchestratorIDStem(name)
 	taken := make(map[string]struct{}, len(existing))
 	for _, config := range existing {

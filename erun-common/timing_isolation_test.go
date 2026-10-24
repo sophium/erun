@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The suite must leave the operator's real timing history byte-for-byte
@@ -13,7 +15,7 @@ import (
 // This asserts the destination the binary actually resolves, so losing the
 // TestMain redirect fails here rather than silently resuming the writes.
 func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		t.Fatalf("timingRecordDir: %v", err)
 	}
@@ -24,7 +26,7 @@ func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
 	real := filepath.Join(home, ".erun", "timing")
 	if filepath.Clean(dir) == filepath.Clean(real) {
 		t.Fatalf("timing records resolve to the operator's real history %q; this binary must redirect %s at a temp tree",
-			real, TimingRecordDirEnv)
+			real, core.TimingRecordDirEnv)
 	}
 }
 
@@ -33,14 +35,14 @@ func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
 // with the run's own command and start time intact.
 func TestWriteTimingRecordWritesToTheResolvedDirectory(t *testing.T) {
 	dir := t.TempDir()
-	previous := timingRecordDir
-	timingRecordDir = func() (string, error) { return dir, nil }
-	t.Cleanup(func() { timingRecordDir = previous })
+	previous := core.TimingRecordDir
+	core.TimingRecordDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { core.TimingRecordDir = previous })
 
-	root := newStepTiming("deploy", nil)
-	root.finish(nil)
+	root := core.NewStepTiming("deploy", nil)
+	root.Finish(nil)
 
-	path, err := writeTimingRecord("deploy", root)
+	path, err := core.WriteTimingRecord("deploy", root)
 	if err != nil {
 		t.Fatalf("writeTimingRecord: %v", err)
 	}
@@ -54,7 +56,7 @@ func TestWriteTimingRecordWritesToTheResolvedDirectory(t *testing.T) {
 	if record.Command != "deploy" {
 		t.Fatalf("record command = %q, want deploy", record.Command)
 	}
-	if !record.StartedAt.Equal(root.snapshot().start) {
-		t.Fatalf("record startedAt = %v, want the root step's start %v", record.StartedAt, root.snapshot().start)
+	if !record.StartedAt.Equal(root.Snapshot().Start) {
+		t.Fatalf("record startedAt = %v, want the root step's start %v", record.StartedAt, root.Snapshot().Start)
 	}
 }

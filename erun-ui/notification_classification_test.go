@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestEnsureMCPAvailableEmitsClassifiedWarning locks the reclassification of
@@ -18,7 +18,7 @@ func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
 	app := &App{
 		emitFn: emits.fn(),
 		deps: erunUIDeps{
-			ensureMCP: func(context.Context, eruncommon.OpenResult) error {
+			ensureMCP: func(context.Context, config.OpenResult) error {
 				return nil
 			},
 			canReachMCPEndpoint: func(int) bool {
@@ -26,7 +26,7 @@ func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
 			},
 		},
 	}
-	result := eruncommon.OpenResult{Tenant: "frs", EnvConfig: eruncommon.EnvConfig{Name: "dev"}}
+	result := config.OpenResult{Tenant: "frs", EnvConfig: config.EnvConfig{Name: "dev"}}
 
 	if err := app.ensureMCPAvailable(context.Background(), result); err != nil {
 		t.Fatalf("ensureMCPAvailable returned an error: %v", err)
@@ -64,7 +64,7 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 	app := &App{
 		emitFn: emits.fn(),
 		deps: erunUIDeps{
-			ensureMCP: func(context.Context, eruncommon.OpenResult) error {
+			ensureMCP: func(context.Context, config.OpenResult) error {
 				t.Fatal("did not expect ensureMCP to run when already reachable")
 				return nil
 			},
@@ -73,7 +73,7 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 			},
 		},
 	}
-	result := eruncommon.OpenResult{Tenant: "frs", EnvConfig: eruncommon.EnvConfig{Name: "dev"}}
+	result := config.OpenResult{Tenant: "frs", EnvConfig: config.EnvConfig{Name: "dev"}}
 
 	if err := app.ensureMCPAvailable(context.Background(), result); err != nil {
 		t.Fatalf("ensureMCPAvailable returned an error: %v", err)

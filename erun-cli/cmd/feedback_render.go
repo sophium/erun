@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -33,14 +33,14 @@ func addOutputFlag(cmd *cobra.Command) {
 
 // commandOutputMode falls back to text on an unset or unparsable value so output
 // rendering never blocks; strict --output validation lives elsewhere.
-func commandOutputMode(cmd *cobra.Command) common.OutputMode {
+func commandOutputMode(cmd *cobra.Command) core.OutputMode {
 	raw, err := cmd.Flags().GetString("output")
 	if err != nil {
-		return common.OutputText
+		return core.OutputText
 	}
-	mode, err := common.ParseOutputMode(raw)
+	mode, err := core.ParseOutputMode(raw)
 	if err != nil {
-		return common.OutputText
+		return core.OutputText
 	}
 	return mode
 }
@@ -49,8 +49,8 @@ func commandOutputMode(cmd *cobra.Command) common.OutputMode {
 // some commands grew first. Both spellings mean the same thing, so a caller that
 // follows only the documented global flag gets the structured result rather than
 // prose; --json stays a supported alias rather than a second, rival contract.
-func commandWantsJSON(commandCtx common.Context, jsonFlag bool) bool {
-	return jsonFlag || commandCtx.Output == common.OutputJSON
+func commandWantsJSON(commandCtx core.Context, jsonFlag bool) bool {
+	return jsonFlag || commandCtx.Output == core.OutputJSON
 }
 
 func isDryRunCommand(cmd *cobra.Command) bool {
@@ -69,17 +69,17 @@ func commandVerbosity(cmd *cobra.Command) int {
 		verbosity = 0
 	}
 	userAskedForVerbose := err == nil && verbosity > 0
-	if isExecCommand(cmd) && verbosity < common.VerbosityDebug {
-		verbosity = common.VerbosityDebug
+	if isExecCommand(cmd) && verbosity < core.VerbosityDebug {
+		verbosity = core.VerbosityDebug
 	}
-	if isDryRunCommand(cmd) && verbosity < common.VerbosityTrace {
-		verbosity = common.VerbosityTrace
+	if isDryRunCommand(cmd) && verbosity < core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
 	}
-	if verbosity > common.VerbosityTrace {
-		verbosity = common.VerbosityTrace
+	if verbosity > core.VerbosityTrace {
+		verbosity = core.VerbosityTrace
 	}
 	if shouldSilenceNoShellOutput(cmd, userAskedForVerbose) {
-		return common.VerbosityInfo - 1
+		return core.VerbosityInfo - 1
 	}
 	return verbosity
 }
@@ -113,10 +113,10 @@ func commandTenantFlagIsNotScoping(cmd *cobra.Command) bool {
 	return cmd.Name() == "list"
 }
 
-func commandContext(cmd *cobra.Command) common.Context {
+func commandContext(cmd *cobra.Command) core.Context {
 	verbosity := commandVerbosity(cmd)
-	return common.Context{
-		Logger:                    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
+	return core.Context{
+		Logger:                    core.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
 		Verbosity:                 verbosity,
 		DryRun:                    isDryRunCommand(cmd),
 		Output:                    commandOutputMode(cmd),

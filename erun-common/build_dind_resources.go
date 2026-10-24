@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 var (
@@ -74,7 +76,7 @@ func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 		return
 	}
 	if store == nil {
-		store = ConfigStore{}
+		store = config.ConfigStore{}
 	}
 	cpuLimit, memoryLimitMiB := dindResourceBuildArgValues(resolveDockerBuildDindPodResources(store, projectRoot, environment))
 	if needsCPU {
@@ -101,8 +103,8 @@ func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 // value sized for a node (RuntimeDindCPULimit), not an accident of the
 // machine this resolution happens to run on. The two are different questions
 // and only the second is forbidden.
-func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) RuntimePodResources {
-	fallback := RuntimePodResources{}
+func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) config.RuntimePodResources {
+	fallback := config.RuntimePodResources{}
 	if envConfig := resolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
 		fallback = envConfig.RuntimeDindPod
 	}
@@ -117,7 +119,7 @@ func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environm
 // integer (matching the DIND_MEMORY_LIMIT_MIB build-arg it feeds), so it is
 // suffixed with "Mi" before being validated/stored as a Kubernetes memory
 // quantity.
-func dindPodResourcesPreferEnv(fallback RuntimePodResources) RuntimePodResources {
+func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.RuntimePodResources {
 	resources := fallback
 	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
 		if _, err := ParseKubernetesCPUToMilli(cpu); err == nil {
@@ -140,7 +142,7 @@ func dindPodResourcesPreferEnv(fallback RuntimePodResources) RuntimePodResources
 // value that fails to parse (should not happen for an already-normalized
 // RuntimePodResources) yields an empty string, which applyDindResourceBuildArgs
 // leaves off the docker command entirely rather than passing a bad literal.
-func dindResourceBuildArgValues(resources RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
+func dindResourceBuildArgValues(resources config.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
 	if milli, err := ParseKubernetesCPUToMilli(resources.CPU); err == nil {
 		cores := milli / 1000
 		if cores < 1 {

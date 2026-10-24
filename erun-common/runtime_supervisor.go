@@ -8,6 +8,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimeSupervisor owns every process the runtime entrypoint starts and the
@@ -17,7 +19,7 @@ import (
 // can report that exit status), and every other child that turns into a zombie
 // is reaped by the init loop (runtime_supervisor_linux.go).
 type runtimeSupervisor struct {
-	ctx Context
+	ctx core.Context
 
 	mu    sync.Mutex
 	owned map[int]*exec.Cmd
@@ -42,7 +44,7 @@ const runtimeShutdownGrace = 10 * time.Second
 
 var errRuntimeSupervisorStopping = errors.New("the runtime entrypoint is shutting down")
 
-func newRuntimeSupervisor(ctx Context) *runtimeSupervisor {
+func newRuntimeSupervisor(ctx core.Context) *runtimeSupervisor {
 	return &runtimeSupervisor{
 		ctx:        ctx,
 		owned:      map[int]*exec.Cmd{},
@@ -72,7 +74,7 @@ func (s *runtimeSupervisor) startLocked(cmd *exec.Cmd) error {
 	if s.stopping() {
 		return errRuntimeSupervisorStopping
 	}
-	HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type adoptFixture struct {
@@ -41,7 +43,7 @@ func (f *adoptFixture) seedLegacyRepo(t *testing.T) {
 
 func (f *adoptFixture) adopt(t *testing.T, dryRun bool) WorktreeAdoptResult {
 	t.Helper()
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &f.output, &f.output), DryRun: dryRun}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &f.output, &f.output), DryRun: dryRun}
 	result, err := AdoptWorktree(ctx, WorktreeAdoptParams{LegacyDir: f.legacy, ClaimDir: f.claim})
 	if err != nil {
 		t.Fatalf("adoption failed: %v\n%s", err, f.output.String())
@@ -231,7 +233,7 @@ func TestAdoptWorktreeDryRunTouchesNeitherVolume(t *testing.T) {
 }
 
 func TestAdoptWorktreeRequiresBothDirectories(t *testing.T) {
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}
 	if _, err := AdoptWorktree(ctx, WorktreeAdoptParams{LegacyDir: "/mnt/erun-home/git/petios"}); err == nil {
 		t.Fatal("a missing claim directory must be an error, not a silent no-op")
 	}

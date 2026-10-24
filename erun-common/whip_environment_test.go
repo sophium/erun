@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // fakeWhipRunner records every command it was asked to run and answers from a
@@ -128,7 +130,7 @@ func TestRunLocalEnvironmentWhipPushesAndPersistsCount(t *testing.T) {
 func TestRunLocalEnvironmentWhipCapsAfterMaxNudges(t *testing.T) {
 	isolateActivityCache(t)
 	maxNudges := 1
-	cfg := ResolveWhipConfig(&WhipConfigOverride{MaxNudges: &maxNudges})
+	cfg := ResolveWhipConfig(&config.WhipConfigOverride{MaxNudges: &maxNudges})
 	whipNudgeSleep = func(time.Duration) {}
 	runner := func(name string, args ...string) ([]byte, error) { return []byte("4242\n"), nil }
 

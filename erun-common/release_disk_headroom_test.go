@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestParseDFDiskBytes(t *testing.T) {
@@ -445,7 +447,7 @@ func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 		return tc.pruneErr
 	}
 
-	err := ensureDiskHeadroomWith(Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, readCacheReclaimable, prune)
+	err := ensureDiskHeadroomWith(core.Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, readCacheReclaimable, prune)
 	assertDiskHeadroomMessage(t, tc, err)
 
 	if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {
@@ -556,7 +558,7 @@ const headroomTestBound = 30 * time.Second
 // running at headroomTestBound, which is the reported failure: a preflight
 // that neither lets the build proceed nor fails it, and so writes no terminal
 // record for a gate to report.
-func awaitHeadroomPreflight(t *testing.T, ctx Context, policy diskHeadroomPolicy) error {
+func awaitHeadroomPreflight(t *testing.T, ctx core.Context, policy diskHeadroomPolicy) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() {
@@ -589,7 +591,7 @@ func TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering(t *testing.T) {
 	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 
@@ -653,7 +655,7 @@ func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
 	setDiskHeadroomOneGiBFree(t, root)
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 
@@ -732,7 +734,7 @@ func TestDiskHeadroomPruneBoundLeavesNothingRunningBehind(t *testing.T) {
 	setDiskHeadroomOneGiBFree(t, root)
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 
@@ -773,7 +775,7 @@ echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 
@@ -853,7 +855,7 @@ esac`))
 	setDiskHeadroomOneGiBFree(t, root)
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := releaseDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 
@@ -884,7 +886,7 @@ func TestDiskHeadroomAbsentExecutableIsNamedNotSpliced(t *testing.T) {
 	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
 	policy.limits = diskHeadroomShortLimits()
 

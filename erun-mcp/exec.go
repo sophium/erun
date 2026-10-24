@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // RawInput absorbs job_start's command mode (#1246): dir, env, and a
@@ -70,8 +71,8 @@ func execRawForeground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		return JobEnvelopeOutput{}, err
 	}
 
-	output, err := runCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx eruncommon.Context) error {
-		return eruncommon.RunRawCommand(runCtx, eruncommon.RawCommandSpec{
+	output, err := runCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx core.Context) error {
+		return core.RunRawCommand(runCtx, core.RawCommandSpec{
 			Dir:  workDir,
 			Args: input.Command,
 		}, nil)

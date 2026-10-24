@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestHostedMarkerSurvivesAReload is the case the plan names directly: the
@@ -18,21 +19,21 @@ import (
 // follows without being told again.
 func TestHostedMarkerSurvivesAReload(t *testing.T) {
 	useConfigHome(t)
-	marker := HostedEnvironment{
+	marker := configpkg.HostedEnvironment{
 		APIHost:            "https://api.example.test",
 		TenantID:           "tenant-1",
 		EnvironmentID:      "env-1",
 		DefinitionRevision: 3,
 	}
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime, Hosted: marker}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", Type: configpkg.EnvironmentTypeRuntime, Hosted: marker}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	reloaded, _, err := LoadEnvConfig("team", "dev")
+	reloaded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	recorded, ok := HostedEnvironmentFromConfig(reloaded)
+	recorded, ok := configpkg.HostedEnvironmentFromConfig(reloaded)
 	if !ok {
 		t.Fatalf("the marker did not survive the reload: %+v", reloaded.Hosted)
 	}
@@ -46,7 +47,7 @@ func TestHostedMarkerSurvivesAReload(t *testing.T) {
 // hosted block at all, so a reader is never asked to interpret an empty one.
 func TestEnvironmentWithNoMarkerOmitsIt(t *testing.T) {
 	configHome := useConfigHome(t)
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", Type: configpkg.EnvironmentTypeRuntime}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(configHome, "erun", "team", "dev", "config.yaml"))
@@ -64,12 +65,12 @@ func TestEnvironmentWithNoMarkerOmitsIt(t *testing.T) {
 func TestPlanPullLocalPortRangeStartRefusesAClaimedRange(t *testing.T) {
 	useConfigHome(t)
 	seedTenantConfigForPortPlanning(t)
-	if err := SaveEnvConfig("team", EnvConfig{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "taken", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	_, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "fresh", LowerServicePort)
-	var overlap ErrLocalPortRangeOverlap
+	_, err := PlanPullLocalPortRangeStart(configpkg.ConfigStore{}, "team", "fresh", configpkg.LowerServicePort)
+	var overlap configpkg.ErrLocalPortRangeOverlap
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a claimed range start was accepted: err = %v", err)
 	}
@@ -81,14 +82,14 @@ func TestPlanPullLocalPortRangeStartRefusesAClaimedRange(t *testing.T) {
 func TestPlanPullLocalPortRangeStartAllocatesTheLowestFreeRange(t *testing.T) {
 	useConfigHome(t)
 	seedTenantConfigForPortPlanning(t)
-	if err := SaveEnvConfig("team", EnvConfig{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "taken", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	start, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "fresh", 0)
+	start, err := PlanPullLocalPortRangeStart(configpkg.ConfigStore{}, "team", "fresh", 0)
 	if err != nil {
 		t.Fatalf("allocate: %v", err)
 	}
-	if start != LowerServicePort+EnvironmentPortRangeSize {
+	if start != configpkg.LowerServicePort+configpkg.EnvironmentPortRangeSize {
 		t.Fatalf("allocated %d, want the range after the claimed one", start)
 	}
 }
@@ -99,20 +100,20 @@ func TestPlanPullLocalPortRangeStartIgnoresTheEnvironmentItself(t *testing.T) {
 	// Re-pulling into an environment that already holds a range must not
 	// collide with itself: the pull is updating this environment, not
 	// competing with it.
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	start, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "dev", LowerServicePort)
+	start, err := PlanPullLocalPortRangeStart(configpkg.ConfigStore{}, "team", "dev", configpkg.LowerServicePort)
 	if err != nil {
 		t.Fatalf("an environment's own range start was treated as a collision: %v", err)
 	}
-	if start != LowerServicePort {
+	if start != configpkg.LowerServicePort {
 		t.Fatalf("allocated %d, want the environment's own range", start)
 	}
 }
 
 func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
-	_, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeHost)}, "", 0)
+	_, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeHost)}, "", 0)
 	if err == nil {
 		t.Fatal("a host row was accepted as hostable")
 	}
@@ -123,26 +124,26 @@ func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
 
 func TestNewPullAsNewEnvironmentRequiresAUsableRepoPath(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeLocalAgent)}, "", 0); err == nil {
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, "", 0); err == nil {
 		t.Fatal("a local-agent pull-as-new was accepted with no repo path")
 	}
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeLocalAgent)}, dir, LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, dir, configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a real directory was refused: %v", err)
 	}
 	// A runtime env rides a PVC worktree, so it needs no host path and an
 	// empty one is not a refusal.
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeRuntime)}, "", LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeRuntime)}, "", configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a runtime pull-as-new was refused for want of a host path: %v", err)
 	}
 }
 
 func TestIsHostableEnvironmentType(t *testing.T) {
-	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime} {
+	for _, envType := range []configpkg.EnvironmentType{configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeRuntime} {
 		if !IsHostableEnvironmentType(envType) {
 			t.Errorf("%s should be hostable", envType)
 		}
 	}
-	if IsHostableEnvironmentType(EnvironmentTypeHost) {
+	if IsHostableEnvironmentType(configpkg.EnvironmentTypeHost) {
 		t.Error("host environments cannot be hosted and must not report as hostable")
 	}
 }
@@ -153,7 +154,7 @@ func TestIsHostableEnvironmentType(t *testing.T) {
 // an empty machine and every range start looks free.
 func seedTenantConfigForPortPlanning(t *testing.T) {
 	t.Helper()
-	if err := SaveTenantConfig(TenantConfig{Name: "team"}); err != nil {
+	if err := configpkg.SaveTenantConfig(configpkg.TenantConfig{Name: "team"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 }
@@ -173,21 +174,21 @@ func useConfigHome(t *testing.T) string {
 // refuses on some later command, far from the pull that caused it.
 func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
 	store := &recordingDefinitionStore{
-		envs: []EnvConfig{
-			{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort},
+		envs: []configpkg.EnvConfig{
+			{Name: "taken", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort},
 		},
 	}
 	client := &stubDefinitionClient{row: PlatformEnvironment{
-		EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(EnvironmentTypeRuntime),
+		EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeRuntime),
 	}}
 	_, err := PullEnvironmentDefinition(context.Background(), store, client, EnvDefinitionPullParams{
 		Tenant: "team", Environment: "fresh", EnvironmentID: "env-1",
 		// The operator asked for the range another environment already holds,
 		// which is the shape a collision takes: an unspecified start allocates
 		// the lowest free range instead and never collides.
-		LocalPortRangeStart: LowerServicePort,
+		LocalPortRangeStart: configpkg.LowerServicePort,
 	})
-	var overlap ErrLocalPortRangeOverlap
+	var overlap configpkg.ErrLocalPortRangeOverlap
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a pull-as-new onto a claimed range start was not refused: err = %v", err)
 	}
@@ -211,9 +212,9 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 	client := &stubDefinitionClient{
 		row: PlatformEnvironment{
 			EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh",
-			Type: string(EnvironmentTypeLocalAgent), KubernetesContext: "test-context",
+			Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context",
 		},
-		definition: PlatformEnvDefinition{RuntimeVersion: &version},
+		definition: configpkg.PlatformEnvDefinition{RuntimeVersion: &version},
 		// The payload also tries to carry a host-owned value, which the pull
 		// must not write.
 		rawDefinition: []byte(`{"runtimeVersion":"1.2.3","localRepoPath":"` + hostile + `"}`),
@@ -234,7 +235,7 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 	if result.Config.LocalRepoPath != repoPath {
 		t.Errorf("repo path = %q, want this machine's %q", result.Config.LocalRepoPath, repoPath)
 	}
-	if result.Config.LocalPortRangeStart != LowerServicePort {
+	if result.Config.LocalPortRangeStart != configpkg.LowerServicePort {
 		t.Errorf("port range start = %d, want the lowest free range", result.Config.LocalPortRangeStart)
 	}
 	if result.Marker.DefinitionRevision != 3 {
@@ -244,13 +245,13 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 
 // hostedDefinitionFixture is a local environment whose marker names the row
 // the stub client serves, so a push resolves without a marker mismatch.
-func hostedDefinitionFixture(name string) EnvConfig {
-	return EnvConfig{
+func hostedDefinitionFixture(name string) configpkg.EnvConfig {
+	return configpkg.EnvConfig{
 		Name:              name,
-		Type:              EnvironmentTypeRuntime,
+		Type:              configpkg.EnvironmentTypeRuntime,
 		KubernetesContext: "test-context",
 		RuntimeVersion:    "1.2.3",
-		Hosted: HostedEnvironment{
+		Hosted: configpkg.HostedEnvironment{
 			APIHost:            "https://api.example.test",
 			TenantID:           "tenant-1",
 			EnvironmentID:      "env-1",
@@ -259,7 +260,7 @@ func hostedDefinitionFixture(name string) EnvConfig {
 	}
 }
 
-func hostedDefinitionClient(config EnvConfig) *stubDefinitionClient {
+func hostedDefinitionClient(config configpkg.EnvConfig) *stubDefinitionClient {
 	return &stubDefinitionClient{row: PlatformEnvironment{
 		EnvironmentID:     config.Hosted.EnvironmentID,
 		TenantID:          config.Hosted.TenantID,
@@ -271,9 +272,9 @@ func hostedDefinitionClient(config EnvConfig) *stubDefinitionClient {
 
 // pushOnce uploads one environment through the shared push path and returns
 // the config the push stamped, which is what every case below reads back.
-func pushOnce(t *testing.T, config EnvConfig) EnvConfig {
+func pushOnce(t *testing.T, config configpkg.EnvConfig) configpkg.EnvConfig {
 	t.Helper()
-	store := &recordingDefinitionStore{envs: []EnvConfig{config}}
+	store := &recordingDefinitionStore{envs: []configpkg.EnvConfig{config}}
 	if _, err := PushEnvironmentDefinition(context.Background(), store, hostedDefinitionClient(config), EnvDefinitionPushParams{
 		Tenant: "team", Environment: config.Name,
 	}); err != nil {
@@ -293,11 +294,11 @@ func pushOnce(t *testing.T, config EnvConfig) EnvConfig {
 func TestPushStampsTheDigestOfWhatItSent(t *testing.T) {
 	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
 
-	want := DefinitionDigest(BuildPlatformEnvDefinition(hostedDefinitionFixture("dev")))
+	want := configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev")))
 	if stamped.Hosted.DefinitionDigest != want {
 		t.Fatalf("stamped digest = %q, want %q", stamped.Hosted.DefinitionDigest, want)
 	}
-	if change := HostedDefinitionLocalChangeFor(stamped); !change.Available || change.Changed {
+	if change := configpkg.HostedDefinitionLocalChangeFor(stamped); !change.Available || change.Changed {
 		t.Fatalf("a just-pushed config reads as %+v, want available and unchanged", change)
 	}
 }
@@ -310,7 +311,7 @@ func TestALocalEditAfterATransferReadsAsChanged(t *testing.T) {
 	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
 	stamped.RuntimeVersion = "2.0.0"
 
-	change := HostedDefinitionLocalChangeFor(stamped)
+	change := configpkg.HostedDefinitionLocalChangeFor(stamped)
 	if !change.Available || !change.Changed {
 		t.Fatalf("an edited portable setting reads as %+v, want available and changed", change)
 	}
@@ -328,7 +329,7 @@ func TestAHostOwnedEditIsNotADivergence(t *testing.T) {
 	stamped.LocalRepoPath = "/somewhere/else"
 	stamped.RuntimeRunningImage = "registry.example.test/erun-devops:9.9.9"
 
-	change := HostedDefinitionLocalChangeFor(stamped)
+	change := configpkg.HostedDefinitionLocalChangeFor(stamped)
 	if !change.Available || change.Changed {
 		t.Fatalf("a host-owned edit reads as %+v, want available and unchanged", change)
 	}
@@ -345,7 +346,7 @@ func TestAHostOwnedEditIsNotADivergence(t *testing.T) {
 func TestAMarkerWithNoDigestCannotTell(t *testing.T) {
 	legacy := hostedDefinitionFixture("dev")
 
-	change := HostedDefinitionLocalChangeFor(legacy)
+	change := configpkg.HostedDefinitionLocalChangeFor(legacy)
 	if change.Available || change.Changed {
 		t.Fatalf("a marker with no digest reads as %+v, want neither available nor changed", change)
 	}
@@ -365,16 +366,16 @@ func TestAMarkerWithNoDigestCannotTell(t *testing.T) {
 func TestPullStampsTheDigestToo(t *testing.T) {
 	repoPath := t.TempDir()
 	version := "1.2.3"
-	story := &recordingDefinitionStore{envs: []EnvConfig{{
-		Name: "fresh", Type: EnvironmentTypeLocalAgent, KubernetesContext: "test-context",
+	story := &recordingDefinitionStore{envs: []configpkg.EnvConfig{{
+		Name: "fresh", Type: configpkg.EnvironmentTypeLocalAgent, KubernetesContext: "test-context",
 		LocalRepoPath: repoPath,
-		Hosted: HostedEnvironment{
+		Hosted: configpkg.HostedEnvironment{
 			APIHost: "https://api.example.test", TenantID: "tenant-1", EnvironmentID: "env-1",
 		},
 	}}}
 	client := &stubDefinitionClient{
-		row:        PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
-		definition: PlatformEnvDefinition{RuntimeVersion: &version},
+		row:        PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
+		definition: configpkg.PlatformEnvDefinition{RuntimeVersion: &version},
 	}
 
 	result, err := PullEnvironmentDefinition(context.Background(), story, client, EnvDefinitionPullParams{
@@ -383,7 +384,7 @@ func TestPullStampsTheDigestToo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull: %v", err)
 	}
-	if change := HostedDefinitionLocalChangeFor(result.Config); !change.Available || change.Changed {
+	if change := configpkg.HostedDefinitionLocalChangeFor(result.Config); !change.Available || change.Changed {
 		t.Fatalf("a just-pulled config reads as %+v, want available and unchanged", change)
 	}
 }
@@ -393,17 +394,17 @@ func TestPullStampsTheDigestToo(t *testing.T) {
 // every read would look like a change), and it must not survive a change to a
 // portable field (or no read ever would).
 func TestDefinitionDigestIsStableAndSensitive(t *testing.T) {
-	base := BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))
-	if DefinitionDigest(base) != DefinitionDigest(BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))) {
+	base := configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))
+	if configpkg.DefinitionDigest(base) != configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))) {
 		t.Fatal("two builds of the same settings produced different digests")
 	}
-	if DefinitionDigest(base) == "" {
+	if configpkg.DefinitionDigest(base) == "" {
 		t.Fatal("the digest is empty, which no marker could ever match")
 	}
 
 	changed := hostedDefinitionFixture("dev")
 	changed.RuntimeVersion = "2.0.0"
-	if DefinitionDigest(base) == DefinitionDigest(BuildPlatformEnvDefinition(changed)) {
+	if configpkg.DefinitionDigest(base) == configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(changed)) {
 		t.Fatal("a changed portable setting produced the same digest")
 	}
 }
@@ -411,11 +412,11 @@ func TestDefinitionDigestIsStableAndSensitive(t *testing.T) {
 // recordingDefinitionStore is an in-memory envDefinitionConfigStore that
 // records what a pull wrote, so a test can assert a refusal wrote nothing.
 type recordingDefinitionStore struct {
-	envs  []EnvConfig
-	saved []EnvConfig
+	envs  []configpkg.EnvConfig
+	saved []configpkg.EnvConfig
 }
 
-func (s *recordingDefinitionStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+func (s *recordingDefinitionStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	for _, env := range s.envs {
 		if env.Name == environment {
 			return env, "/dev/null", nil
@@ -426,27 +427,27 @@ func (s *recordingDefinitionStore) LoadEnvConfig(tenant, environment string) (En
 			return env, "/dev/null", nil
 		}
 	}
-	return EnvConfig{}, "", ErrNotInitialized
+	return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (s *recordingDefinitionStore) SaveEnvConfig(_ string, config EnvConfig) error {
+func (s *recordingDefinitionStore) SaveEnvConfig(_ string, config configpkg.EnvConfig) error {
 	s.saved = append(s.saved, config)
 	return nil
 }
 
-func (s *recordingDefinitionStore) ListTenantConfigs() ([]TenantConfig, error) {
-	return []TenantConfig{{Name: "team"}}, nil
+func (s *recordingDefinitionStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
+	return []configpkg.TenantConfig{{Name: "team"}}, nil
 }
 
-func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]EnvConfig, error) {
-	return append(append([]EnvConfig(nil), s.envs...), s.saved...), nil
+func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig, error) {
+	return append(append([]configpkg.EnvConfig(nil), s.envs...), s.saved...), nil
 }
 
 // stubDefinitionClient answers the three platform reads and writes a pull
 // makes, from fixed values.
 type stubDefinitionClient struct {
 	row             PlatformEnvironment
-	definition      PlatformEnvDefinition
+	definition      configpkg.PlatformEnvDefinition
 	rawDefinition   []byte
 	definitionReads int
 }
@@ -468,6 +469,6 @@ func (c *stubDefinitionClient) GetEnvironmentDefinition(context.Context, string)
 	return PlatformEnvDefinitionRecord{EnvironmentID: c.row.EnvironmentID, TenantID: c.row.TenantID, Revision: 3, Definition: definition}, nil
 }
 
-func (c *stubDefinitionClient) PutEnvironmentDefinition(context.Context, string, PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
+func (c *stubDefinitionClient) PutEnvironmentDefinition(context.Context, string, configpkg.PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
 	return PlatformEnvDefinitionRecord{}, nil
 }

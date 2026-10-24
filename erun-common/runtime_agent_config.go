@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func (b runtimeBoot) mcpURL() string {
@@ -19,7 +22,7 @@ func describeRuntimeAgentConfig(boot runtimeBoot) string {
 // configureRuntimeAgents reconciles both assistants' configuration with the
 // image's baked skills and agents and the container's environment. It runs once
 // per container boot: nothing it reads changes while the container lives.
-func configureRuntimeAgents(ctx Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func configureRuntimeAgents(ctx core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	removeLegacyRuntimeConfigureScripts(boot)
 	// Each part stands alone: a skill that cannot be copied must not leave the
 	// assistants without their MCP server or settings.
@@ -55,7 +58,7 @@ func RuntimeAgentAssetTargetsFor(homeDir string) RuntimeAgentAssetTargets {
 	}
 }
 
-func installRuntimeAgentAssets(ctx Context, boot runtimeBoot, targets RuntimeAgentAssetTargets) error {
+func installRuntimeAgentAssets(ctx core.Context, boot runtimeBoot, targets RuntimeAgentAssetTargets) error {
 	_, err := InstallRuntimeAgentAssets(ctx, boot.skillsRoot, boot.agentsRoot, targets)
 	return err
 }
@@ -76,7 +79,7 @@ type RuntimeAgentAssetsTarget struct {
 // InstallRuntimeAgentAssets installs or refreshes the skills under skillsRoot and
 // the agents under agentsRoot into every target directory. A source root that
 // does not exist has nothing to install. Under ctx.DryRun it only traces.
-func InstallRuntimeAgentAssets(ctx Context, skillsRoot, agentsRoot string, targets RuntimeAgentAssetTargets) (RuntimeAgentAssetsInstall, error) {
+func InstallRuntimeAgentAssets(ctx core.Context, skillsRoot, agentsRoot string, targets RuntimeAgentAssetTargets) (RuntimeAgentAssetsInstall, error) {
 	result := RuntimeAgentAssetsInstall{Targets: []RuntimeAgentAssetsTarget{}}
 	install := func(kind, source string, dests []string, apply func(string, string) (AgentAssetsInstallResult, error)) error {
 		if info, err := os.Stat(source); err != nil || !info.IsDir() {
@@ -141,7 +144,7 @@ func rewriteRuntimeCodexConfig(path, mcpURL string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
+	return config.WriteFileAtomic(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
 }
 
 // withoutRuntimeCodexSettings drops the lines erun owns -- the two policy keys

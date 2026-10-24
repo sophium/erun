@@ -9,6 +9,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -28,30 +30,30 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		render func(common.Context) error
+		render func(core.Context) error
 	}{
-		{"idle", func(ctx common.Context) error {
+		{"idle", func(ctx core.Context) error {
 			return writeIdleResult(ctx, common.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
 		}},
-		{"whip", func(ctx common.Context) error {
+		{"whip", func(ctx core.Context) error {
 			return writeWhipReport(ctx, common.WhipReport{
 				DryRun:  true,
 				Results: []common.WhipResult{{Reason: "no candidate"}},
 			}, false)
 		}},
-		{"activity lease list", func(ctx common.Context) error {
+		{"activity lease list", func(ctx core.Context) error {
 			return writeActivityLeases(ctx, leases, now, false)
 		}},
-		{"activity sample", func(ctx common.Context) error {
+		{"activity sample", func(ctx core.Context) error {
 			return writeActivitySampleResult(ctx, common.ResidentActivityResult{Busy: true}, false)
 		}},
-		{"activity ai-session status", func(ctx common.Context) error {
+		{"activity ai-session status", func(ctx core.Context) error {
 			return writeAISessionStatuses(commandCarryingOutput(ctx), []common.AISessionStatus{{SessionID: "s1"}}, false)
 		}},
-		{"list", func(ctx common.Context) error {
+		{"list", func(ctx core.Context) error {
 			return writeListResult(ctx, common.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
-		{"context list", func(ctx common.Context) error {
+		{"context list", func(ctx core.Context) error {
 			return writeCloudContextList(ctx, common.CloudContextListResult{CloudContexts: []common.CloudContextStatus{{Status: "running"}}})
 		}},
 	}
@@ -59,7 +61,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ctx := common.Context{Output: common.OutputJSON, Stdout: &buf, Stderr: &buf}
+			ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 			if err := tc.render(ctx); err != nil {
 				t.Fatalf("render: %v", err)
 			}
@@ -79,7 +81,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 // substitution for another.
 func TestTextOutputStaysProse(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := common.Context{Output: common.OutputText, Stdout: &buf, Stderr: &buf}
+	ctx := core.Context{Output: core.OutputText, Stdout: &buf, Stderr: &buf}
 	if err := writeIdleResult(ctx, common.EnvironmentIdleStatus{SecondsUntilStop: 300}, false); err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -116,7 +118,7 @@ func TestEveryJSONFlagIsADeclaredOutputAlias(t *testing.T) {
 
 // commandCarryingOutput adapts the render seams that read a Context out of the
 // command's own flags, so they can be exercised from the same table.
-func commandCarryingOutput(ctx common.Context) *cobra.Command {
+func commandCarryingOutput(ctx core.Context) *cobra.Command {
 	cmd := &cobra.Command{Use: "status"}
 	cmd.Flags().String("output", string(ctx.Output), "")
 	cmd.SetOut(ctx.Stdout)
@@ -166,7 +168,7 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.command, func(t *testing.T) {
 			var buf bytes.Buffer
-			ctx := common.Context{Output: common.OutputJSON, Stdout: &buf, Stderr: &buf}
+			ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 			if err := ctx.WriteResult(tc.value); err != nil {
 				t.Fatalf("write result: %v", err)
 			}
@@ -196,7 +198,7 @@ func TestReviewListKeepsOneTypeAcrossCardinalities(t *testing.T) {
 	render := func(t *testing.T, reviews []common.PlatformReview) []json.RawMessage {
 		t.Helper()
 		var buf bytes.Buffer
-		ctx := common.Context{Output: common.OutputJSON, Stdout: &buf, Stderr: &buf}
+		ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 		if err := ctx.WriteResult(reviews); err != nil {
 			t.Fatalf("write result: %v", err)
 		}
@@ -222,11 +224,11 @@ func TestReviewListKeepsOneTypeAcrossCardinalities(t *testing.T) {
 // resolves fine and lists no cloud contexts.
 type emptyCloudConfig struct{}
 
-func (emptyCloudConfig) LoadERunConfig() (common.ERunConfig, string, error) {
-	return common.ERunConfig{}, "", nil
+func (emptyCloudConfig) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{}, "", nil
 }
 
-func (emptyCloudConfig) SaveERunConfig(common.ERunConfig) error { return nil }
+func (emptyCloudConfig) SaveERunConfig(config.ERunConfig) error { return nil }
 
 // TestContextListJSONAlwaysCarriesTheCollection drives the real command body
 // over the CLI half of the shape context_list shares with the MCP tool: an
@@ -235,7 +237,7 @@ func (emptyCloudConfig) SaveERunConfig(common.ERunConfig) error { return nil }
 // does not report contexts at all.
 func TestContextListJSONAlwaysCarriesTheCollection(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := common.Context{Output: common.OutputJSON, Stdout: &buf, Stderr: &buf}
+	ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 	if err := runContextListCommand(ctx, emptyCloudConfig{}, common.CloudContextDependencies{}); err != nil {
 		t.Fatalf("run context list: %v", err)
 	}

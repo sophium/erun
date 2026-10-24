@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A failed `docker build` returns nothing but "exit status 1". That is enough
@@ -20,14 +22,6 @@ import (
 // The step number is what ties the failure back to the output lines that
 // explain it.
 var buildkitStepErrorPattern = regexp.MustCompile(`(?m)^#(\d+) ERROR: (.*)$`)
-
-// buildkitStepOutputPattern matches one line a step printed, e.g.
-//
-//	#6 31.56 curl: (28) Connection timed out after 30002 milliseconds
-//
-// The elapsed-time field is what distinguishes a step's own output from
-// BuildKit's framing around it.
-var buildkitStepOutputPattern = regexp.MustCompile(`^#(\d+) (\d+\.\d+) (.*)$`)
 
 const (
 	// buildFailureReasonMaxLines bounds how much of the failing step's tail is
@@ -75,7 +69,7 @@ func lastBuildkitStepError(output string) (step, headline string, ok bool) {
 func buildkitStepOutputTail(output, step string) []string {
 	var lines []string
 	for _, line := range strings.Split(output, "\n") {
-		match := buildkitStepOutputPattern.FindStringSubmatch(strings.TrimRight(line, "\r"))
+		match := core.BuildkitStepOutputPattern.FindStringSubmatch(strings.TrimRight(line, "\r"))
 		if match == nil || match[1] != step {
 			continue
 		}

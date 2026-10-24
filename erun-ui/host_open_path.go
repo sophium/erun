@@ -9,7 +9,8 @@ import (
 	"runtime"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // hostOpenCommand and hostRevealCommand return the OS opener invocation for a
@@ -52,7 +53,7 @@ func hostRevealCommand(goos, target string) (string, []string, error) {
 // lets the opener outlive this process.
 func launchHostOpenerDetached(executable string, args []string) error {
 	cmd := exec.Command(executable, args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open %s: %w", executable, err)
 	}

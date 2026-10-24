@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,8 +26,8 @@ func TestOrchestratorConfigAliasRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := ERunConfig{
-				Orchestrators: []OrchestratorConfig{{
+			config := configpkg.ERunConfig{
+				Orchestrators: []configpkg.OrchestratorConfig{{
 					ID:    "orch-1",
 					Name:  "Orchestrator One",
 					Alias: tt.alias,
@@ -45,7 +47,7 @@ func TestOrchestratorConfigAliasRoundTrip(t *testing.T) {
 				t.Fatalf("declared alias %q must be written, got:\n%s", tt.alias, data)
 			}
 
-			var roundTripped ERunConfig
+			var roundTripped configpkg.ERunConfig
 			if err := yaml.Unmarshal(data, &roundTripped); err != nil {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}
@@ -122,7 +124,7 @@ func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
 		t.Fatalf("a repeated write changed the alias: %q", got)
 	}
 
-	if _, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+	if _, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
 		OrchestratorID: "orch-1",
 		Alias:          "",
 	}); err != nil {
@@ -141,7 +143,7 @@ func TestSetOrchestratorAliasRefusesAnAliasThisHostCannotResolve(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
 
-	_, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
 		OrchestratorID: "orch-1",
 		Alias:          "erun+elsewhere.example@erun",
 	})
@@ -169,7 +171,7 @@ func TestSetOrchestratorAliasRefusesANonERunAlias(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
 
-	_, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
 		OrchestratorID: "orch-1",
 		Alias:          "aws-prod",
 	})
@@ -188,7 +190,7 @@ func TestSetOrchestratorAliasUnknownOrchestrator(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
 
-	_, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
 		OrchestratorID: "nope",
 		Alias:          "erun+erunpaas.com@erun",
 	})
@@ -204,7 +206,7 @@ func TestSetOrchestratorAliasMissingOrchestratorID(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
 
-	_, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{Alias: "erun+erunpaas.com@erun"})
+	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{Alias: "erun+erunpaas.com@erun"})
 	if err == nil || !strings.Contains(err.Error(), "no orchestrator id given") {
 		t.Fatalf("error = %v, want a missing-id refusal", err)
 	}
@@ -224,7 +226,7 @@ func TestSetOrchestratorAliasDryRunValidatesAndWritesNothing(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
 
-	ctx := Context{DryRun: true}
+	ctx := core.Context{DryRun: true}
 	if _, err := SetOrchestratorAlias(ctx, store, SetOrchestratorAliasParams{
 		OrchestratorID: "orch-1",
 		Alias:          "erun+erunpaas.com@erun",
@@ -243,9 +245,9 @@ func TestSetOrchestratorAliasDryRunValidatesAndWritesNothing(t *testing.T) {
 	}
 }
 
-func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, id, alias string) OrchestratorConfig {
+func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, id, alias string) configpkg.OrchestratorConfig {
 	t.Helper()
-	orchestrator, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+	orchestrator, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
 		OrchestratorID: id,
 		Alias:          alias,
 	})
@@ -261,31 +263,31 @@ func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, i
 // actually reached the config, so a refused alias can be shown to have written
 // nothing.
 type orchestratorAliasStubStore struct {
-	config ERunConfig
+	config configpkg.ERunConfig
 	saved  bool
 }
 
 func newOrchestratorAliasStubStore() *orchestratorAliasStubStore {
 	return &orchestratorAliasStubStore{
-		config: ERunConfig{
-			CloudProviders: []CloudProviderConfig{
-				{Alias: "erun+erunpaas.com@erun", Provider: CloudProviderERun},
-				{Alias: "aws-prod", Provider: CloudProviderAWS},
+		config: configpkg.ERunConfig{
+			CloudProviders: []configpkg.CloudProviderConfig{
+				{Alias: "erun+erunpaas.com@erun", Provider: configpkg.CloudProviderERun},
+				{Alias: "aws-prod", Provider: configpkg.CloudProviderAWS},
 			},
-			Orchestrators: []OrchestratorConfig{{
+			Orchestrators: []configpkg.OrchestratorConfig{{
 				ID:           "orch-1",
 				Name:         "Orchestrator One",
-				Environments: []OrchestratorEnvConfig{{Tenant: "frs", Environment: "laptop", Directory: "/repo"}},
+				Environments: []configpkg.OrchestratorEnvConfig{{Tenant: "frs", Environment: "laptop", Directory: "/repo"}},
 			}},
 		},
 	}
 }
 
-func (s *orchestratorAliasStubStore) LoadERunConfig() (ERunConfig, string, error) {
+func (s *orchestratorAliasStubStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
-func (s *orchestratorAliasStubStore) SaveERunConfig(config ERunConfig) error {
+func (s *orchestratorAliasStubStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	s.config = config
 	s.saved = true
 	return nil

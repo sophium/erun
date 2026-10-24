@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The state ERun keeps under the user's config directory is two trees, not
@@ -79,8 +81,8 @@ func goFuncBody(t *testing.T, fileName, funcName string) string {
 // can be checked is which name the code resolved through.
 func TestPortForwardStatePathNamesTheConfigRootThroughItsOneConstant(t *testing.T) {
 	body := goFuncBody(t, "port_forward_state.go", "PortForwardStatePath")
-	if !strings.Contains(body, "configRoot") {
-		t.Errorf("PortForwardStatePath must resolve the config tree through configRoot rather than a name of its own:\n%s", body)
+	if !strings.Contains(body, "ConfigRoot") {
+		t.Errorf("PortForwardStatePath must resolve the config tree through ConfigRoot rather than a name of its own:\n%s", body)
 	}
 	if literal := stateDirLiteralPattern.FindString(body); literal != "" {
 		t.Errorf("PortForwardStatePath spells the state directory out as the literal %s; resolving through configRoot is what keeps the port-forward tree from drifting away from the config tree it lives in", literal)
@@ -95,7 +97,7 @@ func TestPortForwardStatePathNamesTheConfigRootThroughItsOneConstant(t *testing.
 // is checked against rather than with the desktop's own state.
 func TestPortForwardStateLivesInsideTheConfigTree(t *testing.T) {
 	redirectConfigHomeForTest(t)
-	configTree, err := ERunConfigDir()
+	configTree, err := config.ERunConfigDir()
 	if err != nil {
 		t.Fatalf("ERunConfigDir: %v", err)
 	}
@@ -108,7 +110,7 @@ func TestPortForwardStateLivesInsideTheConfigTree(t *testing.T) {
 		t.Fatalf("port-forward state must sit in the config tree:\n got %q\nwant %q", statePath, want)
 	}
 
-	desktop := DefaultDesktopIdentityDir()
+	desktop := core.DefaultDesktopIdentityDir()
 	if desktop == "" {
 		t.Fatal("DefaultDesktopIdentityDir returned empty")
 	}
@@ -136,17 +138,17 @@ func TestTheDesktopStateTreeAndTheConfigTreeKeepTheirOwnSpellings(t *testing.T) 
 	}
 	t.Setenv("XDG_CONFIG_HOME", userConfigDir)
 	xdg.Reload()
-	configTree, err := ERunConfigDir()
+	configTree, err := config.ERunConfigDir()
 	if err != nil {
 		t.Fatalf("ERunConfigDir: %v", err)
 	}
-	desktop := DefaultDesktopIdentityDir()
+	desktop := core.DefaultDesktopIdentityDir()
 	if desktop == "" {
 		t.Fatal("DefaultDesktopIdentityDir returned empty")
 	}
 
-	if base := filepath.Base(configTree); base != configRoot {
-		t.Errorf("config tree base = %q, want configRoot %q", base, configRoot)
+	if base := filepath.Base(configTree); base != config.ConfigRoot {
+		t.Errorf("config tree base = %q, want configRoot %q", base, config.ConfigRoot)
 	}
 	// The published contract: the desktop identity is read from
 	// <user config dir>/ERun/desktopid.pub.

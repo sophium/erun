@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // newFakeDockerOnPath puts a fake `docker` executable ahead of PATH so these
@@ -244,23 +246,23 @@ func TestAPromoteThatRebuiltIsNotReportedAsACacheHit(t *testing.T) {
 	newFakeDockerImageStore(t)
 
 	clock := newFakeClock()
-	root := newStepTiming("build", clock.now)
+	root := core.NewStepTiming("build", clock.now)
 	var stdout, stderr bytes.Buffer
-	ctx := Context{Stdout: &stdout, Stderr: &stderr, timing: root}
+	ctx := core.Context{Stdout: &stdout, Stderr: &stderr, Timing: root}
 
 	buildInput := testPromoteBuildInput()
 	buildInput.Platforms = []string{"linux/amd64", "linux/arm64"}
 	if err := executeDockerBuild(ctx, buildInput, nil, &stdout, &stderr); err != nil {
 		t.Fatalf("expected the missing cached image to rebuild instead of failing, got: %v", err)
 	}
-	root.finish(nil)
+	root.Finish(nil)
 
 	// The correction has to reach every row the decision was attached to -- the
 	// image's own step and one child per platform -- because a row that still
 	// read "cache hit" is the same defect one level down. One image step plus
 	// its two platform children.
-	assertCorrectedTimingTable(t, renderStepTimingRows(root, 0), 3)
-	assertCorrectedTimingRecord(t, root.toRecord("build"))
+	assertCorrectedTimingTable(t, core.RenderStepTimingRows(root, 0), 3)
+	assertCorrectedTimingRecord(t, root.ToRecord("build"))
 }
 
 // assertCorrectedTimingTable requires every row carrying the promoted image's
@@ -271,7 +273,7 @@ func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
 	if strings.Contains(joined, "(cache hit)") {
 		t.Fatalf("a promote that rebuilt from source must not be reported as a cache hit, got:\n%s", joined)
 	}
-	if got := strings.Count(joined, "cache miss: "+promoteFallbackMissReason); got != wantRows {
+	if got := strings.Count(joined, "cache miss: "+core.PromoteFallbackMissReason); got != wantRows {
 		t.Fatalf("expected the correction on the image row and both platform rows (%d), got %d:\n%s", wantRows, got, joined)
 	}
 }
@@ -279,7 +281,7 @@ func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
 // assertCorrectedTimingRecord requires the machine-readable record -- the
 // surface tooling diffs between runs -- to carry the same correction rather
 // than the decision taken before the promote ran.
-func assertCorrectedTimingRecord(t *testing.T, record TimingRecord) {
+func assertCorrectedTimingRecord(t *testing.T, record core.TimingRecord) {
 	t.Helper()
 	if len(record.Steps) != 1 {
 		t.Fatalf("expected one image step in the record, got %d", len(record.Steps))
@@ -288,7 +290,7 @@ func assertCorrectedTimingRecord(t *testing.T, record TimingRecord) {
 	if image.CacheHit == nil || *image.CacheHit {
 		t.Fatalf("expected the image step's cacheHit to be false, got %v", image.CacheHit)
 	}
-	if image.CacheMissReason != promoteFallbackMissReason {
+	if image.CacheMissReason != core.PromoteFallbackMissReason {
 		t.Fatalf("expected the record to carry the corrected miss reason, got %q", image.CacheMissReason)
 	}
 	for _, platform := range image.Steps {

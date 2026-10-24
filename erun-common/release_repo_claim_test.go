@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The environment-scoped exclusive lease in release_claim_test.go passed
@@ -16,8 +18,8 @@ import (
 // git remote, from two separate checkouts, so a scope mistake shows up the
 // same way it did in production instead of passing by construction.
 
-func newTestClaimContext() Context {
-	return Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}
+func newTestClaimContext() core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}
 }
 
 // cloneRepoForTest gives a second independent checkout of remote, standing in
@@ -169,7 +171,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 // cancelled release leaves its environment's local claim in.
 func exitedProcessPIDForTest(t *testing.T) int {
 	t.Helper()
-	cmd := Command("git", "--version")
+	cmd := core.Command("git", "--version")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start a stand-in process: %v", err)
 	}
@@ -438,7 +440,7 @@ func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T
 }
 
 func runGitCheckForTest(dir string, args ...string) error {
-	cmd := Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := core.Command("git", append([]string{"-C", dir}, args...)...)
 	return cmd.Run()
 }
 

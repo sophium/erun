@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // buildSignatureDocStopwords are filler and verb words stripped before
@@ -84,9 +85,9 @@ var configLocationsGoOSFallbacks = map[string]string{
 // a rename in erun-common is what the documentation is compared against.
 func resolverConfigPaths(t *testing.T) (globalPath, tenantPath, envPath string) {
 	t.Helper()
-	_, globalPath, _ = eruncommon.LoadERunConfig()
-	_, tenantPath, _ = eruncommon.LoadTenantConfig("my-tenant")
-	_, envPath, _ = eruncommon.LoadEnvConfig("my-tenant", "local")
+	_, globalPath, _ = config.LoadERunConfig()
+	_, tenantPath, _ = config.LoadTenantConfig("my-tenant")
+	_, envPath, _ = config.LoadEnvConfig("my-tenant", "local")
 	if globalPath == "" || tenantPath == "" || envPath == "" {
 		t.Fatal("erun-common resolved an empty per-user config path; the rest of this test would pass vacuously")
 	}
@@ -170,7 +171,7 @@ func TestConfigLocationsDocMatchesResolver(t *testing.T) {
 
 	globalPath, tenantPath, envPath := resolverConfigPaths(t)
 
-	configRoot, err := eruncommon.ERunConfigDir()
+	configRoot, err := config.ERunConfigDir()
 	if err != nil {
 		t.Fatalf("erun-common could not resolve its config root: %v", err)
 	}

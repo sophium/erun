@@ -7,7 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // stubGatewayRouting answers the cluster read from a table keyed by
@@ -17,7 +18,7 @@ func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[st
 	var mu sync.Mutex
 	var asked []string
 	previous := readGatewayRouting
-	readGatewayRouting = func(_ context.Context, env eruncommon.EnvConfig, tenant string, catalog *eruncommon.OpenRouterConfig) (eruncommon.GatewayRouting, bool, error) {
+	readGatewayRouting = func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (eruncommon.GatewayRouting, bool, error) {
 		key := tenant + "/" + env.Name
 		mu.Lock()
 		asked = append(asked, key)
@@ -46,14 +47,14 @@ func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		// Switched off the way the ERun settings dialog does it: the base URL is
 		// cleared and the catalog's models stay.
-		config:  &eruncommon.ERunConfig{OpenRouter: &eruncommon.OpenRouterConfig{Models: []eruncommon.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
-		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
+		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
-			"erun/ux":    {Name: "ux", KubernetesContext: "erun", Claude: eruncommon.EnvironmentClaudeConfig{UseGateway: &no}},
+			"erun/ux":    {Name: "ux", KubernetesContext: "erun", Claude: config.EnvironmentClaudeConfig{UseGateway: &no}},
 			"erun/code1": {Name: "code1", KubernetesContext: "erun"},
 			"erun/code2": {Name: "code2", KubernetesContext: "erun"},
-			"erun/host":  {Name: "host", Type: eruncommon.EnvironmentTypeHost, KubernetesContext: "erun"},
+			"erun/host":  {Name: "host", Type: config.EnvironmentTypeHost, KubernetesContext: "erun"},
 			"erun/none":  {Name: "none"},
 		},
 	}})
@@ -80,9 +81,9 @@ func TestLoadGatewayRoutingDriftNamesPodsNotYetOnASwitchedOnGateway(t *testing.T
 	const gateway = "https://openrouter.ai/api"
 	stubGatewayRouting(t, map[string]string{"erun/build": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		config:  &eruncommon.ERunConfig{OpenRouter: &eruncommon.OpenRouterConfig{BaseURL: gateway}},
-		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun"}},
-		envs:    map[string]eruncommon.EnvConfig{"erun/build": {Name: "build", KubernetesContext: "erun-build"}},
+		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{BaseURL: gateway}},
+		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		envs:    map[string]config.EnvConfig{"erun/build": {Name: "build", KubernetesContext: "erun-build"}},
 	}})
 
 	got, err := app.LoadGatewayRoutingDrift()
@@ -98,9 +99,9 @@ func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 	const gateway = "https://openrouter.ai/api"
 	stubGatewayRouting(t, map[string]string{"erun/build": gateway, "erun/ux": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		config:  &eruncommon.ERunConfig{},
-		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun"}},
-		envs: map[string]eruncommon.EnvConfig{
+		config:  &config.ERunConfig{},
+		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
 			"erun/ux":    {Name: "ux", KubernetesContext: "erun"},
 		},

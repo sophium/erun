@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // consumedTestStageDockerfileContent is the repository's component shape:
@@ -161,7 +163,7 @@ func TestApplyIncrementalPromotionStillPromotesOrdinaryDockerfiles(t *testing.T)
 // --no-incremental skips promotion entirely and inspects nothing, so nothing
 // here may shell out.
 func TestApplyIncrementalToDockerBuildsPromotesNothingWithoutIncremental(t *testing.T) {
-	out, err := ApplyIncrementalToDockerBuilds(Context{}, []DockerBuildSpec{testStagePromotionBuild(t)}, true)
+	out, err := ApplyIncrementalToDockerBuilds(core.Context{}, []DockerBuildSpec{testStagePromotionBuild(t)}, true)
 	if err != nil {
 		t.Fatalf("ApplyIncrementalToDockerBuilds: %v", err)
 	}
@@ -178,12 +180,12 @@ func TestBuildSucceedsForAnAllPromotedPlanWithATestStageDockerfile(t *testing.T)
 	build.Fingerprint = "abc123"
 	build.Promote = true
 
-	if err := RunBuildExecution(Context{DryRun: true}, BuildExecutionSpec{dockerBuilds: []DockerBuildSpec{build}}, nil, nil, nil, nil, CloudDependencies{}); err != nil {
+	if err := RunBuildExecution(core.Context{DryRun: true}, BuildExecutionSpec{dockerBuilds: []DockerBuildSpec{build}}, nil, nil, nil, nil, CloudDependencies{}); err != nil {
 		t.Fatalf("expected an all-promoted plan to be accepted, got %v", err)
 	}
 
 	var log bytes.Buffer
-	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)})
+	ctx, finish := traceBuildUmbrella(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)})
 	promoted := false
 	err := RunDockerBuild(ctx, build, func(input DockerBuildSpec, _, _ io.Writer) error {
 		promoted = input.Promote

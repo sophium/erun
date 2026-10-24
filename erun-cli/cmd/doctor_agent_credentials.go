@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportAgentCredentials tells the operator whether this environment's runtime
@@ -23,7 +25,7 @@ import (
 // it broken. Like the neighbouring host-credentials section, it also stays
 // silent under --dry-run: the read is still traced by the diagnosis that owns
 // it, but the section is a live report.
-func reportAgentCredentials(ctx common.Context, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	status := diagnosis.AgentCredentials
 	switch status.State {
 	case "", common.RuntimeAgentCredentialNotApplicable:
@@ -44,7 +46,7 @@ const agentCredentialSectionHeader = "Agent capability"
 // agentCredentialStatusLine is the whole finding in one sentence, with the next
 // action attached rather than left to be inferred. Each arm says what was read,
 // what it means for an agent run, and what to do about it.
-func agentCredentialStatusLine(status common.RuntimeAgentCredentialStatus, result common.OpenResult) string {
+func agentCredentialStatusLine(status common.RuntimeAgentCredentialStatus, result config.OpenResult) string {
 	switch status.State {
 	case common.RuntimeAgentCredentialConfigured:
 		return fmt.Sprintf("available — the runtime pod's %s container carries %s (%s), so Claude Code in this environment is routed at the gateway erun configured.",

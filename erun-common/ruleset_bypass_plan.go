@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ruleset_bypass_plan.go is what has to exist before a repository's ruleset
@@ -136,7 +138,7 @@ type planRulesetBypassInputs struct {
 // ruleset's bypass list.
 var rulesetBypassActorTypes = []string{"User", "Integration", "Team", "RepositoryRole", "OrganizationAdmin", "DeployKey"}
 
-func resolvePlanRulesetBypassInputs(ctx Context, params PlanRulesetBypassParams) (planRulesetBypassInputs, error) {
+func resolvePlanRulesetBypassInputs(ctx core.Context, params PlanRulesetBypassParams) (planRulesetBypassInputs, error) {
 	ctx.Trace("plan-ruleset-bypass: resolving inputs")
 	if params.RulesetID <= 0 {
 		ctx.Trace("plan-ruleset-bypass: input resolution failed: ruleset id is required")
@@ -178,7 +180,7 @@ func resolvePlanRulesetBypassInputs(ctx Context, params PlanRulesetBypassParams)
 // non-human identity the only actor holding an always bypass, verifies the
 // preconditions that edit depends on, and writes the payload each stage (and
 // the rollback) applies.
-func PlanRulesetBypass(ctx Context, params PlanRulesetBypassParams, deps PlanRulesetBypassDependencies) (PlanRulesetBypassResult, error) {
+func PlanRulesetBypass(ctx core.Context, params PlanRulesetBypassParams, deps PlanRulesetBypassDependencies) (PlanRulesetBypassResult, error) {
 	inputs, err := resolvePlanRulesetBypassInputs(ctx, params)
 	if err != nil {
 		return PlanRulesetBypassResult{}, err
@@ -218,7 +220,7 @@ func PlanRulesetBypass(ctx Context, params PlanRulesetBypassParams, deps PlanRul
 // finishPlanRulesetBypass runs the networked half, isolated so the validation
 // and dry-run branching above it stay readable -- the same split
 // ReconcileBypass and ClosePullRequest use.
-func finishPlanRulesetBypass(ctx Context, client *http.Client, token string, inputs planRulesetBypassInputs, result PlanRulesetBypassResult) (PlanRulesetBypassResult, error) {
+func finishPlanRulesetBypass(ctx core.Context, client *http.Client, token string, inputs planRulesetBypassInputs, result PlanRulesetBypassResult) (PlanRulesetBypassResult, error) {
 	ruleset, err := getGitHubRuleset(context.Background(), client, token, inputs.owner, inputs.repo, inputs.rulesetID)
 	if err != nil {
 		return PlanRulesetBypassResult{}, err
@@ -300,7 +302,7 @@ func getGitHubRuleset(ctx context.Context, client *http.Client, token, owner, re
 // checkRulesetGovernsBranch refuses a plan whose named branch this ruleset
 // does not actually cover: the edit would be applied to the wrong ruleset and
 // the branch it was meant to protect would stay exactly as open as before.
-func checkRulesetGovernsBranch(ctx Context, ruleset githubRuleset, branch string) error {
+func checkRulesetGovernsBranch(ctx core.Context, ruleset githubRuleset, branch string) error {
 	if branch == "" {
 		return nil
 	}
@@ -327,7 +329,7 @@ func checkRulesetGovernsBranch(ctx Context, ruleset githubRuleset, branch string
 // resolveQueueActorID turns the named identity into the numeric actor id the
 // bypass list holds. A login is resolved through GitHub rather than trusted,
 // so a typo cannot become a grant to an account nobody meant.
-func resolveQueueActorID(ctx Context, client *http.Client, token string, inputs planRulesetBypassInputs) (int64, error) {
+func resolveQueueActorID(ctx core.Context, client *http.Client, token string, inputs planRulesetBypassInputs) (int64, error) {
 	if inputs.actorType == "DeployKey" || inputs.actorType == "OrganizationAdmin" {
 		ctx.Trace("plan-ruleset-bypass: " + inputs.actorType + " carries no actor id")
 		return 0, nil
@@ -355,7 +357,7 @@ func resolveQueueActorID(ctx Context, client *http.Client, token string, inputs 
 // resolveQueueActorPushAccess is the precondition that makes the ordering
 // safe: an identity that cannot push to the repository at all would be handed
 // the only bypass grant, and the next gated merge would have nowhere to go.
-func resolveQueueActorPushAccess(ctx Context, client *http.Client, token string, inputs planRulesetBypassInputs) (string, error) {
+func resolveQueueActorPushAccess(ctx core.Context, client *http.Client, token string, inputs planRulesetBypassInputs) (string, error) {
 	if inputs.actorType != "User" {
 		ctx.Trace("plan-ruleset-bypass: push access for a " + inputs.actorType +
 			" actor is not a collaborator permission; verify it with a real `git push --dry-run` as that identity before stage 2")
@@ -451,7 +453,7 @@ func rulesetPlanFilePath(inputs planRulesetBypassInputs, stage string) string {
 	return filepath.Join(inputs.outDir, fmt.Sprintf("ruleset-%d-%s.json", inputs.rulesetID, stage))
 }
 
-func writeRulesetPlanFile(ctx Context, path string, payload githubRulesetUpdate) error {
+func writeRulesetPlanFile(ctx core.Context, path string, payload githubRulesetUpdate) error {
 	body, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode ruleset payload for %s: %w", path, err)

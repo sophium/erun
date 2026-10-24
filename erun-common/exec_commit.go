@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // CommitWorkingTreeParams names the commit an orchestrator intends: the
@@ -55,8 +57,8 @@ type CommitWorkingTreeDependencies struct {
 	CurrentBranch GitValueResolverFunc
 	CurrentCommit GitValueResolverFunc
 	RunGit        GitCommandRunnerFunc
-	StagedFiles   func(Context, string) ([]string, error)
-	ChangedFiles  func(Context, string) ([]string, error)
+	StagedFiles   func(core.Context, string) ([]string, error)
+	ChangedFiles  func(core.Context, string) ([]string, error)
 }
 
 func normalizeCommitWorkingTreeDependencies(deps CommitWorkingTreeDependencies) CommitWorkingTreeDependencies {
@@ -85,7 +87,7 @@ func normalizeCommitWorkingTreeDependencies(deps CommitWorkingTreeDependencies) 
 // happens to be on. When Paths is set, the commit is refused just as loudly
 // if the tree has changes outside the declared paths, rather than silently
 // leaving them out of the commit.
-func CommitWorkingTree(ctx Context, root string, params CommitWorkingTreeParams, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+func CommitWorkingTree(ctx core.Context, root string, params CommitWorkingTreeParams, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
 	branch := strings.TrimSpace(params.Branch)
 	if branch == "" {
 		return CommitWorkingTreeResult{}, fmt.Errorf("branch is required")
@@ -141,7 +143,7 @@ func commitVerbArgs(skipHooks bool, message string) []string {
 // preview names files rather than just the git verbs. An unscoped real commit
 // skips it — the post-stage read-back in stageAndCommitWorkingTree already
 // reports what actually landed.
-func resolveCommitPreview(ctx Context, root string, scopedPaths []string, deps CommitWorkingTreeDependencies) ([]string, error) {
+func resolveCommitPreview(ctx core.Context, root string, scopedPaths []string, deps CommitWorkingTreeDependencies) ([]string, error) {
 	if len(scopedPaths) == 0 && !ctx.DryRun {
 		return nil, nil
 	}
@@ -179,7 +181,7 @@ func commitAddArgs(scopedPaths []string) []string {
 
 // traceCommitPreview names, in a dry run, exactly what a real run would
 // commit — the property the preview previously lacked.
-func traceCommitPreview(ctx Context, preview []string) {
+func traceCommitPreview(ctx core.Context, preview []string) {
 	if len(preview) == 0 {
 		ctx.Trace("commit: no changes to commit")
 		return
@@ -190,7 +192,7 @@ func traceCommitPreview(ctx Context, preview []string) {
 // stageAndCommitWorkingTree runs the mutating half of CommitWorkingTree,
 // isolated so the branch-verification and dry-run branching above it don't
 // inflate that function's complexity.
-func stageAndCommitWorkingTree(ctx Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
 	var addStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &addStderr, append([]string{"add"}, addArgs...)...); err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(addStderr.String()))
@@ -291,10 +293,10 @@ func pathWithinScope(path string, scoped []string) bool {
 // otherwise-special path bytes, and --relative reports paths relative to root
 // rather than the top of the enclosing repository, matching the basis Paths
 // is declared and compared in.
-func gitStagedFiles(ctx Context, root string) ([]string, error) {
+func gitStagedFiles(ctx core.Context, root string) ([]string, error) {
 	args := []string{"-C", root, "diff", "--cached", "--relative", "--name-only", "-z"}
 	ctx.TraceCommand("", "git", args...)
-	output, err := Command("git", args...).Output()
+	output, err := core.Command("git", args...).Output()
 	if err != nil {
 		if stderr := stderrFromExitError(err); stderr != "" {
 			return nil, fmt.Errorf("%w: %s", err, stderr)
@@ -314,12 +316,12 @@ func gitStagedFiles(ctx Context, root string) ([]string, error) {
 // it, changes elsewhere in the enclosing repository either never surface (the
 // guard is blind to them) or never match the declared paths (every scoped
 // commit is refused).
-func gitChangedWorkingTreeFiles(ctx Context, root string) ([]string, error) {
+func gitChangedWorkingTreeFiles(ctx core.Context, root string) ([]string, error) {
 	changed := make(map[string]struct{})
 	collect := func(args ...string) error {
 		traceArgs := append([]string{"-C", root}, args...)
 		ctx.TraceCommand("", "git", traceArgs...)
-		output, err := Command("git", traceArgs...).Output()
+		output, err := core.Command("git", traceArgs...).Output()
 		if err != nil {
 			if stderr := stderrFromExitError(err); stderr != "" {
 				return fmt.Errorf("%w: %s", err, stderr)

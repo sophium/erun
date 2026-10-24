@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // tenant_platform_registration.go is the Registration tab's own surface: the
@@ -57,7 +58,7 @@ const (
 // read of one fails, still sees the other — and the tab itself is hidden
 // only when the caller can neither read nor write anything registration-
 // shaped at all.
-func loadTenantDashboardRegistration(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardRegistration(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	loadTenantDashboardRegistrationCapabilities(capabilities, dashboard)
 	contextsRestricted := loadTenantDashboardContexts(ctx, client, capabilities, dashboard)
 	environmentsRestricted := loadTenantDashboardEnvironments(ctx, client, capabilities, dashboard)
@@ -71,7 +72,7 @@ func loadTenantDashboardRegistration(ctx context.Context, client *eruncommon.Pla
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-func loadTenantDashboardRegistrationCapabilities(capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardRegistrationCapabilities(capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	dashboard.CanCreateContext = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateContext) == ""
 	dashboard.CanRegisterEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteRegisterEnvironment) == ""
 	dashboard.CanDeployEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeployEnvironment) == ""
@@ -82,7 +83,7 @@ func loadTenantDashboardRegistrationCapabilities(capabilities eruncommon.Platfor
 // loadTenantDashboardContexts resolves the contexts list (or its restriction/
 // error) and returns the restriction, so the caller can fold it into the
 // tab-level hide decision without re-deriving it.
-func loadTenantDashboardContexts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) string {
+func loadTenantDashboardContexts(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadContexts)
 	if restricted != "" {
 		dashboard.ContextsRestricted = restricted
@@ -99,7 +100,7 @@ func loadTenantDashboardContexts(ctx context.Context, client *eruncommon.Platfor
 
 // loadTenantDashboardEnvironments is loadTenantDashboardContexts's mirror for
 // the environments list.
-func loadTenantDashboardEnvironments(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) string {
+func loadTenantDashboardEnvironments(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadEnvironments)
 	if restricted != "" {
 		dashboard.EnvironmentsRestricted = restricted

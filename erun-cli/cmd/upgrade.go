@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +94,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx common.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
+func runUpgrade(ctx core.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
 	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
 	// that env's trace log; the cross-tenant global run has no single env to
 	// attribute the trace to.
@@ -141,7 +142,7 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 // convention uses elsewhere (e.g. `erun exec plan-ruleset-bypass --dry-run`),
 // so a fleet-wide "--fleet"/"--gate-environment" preview can never read as a
 // completed rollout no matter how many members the resolved plan announces.
-func printUpgradeDryRunMarker(ctx common.Context) error {
+func printUpgradeDryRunMarker(ctx core.Context) error {
 	if !ctx.DryRun {
 		return nil
 	}
@@ -150,7 +151,7 @@ func printUpgradeDryRunMarker(ctx common.Context) error {
 }
 
 func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) common.UpgradeItemDeployer {
-	return func(ctx common.Context, item common.UpgradePlanItem) error {
+	return func(ctx core.Context, item common.UpgradePlanItem) error {
 		deployTarget := common.DeployTarget{
 			Tenant:          item.Tenant,
 			Environment:     item.Environment,

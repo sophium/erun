@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // RunningInCluster reports whether this process runs inside a Kubernetes pod —
@@ -38,30 +40,30 @@ type ClusterRegistryDeps struct {
 // kube-context. The pull host is always the registry Service's ClusterIP; the
 // push host is that same address in-pod, or a managed port-forward
 // (localhost:<port>) on the host.
-func NewClusterRegistryResolver(kubeContext string, deps ClusterRegistryDeps) ClusterRegistryResolver {
-	return func(c ClusterRegistry) (ClusterRegistryAddresses, error) {
+func NewClusterRegistryResolver(kubeContext string, deps ClusterRegistryDeps) config.ClusterRegistryResolver {
+	return func(c config.ClusterRegistry) (config.ClusterRegistryAddresses, error) {
 		c = c.WithDefaults()
 		if deps.LookupClusterIP == nil {
-			return ClusterRegistryAddresses{}, fmt.Errorf("cluster registry resolver missing a ClusterIP lookup")
+			return config.ClusterRegistryAddresses{}, fmt.Errorf("cluster registry resolver missing a ClusterIP lookup")
 		}
 		clusterIP, err := deps.LookupClusterIP(kubeContext, c.Namespace, c.Service)
 		if err != nil {
-			return ClusterRegistryAddresses{}, fmt.Errorf("resolve cluster registry %s/%s: %w", c.Namespace, c.Service, err)
+			return config.ClusterRegistryAddresses{}, fmt.Errorf("resolve cluster registry %s/%s: %w", c.Namespace, c.Service, err)
 		}
 		if strings.TrimSpace(clusterIP) == "" {
-			return ClusterRegistryAddresses{}, fmt.Errorf("cluster registry %s/%s has no ClusterIP; create the registry Service first", c.Namespace, c.Service)
+			return config.ClusterRegistryAddresses{}, fmt.Errorf("cluster registry %s/%s has no ClusterIP; create the registry Service first", c.Namespace, c.Service)
 		}
 		pull := clusterRegistryHost(clusterIP, c.Port)
 		if deps.InCluster {
-			return ClusterRegistryAddresses{Push: pull, Pull: pull}, nil
+			return config.ClusterRegistryAddresses{Push: pull, Pull: pull}, nil
 		}
 		if deps.StartPortForward == nil {
-			return ClusterRegistryAddresses{}, fmt.Errorf("cluster registry resolver missing a port-forward starter")
+			return config.ClusterRegistryAddresses{}, fmt.Errorf("cluster registry resolver missing a port-forward starter")
 		}
 		localPort, err := deps.StartPortForward(kubeContext, c.Namespace, c.Service, c.Port)
 		if err != nil {
-			return ClusterRegistryAddresses{}, fmt.Errorf("port-forward cluster registry %s/%s: %w", c.Namespace, c.Service, err)
+			return config.ClusterRegistryAddresses{}, fmt.Errorf("port-forward cluster registry %s/%s: %w", c.Namespace, c.Service, err)
 		}
-		return ClusterRegistryAddresses{Push: clusterRegistryHost("localhost", localPort), Pull: pull}, nil
+		return config.ClusterRegistryAddresses{Push: clusterRegistryHost("localhost", localPort), Pull: pull}, nil
 	}
 }

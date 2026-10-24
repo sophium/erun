@@ -12,19 +12,21 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runDeployOrchestration is the desktop's deploy. The desktop is barred from the
 // `build --deploy` operator-convenience switches (erun-ui/AGENTS.md), so it
 // composes the pure primitives itself and threads the version `build` minted
 // forward, guaranteeing what deploys is exactly what was built.
-func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection, result eruncommon.OpenResult, force bool) error {
+func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection, result config.OpenResult, force bool) error {
 	cli := a.deps.resolveCLIPath()
 	dir := resolveTerminalStartDir(result.RepoPath)
 	onLine := newActivityTraceLineHandler(a, selection, sessionKindLocal)
 
-	if result.EnvConfig.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+	if result.EnvConfig.ResolvedType() == config.EnvironmentTypeLocalAgent {
 		return a.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
 	}
 	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
@@ -105,8 +107,8 @@ func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 // EnvConfig.ResolvedType/HasPod in erun-common). Checked against ResolvedType
 // rather than the broader "BuildsHere() && !RemoteRepo()" combination, which a
 // host env also satisfies.
-func deployNeedsBuildOrchestration(result eruncommon.OpenResult, version string, force bool) bool {
-	if result.EnvConfig.ResolvedType() != eruncommon.EnvironmentTypeLocalAgent {
+func deployNeedsBuildOrchestration(result config.OpenResult, version string, force bool) bool {
+	if result.EnvConfig.ResolvedType() != config.EnvironmentTypeLocalAgent {
 		return false
 	}
 	return force || strings.TrimSpace(version) == ""
@@ -184,8 +186,8 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 		cliPath = "erun"
 	}
 	cmd := exec.CommandContext(ctx, cliPath, args...)
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), appSessionEnvVar+"=1")
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -292,7 +294,7 @@ func parseBuildResultVersion(stdout string) string {
 	if start < 0 || end <= start {
 		return ""
 	}
-	var result eruncommon.BuildResult
+	var result core.BuildResult
 	if err := json.Unmarshal([]byte(s[start:end+1]), &result); err != nil {
 		return ""
 	}

@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimePodRequestsList is `kubectl get pods -o json` for a local-agent
@@ -180,13 +183,13 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 		"cpu_time_after_ns=2000000000",
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
-	req := ShellLaunchParams{Tenant: "erun", Environment: "code1", Type: EnvironmentTypeLocalAgent}
+	req := ShellLaunchParams{Tenant: "erun", Environment: "code1", Type: config.EnvironmentTypeLocalAgent}
 	containerRunner := func(_ ShellLaunchParams, _, _ string) (RemoteCommandResult, error) {
 		return RemoteCommandResult{Stdout: reading}, nil
 	}
 
 	t.Run("read", func(t *testing.T) {
-		usage, err := RunRuntimeUsage(Context{}, containerRunner, func([]string) ([]byte, error) {
+		usage, err := RunRuntimeUsage(core.Context{}, containerRunner, func([]string) ([]byte, error) {
 			return []byte(runtimePodRequestsList), nil
 		}, req, RuntimeUsageParams{Interval: time.Second})
 		if err != nil {
@@ -201,7 +204,7 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 	})
 
 	t.Run("unreadable pod spec", func(t *testing.T) {
-		usage, err := RunRuntimeUsage(Context{}, containerRunner, func([]string) ([]byte, error) {
+		usage, err := RunRuntimeUsage(core.Context{}, containerRunner, func([]string) ([]byte, error) {
 			return nil, errors.New("kubectl get pods: connection refused")
 		}, req, RuntimeUsageParams{Interval: time.Second})
 		if err != nil {
@@ -223,7 +226,7 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 func TestDryRunTracesThePodSpecReadWithoutInventingAReservation(t *testing.T) {
 	req := ShellLaunchParams{Tenant: "erun", Environment: "code1"}
 	var trace strings.Builder
-	ctx := Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityTrace, &trace, &trace)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace)}
 	usage, err := RunRuntimeUsage(ctx, nil, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)

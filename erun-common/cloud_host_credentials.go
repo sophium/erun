@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // HostAWSCredentialsProfile is the profile the runtime chart wires into the
@@ -47,7 +50,7 @@ type HostCredentialsStatus struct {
 // own AWS profile and writes them into the env's runtime pod under the erun-host
 // profile. The secret is read here and streamed to the pod on stdin, so it never
 // appears in an argument, a trace line, or a golden.
-func RefreshHostAWSCredentials(ctx Context, store CloudReadStore, result OpenResult, deps CloudDependencies) (HostCredentialsRefresh, error) {
+func RefreshHostAWSCredentials(ctx core.Context, store CloudReadStore, result config.OpenResult, deps CloudDependencies) (HostCredentialsRefresh, error) {
 	alias := strings.TrimSpace(result.EnvConfig.CloudProviderAlias)
 	if alias == "" {
 		return HostCredentialsRefresh{}, fmt.Errorf("environment %s/%s has no AWS cloud provider alias; attach one with `erun cloud set %s %s --alias <alias>`",
@@ -57,7 +60,7 @@ func RefreshHostAWSCredentials(ctx Context, store CloudReadStore, result OpenRes
 	if err != nil {
 		return HostCredentialsRefresh{}, err
 	}
-	if provider.Provider != CloudProviderAWS {
+	if provider.Provider != config.CloudProviderAWS {
 		return HostCredentialsRefresh{}, fmt.Errorf("cloud provider alias %q is a %s alias; host credential refresh applies to AWS aliases only", provider.Alias, provider.Provider)
 	}
 
@@ -95,7 +98,7 @@ func RefreshHostAWSCredentials(ctx Context, store CloudReadStore, result OpenRes
 // InspectHostAWSCredentials reads back the pod's erun-host profile so staleness
 // is diagnosable at the erun layer. It reports presence and expiry only — the
 // script it runs never prints credential material.
-func InspectHostAWSCredentials(ctx Context, runner RemoteCommandRunnerFunc, store CloudReadStore, result OpenResult) (HostCredentialsStatus, error) {
+func InspectHostAWSCredentials(ctx core.Context, runner RemoteCommandRunnerFunc, store CloudReadStore, result config.OpenResult) (HostCredentialsStatus, error) {
 	status := HostCredentialsStatus{
 		Alias:   strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Profile: HostAWSCredentialsProfile,
@@ -123,7 +126,7 @@ func regionTraceValue(region string) string {
 	return region
 }
 
-func traceRuntimeExecCommand(ctx Context, args []string, label, script string) {
+func traceRuntimeExecCommand(ctx core.Context, args []string, label, script string) {
 	traceArgs := append([]string{}, args...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
@@ -142,7 +145,7 @@ func hostAWSCredentialsWriteArgs(req ShellLaunchParams, script string) []string 
 }
 
 func writeHostAWSCredentials(req ShellLaunchParams, script, payload string) error {
-	cmd := Command("kubectl", hostAWSCredentialsWriteArgs(req, script)...)
+	cmd := core.Command("kubectl", hostAWSCredentialsWriteArgs(req, script)...)
 	cmd.Stdin = strings.NewReader(payload)
 	var output bytes.Buffer
 	cmd.Stdout = &output
@@ -256,7 +259,7 @@ func parseHostAWSCredentialsReport(stdout string) (bool, time.Time) {
 // host. Empty means nothing resolved — callers must then omit the region rather
 // than pass an empty one, because an empty AWS_REGION overrides (instead of
 // falling back to) whatever the pod's own profile carries.
-func resolveEnvironmentAWSRegion(store CloudReadStore, env EnvConfig) string {
+func resolveEnvironmentAWSRegion(store CloudReadStore, env config.EnvConfig) string {
 	if region := cloudContextRegionFromName(env.KubernetesContext); region != "" {
 		return region
 	}
@@ -273,7 +276,7 @@ func resolveEnvironmentAWSRegion(store CloudReadStore, env EnvConfig) string {
 
 // awsRegionFromContainerRegistries reads the region out of an ECR host: a tenant
 // whose images live in ECR is already operating in that region.
-func awsRegionFromContainerRegistries(registries ContainerRegistries) string {
+func awsRegionFromContainerRegistries(registries config.ContainerRegistries) string {
 	for _, registry := range registries.DistinctRegistries() {
 		if region := awsRegionFromECRHost(registry); region != "" {
 			return region

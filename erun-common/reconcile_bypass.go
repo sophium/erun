@@ -9,6 +9,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reconcile_bypass.go implements the read half of the recorded decision on
@@ -146,7 +149,7 @@ type reconcileBypassInputs struct {
 	expectedActors                   []string
 }
 
-func resolveReconcileBypassInputs(ctx Context, params ReconcileBypassParams) (reconcileBypassInputs, error) {
+func resolveReconcileBypassInputs(ctx core.Context, params ReconcileBypassParams) (reconcileBypassInputs, error) {
 	ctx.Trace("reconcile-bypass: resolving inputs")
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
@@ -179,7 +182,7 @@ func resolveReconcileBypassInputs(ctx Context, params ReconcileBypassParams) (re
 // remote URL, falling back to the checkout's own origin. A command that
 // always runs against the repository the operator is standing in should not
 // make them retype its remote to be usable at all.
-func resolveGitHubRepoFromRemoteOrOrigin(ctx Context, remoteURL, traceLabel string) (owner, repo string, err error) {
+func resolveGitHubRepoFromRemoteOrOrigin(ctx core.Context, remoteURL, traceLabel string) (owner, repo string, err error) {
 	remote := strings.TrimSpace(remoteURL)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no --remote-url given; reading origin from the current checkout")
@@ -226,7 +229,7 @@ func trimmedNonEmpty(values []string) []string {
 // params.RulesetID/params.TargetBranch against the platform's build history,
 // and reports every bypassed push next to whether a successful build of a
 // commit it landed covers it.
-func ReconcileBypass(ctx Context, store CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
+func ReconcileBypass(ctx core.Context, store CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
 	inputs, err := resolveReconcileBypassInputs(ctx, params)
 	if err != nil {
 		return ReconcileBypassResult{}, err
@@ -260,7 +263,7 @@ func ReconcileBypass(ctx Context, store CloudReadStore, alias string, params Rec
 // reconciliation makes once it knows which pushes the tip commit alone did
 // not account for, so a dry run shows every call a real run can make rather
 // than only the one it always makes.
-func traceReconcileBypassFollowUpCalls(ctx Context, provider CloudProviderConfig, inputs reconcileBypassInputs) {
+func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
 		githubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
 	tracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
@@ -273,7 +276,7 @@ func traceReconcileBypassFollowUpCalls(ctx Context, provider CloudProviderConfig
 // finishReconcileBypass runs the networked half of ReconcileBypass, isolated
 // so the validation and dry-run branching above it don't inflate that
 // function's complexity -- the same split ClosePullRequest uses.
-func finishReconcileBypass(ctx Context, client *PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
+func finishReconcileBypass(ctx core.Context, client *PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
 	suites, truncated, err := listBypassedRuleSuites(context.Background(), httpClient, token, listURL)
 	if err != nil {
 		return ReconcileBypassResult{}, err

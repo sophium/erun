@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // seedPinnedTenantRepo lays down the shape a real tenant repo has: a Terraform
@@ -84,7 +87,7 @@ func TestResolvePinPlanFindsEveryErunReferenceAndLeavesTheTenantsOwnAlone(t *tes
 	// image it runs; one that states nothing on a tenant of its own runs that
 	// tenant's devops image instead, and its runtimeversion is not a pin site
 	// (TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenNothingIsStated).
-	env := EnvConfig{Name: "dev", RuntimeVersion: "1.0.115", RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.115"}
+	env := config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115", RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.115"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -117,7 +120,7 @@ func TestResolvePinPlanFindsEveryErunReferenceAndLeavesTheTenantsOwnAlone(t *tes
 // module ref above it, and must surface as a site of its own.
 func TestResolvePinPlanFindsAnErunImageReferenceInTerraformVariables(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -146,7 +149,7 @@ func TestResolvePinPlanDoesNotTreatDescriptionProseAsAnImageReferenceSite(t *tes
 	root := seedPinnedTenantRepo(t)
 	before := readPinFile(t, root, "terraform-acme/dev/variables.tf")
 
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -169,7 +172,7 @@ func TestResolvePinPlanDoesNotTreatDescriptionProseAsAnImageReferenceSite(t *tes
 // rewriting it would edit what the next `helm dependency update` regenerates.
 func TestResolvePinPlanSkipsVendoredCharts(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -185,7 +188,7 @@ func TestResolvePinPlanSkipsVendoredCharts(t *testing.T) {
 func applyPinnedRepo(t *testing.T) string {
 	t.Helper()
 	root := seedPinnedTenantRepo(t)
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -259,7 +262,7 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 		t.Fatalf("write: %v", err)
 	}
 
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -312,7 +315,7 @@ func TestResolvePinPlanStillPinsErunOwnedReferencesForATenantImagedEnv(t *testin
 func resolveTenantImagedRepoPlan(t *testing.T) PinPlan {
 	t.Helper()
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "prod", RuntimeVersion: "1.0.76", RuntimeImage: "ghcr.io/sophium/frs-devops:1.0.76"}
+	env := config.EnvConfig{Name: "prod", RuntimeVersion: "1.0.76", RuntimeImage: "ghcr.io/sophium/frs-devops:1.0.76"}
 	plan, err := ResolvePinPlan(root, "frs", "prod", env, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -329,7 +332,7 @@ func resolveTenantImagedRepoPlan(t *testing.T) PinPlan {
 // is not this environment's number to hold — and say which statement it read.
 func TestResolvePinPlanLeavesAnOwnUmbrellaEnvsRuntimeVersionAlone(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "build", RuntimeChart: "oci://ghcr.io/sophium/charts/frs-devops:1.0.134"}
+	env := config.EnvConfig{Name: "build", RuntimeChart: "oci://ghcr.io/sophium/charts/frs-devops:1.0.134"}
 
 	plan, err := ResolvePinPlan(root, "frs", "build", env, "1.0.287")
 	if err != nil {
@@ -353,7 +356,7 @@ func TestResolvePinPlanLeavesAnOwnUmbrellaEnvsRuntimeVersionAlone(t *testing.T) 
 // pin — and the note must say where it read it.
 func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{
+	env := config.EnvConfig{
 		Name:                "build",
 		RuntimeVersion:      "1.0.134",
 		RuntimeImage:        "ghcr.io/sophium/erun-devops:1.0.284",
@@ -384,7 +387,7 @@ func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t
 // the decision rested on.
 func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenNothingIsStated(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "build"}
+	env := config.EnvConfig{Name: "build"}
 
 	plan, err := ResolvePinPlan(root, "frs", "build", env, "1.0.287")
 	if err != nil {
@@ -411,19 +414,19 @@ func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
 		name        string
 		tenant      string
 		environment string
-		env         EnvConfig
+		env         config.EnvConfig
 	}{
 		{
 			name:        "erun's own tenant, nothing stated",
 			tenant:      "erun",
 			environment: "dev",
-			env:         EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"},
+			env:         config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"},
 		},
 		{
 			name:        "stock image and stock chart stated",
 			tenant:      "acme",
 			environment: "dev",
-			env: EnvConfig{
+			env: config.EnvConfig{
 				Name:                "dev",
 				RuntimeVersion:      "1.0.115",
 				RuntimeImage:        "ghcr.io/sophium/erun-devops:1.0.115",
@@ -484,7 +487,7 @@ func skipNoteNaming(t *testing.T, plan PinPlan, fragments ...string) string {
 // safe against a partially aligned tree.
 func TestApplyPinPlanIsANoOpOnceAligned(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}
+	env := config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -521,13 +524,13 @@ func TestRefreshPinnedChartLocksVisitsEachMovedChartOnce(t *testing.T) {
 		t.Fatalf("write chart: %v", err)
 	}
 
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 
 	var visited []string
-	err = RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ Context, dir string) error {
+	err = RefreshPinnedChartLocks(core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ core.Context, dir string) error {
 		visited = append(visited, dir)
 		return nil
 	})
@@ -546,11 +549,11 @@ func TestRefreshPinnedChartLocksVisitsEachMovedChartOnce(t *testing.T) {
 // started from, so a failure names the chart and stops rather than carrying on.
 func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	err = RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ Context, dir string) error {
+	err = RefreshPinnedChartLocks(core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ core.Context, dir string) error {
 		return fmt.Errorf("registry unreachable for %s", filepath.Base(dir))
 	})
 	if err == nil || !strings.Contains(err.Error(), "acme-api") {
@@ -566,7 +569,7 @@ func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
 		{Kind: PinSiteTerraformRef, Path: "terraform-acme/dev/main.tf", Current: "1.0.102", Target: "1.0.175"},
 	}}
 	called := 0
-	if err := RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(Context, string) error {
+	if err := RefreshPinnedChartLocks(core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(core.Context, string) error {
 		called++
 		return nil
 	}); err != nil {
@@ -604,15 +607,15 @@ func TestPinPreviousSurvivesARepeatedRePin(t *testing.T) {
 
 func TestResolvePinPlanRefusesWithoutATarget(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	if _, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{}, "  "); err == nil {
+	if _, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{}, "  "); err == nil {
 		t.Fatal("a re-pin needs a target version")
 	}
-	if _, err := ResolvePinPlan("", "acme", "dev", EnvConfig{}, "1.0.175"); err == nil {
+	if _, err := ResolvePinPlan("", "acme", "dev", config.EnvConfig{}, "1.0.175"); err == nil {
 		t.Fatal("a re-pin needs a project root")
 	}
 	// A leading v is how the tags are written; the pins are not all written that
 	// way, so the target is normalised once rather than at each site.
-	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{}, "v1.0.175")
+	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{}, "v1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -639,7 +642,7 @@ func TestResolvePinPlanRefusesAnUnresolvedTenantOrEnvironment(t *testing.T) {
 		{"both whitespace", "  ", "  "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := ResolvePinPlan(root, tc.tenant, tc.environment, EnvConfig{}, "1.0.175")
+			plan, err := ResolvePinPlan(root, tc.tenant, tc.environment, config.EnvConfig{}, "1.0.175")
 			if err == nil {
 				t.Fatalf("expected a refusal, got a plan: %+v", plan)
 			}
@@ -656,7 +659,7 @@ func TestResolvePinPlanRefusesAnUnresolvedTenantOrEnvironment(t *testing.T) {
 // chart an environment actually installs pointed at the old version.
 func TestResolvePinPlanMovesTheStockRuntimeChartVersion(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201"}
+	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -683,7 +686,7 @@ func TestResolvePinPlanMovesTheStockRuntimeChartVersion(t *testing.T) {
 // tenant-imaged runtimeimage alone.
 func TestResolvePinPlanLeavesATenantOwnRuntimeChartAlone(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/acme-devops:1.0.76"}
+	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/acme-devops:1.0.76"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -710,7 +713,7 @@ func TestResolvePinPlanLeavesATenantOwnRuntimeChartAlone(t *testing.T) {
 // for pin to move, and nothing to warn about either.
 func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops"}
+	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -734,7 +737,7 @@ func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 // established for the runtime-image line guard.
 func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeChart: "oci://"}
+	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -762,7 +765,7 @@ func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T
 // since ResolvePinPlan never writes, it must do so without mutating anything.
 func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{
+	env := config.EnvConfig{
 		Name:         "prod",
 		RuntimeImage: "ghcr.io/sophium/petios-devops",
 		RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
@@ -798,7 +801,7 @@ func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.
 // and runtimeversion all move to the target in the one write
 // ApplyPinnedEnvConfig computes.
 func TestApplyPinnedEnvConfigMovesRuntimeVersionImageAndChartTogether(t *testing.T) {
-	env := EnvConfig{
+	env := config.EnvConfig{
 		Name:           "dev",
 		RuntimeVersion: "1.0.201",
 		RuntimeImage:   "ghcr.io/sophium/erun-devops:1.0.201",
@@ -829,7 +832,7 @@ func TestApplyPinnedEnvConfigMovesRuntimeVersionImageAndChartTogether(t *testing
 // survive a re-pin too. Writing the erun target into runtimeversion here is what
 // left an environment holding a number its own release line never publishes.
 func TestApplyPinnedEnvConfigLeavesAnOwnUmbrellaEnvsWholeCoordinateUnchanged(t *testing.T) {
-	env := EnvConfig{
+	env := config.EnvConfig{
 		Name:           "dev",
 		RuntimeVersion: "1.0.76",
 		RuntimeChart:   "oci://ghcr.io/sophium/charts/acme-devops:1.0.76",

@@ -3,6 +3,10 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // UnexposeParams are the inputs to removing an environment's per-env wildcard
@@ -51,9 +55,9 @@ type UnexposeResult struct {
 // The DNS delete uses the same two-path decision RunExposeService's upsert
 // does — see resolveUnexposeDNSDeleter. deleteDNSRecord, when
 // non-nil, overrides the decision outright (tests).
-func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
-		store = ConfigStore{}
+		store = config.ConfigStore{}
 	}
 
 	if params.SkipIfUnconfigured && !unexposePlatformConfigured(params) {
@@ -104,7 +108,7 @@ func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, c
 func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (UnexposeResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if err := errMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
 		return UnexposeResult{}, err
 	}
 	if err := ValidateTenantName(tenant); err != nil {

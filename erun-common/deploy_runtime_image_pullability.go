@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // deployRuntimeImagePullProbe is the anonymousPullProbeFunc RunHelmDeploy
@@ -67,7 +69,7 @@ func autoImagePullSecretName(tenant string) string {
 //     could not get an answer -- refuses. An inconclusive probe is never
 //     treated as "public": that is exactly the assumption that let this
 //     failure hide until the image actually went private.
-func ensureRuntimeImagePullSecret(ctx Context, deployInput *HelmDeploySpec, probe anonymousPullProbeFunc) error {
+func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe anonymousPullProbeFunc) error {
 	image := strings.TrimSpace(deployInput.ImageOverrides[DevopsComponentName])
 	if image == "" {
 		return nil

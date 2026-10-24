@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // PushWorkingTreeBranchParams names the push an orchestrator intends: the
@@ -61,7 +63,7 @@ func normalizePushWorkingTreeBranchDependencies(deps PushWorkingTreeBranchDepend
 // review has always needed this operation; "raw" running `git push` was the
 // only way to get it, and that is exactly the escape hatch a typed command
 // exists to replace.
-func PushWorkingTreeBranch(ctx Context, root string, params PushWorkingTreeBranchParams, deps PushWorkingTreeBranchDependencies) (PushWorkingTreeBranchResult, error) {
+func PushWorkingTreeBranch(ctx core.Context, root string, params PushWorkingTreeBranchParams, deps PushWorkingTreeBranchDependencies) (PushWorkingTreeBranchResult, error) {
 	branch := strings.TrimSpace(params.Branch)
 	if branch == "" {
 		return PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")

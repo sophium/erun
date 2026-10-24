@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -111,14 +113,14 @@ func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
 	if contexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, boundaryTarget(projectRoot)); !errors.Is(err, ErrDockerBuildContextNotFound) {
 		t.Fatalf("a package directory resolved image contexts %+v, %v", contexts, err)
 	}
-	execution, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(execution.dockerBuilds) != 0 || !slices.Equal(linuxPackageNames(execution.linuxPackages), []string{"erun-ui"}) {
 		t.Fatalf("expected only the erun-ui package, got images %+v and packages %+v", execution.dockerBuilds, execution.linuxPackages)
 	}
-	_, _, err = ResolveDockerPushSpec(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	_, _, err = ResolveDockerPushSpec(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err == nil || !strings.Contains(err.Error(), "is a linux package, not an image") {
 		t.Fatalf("a push from a package directory must be refused by name, got %v", err)
 	}
@@ -129,7 +131,7 @@ func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
 func TestPlainBuildResolvesLinuxPackagesBesideImages(t *testing.T) {
 	projectRoot, _, _ := linuxPackageProject(t)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
-	execution, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestPlainBuildRefusesAPackageWithNothingToRun(t *testing.T) {
 	projectRoot, _, cliDir := linuxPackageProject(t)
 	writeTestDockerfile(t, cliDir, "FROM debian:bookworm AS dist\nRUN true\n")
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
-	_, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err == nil || !strings.Contains(err.Error(), "linux package erun-cli declares neither a `test` nor a `build` stage") {
 		t.Fatalf("expected the package without a test or build stage to be refused, got %v", err)
 	}
@@ -210,7 +212,7 @@ func TestLinuxPackageChecksBuildCacheOnlyAndReportOutcomes(t *testing.T) {
 	})
 	dockerLog := fakeDockerRecorder(t, "0")
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	if err := runLinuxPackageChecks(ctx, packages); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +235,7 @@ func TestLinuxPackageCheckFailureReportsNoOutcome(t *testing.T) {
 	packages := newLinuxPackageSpecs(projectRoot, []LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
 	fakeDockerRecorder(t, "1")
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	err := runLinuxPackageChecks(ctx, packages)
 	if err == nil || !strings.Contains(err.Error(), "linux package erun-ui") || strings.Contains(log.String(), "test:") {
 		t.Fatalf("expected a named failure and no outcome, got %v and %q", err, log.String())
@@ -269,7 +271,7 @@ func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2-rc.1")
 	dockerLog := fakeDockerRecorder(t, "0")
 	ghLog := fakeGitHubCLI(t, "1")
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	stale := filepath.Join(spec.LinuxPackageDir, "erun-ui", "linux", "amd64", "erun-desktop_1.4.1.deb")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
 		t.Fatal(err)
@@ -297,7 +299,7 @@ func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
 	assertGitHubReleaseCreated(t, ctx, spec, ghLog)
 }
 
-func assertGitHubReleaseCreated(t *testing.T, ctx Context, spec ReleaseSpec, ghLog string) {
+func assertGitHubReleaseCreated(t *testing.T, ctx core.Context, spec ReleaseSpec, ghLog string) {
 	t.Helper()
 	if err := uploadReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
@@ -323,7 +325,7 @@ func TestReleaseUploadsToAnExistingGitHubRelease(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2")
 	fakeDockerRecorder(t, "0")
 	ghLog := fakeGitHubCLI(t, "0")
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	if err := exportReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +343,7 @@ func TestReleaseUploadsToAnExistingGitHubRelease(t *testing.T) {
 func TestReleaseUploadRefusesAnExportWithoutPackages(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2")
 	ghLog := fakeGitHubCLI(t, "0")
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	err := uploadReleaseLinuxPackages(ctx, spec)
 	if err == nil || !strings.Contains(err.Error(), "exported no .deb file") || !strings.Contains(err.Error(), "do not delete the tag") {
 		t.Fatalf("expected a missing-package failure, got %v", err)
@@ -358,7 +360,7 @@ func TestReleaseLinuxPackagesDryRunTracesWithoutRunning(t *testing.T) {
 	dockerLog := fakeDockerRecorder(t, "0")
 	ghLog := fakeGitHubCLI(t, "0")
 	var trace bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityTrace, &trace, &trace)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace)}
 	if err := exportReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
@@ -395,10 +397,10 @@ func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 	stub := writeExecutableScript(t, "touch '"+gate+"/started'\nwhile [ ! -e '"+gate+"/release' ]; do sleep 0.01; done\nexit 0")
 	t.Setenv("ERUN_DOCKER_BIN", stub)
 	var log syncBuffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	ticks := make(chan time.Time)
-	heartbeat := &buildHeartbeat{now: time.Now, emit: func(string) {}, ticks: ticks}
-	ctx.progress = heartbeat
+	heartbeat := &core.BuildHeartbeat{Now: time.Now, Emit: func(string) {}, Ticks: ticks}
+	ctx.Progress = heartbeat
 	done := make(chan error, 1)
 	go func() { done <- runLinuxPackageChecks(ctx, packages) }()
 	deadline := time.Now().Add(20 * time.Second)
@@ -411,7 +413,7 @@ func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	line := heartbeat.line()
+	line := heartbeat.Line()
 	if err := os.WriteFile(filepath.Join(gate, "release"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +423,7 @@ func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 	if !strings.HasPrefix(line, "still building erun-ui, ") {
 		t.Fatalf("while the package build runs the heartbeat should name it, got %q", line)
 	}
-	if after := heartbeat.line(); after != "" {
+	if after := heartbeat.Line(); after != "" {
 		t.Fatalf("a finished package build must leave the heartbeat, got %q", after)
 	}
 }
@@ -432,7 +434,7 @@ func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 	t.Setenv("ERUN_TENANT", "team")
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
-	parent := buildContainerCPUCapCgroupParent()
+	parent := core.BuildContainerCPUCapCgroupParent()
 	if parent == "" {
 		t.Fatal("an injected runtime pod should have a CPU cap cgroup parent")
 	}
@@ -440,7 +442,7 @@ func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 	packages := newLinuxPackageSpecs(projectRoot, []LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
 	dockerLog := fakeDockerRecorder(t, "0")
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	if err := runLinuxPackageChecks(ctx, packages); err != nil {
 		t.Fatal(err)
 	}

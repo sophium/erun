@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // unconfiguredStore is the state the reported defect is about: a store that
@@ -11,8 +14,8 @@ import (
 // serialises as.
 type unconfiguredStore struct{}
 
-func (unconfiguredStore) LoadERunConfig() (ERunConfig, string, error) {
-	return ERunConfig{}, "", nil
+func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{}, "", nil
 }
 
 // TestCloudProviderListStatusesIsNeverNil pins the producers' half of the
@@ -36,7 +39,7 @@ func TestCloudProviderListStatusesIsNeverNil(t *testing.T) {
 // attempted, because an empty array there would assert that it ran and found
 // nothing to report -- a different fact from never having looked.
 func TestCloudContextListResultCarriesAnEmptyArray(t *testing.T) {
-	result, err := RefreshCloudContextList(Context{}, unconfiguredStore{}, CloudContextDependencies{})
+	result, err := RefreshCloudContextList(core.Context{}, unconfiguredStore{}, CloudContextDependencies{})
 	if err != nil {
 		t.Fatalf("refresh cloud context list: %v", err)
 	}

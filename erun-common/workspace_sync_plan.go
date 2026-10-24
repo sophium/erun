@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The distinct reasons a sync cannot run. They stay separate values because the
@@ -19,7 +21,7 @@ var (
 // WorkspaceSyncLocalPath resolves the host directory a pass mirrors into: the
 // configured path first, then the project root, then the environment's own
 // worktree when that already lives on this host.
-func WorkspaceSyncLocalPath(result OpenResult, findProjectRoot ProjectFinderFunc) string {
+func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot ProjectFinderFunc) string {
 	if localPath := strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath); localPath != "" {
 		return localPath
 	}
@@ -38,7 +40,7 @@ func WorkspaceSyncLocalPath(result OpenResult, findProjectRoot ProjectFinderFunc
 // run, or names the precondition it fails. Every transport resolves through
 // here, so the desktop poller, the CLI and the MCP agree on both what a pass
 // addresses and when there is nothing to address.
-func ResolveWorkspaceSyncParams(result OpenResult, findProjectRoot ProjectFinderFunc) (WorkspaceSyncParams, error) {
+func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot ProjectFinderFunc) (WorkspaceSyncParams, error) {
 	if !result.RemoteRepo() {
 		return WorkspaceSyncParams{}, ErrWorkspaceSyncNotRemoteAgent
 	}

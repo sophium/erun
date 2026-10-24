@@ -5,9 +5,10 @@ import (
 	"sort"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func writeUsageResult(ctx common.Context, report common.RuntimeUsageReport) error {
+func writeUsageResult(ctx core.Context, report common.RuntimeUsageReport) error {
 	usage := report.RuntimeUsage
 	if err := writeUsageCPU(ctx, "", usage.CPU); err != nil {
 		return err
@@ -38,7 +39,7 @@ func writeUsageResult(ctx common.Context, report common.RuntimeUsageReport) erro
 // runtime image, a sidecar mid-restart), matching the desktop hover card's
 // "-- excludes builds" caveat (Sidebar.EnvHoverCard.tsx) so both transports
 // agree on what this reading covers either way.
-func writeUsageDindReading(ctx common.Context, usage common.RuntimeUsage) error {
+func writeUsageDindReading(ctx core.Context, usage common.RuntimeUsage) error {
 	if !usage.ExcludesBuilds {
 		return nil
 	}
@@ -56,7 +57,7 @@ func writeUsageDindReading(ctx common.Context, usage common.RuntimeUsage) error 
 	return writeUsageMemory(ctx, "  ", usage.Dind.Memory)
 }
 
-func writeUsageCPU(ctx common.Context, prefix string, cpu common.RuntimeCPUUsage) error {
+func writeUsageCPU(ctx core.Context, prefix string, cpu common.RuntimeCPUUsage) error {
 	if cpu.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sCPU: unavailable (%s)\n", prefix, cpu.Unavailable)
 		return err
@@ -71,7 +72,7 @@ func writeUsageCPU(ctx common.Context, prefix string, cpu common.RuntimeCPUUsage
 // environment holds 2.0GiB": a cgroup ceiling is what the container may grow to
 // under pressure, and it reserves nothing at all. The reservation is the line
 // writeUsageRequests prints beneath it.
-func writeUsageMemory(ctx common.Context, prefix string, memory common.RuntimeMemoryUsage) error {
+func writeUsageMemory(ctx core.Context, prefix string, memory common.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
 		return err
@@ -100,7 +101,7 @@ func writeUsageMemory(ctx common.Context, prefix string, memory common.RuntimeMe
 // It names each container's own request as well as the pod's effective total,
 // because the container is what each limit above belongs to -- the runtime
 // container's 1GiB request is the figure to read against its own 27GiB limit.
-func writeUsageRequests(ctx common.Context, requests *common.RuntimeUsageRequests) error {
+func writeUsageRequests(ctx core.Context, requests *common.RuntimeUsageRequests) error {
 	if requests == nil {
 		// A dry run read nothing, and the reading is omitted rather than
 		// printed as a reservation of nothing.
@@ -171,7 +172,7 @@ func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
 // actually wrote the bytes (see RuntimeDiskUsage.NodeShared). The own-usage
 // line beneath it is the number scoped to this environment alone -- the one
 // an operator can actually reduce by cleaning up this environment.
-func writeUsageDisk(ctx common.Context, disks []common.RuntimeDiskUsage) error {
+func writeUsageDisk(ctx core.Context, disks []common.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
 			if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared) %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
@@ -195,7 +196,7 @@ func formatUsageDiskOwn(disk common.RuntimeDiskUsage) string {
 	return formatUsageBytes(disk.OwnUsedBytes)
 }
 
-func writeUsageWarnings(ctx common.Context, warnings []string) error {
+func writeUsageWarnings(ctx core.Context, warnings []string) error {
 	if len(warnings) == 0 {
 		return nil
 	}
@@ -223,7 +224,7 @@ func writeUsageWarnings(ctx common.Context, warnings []string) error {
 // observed rather than silence about a saturated one: a memory warning is
 // derived from the same evidence and the same threshold as a raise, so a
 // warning always arrives with its verdict.
-func writeUsageSizing(ctx common.Context, sizing *common.RuntimeSizingRecommendation) error {
+func writeUsageSizing(ctx core.Context, sizing *common.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}

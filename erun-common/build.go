@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) ([]DockerBuildSpec, error) {
+func ResolveCurrentDockerBuildSpecs(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) ([]DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -39,7 +42,7 @@ func newEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
 }
 
-func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	recommendBuildEnvIfMissing(ctx, findProjectRoot, target)
@@ -94,7 +97,7 @@ func buildExecutionPlansWork(execution BuildExecutionSpec) bool {
 // finalizeBuildExecution applies incremental promotion, then resolves the
 // component chart source off the final builds so their release/snapshot version
 // and registry drive the chart specs.
-func finalizeBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
+func finalizeBuildExecution(ctx core.Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
 	execution, err := ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	if err != nil {
 		return BuildExecutionSpec{}, err
@@ -116,7 +119,7 @@ func buildEnvDisablesBuildScript(store DockerStore, findProjectRoot ProjectFinde
 // environment toward creating one. Every build path funnels through
 // ResolveBuildExecution, so the advisory fires even when a bare Dockerfile build
 // would otherwise succeed. Best-effort: a detection failure never blocks the build.
-func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
+func recommendBuildEnvIfMissing(ctx core.Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
@@ -141,14 +144,14 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 // advisory's concern — the real build resolution reports that loudly on its
 // own, so this simply falls through to the unchanged paths.docker check.
 func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
-	_, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	_, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err == nil && ok {
 		return strings.TrimSpace(paths.Docker) != ""
 	}
 	if ok {
 		return false
 	}
-	paths, err = loadProjectPaths(projectRoot)
+	paths, err = config.LoadProjectPaths(projectRoot)
 	return err == nil && strings.TrimSpace(paths.Docker) != ""
 }
 
@@ -161,14 +164,14 @@ func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 // before the resolution that follows fails loudly on it. It also warns when
 // the project config itself is gitignored, since that silently voids the very
 // overrides it just traced.
-func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
+func traceConfiguredBuildPaths(ctx core.Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	WarnIfProjectConfigGitIgnored(ctx, projectRoot)
+	config.WarnIfProjectConfigGitIgnored(ctx, projectRoot)
 
-	name, paths, ok, err := resolveProjectComponent(projectRoot, target.Component)
+	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, target.Component)
 	if err != nil {
 		ctx.Trace("build: component selection failed: " + err.Error())
 		return
@@ -178,7 +181,7 @@ func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, t
 		ctx.Trace("build: component " + name + " selected (.erun/config.yaml components)")
 		keyPrefix = "components." + name
 	} else {
-		paths, err = loadProjectPaths(projectRoot)
+		paths, err = config.LoadProjectPaths(projectRoot)
 		if err != nil {
 			return
 		}
@@ -329,7 +332,7 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 
 	// Build callers don't surface a Context; the zero value is safe here because
 	// a zero-value Logger silently drops traces.
-	releaseSpec, err := ResolveReleaseSpec(Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
+	releaseSpec, err := ResolveReleaseSpec(core.Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return DockerCommandTarget{}, nil, err
 	}

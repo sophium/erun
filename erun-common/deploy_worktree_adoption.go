@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // worktreeClaimSuffix names the runtime release's dedicated worktree volume; it
@@ -32,7 +35,7 @@ func podWorktreePath(repoName string) string {
 //
 // Best-effort by design — when the claim's existence cannot be read, the notice
 // is printed anyway. Staying quiet is the failure mode being fixed.
-func announceWorktreeVolumeChange(ctx Context, spec HelmDeploySpec) {
+func announceWorktreeVolumeChange(ctx core.Context, spec HelmDeploySpec) {
 	if spec.WorktreeStorage != WorktreeStoragePVC {
 		return
 	}
@@ -95,14 +98,14 @@ func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
 // claim is not there" from "the answer is unknown" either way, so a cluster
 // erun cannot read never passes for a settled worktree.
 func worktreeClaimExists(contextName, namespace, claim string) (bool, error) {
-	if currentExecutionMode(kubectlPVCGetExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlPVCGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryPersistentVolumeClaimExists(contextName, namespace, claim)
 	}
 	return defaultWorktreeClaimExists(contextName, namespace, claim)
 }
 
 func defaultWorktreeClaimExists(contextName, namespace, claim string) (bool, error) {
-	output, err := Command("kubectl", kubectlGetPVCArgs(contextName, namespace, claim)...).CombinedOutput()
+	output, err := core.Command("kubectl", kubectlGetPVCArgs(contextName, namespace, claim)...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

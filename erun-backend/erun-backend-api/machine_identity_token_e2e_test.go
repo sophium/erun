@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // This file closes the two proof gaps an audit of the landed machine-identity
@@ -184,10 +184,10 @@ func writeOIDCError(w http.ResponseWriter, status int, code string) {
 // staticCloudReadStore is the cloud config reader the grant resolves its alias
 // through: one provider, already saved, exactly as `erun init` leaves it.
 type staticCloudReadStore struct {
-	config eruncommon.ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s staticCloudReadStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s staticCloudReadStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
@@ -284,18 +284,18 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
 	mustNoErr(t, secrets.SaveCloudSecret(secretRef, f.identity.ClientSecret), "save the provisioned client secret")
 
-	store := staticCloudReadStore{config: eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+	store := staticCloudReadStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:         machineIdentityTokenAlias,
-		Provider:      eruncommon.CloudProviderERun,
+		Provider:      configpkg.CloudProviderERun,
 		OIDCIssuerURL: issuer.issuer(),
-		ERun: &eruncommon.ERunProviderConfig{
+		ERun: &configpkg.ERunProviderConfig{
 			APIURL:          "http://platform.invalid",
 			ClientID:        f.identity.ClientID,
 			ClientSecretRef: secretRef,
 		},
 	}}}}
 	token, err := eruncommon.CloudProviderBearerToken(
-		eruncommon.Context{},
+		core.Context{},
 		store,
 		eruncommon.CloudBearerParams{Alias: machineIdentityTokenAlias},
 		eruncommon.CloudDependencies{CloudSecretStore: secrets},

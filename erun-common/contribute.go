@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -148,13 +150,13 @@ type WriteFileFunc func(path string, data []byte, perm os.FileMode) error
 //
 // The audit and command trace lines it emits are locked by integration
 // goldens.
-func RunContributeClone(ctx Context, homeDir string, runGit GitCommandRunnerFunc) error {
+func RunContributeClone(ctx core.Context, homeDir string, runGit GitCommandRunnerFunc) error {
 	return RunContributeCloneWithIO(ctx, homeDir, runGit, ContributeCloneIO{})
 }
 
 // RunContributeCloneWithIO is the test-friendly variant of
 // RunContributeClone with injectable filesystem helpers.
-func RunContributeCloneWithIO(ctx Context, homeDir string, runGit GitCommandRunnerFunc, io ContributeCloneIO) error {
+func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit GitCommandRunnerFunc, io ContributeCloneIO) error {
 	io = defaultContributeCloneIO(io)
 	ctx.Info("==> Cloning ERun for contribute mode")
 	status, err := ResolveContributeCloneStatus(homeDir, runGit, io.Stat)
@@ -195,7 +197,7 @@ func RunContributeCloneWithIO(ctx Context, homeDir string, runGit GitCommandRunn
 	return nil
 }
 
-func installContributeShim(ctx Context, homeDir string, io ContributeCloneIO) error {
+func installContributeShim(ctx core.Context, homeDir string, io ContributeCloneIO) error {
 	shimPath, err := ContributeShimPath(homeDir)
 	if err != nil {
 		return err

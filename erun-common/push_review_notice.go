@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // push_review_notice.go makes one silent state visible at the moment it is
@@ -59,7 +61,7 @@ type PushedBranchReviewNoticeParams struct {
 // Traces the intended call before checking ctx.DryRun, the same contract
 // tracePlatformCall's other callers use, so --dry-run shows the check without
 // making it.
-func WarnPushedBranchWithoutReview(ctx Context, store CloudReadStore, deps CloudDependencies, params PushedBranchReviewNoticeParams) {
+func WarnPushedBranchWithoutReview(ctx core.Context, store CloudReadStore, deps CloudDependencies, params PushedBranchReviewNoticeParams) {
 	if !hasAnyErunPlatformAlias(store) {
 		return
 	}
@@ -134,7 +136,7 @@ func branchHasLiveReview(reviews []PlatformReview, branch string) bool {
 // A false positive here is worse than a missed warning -- an operator told to
 // queue a branch that does not need queueing learns to ignore the line -- so
 // the fallback only fires when the symref is genuinely unavailable.
-func pushedBranchIsReviewTarget(ctx Context, projectRoot, remote, branch string) bool {
+func pushedBranchIsReviewTarget(ctx core.Context, projectRoot, remote, branch string) bool {
 	if strings.TrimSpace(projectRoot) != "" {
 		if defaultBranch, ok := gitRemoteDefaultBranch(ctx, projectRoot, remote); ok {
 			return branch == defaultBranch

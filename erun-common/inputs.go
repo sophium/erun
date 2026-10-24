@@ -10,6 +10,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // UploadRuntimeInputParams selects the file `inputs upload` places inside the
@@ -45,7 +47,7 @@ type RuntimeInputUploadRunner func(req ShellLaunchParams, script string, stdin i
 // serves (mirroring workspace_sync) for an MCP-connected orchestrator. It has
 // no in-pod MCP counterpart — the edge in erun-mcp runs inside the pod and
 // has no path back to the operator's filesystem.
-func UploadRuntimeInput(ctx Context, req ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
+func UploadRuntimeInput(ctx core.Context, req ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
@@ -139,7 +141,7 @@ func splitRuntimeInputDestination(remotePath string) (dir, name string, err erro
 
 // traceRuntimeInputUploadScript returns true when the context is in dry-run,
 // in which case the caller must not run the command.
-func traceRuntimeInputUploadScript(ctx Context, req ShellLaunchParams, label, script string) bool {
+func traceRuntimeInputUploadScript(ctx core.Context, req ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kubectlRemoteExecStdinArgs(req, script)...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
@@ -211,7 +213,7 @@ func kubectlRemoteExecStdinArgs(req ShellLaunchParams, script string) []string {
 // RunRemoteCommandWithStdin is the stdin-streaming counterpart of
 // RunRemoteCommand.
 func RunRemoteCommandWithStdin(req ShellLaunchParams, script string, stdin io.Reader) (RemoteCommandResult, error) {
-	cmd := Command("kubectl", kubectlRemoteExecStdinArgs(req, script)...)
+	cmd := core.Command("kubectl", kubectlRemoteExecStdinArgs(req, script)...)
 	cmd.Stdin = stdin
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

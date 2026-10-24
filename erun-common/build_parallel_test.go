@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // buildSpecFromDockerfile writes a Dockerfile and returns the spec that builds
@@ -27,14 +29,14 @@ func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) DockerBuildSpe
 	return DockerBuildSpec{Image: DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
 }
 
-func dependencyContext(stdout, stderr io.Writer) Context {
-	return Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard), Stdout: stdout, Stderr: stderr}
+func dependencyContext(stdout, stderr io.Writer) core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard), Stdout: stdout, Stderr: stderr}
 }
 
 // traceContext captures the audit channel, which is where the dependency plan
 // is reported.
-func traceContext(trace io.Writer) Context {
-	return Context{Logger: NewLoggerWithWriters(0, trace, trace)}
+func traceContext(trace io.Writer) core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(0, trace, trace)}
 }
 
 func resolveTestDependencies(t *testing.T, builds []DockerBuildSpec) ([]DockerBuildSpec, map[string][]string) {
@@ -452,14 +454,14 @@ func eventIndex(events []string, want string) int {
 
 func TestResolveBuildJobsPrefersTheExplicitDegreeThenTheEnvironment(t *testing.T) {
 	t.Setenv(BuildJobsEnvVar, "4")
-	if got := resolveBuildJobs(Context{BuildJobs: 1}, 8); got != 1 {
+	if got := resolveBuildJobs(core.Context{BuildJobs: 1}, 8); got != 1 {
 		t.Fatalf("an explicit --jobs 1 must win, got %d", got)
 	}
-	if got := resolveBuildJobs(Context{}, 8); got != 4 {
+	if got := resolveBuildJobs(core.Context{}, 8); got != 4 {
 		t.Fatalf("the environment override must apply, got %d", got)
 	}
 	// Never more workers than there is work: the extra ones would only idle.
-	if got := resolveBuildJobs(Context{BuildJobs: 16}, 3); got != 3 {
+	if got := resolveBuildJobs(core.Context{BuildJobs: 16}, 3); got != 3 {
 		t.Fatalf("expected the degree capped at the image count, got %d", got)
 	}
 }

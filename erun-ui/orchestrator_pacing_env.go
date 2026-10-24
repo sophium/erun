@@ -4,7 +4,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // erun#1699: an orchestrator that dispatched work to a linked environment and
@@ -66,7 +67,7 @@ func (s orchestratorLinkedEnvBusyState) stuckDetail() string {
 // orchestrator's own ID holds counts as busy: an environment busy on another
 // orchestrator's job, or an operator's own session, must not silence this one
 // — the lease's holder is the discriminator, exactly as the issue asks for.
-func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []eruncommon.OrchestratorEnvConfig, snapshot map[string]environmentActivityState) orchestratorLinkedEnvBusyState {
+func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.OrchestratorEnvConfig, snapshot map[string]environmentActivityState) orchestratorLinkedEnvBusyState {
 	sawUnknown := false
 	for _, env := range envs {
 		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})

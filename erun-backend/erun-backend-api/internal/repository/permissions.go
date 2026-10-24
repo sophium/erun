@@ -6,7 +6,7 @@ import (
 	"regexp"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/uptrace/bun"
 )
 
@@ -45,13 +45,13 @@ func (a *PermissionAuthorizer) Authorize(ctx context.Context, method string, api
 // reads the same rules through the same query as Authorize and decides each
 // candidate with the same matcher, so what a client renders from and what the
 // middleware enforces cannot drift.
-func (a *PermissionAuthorizer) PermittedRoutes(ctx context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error) {
+func (a *PermissionAuthorizer) PermittedRoutes(ctx context.Context, candidates []model.PlatformCapability) ([]model.PlatformCapability, error) {
 	securityContext, err := security.RequiredFromContext(ctx)
 	if err != nil {
 		return nil, ErrMissingSecurityContext
 	}
 
-	var permitted []eruncommon.PlatformCapability
+	var permitted []model.PlatformCapability
 	err = a.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		rules, err := userPermissionRules(ctx, tx, securityContext.ErunUserID)
 		if err != nil {

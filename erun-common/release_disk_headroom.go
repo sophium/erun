@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A multi-arch, many-image release is the single build most likely to fill a
@@ -178,7 +180,7 @@ var (
 // runs after the stages and a refusal there still leaves the stamp commit and
 // tag behind. It is named here so that placement reads as the known limit of
 // this rule rather than as an oversight.
-func ensureReleaseDiskHeadroom(ctx Context) error {
+func ensureReleaseDiskHeadroom(ctx core.Context) error {
 	// The ceiling is checked first and unconditionally: it is a bound on how
 	// much cache this environment may hold, so it has to hold whether or not
 	// free space happens to be short this time. Reaching it also frees room,
@@ -190,7 +192,7 @@ func ensureReleaseDiskHeadroom(ctx Context) error {
 // ensureBuildDiskHeadroom is the same preflight for an ordinary build, which
 // warns instead of refusing. It is the one that actually runs between releases,
 // where the cache growth that fills a node happens.
-func ensureBuildDiskHeadroom(ctx Context) error {
+func ensureBuildDiskHeadroom(ctx core.Context) error {
 	ensureBuildCacheRetention(ctx, buildDiskHeadroomPolicy)
 	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, dockerBuildCacheReclaimable, runDiskHeadroomPrune)
 }
@@ -203,7 +205,7 @@ func ensureBuildDiskHeadroom(ctx Context) error {
 // inconclusive read is not an answer — the same "known failure over invented
 // behavior" posture as ensureReleaseBaseBranchUnmoved — so it lets the run
 // proceed exactly as it does today, with no prune at all.
-func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, readCacheReclaimable diskHeadroomCacheReclaimableFunc, prune diskHeadroomPruneFunc) error {
+func ensureDiskHeadroomWith(ctx core.Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, readCacheReclaimable diskHeadroomCacheReclaimableFunc, prune diskHeadroomPruneFunc) error {
 	ctx.TraceCommand("", "docker", "info", "-f", "{{.DockerRootDir}}")
 	if ctx.DryRun {
 		return nil
@@ -351,7 +353,7 @@ func (s diskHeadroomShortfall) remedy() string {
 // diskHeadroomVerdict is what the caller does once no further reclaim is going
 // to happen: a release refuses, a build warns and proceeds. Shared so the
 // declined-prune path and the pruned-anyway path cannot drift apart.
-func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, shortfall diskHeadroomShortfall) error {
+func diskHeadroomVerdict(ctx core.Context, policy diskHeadroomPolicy, shortfall diskHeadroomShortfall) error {
 	if shortfall.free >= shortfall.floor {
 		return nil
 	}
@@ -533,14 +535,14 @@ func runDiskHeadroomPrune(floor uint64, limit time.Duration) error {
 func diskHeadroomOutput(limit time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	out, err := CommandContext(ctx, name, args...).Output()
+	out, err := core.CommandContext(ctx, name, args...).Output()
 	return out, diskHeadroomDeadlineErr(ctx, err)
 }
 
 func diskHeadroomRun(limit time.Duration, name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	return diskHeadroomDeadlineErr(ctx, CommandContext(ctx, name, args...).Run())
+	return diskHeadroomDeadlineErr(ctx, core.CommandContext(ctx, name, args...).Run())
 }
 
 // diskHeadroomDeadlineErr reports a command killed by its own deadline as that

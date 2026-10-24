@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // registryCopy is one image mirrored from the FROM registry to a TO registry
@@ -32,7 +35,7 @@ func joinRegistryImage(registry, image string) string {
 // runDeployRegistryCopies mirrors the deploy's images from the FROM registry to
 // each TO registry. Every copy is traced even under --dry-run so a dry-run is a
 // complete audit of what a real deploy would push.
-func runDeployRegistryCopies(ctx Context, execution DeploySpec) error {
+func runDeployRegistryCopies(ctx core.Context, execution DeploySpec) error {
 	copies, err := resolveDeployRegistryCopies(execution)
 	if err != nil {
 		return err
@@ -47,7 +50,7 @@ func runDeployRegistryCopies(ctx Context, execution DeploySpec) error {
 	for _, copy := range copies {
 		ctx.Info("==> Copying " + copy.Image + " from " + copy.From + " to " + copy.To)
 		cmd := copy.command()
-		runner := Command(cmd.Name, cmd.Args...)
+		runner := core.Command(cmd.Name, cmd.Args...)
 		runner.Stdout = ctx.Stdout
 		runner.Stderr = ctx.Stderr
 		if err := runner.Run(); err != nil {
@@ -58,7 +61,7 @@ func runDeployRegistryCopies(ctx Context, execution DeploySpec) error {
 }
 
 func resolveDeployRegistryCopies(execution DeploySpec) ([]registryCopy, error) {
-	list, err := deployTargetContainerRegistries(execution.Target)
+	list, err := config.DeployTargetContainerRegistries(execution.Target)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -233,7 +235,7 @@ func KubectlGetDeploymentArgs(contextName, namespace, name string) []string {
 // cluster erun cannot read never passes for a deployment that is actually
 // present.
 func DeploymentPresent(contextName, namespace, name string) (bool, error) {
-	if currentExecutionMode(kubectlDeploymentGetExecutionOperation) == ExecutionModeLibrary {
+	if configpkg.CurrentExecutionMode(kubectlDeploymentGetExecutionOperation) == configpkg.ExecutionModeLibrary {
 		return libraryDeploymentPresent(contextName, namespace, name)
 	}
 	return defaultDeploymentPresent(contextName, namespace, name)
@@ -242,7 +244,7 @@ func DeploymentPresent(contextName, namespace, name string) (bool, error) {
 // defaultDeploymentPresent is the subprocess-backed path DeploymentPresent
 // dispatches to by default.
 func defaultDeploymentPresent(contextName, namespace, name string) (bool, error) {
-	output, err := Command("kubectl", KubectlGetDeploymentArgs(contextName, namespace, name)...).CombinedOutput()
+	output, err := core.Command("kubectl", KubectlGetDeploymentArgs(contextName, namespace, name)...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 func TestParseSSHHostEntriesReadsTheDirectivesErunWrites(t *testing.T) {
 	content := `# a hand-maintained header
@@ -15,12 +19,12 @@ Host erun-team-dev
 Host erun-team-gone erun-team-also-gone
   Port 17122
 `
-	want := []SSHHostEntry{
+	want := []config.SSHHostEntry{
 		{Alias: "erun-team-dev", HostKeyAlias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun", IdentityFile: "/home/op/.ssh/id_ed25519"},
 		{Alias: "erun-team-gone", Port: 17122},
 		{Alias: "erun-team-also-gone", Port: 17122},
 	}
-	got := ParseSSHHostEntries(content)
+	got := config.ParseSSHHostEntries(content)
 	if len(got) != len(want) {
 		t.Fatalf("a shared Host line must yield one entry per alias, got %d: %+v", len(got), got)
 	}
@@ -36,7 +40,7 @@ func TestParseSSHHostEntriesIgnoresNegatedNamesAndBareDirectives(t *testing.T) {
   Port
   Port 17022
 `
-	entries := ParseSSHHostEntries(content)
+	entries := config.ParseSSHHostEntries(content)
 	if len(entries) != 1 {
 		t.Fatalf("a negated name excludes, it does not declare: %+v", entries)
 	}
@@ -51,7 +55,7 @@ func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
 	// local names no live environment either and its port is held by nobody;
 	// erun-erun-remote's block is claimed by a configured environment; and
 	// myserver is the operator's own, so erun never reports on it.
-	entries := []SSHHostEntry{
+	entries := []config.SSHHostEntry{
 		{Alias: "erun-erun-proxmox1", Port: 17122},
 		{Alias: "erun-erun-local", Port: 17022},
 		{Alias: "erun-erun-remote", Port: 17222},
@@ -77,7 +81,7 @@ func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
 }
 
 func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *testing.T) {
-	entries := []SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
+	entries := []config.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
 	environments := []SSHEnvironmentAlias{
 		{Tenant: "team", Environment: "dev", Alias: SSHHostAlias("team", "dev"), LocalPort: 17022},
 	}

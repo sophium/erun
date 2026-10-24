@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // registryBasicAuth is a username/secret pair used to Basic-authenticate a
@@ -217,7 +219,7 @@ func hostLookupKeys(host string) []string {
 }
 
 func execDockerCredentialHelper(binaryPath, serverURL string) ([]byte, error) {
-	cmd := Command(binaryPath, "get")
+	cmd := core.Command(binaryPath, "get")
 	cmd.Stdin = strings.NewReader(serverURL)
 	return cmd.Output()
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -48,7 +49,7 @@ func newRuntimeInitCmd() *cobra.Command {
 	return cmd
 }
 
-func runRuntimeInitCommand(ctx common.Context, args []string) error {
+func runRuntimeInitCommand(ctx core.Context, args []string) error {
 	erunPath, err := os.Executable()
 	if err != nil {
 		erunPath = "erun"
@@ -102,7 +103,7 @@ func newTrimCacheCmd() *cobra.Command {
 	return cmd
 }
 
-func runTrimCacheCommand(ctx common.Context, args []string, maxBytes int64, maxBytesSet bool) error {
+func runTrimCacheCommand(ctx core.Context, args []string, maxBytes int64, maxBytesSet bool) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve the home directory holding the go build cache: %w", err)
@@ -154,7 +155,7 @@ func newInstallSkillsCmd() *cobra.Command {
 	return cmd
 }
 
-func runInstallSkillsCommand(ctx common.Context, skillsDir, agentsDir string) error {
+func runInstallSkillsCommand(ctx core.Context, skillsDir, agentsDir string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve the home directory to install skills into: %w", err)
@@ -163,7 +164,7 @@ func runInstallSkillsCommand(ctx common.Context, skillsDir, agentsDir string) er
 	if err != nil {
 		return err
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(result)
 	}
 	for _, target := range result.Targets {

@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const (
 	DefaultHost = "127.0.0.1"
-	DefaultPort = eruncommon.MCPServicePort
+	DefaultPort = config.MCPServicePort
 	DefaultPath = eruncommon.MCPServerPath
 )
 
@@ -33,7 +35,7 @@ type HTTPConfig struct {
 // often) cancels the other and its error wins, rather than the metrics
 // listener silently dying while the MCP edge keeps the process alive for the
 // rest of the pod's lifetime.
-func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime RuntimeConfig) error {
+func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime RuntimeConfig) error {
 	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
 		return err
@@ -63,7 +65,7 @@ func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, met
 	return second
 }
 
-func runMCPHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) error {
+func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) error {
 	server := &http.Server{
 		Addr:              listenAddress(cfg),
 		Handler:           newHTTPHandler(info, cfg, runtime, recorder),
@@ -85,7 +87,7 @@ func runMCPHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, 
 	return err
 }
 
-func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) http.Handler {
+func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) http.Handler {
 	cfg, _ = normalizeHTTPConfig(cfg)
 
 	// One server per distinct capability set, resolved per request: a caller
@@ -179,9 +181,9 @@ func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handl
 			next.ServeHTTP(w, req)
 			return
 		}
-		recordRuntimeActivity(runtime, eruncommon.ActivityKindMCP, false)
+		recordRuntimeActivity(runtime, config.ActivityKindMCP, false)
 		if requestLooksLikeCodex(req) {
-			recordRuntimeActivity(runtime, eruncommon.ActivityKindCodex, false)
+			recordRuntimeActivity(runtime, config.ActivityKindCodex, false)
 		}
 		next.ServeHTTP(w, req)
 	})
@@ -257,8 +259,8 @@ var mcpSessionTimeout = 5 * time.Minute
 // absence of the request.
 var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
-	info = eruncommon.NormalizeBuildInfo(info)
+func newServer(info model.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
+	info = model.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
 
 	server := mcp.NewServer(&mcp.Implementation{
@@ -305,7 +307,7 @@ func removedTool(name, guidance string) func(context.Context, *mcp.CallToolReque
 	}
 }
 
-func registerReadModelTools(reg toolRegistrar, info eruncommon.BuildInfo, runtime RuntimeConfig) {
+func registerReadModelTools(reg toolRegistrar, info model.BuildInfo, runtime RuntimeConfig) {
 	addTool(reg, &mcp.Tool{
 		Name:        "version",
 		Description: "Return build metadata for the current erun binary",

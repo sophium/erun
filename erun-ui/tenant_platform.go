@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // tenant_platform.go resolves which erun-hosted-platform identity backs the
@@ -70,7 +72,7 @@ type tenantPlatformResolution struct {
 // used to send one platform's bearer to whatever address the field named.
 func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatformResolution, error) {
 	tenantConfig, _, err := a.deps.store.LoadTenantConfig(tenant)
-	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return tenantPlatformResolution{}, err
 	}
 
@@ -90,7 +92,7 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 	}
 	apiURL := provider.ERun.APIURL
 
-	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
+	token, err := eruncommon.CloudProviderBearerToken(core.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
 	bearer := strings.TrimSpace(token.Token)
 	if err != nil || bearer == "" {
 		return tenantPlatformResolution{state: tenantPlatformStateNotSignedIn, alias: provider.Alias, apiURL: apiURL}, nil
@@ -129,22 +131,22 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 // (erun-docs/docs/reference/configuration.md: "cloud provider aliases the
 // tenant is allowed to use") — none found there means not-connected, full
 // stop, never a fallback to an alias the tenant did not attach.
-func (a *App) resolveTenantERunPlatformAlias(tenantConfig eruncommon.TenantConfig, aliasOverride string) (provider eruncommon.CloudProviderConfig, terminal *tenantPlatformResolution, err error) {
+func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig, aliasOverride string) (provider configpkg.CloudProviderConfig, terminal *tenantPlatformResolution, err error) {
 	if aliasOverride != "" || len(tenantConfig.CloudProviderAliases) == 0 {
 		return a.resolveGlobalERunPlatformAlias(aliasOverride)
 	}
 
 	tenantERunAliases := a.tenantSelectedERunAliases(tenantConfig)
 	if len(tenantERunAliases) == 0 {
-		return eruncommon.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateNotConnected}, nil
+		return configpkg.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateNotConnected}, nil
 	}
 	chosen := chooseTenantERunAlias(tenantERunAliases, tenantConfig.PrimaryCloudProviderAlias)
 	if chosen == "" {
-		return eruncommon.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateChooseAlias, aliasChoices: tenantERunAliases}, nil
+		return configpkg.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateChooseAlias, aliasChoices: tenantERunAliases}, nil
 	}
 	provider, err = eruncommon.ResolveCloudProvider(a.deps.store, chosen)
 	if err != nil {
-		return eruncommon.CloudProviderConfig{}, nil, err
+		return configpkg.CloudProviderConfig{}, nil, err
 	}
 	return provider, nil, nil
 }
@@ -153,11 +155,11 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig eruncommon.TenantConfi
 // the explicit override when given, else the machine's sole configured erun
 // alias. Used both for an explicit aliasOverride (always honored verbatim)
 // and for a tenant that has never attached any cloud alias at all.
-func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (eruncommon.CloudProviderConfig, *tenantPlatformResolution, error) {
+func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (configpkg.CloudProviderConfig, *tenantPlatformResolution, error) {
 	provider, err := eruncommon.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
 	if err != nil {
 		resolution, resolveErr := a.tenantPlatformResolutionForResolveError(err)
-		return eruncommon.CloudProviderConfig{}, &resolution, resolveErr
+		return configpkg.CloudProviderConfig{}, &resolution, resolveErr
 	}
 	return provider, nil, nil
 }
@@ -165,7 +167,7 @@ func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (eruncommon.C
 // tenantSelectedERunAliases filters tenantConfig's own attached aliases down
 // to the erun-type ones, preserving order. A stale/removed alias name in the
 // tenant's own selection is skipped rather than failing the whole read.
-func (a *App) tenantSelectedERunAliases(tenantConfig eruncommon.TenantConfig) []string {
+func (a *App) tenantSelectedERunAliases(tenantConfig configpkg.TenantConfig) []string {
 	var erunAliases []string
 	for _, alias := range tenantConfig.CloudProviderAliases {
 		alias = strings.TrimSpace(alias)
@@ -173,7 +175,7 @@ func (a *App) tenantSelectedERunAliases(tenantConfig eruncommon.TenantConfig) []
 			continue
 		}
 		candidate, err := eruncommon.ResolveCloudProvider(a.deps.store, alias)
-		if err != nil || candidate.Provider != eruncommon.CloudProviderERun {
+		if err != nil || candidate.Provider != configpkg.CloudProviderERun {
 			continue
 		}
 		erunAliases = append(erunAliases, alias)
@@ -258,7 +260,7 @@ type uiConnectERunPlatformInput struct {
 // URL beyond the base address itself. It attaches the alias to the tenant the
 // click came from, which is the state the caller is asking to move.
 func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProviderStatus, error) {
-	provider, err := eruncommon.InitERunCloudProvider(eruncommon.Context{}, a.deps.store, eruncommon.InitERunCloudProviderParams{
+	provider, err := eruncommon.InitERunCloudProvider(core.Context{}, a.deps.store, eruncommon.InitERunCloudProviderParams{
 		APIURL: strings.TrimSpace(input.APIURL),
 	}, a.deps.cloudDeps)
 	if err != nil {
@@ -283,7 +285,7 @@ func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProv
 // connect with no selection at all, and no way to grow one from the card.
 func (a *App) attachTenantCloudProviderAlias(tenant, alias string) error {
 	config, _, err := a.deps.store.LoadTenantConfig(tenant)
-	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return err
 	}
 	config.Name = tenant
@@ -319,7 +321,7 @@ type uiPlatformUser struct {
 // the administrator hand-off (enrollERunPlatformUserError,
 // tenant_platform_error.go) rather than surfaced as the raw platform error.
 func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatformUser, error) {
-	user, err := eruncommon.RunPlatformCreateUser(eruncommon.Context{}, a.deps.store, strings.TrimSpace(input.Alias), eruncommon.PlatformCreateUserParams{
+	user, err := eruncommon.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), eruncommon.PlatformCreateUserParams{
 		Username: strings.TrimSpace(input.Username),
 		Issuer:   strings.TrimSpace(input.Issuer),
 		Subject:  strings.TrimSpace(input.Subject),

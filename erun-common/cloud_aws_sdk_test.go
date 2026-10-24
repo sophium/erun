@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // stsCallerIdentityFixture starts a fake STS endpoint that answers
@@ -36,10 +39,10 @@ func stsCallerIdentityFixture(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 }
 
-func traceCapturingContext() (Context, *bytes.Buffer) {
+func traceCapturingContext() (core.Context, *bytes.Buffer) {
 	var trace bytes.Buffer
-	logger := NewLogger(VerbosityInfo).WithTraceSink(&trace)
-	return Context{Logger: logger}, &trace
+	logger := core.NewLogger(core.VerbosityInfo).WithTraceSink(&trace)
+	return core.Context{Logger: logger}, &trace
 }
 
 // stsWebIdentityTokenFixture starts a fake STS endpoint that answers
@@ -85,7 +88,7 @@ func TestLibraryResolveAWSIdentityMatchesSubprocessObservableResult(t *testing.T
 	// The trace line must be byte-identical to what defaultResolveAWSIdentity
 	// renders for the subprocess path (root AGENTS.md's dry-run/audit
 	// contract: the equivalent CLI invocation, regardless of execution mode).
-	wantTrace := formatShellCommand("", "aws", awsGetCallerIdentityArgs("")...)
+	wantTrace := core.FormatShellCommand("", "aws", awsGetCallerIdentityArgs("")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
@@ -110,21 +113,21 @@ func TestAWSGetCallerIdentityArgsSharedByBothPaths(t *testing.T) {
 
 func TestLibraryCheckAWSStatusActive(t *testing.T) {
 	stsCallerIdentityFixture(t)
-	provider := CloudProviderConfig{Provider: CloudProviderAWS, Alias: "test@aws"}
+	provider := config.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws"}
 
-	status := libraryCheckAWSStatus(Context{}, provider)
+	status := libraryCheckAWSStatus(core.Context{}, provider)
 
-	if status.Status != CloudTokenStatusActive {
+	if status.Status != config.CloudTokenStatusActive {
 		t.Fatalf("status = %+v, want Active", status)
 	}
 }
 
 func TestLibraryCheckAWSStatusNotConfiguredForMissingProfile(t *testing.T) {
-	provider := CloudProviderConfig{Provider: CloudProviderAWS, Alias: "test@aws", Profile: "erun-cloud-aws-sdk-test-missing-profile"}
+	provider := config.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws", Profile: "erun-cloud-aws-sdk-test-missing-profile"}
 
-	status := libraryCheckAWSStatus(Context{}, provider)
+	status := libraryCheckAWSStatus(core.Context{}, provider)
 
-	if status.Status != CloudTokenStatusNotConfigured {
+	if status.Status != config.CloudTokenStatusNotConfigured {
 		t.Fatalf("status = %+v, want NotConfigured", status)
 	}
 	if status.Message == "" {
@@ -152,7 +155,7 @@ func TestLibraryRunAWSBearerTokenMatchesSubprocessObservableResult(t *testing.T)
 	// The trace line must be byte-identical to what defaultRunAWSBearerToken
 	// renders for the subprocess path (root AGENTS.md's dry-run/audit
 	// contract: the equivalent CLI invocation, regardless of execution mode).
-	wantTrace := formatShellCommand("", "aws", awsGetWebIdentityTokenArgs("", "https://api.example")...)
+	wantTrace := core.FormatShellCommand("", "aws", awsGetWebIdentityTokenArgs("", "https://api.example")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
@@ -172,7 +175,7 @@ func TestLibraryRunAWSBearerTokenDryRunTracesWithoutCallingAWS(t *testing.T) {
 		t.Fatalf("token = %q, want empty on dry run", token)
 	}
 
-	wantTrace := formatShellCommand("", "aws", awsGetWebIdentityTokenArgs("my-profile", "https://api.example")...)
+	wantTrace := core.FormatShellCommand("", "aws", awsGetWebIdentityTokenArgs("my-profile", "https://api.example")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
@@ -261,7 +264,7 @@ func TestLibraryRunAWSExportCredentialsMatchesSubprocessObservableResult(t *test
 	// The trace line must be byte-identical to what defaultRunAWSExportCredentials
 	// renders for the subprocess path (root AGENTS.md's dry-run/audit contract:
 	// the equivalent CLI invocation, regardless of execution mode).
-	wantTrace := formatShellCommand("", "aws", awsConfigureExportCredentialsArgs("erun-test-export")...)
+	wantTrace := core.FormatShellCommand("", "aws", awsConfigureExportCredentialsArgs("erun-test-export")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
@@ -298,7 +301,7 @@ func TestLibraryRunAWSExportCredentialsDryRunTracesWithoutResolvingCredentials(t
 		t.Fatalf("creds = %+v, want zero value on dry run", creds)
 	}
 
-	wantTrace := formatShellCommand("", "aws", awsConfigureExportCredentialsArgs("my-profile")...)
+	wantTrace := core.FormatShellCommand("", "aws", awsConfigureExportCredentialsArgs("my-profile")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}

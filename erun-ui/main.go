@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-ui/headlessserver"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -79,8 +79,8 @@ func main() {
 // desktopDeps is the composition-root dependency set for one launch mode.
 func desktopDeps(headless bool) erunUIDeps {
 	deps := erunUIDeps{
-		store:           eruncommon.ConfigStore{},
-		findProjectRoot: eruncommon.FindProjectRoot,
+		store:           config.ConfigStore{},
+		findProjectRoot: config.FindProjectRoot,
 		resolveCLIPath:  resolveCLIExecutable,
 		windowStatePath: defaultAppWindowStatePath(),
 	}

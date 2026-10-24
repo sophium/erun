@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
@@ -60,8 +62,8 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 	if input.KubernetesContext == "" {
 		return uiClusterRegistryStatus{}, nil
 	}
-	service := eruncommon.DefaultClusterRegistryService
-	namespace := eruncommon.DefaultClusterRegistryNamespace
+	service := config.DefaultClusterRegistryService
+	namespace := config.DefaultClusterRegistryNamespace
 	// A ClusterIP means the registry Service exists in this context. A missing
 	// Service makes kubectl exit non-zero — treated as "not deployed", not an
 	// error, so the dialog simply falls back to its normal registry default.
@@ -71,7 +73,7 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 	if err != nil || clusterIP == "" || clusterIP == "None" {
 		return uiClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
 	}
-	port := eruncommon.DefaultClusterRegistryPort
+	port := config.DefaultClusterRegistryPort
 	return uiClusterRegistryStatus{
 		KubernetesContext: input.KubernetesContext,
 		Deployed:          true,
@@ -618,7 +620,7 @@ func kubectlJSON(ctx context.Context, kubernetesContext string, args ...string) 
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))

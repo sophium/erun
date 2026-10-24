@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtime_usage.go wires the desktop's Runtime tab to the same reader
@@ -88,7 +89,7 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 		args = append(args, "exec", "-c", strings.TrimSpace(container),
 			"deployment/"+eruncommon.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		eruncommon.HideConsoleWindow(cmd)
+		core.HideConsoleWindow(cmd)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -105,7 +106,7 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 func runtimePodRequestsRunner(ctx context.Context) eruncommon.RuntimePodRequestsRunnerFunc {
 	return func(args []string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		eruncommon.HideConsoleWindow(cmd)
+		core.HideConsoleWindow(cmd)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

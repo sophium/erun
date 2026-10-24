@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // hostedDefinitionUploadTimeout bounds the platform write. It matches the drift
@@ -100,7 +101,7 @@ func (a *App) reloadedHostedLocalChange(tenant, environment string) uiHostedDefi
 	if err != nil {
 		return uiHostedDefinitionLocalChange{}
 	}
-	return hostedDefinitionLocalChangeToUI(eruncommon.HostedDefinitionLocalChangeFor(config))
+	return hostedDefinitionLocalChangeToUI(configpkg.HostedDefinitionLocalChangeFor(config))
 }
 
 // autoUploadHostedDefinition uploads one environment's settings if they have
@@ -120,10 +121,10 @@ func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 		// upload has nothing to send and no row to send it to.
 		return
 	}
-	if _, ok := eruncommon.HostedEnvironmentFromConfig(config); !ok {
+	if _, ok := configpkg.HostedEnvironmentFromConfig(config); !ok {
 		return
 	}
-	if !eruncommon.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
+	if !configpkg.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
 		// The setting that changed never leaves the machine, or it is already
 		// what the platform holds. The digest is what says so without asking.
 		return
@@ -196,10 +197,10 @@ func (a *App) catchUpHostedDefinitions() {
 			continue
 		}
 		for _, config := range envs {
-			if _, ok := eruncommon.HostedEnvironmentFromConfig(config); !ok {
+			if _, ok := configpkg.HostedEnvironmentFromConfig(config); !ok {
 				continue
 			}
-			if !eruncommon.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
+			if !configpkg.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
 				continue
 			}
 			a.autoUploadHostedDefinition(tenant.Name, config.Name)

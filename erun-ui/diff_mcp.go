@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type idleProbeRoundTripper struct {
@@ -93,11 +94,11 @@ func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDif
 	return diff, nil
 }
 
-func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -112,18 +113,18 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenan
 		},
 	})
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	var output struct {
-		EnvConfig eruncommon.EnvConfig `json:"envConfig"`
+		EnvConfig config.EnvConfig `json:"envConfig"`
 	}
 	if err := json.Unmarshal(data, &output); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	return output.EnvConfig, nil
 }

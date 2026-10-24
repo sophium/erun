@@ -1,18 +1,22 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // TestEnvironmentTypeIsValid pins the canonical set including host — the
 // fourth type this test suite exists to protect (#1380).
 func TestEnvironmentTypeIsValid(t *testing.T) {
 	cases := []struct {
-		envType EnvironmentType
+		envType config.EnvironmentType
 		want    bool
 	}{
-		{EnvironmentTypeLocalAgent, true},
-		{EnvironmentTypeRemoteAgent, true},
-		{EnvironmentTypeRuntime, true},
-		{EnvironmentTypeHost, true},
+		{config.EnvironmentTypeLocalAgent, true},
+		{config.EnvironmentTypeRemoteAgent, true},
+		{config.EnvironmentTypeRuntime, true},
+		{config.EnvironmentTypeHost, true},
 		{"", false},
 		{"bogus", false},
 	}
@@ -29,13 +33,13 @@ func TestEnvironmentTypeIsValid(t *testing.T) {
 // host has no pod at all.
 func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 	cases := []struct {
-		envType EnvironmentType
+		envType config.EnvironmentType
 		want    bool
 	}{
-		{EnvironmentTypeLocalAgent, true},
-		{EnvironmentTypeRemoteAgent, true},
-		{EnvironmentTypeRuntime, false},
-		{EnvironmentTypeHost, false},
+		{config.EnvironmentTypeLocalAgent, true},
+		{config.EnvironmentTypeRemoteAgent, true},
+		{config.EnvironmentTypeRuntime, false},
+		{config.EnvironmentTypeHost, false},
 		{"", false},
 		{"bogus", false},
 	}
@@ -54,7 +58,7 @@ func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 // failure, not a silent reclassification into whichever branch nobody
 // updated.
 func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
-	for _, envType := range validEnvironmentTypes {
+	for _, envType := range config.ValidEnvironmentTypes {
 		envType := envType
 		t.Run(string(envType), func(t *testing.T) {
 			defer func() {
@@ -62,7 +66,7 @@ func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 					t.Fatalf("predicate panicked for type %q: %v", envType, r)
 				}
 			}()
-			env := EnvConfig{Type: envType}
+			env := config.EnvConfig{Type: envType}
 			_ = env.BuildsHere()
 			_ = env.RemoteWorktree()
 			_ = env.HasPod()
@@ -76,13 +80,13 @@ func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 // explicitly, one assertion per predicate, so a future change to any of them
 // has to look this test in the eye rather than fail somewhere downstream.
 func TestHostEnvironmentPredicates(t *testing.T) {
-	env := EnvConfig{Type: EnvironmentTypeHost}
+	env := config.EnvConfig{Type: config.EnvironmentTypeHost}
 
 	if !env.Type.IsValid() {
 		t.Error("EnvironmentTypeHost must be valid")
 	}
-	if got := env.ResolvedType(); got != EnvironmentTypeHost {
-		t.Errorf("ResolvedType() = %q, want %q", got, EnvironmentTypeHost)
+	if got := env.ResolvedType(); got != config.EnvironmentTypeHost {
+		t.Errorf("ResolvedType() = %q, want %q", got, config.EnvironmentTypeHost)
 	}
 	// Building is the point of a host env (desktop-app builds, host-credential
 	// tasks) — it must answer true, not fall out of an "!= runtime" exclusion.
@@ -101,8 +105,8 @@ func TestHostEnvironmentPredicates(t *testing.T) {
 	}
 	// A host env iterates on local builds like an agent env, not like a
 	// runtime env consuming stable releases.
-	if got := env.ResolvedUpgradeChannel(); got != UpgradeChannelSnapshot {
-		t.Errorf("ResolvedUpgradeChannel() = %q, want %q", got, UpgradeChannelSnapshot)
+	if got := env.ResolvedUpgradeChannel(); got != config.UpgradeChannelSnapshot {
+		t.Errorf("ResolvedUpgradeChannel() = %q, want %q", got, config.UpgradeChannelSnapshot)
 	}
 }
 
@@ -113,7 +117,7 @@ func TestHostEnvironmentPredicates(t *testing.T) {
 // environment just because it also answers false to RemoteWorktree/BuildsHere
 // questions the same way host does.
 func TestUnresolvedEnvironmentTypeKeepsPreHostBehavior(t *testing.T) {
-	env := EnvConfig{}
+	env := config.EnvConfig{}
 	if env.Type.IsValid() {
 		t.Fatal("zero-value Type must not be valid")
 	}

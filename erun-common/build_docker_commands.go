@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const fingerprintTagPrefix = "fp-"
@@ -30,13 +33,13 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
-		cgroupBefore := captureBuildCgroupSnapshot()
+		cgroupBefore := core.CaptureBuildCgroupSnapshot()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		output, err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 		elapsed := time.Since(started)
 		if buildInput.PlatformObserver != nil {
-			cgroup := buildCgroupMetricsFromSnapshots(cgroupBefore, captureBuildCgroupSnapshot(), elapsed)
+			cgroup := core.BuildCgroupMetricsFromSnapshots(cgroupBefore, core.CaptureBuildCgroupSnapshot(), elapsed)
 			buildInput.PlatformObserver(platform, elapsed, err, cgroup, output)
 		}
 		if err != nil {
@@ -168,7 +171,7 @@ func settlePromoteFailure(buildInput DockerBuildSpec, platform, platformTag, fpT
 	default:
 		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
 	}
-	buildInput.cache.notePromoteFallback()
+	buildInput.cache.NotePromoteFallback()
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }
 
@@ -182,7 +185,7 @@ func settlePromoteFailure(buildInput DockerBuildSpec, platform, platformTag, fpT
 // tag and this inspect — reports single-platform, so the classic path keeps
 // publishing exactly as it did before.
 func localImageIsSinglePlatform(tag string) bool {
-	cmd := Command("docker", "image", "inspect", tag)
+	cmd := core.Command("docker", "image", "inspect", tag)
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = io.Discard
@@ -366,23 +369,23 @@ func platformShortSuffix(platform string) string {
 // out of it (build_progress_phases.go) without re-running or re-capturing
 // anything.
 func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) (string, error) {
-	cmd := Command("docker", args...)
+	cmd := core.Command("docker", args...)
 	cmd.Dir = dir
-	capture := &commandOutputCapture{}
-	if verbosity >= VerbosityDebug {
-		cmd.Stdout = teeWriter(stdout, &capture.stdout)
-		cmd.Stderr = teeWriter(stderr, &capture.stderr)
+	capture := &core.CommandOutputCapture{}
+	if verbosity >= core.VerbosityDebug {
+		cmd.Stdout = core.TeeWriter(stdout, &capture.Stdout)
+		cmd.Stderr = core.TeeWriter(stderr, &capture.Stderr)
 	} else {
-		cmd.Stdout = &capture.stdout
-		cmd.Stderr = &capture.stderr
+		cmd.Stdout = &capture.Stdout
+		cmd.Stderr = &capture.Stderr
 	}
 	err := cmd.Run()
-	message := capture.combined()
+	message := capture.Combined()
 	if err == nil {
 		return message, nil
 	}
 
-	if verbosity < VerbosityDebug && stderr != nil {
+	if verbosity < core.VerbosityDebug && stderr != nil {
 		_, _ = io.WriteString(stderr, message)
 	}
 	if push && IsDockerPushAuthorizationError(message) {
@@ -409,7 +412,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 }
 
 func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
-	cmd := Command("docker", args...)
+	cmd := core.Command("docker", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
@@ -423,7 +426,7 @@ func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
 // (manifest create/push, tag) that lack the native flag, replaying captured
 // output only on error.
 func runDockerSimpleCommandWithVerbosity(args []string, verbosity int, stdout, stderr io.Writer) error {
-	if verbosity >= VerbosityDebug {
+	if verbosity >= core.VerbosityDebug {
 		return runDockerSimpleCommand(args, stdout, stderr)
 	}
 	capture := new(bytes.Buffer)
@@ -454,11 +457,11 @@ func runDockerTag(source, target string, stdout, stderr io.Writer) error {
 
 func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	capture := new(bytes.Buffer)
-	cmd := Command("docker", "tag", source, target)
+	cmd := core.Command("docker", "tag", source, target)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
-	cmd.Stderr = teeWriter(stderr, capture)
+	cmd.Stderr = core.TeeWriter(stderr, capture)
 	if err := cmd.Run(); err != nil {
 		return dockerTagError{err: err, message: capture.String()}
 	}
@@ -508,7 +511,7 @@ func DockerImageExists(tag string) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
-	cmd := Command("docker", "image", "inspect", tag)
+	cmd := core.Command("docker", "image", "inspect", tag)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -526,7 +529,7 @@ func DockerManifestExists(tag string, insecure bool) (bool, error) {
 		return false, nil
 	}
 	args := append(dockerManifestArgs("inspect", insecure), tag)
-	cmd := Command("docker", args...)
+	cmd := core.Command("docker", args...)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -620,7 +623,7 @@ func dockerBuildArgVersion(buildInput DockerBuildSpec) string {
 }
 
 func dockerPushArgs(tag string, verbosity int) []string {
-	if verbosity >= VerbosityDebug {
+	if verbosity >= core.VerbosityDebug {
 		return []string{"push", tag}
 	}
 	return []string{"push", "--quiet", tag}
@@ -641,9 +644,9 @@ func dockerImageTagVersion(tag string) string {
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Project build scripts are POSIX shell; Windows can't exec a shebang script
 	// by name ("%1 is not a valid Win32 application"), so run it through sh.
-	cmd := Command(scriptPath)
+	cmd := core.Command(scriptPath)
 	if runtime.GOOS == "windows" {
-		cmd = Command("sh", scriptPath)
+		cmd = core.Command("sh", scriptPath)
 	}
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
@@ -717,16 +720,16 @@ func dockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer, wait
 
 func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) error {
 	args := dockerPushArgs(tag, verbosity)
-	pushCmd := Command("docker", args...)
-	capture := &commandOutputCapture{}
-	pushCmd.Stdout = teeWriter(stdout, &capture.stdout)
-	pushCmd.Stderr = teeWriter(stderr, &capture.stderr)
+	pushCmd := core.Command("docker", args...)
+	capture := &core.CommandOutputCapture{}
+	pushCmd.Stdout = core.TeeWriter(stdout, &capture.Stdout)
+	pushCmd.Stderr = core.TeeWriter(stderr, &capture.Stderr)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := capture.combined()
+	message := capture.Combined()
 	if IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      tag,
@@ -776,7 +779,7 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 		args = append(args, registry)
 	}
 
-	loginCmd := Command("docker", args...)
+	loginCmd := core.Command("docker", args...)
 	loginCmd.Stdin = stdin
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -789,7 +792,7 @@ func isGHCRRegistry(registry string) bool {
 }
 
 func isHostedRegistry(registry string) bool {
-	return strings.EqualFold(strings.TrimSpace(registry), HostedRegistryHost)
+	return strings.EqualFold(strings.TrimSpace(registry), config.HostedRegistryHost)
 }
 
 // DockerRegistryLoginWithHostedRegistry wraps DockerRegistryLogin with the one
@@ -816,14 +819,14 @@ func hostedRegistryDockerLogin(store CloudReadStore, deps CloudDependencies, std
 	if err != nil {
 		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
 	}
-	token, err := CloudProviderBearerToken(Context{}, store, CloudBearerParams{Alias: provider.Alias}, deps)
+	token, err := CloudProviderBearerToken(core.Context{}, store, CloudBearerParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		return fmt.Errorf("mint erun-api bearer token for hosted registry login: %w", err)
 	}
 	if strings.TrimSpace(token.Token) == "" {
 		return fmt.Errorf("erun cloud provider alias %q returned an empty bearer token", provider.Alias)
 	}
-	loginCmd := Command("docker", "login", HostedRegistryHost, "-u", HostedRegistryLoginUsername, "--password-stdin")
+	loginCmd := core.Command("docker", "login", config.HostedRegistryHost, "-u", config.HostedRegistryLoginUsername, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token.Token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -853,7 +856,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 		return false, nil
 	}
 
-	loginCmd := Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
+	loginCmd := core.Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -864,7 +867,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 }
 
 func captureGHCommand(args ...string) (string, error) {
-	cmd := Command("gh", args...)
+	cmd := core.Command("gh", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -902,16 +905,16 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 		return false, newNonInteractiveGHCRScopeRefreshError(tag, namespace)
 	}
 
-	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
+	switchCmd := core.Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
 	switchCmd.Stdout = stdout
 	switchCmd.Stderr = stderr
 	switchErr := switchCmd.Run()
 
 	var ghCmd *exec.Cmd
 	if switchErr == nil {
-		ghCmd = Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
+		ghCmd = core.Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
 	} else {
-		ghCmd = Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
+		ghCmd = core.Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
 	}
 	ghCmd.Stdin = stdin
 	ghCmd.Stdout = stdout
@@ -930,7 +933,7 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 // or a pipe). ERUN_FORCE_TTY=1 is the CLI's test seam so the integration
 // harness, whose stdin is always a pipe, can still exercise the interactive path.
 func interactiveGHAuthAllowed(stdin io.Reader) bool {
-	if inInjectedRuntimePod() {
+	if core.InInjectedRuntimePod() {
 		return false
 	}
 	if os.Getenv("ERUN_FORCE_TTY") == "1" {
@@ -944,19 +947,13 @@ func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-// inInjectedRuntimePod detects the chart-injected runtime pod.
-func inInjectedRuntimePod() bool {
-	_, _, ok := injectedRuntimePodIdentity(os.Getenv)
-	return ok
-}
-
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	registry := dockerRegistryFromImageTag(tag)
 	if registry == "" {
 		registry = "ghcr.io"
 	}
 	reason := "stdin is not an interactive terminal"
-	if inInjectedRuntimePod() {
+	if core.InInjectedRuntimePod() {
 		reason = "this runtime pod is headless and has no browser"
 	}
 	var sb strings.Builder
@@ -994,7 +991,7 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 		return false, nil
 	}
 
-	loginCmd := Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
+	loginCmd := core.Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -1004,7 +1001,7 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 	return true, nil
 }
 
-func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) error {
+func runScriptSpec(ctx core.Context, script scriptSpec, run BuildScriptRunnerFunc) error {
 	if run == nil {
 		run = BuildScriptRunner
 	}

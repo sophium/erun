@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -12,7 +14,7 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 	if !boot.hasTarget() {
 		return ""
 	}
-	return "write the erun config for " + boot.tenant() + "/" + boot.environment() + " under " + filepath.Join(boot.configHome(), configRoot)
+	return "write the erun config for " + boot.tenant() + "/" + boot.environment() + " under " + filepath.Join(boot.configHome(), configpkg.ConfigRoot)
 }
 
 // writeRuntimeBootConfig writes the pod's erun config from the environment the
@@ -23,7 +25,7 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 // --sync-config` reconciles against, so a freshly booted pod is in sync by
 // construction. Keys the injection does not carry are preserved, as every
 // config writer preserves them.
-func writeRuntimeBootConfig(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	injected, ok := ResolveInjectedRuntimeConfig(boot.env)
 	if !ok {
 		return nil
@@ -37,7 +39,7 @@ func writeRuntimeBootConfig(_ Context, boot runtimeBoot, _ *runtimeSupervisor) e
 	}
 	env, _, err := loadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
 	if err != nil {
-		env = EnvConfig{}
+		env = configpkg.EnvConfig{}
 	}
 	env = overlayInjectedEnvConfig(env, injected.Env)
 	env.LocalRepoPath = boot.repoDir()
@@ -47,7 +49,7 @@ func writeRuntimeBootConfig(_ Context, boot runtimeBoot, _ *runtimeSupervisor) e
 func writeRuntimeBootRootConfig(configHome string, injected InjectedRuntimeConfig) error {
 	root, _, err := loadRuntimeRootConfigForSync(configHome)
 	if err != nil {
-		root = ERunConfig{}
+		root = configpkg.ERunConfig{}
 	}
 	root.DefaultTenant = injected.Tenant
 	for _, provider := range injected.Providers {
@@ -60,11 +62,11 @@ func writeRuntimeBootRootConfig(configHome string, injected InjectedRuntimeConfi
 }
 
 func writeRuntimeBootTenantConfig(configHome string, injected InjectedRuntimeConfig) error {
-	path := filepath.Join(configHome, configRoot, injected.Tenant, configFile)
-	tenant := TenantConfig{}
+	path := filepath.Join(configHome, configpkg.ConfigRoot, injected.Tenant, configpkg.ConfigFile)
+	tenant := configpkg.TenantConfig{}
 	if data, err := os.ReadFile(path); err == nil {
 		if yaml.Unmarshal(data, &tenant) != nil {
-			tenant = TenantConfig{}
+			tenant = configpkg.TenantConfig{}
 		}
 	}
 	tenant.Name = injected.Tenant
@@ -81,12 +83,12 @@ func writeRuntimeBootYAML(path string, config any) error {
 	if yaml.Unmarshal(existing, &probe) != nil || strings.TrimSpace(string(existing)) == "" {
 		existing = nil
 	}
-	data, err := marshalConfigPreservingUnknownFields(existing, config)
+	data, err := configpkg.MarshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, data, configFilePerm)
+	return configpkg.WriteFileAtomic(path, data, configpkg.ConfigFilePerm)
 }

@@ -3,13 +3,15 @@ package eruncommon
 import (
 	"errors"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A build that plans no work at all must not report success: it builds no
 // image and runs no gate, so its exit code would be indistinguishable from a
 // real pass for the caller that reads it as a verdict.
 func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
-	err := RunBuildExecution(Context{DryRun: true}, BuildExecutionSpec{}, nil, nil, nil, nil, CloudDependencies{})
+	err := RunBuildExecution(core.Context{DryRun: true}, BuildExecutionSpec{}, nil, nil, nil, nil, CloudDependencies{})
 	if err == nil {
 		t.Fatal("expected a build that plans no work to fail instead of reporting success")
 	}
@@ -23,7 +25,7 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 // plan with nothing at all is refused.
 func TestRunBuildExecutionAcceptsAScriptOnlyPlan(t *testing.T) {
 	execution := BuildExecutionSpec{script: &scriptSpec{Dir: t.TempDir(), Path: "./build.sh"}}
-	if err := RunBuildExecution(Context{DryRun: true}, execution, nil, nil, nil, nil, CloudDependencies{}); err != nil {
+	if err := RunBuildExecution(core.Context{DryRun: true}, execution, nil, nil, nil, nil, CloudDependencies{}); err != nil {
 		t.Fatalf("expected a script-only plan to run, got %v", err)
 	}
 }

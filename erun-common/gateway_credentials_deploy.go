@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // renderGatewayCredentialsSecret is the Secret erun creates in an
@@ -24,7 +27,7 @@ metadata:
 type: Opaque
 stringData:
   %s: %q
-`, name, namespace, GatewaySecretKey, authToken)
+`, name, namespace, config.GatewaySecretKey, authToken)
 }
 
 // applyGatewayCredentialsSecret delivers the erun-level gateway credential into
@@ -41,16 +44,16 @@ stringData:
 // skipped Secret: the chart would render an env var pointing at a Secret that
 // does not exist, and the pod would fail at launch with a message about a
 // missing Secret instead of one about the missing credential.
-func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) error {
+func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	// Resolved the same way the chart values are, so the Secret exists exactly
 	// when this environment reads it: an environment that opted out renders no
 	// gateway env block, and gets no Secret to go with it.
-	gateway := EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
+	gateway := config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
 	if !gateway.Configured() {
 		return nil
 	}
 	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
-	ctx.Trace("apply gateway credentials secret " + GatewaySecretName + " (token redacted)")
+	ctx.Trace("apply gateway credentials secret " + config.GatewaySecretName + " (token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
@@ -59,7 +62,7 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 	if err != nil {
 		return err
 	}
-	manifest := renderGatewayCredentialsSecret(GatewaySecretName, deployInput.Namespace, authToken)
+	manifest := renderGatewayCredentialsSecret(config.GatewaySecretName, deployInput.Namespace, authToken)
 	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "gateway credentials secret", manifest, args)
 }
 
@@ -72,19 +75,19 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 // the runtime release: the pod being replaced still references the Secret
 // until the new one is up, and a component release in the same namespace does
 // not carry the env's Claude configuration to decide by.
-func pruneGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) error {
+func pruneGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	if deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
-	if EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
+	if config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
 		return nil
 	}
 	args := []string{}
 	if c := strings.TrimSpace(deployInput.KubernetesContext); c != "" {
 		args = append(args, "--context", c)
 	}
-	args = append(args, "-n", strings.TrimSpace(deployInput.Namespace), "delete", "secret", GatewaySecretName, "--ignore-not-found")
-	ctx.Trace("remove gateway credentials secret " + GatewaySecretName + " (environment does not use the gateway)")
+	args = append(args, "-n", strings.TrimSpace(deployInput.Namespace), "delete", "secret", config.GatewaySecretName, "--ignore-not-found")
+	ctx.Trace("remove gateway credentials secret " + config.GatewaySecretName + " (environment does not use the gateway)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
@@ -93,7 +96,7 @@ func pruneGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 }
 
 var deleteGatewayCredentialsSecret = func(args []string) error {
-	output, err := Command("kubectl", args...).CombinedOutput()
+	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("kubectl delete gateway credentials secret: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -110,7 +113,7 @@ var deleteGatewayCredentialsSecret = func(args []string) error {
 // something erun can read. A saved value wins over the fallback, so an operator
 // who wants a key other than their own saves one; deleting it restores the
 // fallback rather than leaving the gateway unauthenticated.
-func gatewayCredentialForDeploy(gateway *OpenRouterConfig) (string, error) {
+func gatewayCredentialForDeploy(gateway *config.OpenRouterConfig) (string, error) {
 	store, err := DefaultCloudSecretStore()
 	if err != nil {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
@@ -123,7 +126,7 @@ func gatewayCredentialForDeploy(gateway *OpenRouterConfig) (string, error) {
 // operator secret store, else this machine's Claude Code key when it belongs to
 // the same endpoint. The result is a secret: callers deliver it only through a
 // process environment, never argv, a trace, or a file erun writes.
-func ResolveGatewayCredential(gateway *OpenRouterConfig) (string, error) {
+func ResolveGatewayCredential(gateway *config.OpenRouterConfig) (string, error) {
 	return gatewayCredentialForDeploy(gateway)
 }
 

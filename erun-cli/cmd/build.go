@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -71,7 +72,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	return cmd
 }
 
-func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
+func runBuildCommand(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
@@ -106,7 +107,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 
 // runBuildAndDeploy is --deploy's composed step: resolve the deploy specs, then
 // roll the build out.
-func runBuildAndDeploy(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, execution common.BuildExecutionSpec, runBuildScript common.BuildScriptRunnerFunc, buildWithRetry common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
+func runBuildAndDeploy(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, execution common.BuildExecutionSpec, runBuildScript common.BuildScriptRunnerFunc, buildWithRetry common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	if common.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
@@ -146,7 +147,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 				return err
 			}
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
-			return common.RunPushCommand(ctx, func(ctx common.Context) error {
+			return common.RunPushCommand(ctx, func(ctx core.Context) error {
 				return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 			})
 		},
@@ -158,7 +159,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	return cmd
 }
 
-func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerImageBuilderFunc {
+func pushBuildWithRetry(ctx core.Context, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerImageBuilderFunc {
 	return func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
 			ctx,
@@ -224,7 +225,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				if err != nil {
 					return err
 				}
-				return common.RunPushCommand(ctx, func(ctx common.Context) error {
+				return common.RunPushCommand(ctx, func(ctx core.Context) error {
 					return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 				})
 			}
@@ -232,7 +233,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			if err != nil {
 				return err
 			}
-			return common.RunPushCommand(ctx, func(ctx common.Context) error {
+			return common.RunPushCommand(ctx, func(ctx core.Context) error {
 				return common.RunDockerPushExecution(ctx, execution, buildWithRetry, push)
 			})
 		},
@@ -245,7 +246,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	return cmd
 }
 
-func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
+func runPushBuildStep(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
@@ -262,7 +263,7 @@ func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectR
 	return nil
 }
 
-func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec, push common.DockerPushFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) error {
+func runDockerPushWithRetry(ctx core.Context, pushInput common.DockerPushSpec, push common.DockerPushFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) error {
 	err := push(ctx, pushInput)
 	if err == nil {
 		return nil
@@ -297,7 +298,7 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	return push(ctx, pushInput)
 }
 
-func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSpec, build common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, stdout, stderr io.Writer) error {
+func runDockerBuildWithRetry(ctx core.Context, buildInput common.DockerBuildSpec, build common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, stdout, stderr io.Writer) error {
 	err := build(buildInput, stdout, stderr)
 	if err == nil {
 		return nil

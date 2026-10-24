@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // pipelineJob is one job as the union sees it: a status, and whatever issue
@@ -150,8 +150,8 @@ func TestGroupPipelineRendersABranchDerivedLinkAsInferred(t *testing.T) {
 	if item.IssueRef != "2212" {
 		t.Errorf("issueRef = %q, want the branch's own number", item.IssueRef)
 	}
-	if item.IssueRefSource != eruncommon.IssueReferenceInferred {
-		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, eruncommon.IssueReferenceInferred)
+	if item.IssueRefSource != modelpkg.IssueReferenceInferred {
+		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, modelpkg.IssueReferenceInferred)
 	}
 	if item.IssueKey != "sophium/erun#2212" {
 		t.Errorf("issueKey = %q, want the branch's number joined to the review's repository", item.IssueKey)
@@ -170,8 +170,8 @@ func TestGroupPipelineRendersADeclaredLinkAsDeclared(t *testing.T) {
 	if item.IssueRef != "sophium/erun#2683" {
 		t.Errorf("issueRef = %q, want the declared reference", item.IssueRef)
 	}
-	if item.IssueRefSource != eruncommon.IssueReferenceDeclared {
-		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, eruncommon.IssueReferenceDeclared)
+	if item.IssueRefSource != modelpkg.IssueReferenceDeclared {
+		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, modelpkg.IssueReferenceDeclared)
 	}
 }
 

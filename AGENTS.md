@@ -453,8 +453,9 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
   an existing external caller requires them to be exported.
 - The layered split of `erun-common`, `erun-cli` and `erun-mcp` in
   https://github.com/sophium/erun/issues/2741 is the declared intended design
-  for those package boundaries (layer map in `erun-common/AGENTS.md`). Until it
-  lands, add no new upward coupling: orchestration goes in orchestration-shaped
+  for those package boundaries (layer map in `erun-common/AGENTS.md`); it
+  lands one layer at a time through `erun-common/cmd/pkgmove`. Until it has,
+  add no new upward coupling: orchestration goes in orchestration-shaped
   files, never in a primitive's files, and types/config code never calls into
   build, deploy or release.
 - Reuse matching shared interfaces from `erun-common` directly rather than

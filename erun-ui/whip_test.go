@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // whipTestStore mirrors jobsTestStore's shape: one resolvable tenant/
@@ -15,13 +16,13 @@ import (
 func whipTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/ux": {
 				Name:              "ux",
-				Type:              eruncommon.EnvironmentTypeLocalAgent,
+				Type:              config.EnvironmentTypeLocalAgent,
 				LocalRepoPath:     t.TempDir(),
 				KubernetesContext: "orbstack",
 			},
@@ -266,9 +267,9 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 // carry, unlike a real env this transport merely cannot reach right now.
 func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 	store := whipTestStore(t)
-	store.envs["erun/desktop-build"] = eruncommon.EnvConfig{
+	store.envs["erun/desktop-build"] = config.EnvConfig{
 		Name:          "desktop-build",
-		Type:          eruncommon.EnvironmentTypeHost,
+		Type:          config.EnvironmentTypeHost,
 		LocalRepoPath: t.TempDir(),
 	}
 
@@ -304,9 +305,9 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 // report after being attempted anyway.
 func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 	store := whipTestStore(t)
-	store.envs["erun/dev"] = eruncommon.EnvConfig{
+	store.envs["erun/dev"] = config.EnvConfig{
 		Name:              "dev",
-		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		Type:              config.EnvironmentTypeLocalAgent,
 		LocalRepoPath:     t.TempDir(),
 		KubernetesContext: "orbstack",
 	}
@@ -341,9 +342,9 @@ func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 // either, since it can never carry a session to push.
 func TestListWhipEnvironmentTargetsSkipsHostEnvs(t *testing.T) {
 	store := whipTestStore(t)
-	store.envs["erun/desktop-build"] = eruncommon.EnvConfig{
+	store.envs["erun/desktop-build"] = config.EnvConfig{
 		Name:          "desktop-build",
-		Type:          eruncommon.EnvironmentTypeHost,
+		Type:          config.EnvironmentTypeHost,
 		LocalRepoPath: t.TempDir(),
 	}
 	app := NewApp(erunUIDeps{store: store})

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // exposure_app.go is the desktop half of the Ports tab's public-exposure
@@ -94,7 +96,7 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {
 		return uiExposedService{}, fmt.Errorf("this environment's project has no platform block configured, so it cannot be exposed at a public hostname")
 	}
-	result, err := eruncommon.RunExposeService(eruncommon.Context{}, eruncommon.ExposeServiceParams{
+	result, err := eruncommon.RunExposeService(core.Context{}, eruncommon.ExposeServiceParams{
 		Tenant:         selection.Tenant,
 		Environment:    selection.Environment,
 		Service:        service,
@@ -124,7 +126,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {
 		return uiUnexposeResult{}, fmt.Errorf("this environment's project has no platform block configured")
 	}
-	result, err := eruncommon.RunUnexposeService(eruncommon.Context{}, eruncommon.UnexposeParams{
+	result, err := eruncommon.RunUnexposeService(core.Context{}, eruncommon.UnexposeParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		ProjectRoot: projectRoot,
@@ -145,7 +147,7 @@ func (a *App) resolveExposureRequest(selection uiSelection) (req eruncommon.Shel
 	if err != nil {
 		return eruncommon.ShellLaunchParams{}, false, "", err
 	}
-	if config.Type == eruncommon.EnvironmentTypeHost {
+	if config.Type == configpkg.EnvironmentTypeHost {
 		return eruncommon.ShellLaunchParams{}, false, uiExposureNotConfiguredHostEnvironment, nil
 	}
 	req = eruncommon.ShellLaunchParams{

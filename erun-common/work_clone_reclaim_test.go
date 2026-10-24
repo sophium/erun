@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // This repository squash-merges every branch. That means the *normal* end
@@ -48,8 +50,8 @@ func initGitRepoAt(t *testing.T, dir string) {
 	runGitForTest(t, dir, "commit", "-q", "-m", "seed")
 }
 
-func testContext() Context {
-	return Context{Logger: NewLogger(VerbosityInfo)}
+func testContext() core.Context {
+	return core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 }
 
 // writeAndCommit writes name/content into dir and commits it, for building up

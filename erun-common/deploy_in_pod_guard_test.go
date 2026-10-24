@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 func inPodProjection(values map[string]string) func(string) string {
@@ -12,7 +14,7 @@ func inPodProjection(values map[string]string) func(string) string {
 
 func inPodProjectionRuntimeSpecs(tenant string) []DeploySpec {
 	return []DeploySpec{{
-		Target: OpenResult{Tenant: tenant},
+		Target: configpkg.OpenResult{Tenant: tenant},
 		Deploy: HelmDeploySpec{ReleaseName: RuntimeReleaseName(tenant), Version: "1.2.3"},
 	}}
 }
@@ -41,7 +43,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 	inPod := map[string]string{"ERUN_TENANT": "tenant-a", "ERUN_ENVIRONMENT": "dev"}
 	for _, tc := range []struct {
 		name      string
-		envType   EnvironmentType
+		envType   configpkg.EnvironmentType
 		env       func(string) string
 		tenant    string
 		component string
@@ -49,7 +51,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 	}{
 		{
 			name:      "a remote-agent env's own pod is refused",
-			envType:   EnvironmentTypeRemoteAgent,
+			envType:   configpkg.EnvironmentTypeRemoteAgent,
 			env:       inPodProjection(inPod),
 			tenant:    "tenant-a",
 			component: "tenant-a-devops",
@@ -57,7 +59,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		},
 		{
 			name:      "a local-agent env's own pod is refused",
-			envType:   EnvironmentTypeLocalAgent,
+			envType:   configpkg.EnvironmentTypeLocalAgent,
 			env:       inPodProjection(inPod),
 			tenant:    "tenant-a",
 			component: "tenant-a-devops",
@@ -65,7 +67,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		},
 		{
 			name:      "a runtime env's own pod is refused",
-			envType:   EnvironmentTypeRuntime,
+			envType:   configpkg.EnvironmentTypeRuntime,
 			env:       inPodProjection(inPod),
 			tenant:    "tenant-a",
 			component: "tenant-a-devops",
@@ -73,7 +75,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		},
 		{
 			name:      "off-pod the same resolve is allowed",
-			envType:   EnvironmentTypeRemoteAgent,
+			envType:   configpkg.EnvironmentTypeRemoteAgent,
 			env:       inPodProjection(map[string]string{}),
 			tenant:    "tenant-a",
 			component: "tenant-a-devops",
@@ -81,7 +83,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		},
 		{
 			name:    "another environment's pod is not this environment's projection",
-			envType: EnvironmentTypeRemoteAgent,
+			envType: configpkg.EnvironmentTypeRemoteAgent,
 			env: inPodProjection(map[string]string{
 				"ERUN_TENANT": "tenant-a", "ERUN_ENVIRONMENT": "prod",
 			}),
@@ -93,7 +95,7 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 			// A component-only deploy carries no environment shape, so an env's
 			// own pod keeps deploying its own components.
 			name:      "a non-runtime component is left alone",
-			envType:   EnvironmentTypeRemoteAgent,
+			envType:   configpkg.EnvironmentTypeRemoteAgent,
 			env:       inPodProjection(inPod),
 			tenant:    "tenant-a",
 			component: "tenant-a-devops-api",
@@ -101,10 +103,10 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := OpenResult{
+			target := configpkg.OpenResult{
 				Tenant:      tc.tenant,
 				Environment: "dev",
-				EnvConfig:   EnvConfig{Name: "dev", Type: tc.envType},
+				EnvConfig:   configpkg.EnvConfig{Name: "dev", Type: tc.envType},
 			}
 			specs := inPodProjectionRuntimeSpecs(tc.tenant)
 			specs[0].Deploy.ReleaseName = tc.component
@@ -135,18 +137,18 @@ func TestInPodProjectionResolvesDeployValuesTheGuardRefuses(t *testing.T) {
 
 	chartPath := inPodProjectionRuntimeChart(t)
 	deployContext := KubernetesDeployContext{ComponentName: "tenant-a-devops", ChartPath: chartPath}
-	target := func(config EnvConfig) OpenResult {
-		config.Name, config.Type = "dev", EnvironmentTypeRemoteAgent
-		return OpenResult{Tenant: "tenant-a", Environment: "dev", EnvConfig: config}
+	target := func(config configpkg.EnvConfig) configpkg.OpenResult {
+		config.Name, config.Type = "dev", configpkg.EnvironmentTypeRemoteAgent
+		return configpkg.OpenResult{Tenant: "tenant-a", Environment: "dev", EnvConfig: config}
 	}
 	// The host config store's authoritative shape, and the subset of it the
 	// chart's projection actually carries.
-	hostStore := EnvConfig{SSHD: SSHDConfig{Enabled: true}, RuntimePod: RuntimePodResources{CPU: "4", Memory: "8192Mi"}}
-	projection := EnvConfig{}
+	hostStore := configpkg.EnvConfig{SSHD: configpkg.SSHDConfig{Enabled: true}, RuntimePod: configpkg.RuntimePodResources{CPU: "4", Memory: "8192Mi"}}
+	projection := configpkg.EnvConfig{}
 
 	for _, tc := range []struct {
 		name       string
-		config     EnvConfig
+		config     configpkg.EnvConfig
 		wantSSHD   bool
 		wantMemory string
 	}{

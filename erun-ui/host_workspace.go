@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // A host workspace is the operator's host-machine copy of an env's worktree. For
@@ -21,7 +22,7 @@ import (
 
 // hostWorkspacePath returns the env's host-accessible worktree path, or "" when
 // the env has none (a remote-agent without workspace sync, or a runtime env).
-func hostWorkspacePath(result eruncommon.OpenResult, findProjectRoot eruncommon.ProjectFinderFunc) string {
+func hostWorkspacePath(result config.OpenResult, findProjectRoot eruncommon.ProjectFinderFunc) string {
 	if !result.RemoteRepo() {
 		return strings.TrimSpace(result.RepoPath)
 	}
@@ -31,13 +32,13 @@ func hostWorkspacePath(result eruncommon.OpenResult, findProjectRoot eruncommon.
 	return ""
 }
 
-func (a *App) resolveHostWorkspace(selection uiSelection) (eruncommon.OpenResult, string, error) {
+func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, string, error) {
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return eruncommon.OpenResult{}, "", err
+		return config.OpenResult{}, "", err
 	}
 	path := hostWorkspacePath(result, a.deps.findProjectRoot)
 	if strings.TrimSpace(path) == "" {

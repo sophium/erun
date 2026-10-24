@@ -10,14 +10,16 @@ import (
 	"strconv"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
 const defaultAPIHost = "127.0.0.1"
 
-func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchAPI APILauncher) *cobra.Command {
+func newAPICmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchAPI APILauncher) *cobra.Command {
 	host := defaultAPIHost
-	port := common.APIServicePort
+	port := config.APIServicePort
 	databaseURL := ""
 	allowedIssuers := ""
 	awsIdentityStoreID := ""
@@ -35,7 +37,7 @@ func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 			}
 			resolvedPort := port
 			if !cmd.Flags().Changed("port") {
-				resolvedPort = common.APIPortForResult(result)
+				resolvedPort = config.APIPortForResult(result)
 			}
 
 			commandArgs := apiCommandArgs(host, resolvedPort, databaseURL, allowedIssuers, awsIdentityStoreID, awsIdentityStoreRegion)
@@ -50,12 +52,12 @@ func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 
 	addDryRunFlag(cmd)
 	cmd.Flags().StringVar(&host, "host", defaultAPIHost, "Host interface to bind the backend API HTTP server to")
-	cmd.Flags().IntVar(&port, "port", common.APIServicePort, "Port to bind the backend API HTTP server to")
+	cmd.Flags().IntVar(&port, "port", config.APIServicePort, "Port to bind the backend API HTTP server to")
 	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Backend PostgreSQL database URL; defaults to ERUN_DATABASE_URL")
 	cmd.Flags().StringVar(&allowedIssuers, "oidc-allowed-issuers", "", "Comma-separated OIDC issuer allow-list")
 	cmd.Flags().StringVar(&awsIdentityStoreID, "aws-identity-store-id", "", "AWS IAM Identity Center identity store ID used to resolve usernames from STS tokens")
 	cmd.Flags().StringVar(&awsIdentityStoreRegion, "aws-identity-store-region", "", "AWS region for Identity Store username lookup")
-	cmd.Example = fmt.Sprintf("  erun api --host %s --port %d\n  erun api tenant-a dev", defaultAPIHost, common.APIServicePort)
+	cmd.Example = fmt.Sprintf("  erun api --host %s --port %d\n  erun api tenant-a dev", defaultAPIHost, config.APIServicePort)
 	return cmd
 }
 
@@ -80,7 +82,7 @@ func apiCommandArgs(host string, port int, databaseURL string, allowedIssuers st
 }
 
 func launchAPIProcess(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
-	cmd := common.Command(resolveAPIExecutable(), args...)
+	cmd := core.Command(resolveAPIExecutable(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

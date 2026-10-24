@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The config.yaml files hold cluster admin tokens. Their containing directory
@@ -54,7 +55,7 @@ func rewriteAsLegacyModeAndResave(t *testing.T, path string, save func()) {
 	assertConfigFileMode(t, path, 0o600)
 }
 
-func assertBackupsAreRestricted(t *testing.T, backups []ConfigBackup) {
+func assertBackupsAreRestricted(t *testing.T, backups []config.ConfigBackup) {
 	t.Helper()
 	if len(backups) == 0 {
 		t.Fatal("expected a dated backup to have been written")
@@ -73,12 +74,12 @@ func TestRootConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	defer restore()
 
 	save := func() {
-		if err := SaveERunConfig(ERunConfig{DefaultTenant: "erun"}); err != nil {
+		if err := config.SaveERunConfig(config.ERunConfig{DefaultTenant: "erun"}); err != nil {
 			t.Fatalf("save root config: %v", err)
 		}
 	}
 	save()
-	_, rootPath, err := LoadERunConfig()
+	_, rootPath, err := config.LoadERunConfig()
 	if err != nil {
 		t.Fatalf("load root config: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestRootConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 
 	rewriteAsLegacyModeAndResave(t, rootPath, save)
 
-	backups, err := ListRootConfigBackups(rootPath)
+	backups, err := config.ListRootConfigBackups(rootPath)
 	if err != nil {
 		t.Fatalf("list root backups: %v", err)
 	}
@@ -101,12 +102,12 @@ func TestEnvConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	defer restore()
 
 	save := func() {
-		if err := SaveEnvConfig("erun", EnvConfig{Name: "dev"}); err != nil {
+		if err := config.SaveEnvConfig("erun", config.EnvConfig{Name: "dev"}); err != nil {
 			t.Fatalf("save env config: %v", err)
 		}
 	}
 	save()
-	envPath, err := EnvConfigPath("erun", "dev")
+	envPath, err := config.EnvConfigPath("erun", "dev")
 	if err != nil {
 		t.Fatalf("env config path: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestEnvConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 
 	rewriteAsLegacyModeAndResave(t, envPath, save)
 
-	backups, err := ListEnvConfigBackups("erun", "dev")
+	backups, err := config.ListEnvConfigBackups("erun", "dev")
 	if err != nil {
 		t.Fatalf("list env backups: %v", err)
 	}
@@ -133,8 +134,8 @@ func TestDoctorSyncConfigWritesRestrictedConfig(t *testing.T) {
 	mustNoErr(t, err, "inspect")
 	mustNoErr(t, RunRuntimeConfigSync(testTraceContext(false), inspection), "sync")
 
-	rootPath := filepath.Join(configHome, configRoot, configFile)
-	envPath := filepath.Join(configHome, configRoot, "team", "prod", configFile)
+	rootPath := filepath.Join(configHome, config.ConfigRoot, config.ConfigFile)
+	envPath := filepath.Join(configHome, config.ConfigRoot, "team", "prod", config.ConfigFile)
 	for _, path := range []string{rootPath, envPath} {
 		assertConfigFileMode(t, path, 0o600)
 	}

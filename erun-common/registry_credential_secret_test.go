@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestRegistryCredentialSecretName(t *testing.T) {
@@ -109,8 +111,8 @@ func TestKubectlApplyStdinArgs(t *testing.T) {
 	}
 }
 
-func testTraceContext(dryRun bool) Context {
-	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard), DryRun: dryRun}
+func testTraceContext(dryRun bool) core.Context {
+	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), DryRun: dryRun}
 }
 
 func TestProvisionRegistryCredentialSecretNoRegistries(t *testing.T) {

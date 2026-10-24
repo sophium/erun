@@ -4,6 +4,7 @@ import (
 	"context"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A lease is a claim on one environment's idle-stop, so it only means anything
@@ -22,7 +23,7 @@ type environmentActivityLeaseResult struct {
 	Released *bool `json:"released,omitempty"`
 }
 
-func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
+func takeLeaseInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "name", params.Name)
 	putEnvironmentToolArgument(arguments, "id", params.ID)
@@ -46,7 +47,7 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	return *result.Lease, resolved, nil
 }
 
-func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
+func releaseLeaseInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", id)
 	if exclusive {
@@ -63,7 +64,7 @@ func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, r
 	return common.EnvironmentActivityLeaseNotHeld, resolved, nil
 }
 
-func listLeasesInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
+func listLeasesInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
 	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, tenant, environment, "activity_lease_list", nil, true)
 	return result.Held, resolved, err
 }

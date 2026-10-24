@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ReleasePublisher is the publish half of a release: it puts the release
@@ -24,8 +26,8 @@ type ReleasePublisher struct {
 	// mutated: a release whose images nothing publishes must fail while it is
 	// still private, not after it has announced them.
 	Tags    []releasePublishTag
-	Publish func(Context) error
-	Verify  func(Context) error
+	Publish func(core.Context) error
+	Verify  func(core.Context) error
 }
 
 func newReleasePublisher(execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) ReleasePublisher {
@@ -35,11 +37,11 @@ func newReleasePublisher(execution BuildExecutionSpec, deploySpecs []DeploySpec,
 	}
 	return ReleasePublisher{
 		Tags: tags,
-		Publish: func(publishCtx Context) error {
+		Publish: func(publishCtx core.Context) error {
 			_, err := runBuildExecutionBuilds(publishCtx, execution, deploySpecs, runScript, build, push)
 			return err
 		},
-		Verify: func(verifyCtx Context) error {
+		Verify: func(verifyCtx core.Context) error {
 			if err := verifyPublishedReleaseArtifacts(verifyCtx, execution); err != nil {
 				return err
 			}
@@ -82,13 +84,13 @@ func ensureReleasePublishesResolvedImages(spec ReleaseSpec, publisher ReleasePub
 		spec.Version, strings.Join(missing, ", "))
 }
 
-func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
+func runReleasePublication(ctx core.Context, publisher ReleasePublisher) error {
 	if publisher.Publish == nil {
 		return nil
 	}
 	reportAlreadyPublishedReleaseArtifacts(ctx, publisher.Tags)
 	ctx.Trace("stage: publish")
-	publishCtx, finishPublish := ctx.startTimingStep("publish")
+	publishCtx, finishPublish := ctx.StartTimingStep("publish")
 	err := publisher.Publish(publishCtx)
 	finishPublish(err)
 	if err != nil {
@@ -98,7 +100,7 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 		return nil
 	}
 	ctx.Trace("stage: verify-publication")
-	verifyCtx, finishVerify := ctx.startTimingStep("verify-publication")
+	verifyCtx, finishVerify := ctx.StartTimingStep("verify-publication")
 	err = publisher.Verify(verifyCtx)
 	finishVerify(err)
 	return err
@@ -117,7 +119,7 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 // tag existence. A probe here cannot tell "already published with exactly
 // this content" from "a tag with this name exists for some other reason", so
 // it is not trusted to skip work, only to report.
-func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []releasePublishTag) {
+func reportAlreadyPublishedReleaseArtifacts(ctx core.Context, tags []releasePublishTag) {
 	for _, t := range tags {
 		tag := strings.TrimSpace(t.Tag)
 		if tag == "" {
@@ -138,7 +140,7 @@ func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []releasePublishTa
 // a 404 is a transient read-after-write race worth retrying), a tag probed
 // before anything is published is expected to 404 on a first release, and
 // retrying that would slow down every release for the common case.
-func dockerImageManifestResolves(ctx Context, tag string, insecure bool) bool {
+func dockerImageManifestResolves(ctx core.Context, tag string, insecure bool) bool {
 	spec := commandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
 	_, err := runCommandCapturingOutput(ctx, spec)
 	return err == nil
@@ -150,7 +152,7 @@ func dockerImageManifestResolves(ctx Context, tag string, insecure bool) bool {
 // (publishComponentCharts), so only the image half needs a check here — nothing
 // else proves a version's multi-arch manifest exists, and assuming it does is
 // how a tag gets announced for an image no deploy can pull.
-func verifyPublishedReleaseArtifacts(ctx Context, execution BuildExecutionSpec) error {
+func verifyPublishedReleaseArtifacts(ctx core.Context, execution BuildExecutionSpec) error {
 	for _, pushInput := range execution.dockerPushes {
 		if err := VerifyPublishedDockerImage(ctx, pushInput.Image.Tag, pushInput.Image.Insecure); err != nil {
 			return err

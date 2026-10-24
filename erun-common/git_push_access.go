@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // GitPushAccessStatus reports what a remote-worktree environment's project
@@ -59,7 +61,7 @@ func (s GitPushAccessStatus) FetchWorksPushDoesNot() bool {
 // succeeds, and whether a push credential is configured. The script it runs
 // is read-only: it never mutates git or gh state and never invokes gh's
 // interactive login/refresh/switch subcommands.
-func InspectGitPushAccess(ctx Context, runner RemoteCommandRunnerFunc, req ShellLaunchParams, repoPath string) (GitPushAccessStatus, error) {
+func InspectGitPushAccess(ctx core.Context, runner RemoteCommandRunnerFunc, req ShellLaunchParams, repoPath string) (GitPushAccessStatus, error) {
 	out, err := RunTracedRemoteCommand(ctx, runner, req, "git-push-access-script", gitPushAccessScript(repoPath))
 	if err != nil {
 		return GitPushAccessStatus{}, fmt.Errorf("read git push access%s: %w", formatRemoteCommandStderr(out.Stderr), err)

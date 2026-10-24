@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 var (
@@ -70,8 +70,8 @@ type installedDesktopApp struct {
 // same keg, so neither package manager ever leaves a second,
 // independently-aging copy behind the way a manually built and relocated .app
 // bundle can.
-func installedDesktopAppCandidates(hostOS common.HostOS) []string {
-	if hostOS != common.HostOSDarwin {
+func installedDesktopAppCandidates(hostOS core.HostOS) []string {
+	if hostOS != core.HostOSDarwin {
 		return nil
 	}
 	seen := make(map[string]struct{}, 4)
@@ -88,7 +88,7 @@ func installedDesktopAppCandidates(hostOS common.HostOS) []string {
 	}
 
 	if dir := desktopAppExecutableDir(); dir != "" {
-		for _, layout := range desktopAppLayouts(dir, common.DesktopAppName, hostOS) {
+		for _, layout := range desktopAppLayouts(dir, core.DesktopAppName, hostOS) {
 			add(layout.Launch)
 		}
 	}
@@ -117,12 +117,12 @@ func desktopAppExecutableDir() string {
 // launchedDesktopAppPath is the copy `erun app` would start right now, or ""
 // when there is none -- the same resolution the launch itself uses, so the
 // bundle doctor reports on is the bundle a launch would actually reach.
-func launchedDesktopAppPath(hostOS common.HostOS) string {
+func launchedDesktopAppPath(hostOS core.HostOS) string {
 	dir := desktopAppExecutableDir()
 	if dir == "" {
 		return ""
 	}
-	chosen, _ := resolveAppExecutableNear(filepath.Join(dir, common.DesktopAppName), common.DesktopAppName, hostOS)
+	chosen, _ := resolveAppExecutableNear(filepath.Join(dir, core.DesktopAppName), core.DesktopAppName, hostOS)
 	return chosen
 }
 
@@ -136,7 +136,7 @@ func systemApplicationsDir() string {
 // inspectInstalledDesktopApps reads every installed desktop app bundle this
 // host's OS convention could hold, returning one entry per bundle that
 // actually exists on disk, in candidate order.
-func inspectInstalledDesktopApps(hostOS common.HostOS) []installedDesktopApp {
+func inspectInstalledDesktopApps(hostOS core.HostOS) []installedDesktopApp {
 	launched := launchedDesktopAppPath(hostOS)
 	var found []installedDesktopApp
 	for _, bundlePath := range installedDesktopAppCandidates(hostOS) {
@@ -178,8 +178,8 @@ func readDesktopAppBundleVersion(bundlePath string) (string, bool) {
 // about the tenant/environment doctor is scoped to, so this runs before any
 // tenant resolves and the same in --dry-run as for real -- there is no live
 // action to skip, only files to read.
-func reportInstalledDesktopAppVersion(ctx common.Context) error {
-	found := inspectInstalledDesktopApps(common.DetectHost().OS)
+func reportInstalledDesktopAppVersion(ctx core.Context) error {
+	found := inspectInstalledDesktopApps(core.DetectHost().OS)
 	if len(found) == 0 {
 		return nil
 	}

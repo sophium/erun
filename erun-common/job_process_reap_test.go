@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reapContractCommand returns the command the two tests below run as a job, and
@@ -48,18 +50,18 @@ func readOrphanPID(t *testing.T, pidFile string) int {
 
 // processTableEntry returns the session-table row for pid, if the platform's
 // process table still holds one. A reaped process leaves no row at all.
-func processTableEntry(t *testing.T, pid int) (sessionProcess, bool) {
+func processTableEntry(t *testing.T, pid int) (core.SessionProcess, bool) {
 	t.Helper()
-	procs, ok := environmentJobSessionProcessesFunc()
+	procs, ok := core.EnvironmentJobSessionProcessesFunc()
 	if !ok {
 		t.Fatalf("this host's process table could not be read, so the reap cannot be observed")
 	}
 	for _, proc := range procs {
-		if proc.pid == pid {
+		if proc.Pid == pid {
 			return proc, true
 		}
 	}
-	return sessionProcess{}, false
+	return core.SessionProcess{}, false
 }
 
 // A supervisor is a child subreaper, so anything a job's work orphans is
@@ -107,7 +109,7 @@ func TestEnvironmentJobSupervisorReapsAReparentedDescendantThatExitsWhileTheJobR
 	if proc, present := processTableEntry(t, orphanPID); present {
 		t.Fatalf("the job's orphaned descendant (pid %d) is still in the process table %s after it exited, as a child of %d (zombie=%v): "+
 			"the supervisor did not reap it, so signal 0 reads an exited process as alive",
-			orphanPID, 4*time.Second, proc.parent, proc.zombie)
+			orphanPID, 4*time.Second, proc.Parent, proc.Zombie)
 	}
 }
 
@@ -138,7 +140,7 @@ func TestEnvironmentJobSupervisorKeepsItsOwnChildsExitStatusWhileReaping(t *test
 
 	orphanPID := readOrphanPID(t, pidFile)
 	if proc, present := processTableEntry(t, orphanPID); present {
-		t.Fatalf("the job's orphaned descendant (pid %d) was not reaped (child of %d, zombie=%v)", orphanPID, proc.parent, proc.zombie)
+		t.Fatalf("the job's orphaned descendant (pid %d) was not reaped (child of %d, zombie=%v)", orphanPID, proc.Parent, proc.Zombie)
 	}
 
 	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())

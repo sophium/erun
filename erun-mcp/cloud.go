@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 type CloudListInput struct {
@@ -79,11 +80,11 @@ type CloudActionResult struct {
 }
 
 type CloudSetResult struct {
-	Preview     bool                 `json:"preview"`
-	Tenant      string               `json:"tenant"`
-	Environment string               `json:"environment"`
-	EnvConfig   eruncommon.EnvConfig `json:"envConfig"`
-	Trace       []string             `json:"trace,omitempty"`
+	Preview     bool                `json:"preview"`
+	Tenant      string              `json:"tenant"`
+	Environment string              `json:"environment"`
+	EnvConfig   configpkg.EnvConfig `json:"envConfig"`
+	Trace       []string            `json:"trace,omitempty"`
 }
 
 func cloudListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
@@ -117,7 +118,7 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 				"aws sso login --profile erun-sso-<timestamp>",
 				"aws sts get-caller-identity --profile erun-sso-<timestamp>",
 				"aws iam enable-outbound-web-identity-federation --query IssuerIdentifier --output text --profile erun-sso-<timestamp> if AWS outbound web identity federation is disabled",
-				"aws sts get-web-identity-token --audience " + eruncommon.CloudProviderBearerAudience + " --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile erun-sso-<timestamp>",
+				"aws sts get-web-identity-token --audience " + configpkg.CloudProviderBearerAudience + " --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile erun-sso-<timestamp>",
 				"save root cloud provider alias resolved from AWS identity",
 				"save cloud provider OIDC issuer resolved from AWS web identity token",
 			}
@@ -267,7 +268,7 @@ func cloudDependencies() eruncommon.CloudDependencies {
 func cloudAudienceForPlan(audience string) string {
 	audience = strings.TrimSpace(audience)
 	if audience == "" {
-		return eruncommon.CloudProviderBearerAudience
+		return configpkg.CloudProviderBearerAudience
 	}
 	return audience
 }

@@ -5,28 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // fakeDockerStoreForDindResources is the minimal DockerStore double
 // resolveDockerBuildDindPodResources needs: one tenant with one environment
 // whose LocalRepoPath matches the project root under test.
 type fakeDockerStoreForDindResources struct {
-	tenant TenantConfig
-	envs   []EnvConfig
+	tenant config.TenantConfig
+	envs   []config.EnvConfig
 }
 
-func (f fakeDockerStoreForDindResources) ListTenantConfigs() ([]TenantConfig, error) {
-	return []TenantConfig{f.tenant}, nil
+func (f fakeDockerStoreForDindResources) ListTenantConfigs() ([]config.TenantConfig, error) {
+	return []config.TenantConfig{f.tenant}, nil
 }
 
-func (f fakeDockerStoreForDindResources) LoadTenantConfig(name string) (TenantConfig, string, error) {
+func (f fakeDockerStoreForDindResources) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
 	if name == f.tenant.Name {
 		return f.tenant, "", nil
 	}
-	return TenantConfig{}, "", fmt.Errorf("tenant %q not found", name)
+	return config.TenantConfig{}, "", fmt.Errorf("tenant %q not found", name)
 }
 
-func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config.EnvConfig, error) {
 	if tenant != f.tenant.Name {
 		return nil, nil
 	}
@@ -36,11 +38,11 @@ func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]EnvCon
 // storeWithDindConfig builds a store whose one environment matches projectRoot
 // and carries the given RuntimeDindPod, so resolveDockerBuildEnvConfigForProject
 // resolves it as the "config present" case.
-func storeWithDindConfig(t *testing.T, projectRoot string, resources RuntimePodResources) DockerStore {
+func storeWithDindConfig(t *testing.T, projectRoot string, resources config.RuntimePodResources) DockerStore {
 	t.Helper()
 	return fakeDockerStoreForDindResources{
-		tenant: TenantConfig{Name: "acme"},
-		envs: []EnvConfig{{
+		tenant: config.TenantConfig{Name: "acme"},
+		envs: []config.EnvConfig{{
 			Name:           "dev",
 			LocalRepoPath:  filepath.Clean(projectRoot),
 			RuntimeDindPod: resources,
@@ -71,10 +73,10 @@ func TestResolveDockerBuildDindPodResourcesPrefersEnvVarsOverConfig(t *testing.T
 	t.Setenv(DindMemoryLimitMiBEnvVar, "8192")
 
 	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, RuntimePodResources{CPU: "2", Memory: "4096Mi"})
+	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
 
 	got := resolveDockerBuildDindPodResources(store, dir, "dev")
-	want := RuntimePodResources{CPU: "8", Memory: "8192Mi"}
+	want := config.RuntimePodResources{CPU: "8", Memory: "8192Mi"}
 	if got != want {
 		t.Fatalf("expected env vars to win, got %+v want %+v", got, want)
 	}
@@ -86,10 +88,10 @@ func TestResolveDockerBuildDindPodResourcesFallsBackToConfigWhenEnvVarsAbsent(t 
 	clearInjectedRuntimeEnv(t)
 
 	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, RuntimePodResources{CPU: "2", Memory: "4096Mi"})
+	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
 
 	got := resolveDockerBuildDindPodResources(store, dir, "dev")
-	want := RuntimePodResources{CPU: "2", Memory: "4096Mi"}
+	want := config.RuntimePodResources{CPU: "2", Memory: "4096Mi"}
 	if got != want {
 		t.Fatalf("expected the config-store value, got %+v want %+v", got, want)
 	}
@@ -101,8 +103,8 @@ func TestResolveDockerBuildDindPodResourcesFallsBackToDefaultsWhenNeitherEnvNorC
 	clearInjectedRuntimeEnv(t)
 
 	dir := t.TempDir()
-	got := resolveDockerBuildDindPodResources(ConfigStore{}, dir, "dev")
-	want := RuntimePodResources{CPU: DefaultRuntimeDindCPU, Memory: DefaultRuntimeDindMemory}
+	got := resolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
+	want := config.RuntimePodResources{CPU: DefaultRuntimeDindCPU, Memory: DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected the hardcoded defaults, got %+v want %+v", got, want)
 	}
@@ -117,10 +119,10 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarPerField(t *tes
 	t.Setenv(DindMemoryLimitMiBEnvVar, "8192")
 
 	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, RuntimePodResources{CPU: "2", Memory: "4096Mi"})
+	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
 
 	got := resolveDockerBuildDindPodResources(store, dir, "dev")
-	want := RuntimePodResources{CPU: "2", Memory: "8192Mi"}
+	want := config.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
 	if got != want {
 		t.Fatalf("expected malformed CPU to fall back to config and memory to take the env var, got %+v want %+v", got, want)
 	}
@@ -134,8 +136,8 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t 
 	t.Setenv(DindMemoryLimitMiBEnvVar, "not-a-memory-quantity")
 
 	dir := t.TempDir()
-	got := resolveDockerBuildDindPodResources(ConfigStore{}, dir, "dev")
-	want := RuntimePodResources{CPU: "8", Memory: DefaultRuntimeDindMemory}
+	got := resolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
+	want := config.RuntimePodResources{CPU: "8", Memory: DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected valid CPU env var and default memory, got %+v want %+v", got, want)
 	}
@@ -158,7 +160,7 @@ func TestApplyDindResourceBuildArgsUsesEnvVarsInPod(t *testing.T) {
 	}
 
 	build := &DockerBuildSpec{DockerfilePath: dockerfilePath}
-	applyDindResourceBuildArgs(ConfigStore{}, dir, "dev", build)
+	applyDindResourceBuildArgs(config.ConfigStore{}, dir, "dev", build)
 
 	if build.DindCPULimit != "8" {
 		t.Fatalf("expected DindCPULimit 8 (from %s), got %q", DindCPULimitEnvVar, build.DindCPULimit)

@@ -8,7 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The readiness indicator has to tell three conditions apart: running, stopped,
@@ -21,10 +23,10 @@ func stopTestApp(t *testing.T, emits *capturedEmits, deps erunUIDeps) *App {
 	t.Helper()
 	projectRoot := t.TempDir()
 	deps.store = stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "cluster-local"},
 		},
 	}
@@ -93,7 +95,7 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 		t.Run(testCase.name, func(t *testing.T) {
 			emits := newCapturedEmits()
 			app := stopTestApp(t, emits, erunUIDeps{
-				readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+				readRuntimeRunState: func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 					return testCase.state, testCase.err
 				},
 			})
@@ -111,7 +113,7 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 func TestRuntimeStoppedForSelectionHonoursTheLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
-		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		readRuntimeRunState: func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
 		},
 	})
@@ -134,7 +136,7 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	emits := newCapturedEmits()
 	var captured eruncommon.StopEnvironmentParams
 	app := stopTestApp(t, emits, erunUIDeps{
-		stopEnvironmentRuntime: func(_ eruncommon.Context, params eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error) {
+		stopEnvironmentRuntime: func(_ core.Context, params eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error) {
 			captured = params
 			return eruncommon.StopEnvironmentResult{
 				Tenant:      params.Result.Tenant,
@@ -221,7 +223,7 @@ func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 func loadRunStateReading(t *testing.T, state eruncommon.RuntimeRunState, readErr error) uiRuntimeRunState {
 	t.Helper()
 	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
-		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		readRuntimeRunState: func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 			return state, readErr
 		},
 	})
@@ -250,7 +252,7 @@ func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
 // panel would flash "running" at the operator who just stopped it.
 func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
-		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		readRuntimeRunState: func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
 		},
 	})
@@ -330,7 +332,7 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
-		stopEnvironmentRuntime: func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error) {
+		stopEnvironmentRuntime: func(core.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error) {
 			return eruncommon.StopEnvironmentResult{}, errors.New("forbidden")
 		},
 	})
@@ -363,7 +365,7 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 			sessionsMu.Unlock()
 			return session, nil
 		},
-		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		readRuntimeRunState: func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
 			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 		},
 	})

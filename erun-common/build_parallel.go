@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Most discovered images are independent of each other — the runtime build has
@@ -36,7 +38,7 @@ const BuildJobsEnvVar = "ERUN_BUILD_JOBS"
 // BuildKit and the foreign architecture runs under emulation, which is memory
 // heavy, so the automatic ceiling is half the cores rather than all of them —
 // oversubscribing here trades wall-clock for swap.
-func resolveBuildJobs(ctx Context, images int) int {
+func resolveBuildJobs(ctx core.Context, images int) int {
 	jobs := ctx.BuildJobs
 	if jobs <= 0 {
 		if fromEnv, err := strconv.Atoi(strings.TrimSpace(os.Getenv(BuildJobsEnvVar))); err == nil && fromEnv > 0 {
@@ -149,7 +151,7 @@ func buildCycleStart(path []string, tag string) int {
 // report, and a line that reported levels would describe a barrier the run does
 // not have. A build with nothing to order says nothing: there is no dependency
 // to explain, and saying so would churn every independent-image golden.
-func traceBuildDependencyPlan(ctx Context, builds []DockerBuildSpec, dependencies map[string][]string) {
+func traceBuildDependencyPlan(ctx core.Context, builds []DockerBuildSpec, dependencies map[string][]string) {
 	waiting := make([]string, 0, len(builds))
 	for _, build := range builds {
 		tag := strings.TrimSpace(build.Image.Tag)
@@ -184,7 +186,7 @@ func traceBuildDependencyPlan(ctx Context, builds []DockerBuildSpec, dependencie
 // past. It is time-based and therefore not reproducible either, which is why it
 // is emitted at default verbosity only by a run that is actually building — see
 // build_heartbeat.go.
-func runBuildDependencies(ctx Context, builds []DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) error {
+func runBuildDependencies(ctx core.Context, builds []DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) error {
 	if jobs <= 1 || len(builds) <= 1 {
 		for _, buildInput := range builds {
 			if err := executeDockerBuild(ctx, buildInput, build, ctx.Stdout, ctx.Stderr); err != nil {
@@ -207,7 +209,7 @@ func runBuildDependencies(ctx Context, builds []DockerBuildSpec, dependencies ma
 // buildDispatch is one run's dispatch state: the images in build order, the
 // worker pool they share, what each image waits for, and how it turned out.
 type buildDispatch struct {
-	ctx         Context
+	ctx         core.Context
 	builds      []DockerBuildSpec
 	build       DockerImageBuilderFunc
 	baseIndexes [][]int
@@ -225,7 +227,7 @@ type buildDispatch struct {
 	running  sync.WaitGroup
 }
 
-func newBuildDispatch(ctx Context, builds []DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) *buildDispatch {
+func newBuildDispatch(ctx core.Context, builds []DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) *buildDispatch {
 	dispatch := &buildDispatch{
 		ctx:         ctx,
 		builds:      builds,

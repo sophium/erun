@@ -9,6 +9,8 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // awsSTSIdentityExecutionOperation is the ExecutionModeFor/ExecutionModeReport
@@ -48,7 +50,7 @@ const awsExportCredentialsExecutionOperation = "aws-export-credentials"
 // defaultResolveAWSIdentity. It renders the exact same `aws sts
 // get-caller-identity` trace line for dry-run/audit parity, then resolves the
 // identity via aws-sdk-go-v2 instead of shelling out to the aws CLI.
-func libraryResolveAWSIdentity(ctx Context, profile string) (AWSIdentity, error) {
+func libraryResolveAWSIdentity(ctx core.Context, profile string) (AWSIdentity, error) {
 	profile = strings.TrimSpace(profile)
 	traceAWSGetCallerIdentity(ctx, profile)
 	identity, err := awsSDKCallerIdentity(context.Background(), profile)
@@ -63,14 +65,14 @@ func libraryResolveAWSIdentity(ctx Context, profile string) (AWSIdentity, error)
 // "aws CLI is not installed" — there is no CLI to be missing — so that status
 // arm never fires here; every other classification (active, not configured,
 // expired) is preserved.
-func libraryCheckAWSStatus(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+func libraryCheckAWSStatus(_ core.Context, provider config.CloudProviderConfig) CloudProviderStatus {
 	_, err := awsSDKCallerIdentity(context.Background(), provider.Profile)
 	if err == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 	}
-	status := CloudTokenStatusExpired
+	status := config.CloudTokenStatusExpired
 	if isAWSProfileNotConfiguredError(err) {
-		status = CloudTokenStatusNotConfigured
+		status = config.CloudTokenStatusNotConfigured
 	}
 	return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: awsSDKErrorMessage(err)}
 }
@@ -81,7 +83,7 @@ func libraryCheckAWSStatus(_ Context, provider CloudProviderConfig) CloudProvide
 // unconditional dry-run trace awsBearerTokenWithOIDCRetry issues a second time
 // to preview its federation-enable recovery — then mints the token via
 // aws-sdk-go-v2 instead of shelling out to the aws CLI.
-func libraryRunAWSBearerToken(ctx Context, profile, audience string) (string, error) {
+func libraryRunAWSBearerToken(ctx core.Context, profile, audience string) (string, error) {
 	profile = strings.TrimSpace(profile)
 	audience = normalizeCloudBearerAudience(audience)
 	traceAWSGetWebIdentityToken(ctx, profile, audience)
@@ -102,7 +104,7 @@ func libraryRunAWSBearerToken(ctx Context, profile, audience string) (string, er
 // (static keys, SSO, assume-role, credential_process, IMDS — the same
 // ~/.aws/config and ~/.aws/sso cache the aws CLI itself reads) instead of
 // shelling out to the aws CLI.
-func libraryRunAWSExportCredentials(ctx Context, profile string) (CloudProviderCredentials, error) {
+func libraryRunAWSExportCredentials(ctx core.Context, profile string) (CloudProviderCredentials, error) {
 	profile = strings.TrimSpace(profile)
 	traceAWSExportCredentials(ctx, profile)
 	if ctx.DryRun {
@@ -128,7 +130,7 @@ func awsGetCallerIdentityArgs(profile string) []string {
 	return args
 }
 
-func traceAWSGetCallerIdentity(ctx Context, profile string) {
+func traceAWSGetCallerIdentity(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", awsGetCallerIdentityArgs(profile)...)
 }
 
@@ -152,7 +154,7 @@ func awsGetWebIdentityTokenArgs(profile, audience string) []string {
 	return args
 }
 
-func traceAWSGetWebIdentityToken(ctx Context, profile, audience string) {
+func traceAWSGetWebIdentityToken(ctx core.Context, profile, audience string) {
 	ctx.TraceCommand("", "aws", awsGetWebIdentityTokenArgs(profile, audience)...)
 }
 
@@ -169,7 +171,7 @@ func awsConfigureExportCredentialsArgs(profile string) []string {
 	return args
 }
 
-func traceAWSExportCredentials(ctx Context, profile string) {
+func traceAWSExportCredentials(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", awsConfigureExportCredentialsArgs(profile)...)
 }
 
