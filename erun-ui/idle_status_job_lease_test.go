@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // The banner that names an occupancy can only offer to stop it if it knows
@@ -13,7 +14,7 @@ import (
 // anything else.
 func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
 	now := time.Unix(1700000100, 0)
-	out := environmentLeasesToUI([]eruncommon.EnvironmentActivityLease{
+	out := environmentLeasesToUI([]activity.EnvironmentActivityLease{
 		{ID: "job-gate-1", Name: "repo gate", StartedAt: time.Unix(1700000000, 0)},
 		{ID: "orchestrator-erun", Name: "erun", StartedAt: time.Unix(1700000000, 0)},
 	}, now)

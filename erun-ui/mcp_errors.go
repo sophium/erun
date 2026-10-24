@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // errMCPUnreachable signals the frontend to render an unreachable state with a
@@ -26,9 +26,9 @@ const mcpUnreachableMarker = "ERUN_MCP_UNREACHABLE: "
 // as informational, a stale forward reads as a fault, and the frontend cannot
 // tell those apart from prose alone. Both are still recognised as "MCP
 // unreachable" the same way the plain marker is.
-var mcpUnreachableKindMarkers = map[eruncommon.LocalMCPUnreachableKind]string{
-	eruncommon.LocalMCPNotOpen:      "ERUN_MCP_UNREACHABLE_NOT_OPEN: ",
-	eruncommon.LocalMCPStaleForward: "ERUN_MCP_UNREACHABLE_STALE: ",
+var mcpUnreachableKindMarkers = map[mcp.LocalMCPUnreachableKind]string{
+	mcp.LocalMCPNotOpen:      "ERUN_MCP_UNREACHABLE_NOT_OPEN: ",
+	mcp.LocalMCPStaleForward: "ERUN_MCP_UNREACHABLE_STALE: ",
 }
 
 func wrapMCPUnreachableError(err error) error {
@@ -42,7 +42,7 @@ func wrapMCPUnreachableError(err error) error {
 // reachability kind the caller already classified, so the review panel can
 // tell a stopped environment (informational, "Open") from a stale forward (a
 // fault, "Reconnect…") without re-deriving it from the message text.
-func wrapMCPUnreachableErrorWithKind(kind eruncommon.LocalMCPUnreachableKind, err error) error {
+func wrapMCPUnreachableErrorWithKind(kind mcp.LocalMCPUnreachableKind, err error) error {
 	if err == nil {
 		return nil
 	}

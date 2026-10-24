@@ -12,6 +12,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // resolveMCPAuthPublicKey loads the desktop key the per-env MCP edge verifies
@@ -43,7 +45,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // console. No key resolved (and no explicit opt-out) leaves the deploy
 // unauthenticated, matching every deploy before this existed.
 func applyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *DeploySpec) error {
-	if spec == nil || spec.Deploy.ReleaseName != RuntimeReleaseName(target.Tenant) {
+	if spec == nil || spec.Deploy.ReleaseName != config.RuntimeReleaseName(target.Tenant) {
 		return nil
 	}
 	keyPath := resolveMCPAuthKeyPathForDeploy(ctx, target, spec.Target.EnvConfig)
@@ -127,7 +129,7 @@ func guardMCPAuthDowngrade(ctx core.Context, target DeployTarget, deployInput He
 	if target.DisableMCPAuth || deployInput.MCPAuthEnabled {
 		return nil
 	}
-	if deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	live, known := readLiveMCPAuth(deployInput)
@@ -150,7 +152,7 @@ func guardMCPAuthDowngrade(ctx core.Context, target DeployTarget, deployInput He
 // asking it for one sends the operator after a file that should not exist.
 func mcpAuthDowngradeRecovery(ctx core.Context, deployInput HelmDeploySpec, live liveMCPAuth) string {
 	const optOut = ", or pass --no-mcp-auth to turn authentication off on purpose"
-	if issuer := strings.TrimSpace(live.issuer); issuer != "" && !strings.HasPrefix(issuer, fileIssuerScheme) {
+	if issuer := strings.TrimSpace(live.issuer); issuer != "" && !strings.HasPrefix(issuer, mcpauth.FileIssuerScheme) {
 		ctx.Trace("deploy: mcp auth: release " + deployInput.ReleaseName + " authenticates against the OIDC issuer " + issuer + "; no local key is involved")
 		return "The release authenticates against the OIDC issuer " + issuer + ", not a local key; erun has no supported way to configure that issuer, so switch the release to the key-based path with --mcp-auth-public-key <path>" + optOut
 	}
@@ -184,7 +186,7 @@ func readLiveMCPAuthPublicKey(ctx core.Context, deployInput HelmDeploySpec, secr
 	if kubernetesContext := strings.TrimSpace(deployInput.KubernetesContext); kubernetesContext != "" {
 		args = append(args, "--context", kubernetesContext)
 	}
-	jsonPath := "jsonpath={.data." + strings.ReplaceAll(desktopMCPPublicKeyFile, ".", `\.`) + "}"
+	jsonPath := "jsonpath={.data." + strings.ReplaceAll(mcpauth.DesktopMCPPublicKeyFile, ".", `\.`) + "}"
 	args = append(args, "-n", namespace, "get", "secret", secret, "-o", jsonPath)
 	output, err := core.Command("kubectl", args...).Output()
 	if err != nil {
@@ -208,7 +210,7 @@ func desktopIdentityPublicKeyMatching(trusted []byte) (string, bool) {
 	if dir == "" {
 		return "", false
 	}
-	path := DesktopIdentityPublicKeyPath(dir)
+	path := mcpauth.DesktopIdentityPublicKeyPath(dir)
 	local, err := os.ReadFile(path)
 	if err != nil {
 		return "", false
@@ -319,7 +321,7 @@ metadata:
 type: Opaque
 stringData:
   %s: %q
-`, name, namespace, desktopMCPPublicKeyFile, publicKeyPEM)
+`, name, namespace, mcpauth.DesktopMCPPublicKeyFile, publicKeyPEM)
 }
 
 // applyMCPAuthSecret delivers the desktop public key into the env's runtime
@@ -329,7 +331,7 @@ func applyMCPAuthSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	if !deployInput.MCPAuthEnabled || strings.TrimSpace(deployInput.MCPAuthSecretName) == "" {
 		return nil
 	}
-	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	args := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.Trace("apply mcp auth public key secret " + deployInput.MCPAuthSecretName)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -343,7 +345,7 @@ func applyMCPAuthSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 		deployInput.Namespace,
 		deployInput.MCPAuthPublicKeyPEM,
 	)
-	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "mcp auth secret", manifest, args)
+	return kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "mcp auth secret", manifest, args)
 }
 
 // applyMCPAuthDeployMetadata records the MCP-auth fields but applies no Secret
@@ -359,7 +361,7 @@ func applyMCPAuthDeployMetadata(deployInput *HelmDeploySpec, publicKeyPEM, publi
 	deployInput.MCPAuthEnabled = true
 	deployInput.MCPAuthPublicKeyPEM = publicKeyPEM
 	deployInput.MCPAuthPublicKeyPath = strings.TrimSpace(publicKeyPath)
-	deployInput.MCPAuthIssuer = DesktopMCPIssuer()
-	deployInput.MCPAuthAudience = MCPTokenAudience(deployInput.Tenant, deployInput.Environment)
+	deployInput.MCPAuthIssuer = mcpauth.DesktopMCPIssuer()
+	deployInput.MCPAuthAudience = mcpauth.MCPTokenAudience(deployInput.Tenant, deployInput.Environment)
 	deployInput.MCPAuthSecretName = mcpAuthSecretName(deployInput.ReleaseName)
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // Every build recorded against a review is RECORDED and carries its version:
@@ -44,7 +45,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 }
 
 func TestRunReviewRecordBuildRequiresAVersionBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, CloudDependencies{})
+	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, cloud.CloudDependencies{})
 	if err == nil || !strings.Contains(err.Error(), "version is required") {
 		t.Fatalf("err = %v, want the missing-version refusal", err)
 	}
@@ -75,6 +76,9 @@ func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 		t.Errorf("expected the refusal before any platform call, got %d calls", calls.Load())
 	}
 
+	if err := ensureNotKnownInfrastructureBuildFailure(false, "#16 213.0 error Error: https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz: ESOCKETTIMEDOUT"); err == nil {
+		t.Error("a registry download that timed out mid-install must not be recorded as FAILED")
+	}
 	if err := ensureNotKnownInfrastructureBuildFailure(false, "make: *** [Makefile:1060: check] Error 2"); err != nil {
 		t.Errorf("an ordinary red build must still be recordable as FAILED, got %v", err)
 	}

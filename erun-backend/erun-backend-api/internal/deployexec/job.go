@@ -15,14 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
+	"github.com/sophium/erun/erun-common/base/config"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
 )
 
 const (
@@ -319,7 +317,7 @@ func ExposeHostnameFromParams(params DeployJobParams) string {
 	if ip == "" || zone == "" || namespace == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s.%s.%s", mcpExposeService, eruncommon.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
+	return fmt.Sprintf("%s.%s.%s", mcpExposeService, config.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
 }
 
 // namespaceQuotaFlags appends --max-cpu/--max-memory/--max-storage when all

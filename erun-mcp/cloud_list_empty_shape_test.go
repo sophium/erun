@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // unconfiguredStore is the state the reported defect is about: a store that
@@ -29,12 +29,12 @@ func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
 // slice of length zero exactly as it drops a nil one, and initialising the
 // slice without dropping the tag would have changed nothing.
 func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
-	providers, err := eruncommon.ListCloudProviderStatuses(unconfiguredStore{}, eruncommon.CloudDependencies{})
+	providers, err := cloud.ListCloudProviderStatuses(unconfiguredStore{}, cloud.CloudDependencies{})
 	if err != nil {
 		t.Fatalf("list cloud provider statuses: %v", err)
 	}
-	contexts, err := eruncommon.RefreshCloudContextList(
-		core.Context{}, unconfiguredStore{}, eruncommon.CloudContextDependencies{})
+	contexts, err := cloud.RefreshCloudContextList(
+		core.Context{}, unconfiguredStore{}, cloud.CloudContextDependencies{})
 	if err != nil {
 		t.Fatalf("refresh cloud context list: %v", err)
 	}

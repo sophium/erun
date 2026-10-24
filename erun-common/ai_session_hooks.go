@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The AI tools' own hook events are the producer the structured AI-session
@@ -28,7 +30,7 @@ type AISessionHookBinding struct {
 	// ToolEvent is the hook event name in the tool's own settings vocabulary.
 	ToolEvent string
 	// ModelEvent is the turn-boundary event a report bound to ToolEvent writes.
-	ModelEvent AISessionEventKind
+	ModelEvent model.AISessionEventKind
 }
 
 // AISessionHookBindings is the whole turn-boundary mapping, and is the
@@ -54,12 +56,12 @@ type AISessionHookBinding struct {
 // mid-turn working through the subagent's result.
 func AISessionHookBindings() []AISessionHookBinding {
 	return []AISessionHookBinding{
-		{ToolEvent: "UserPromptSubmit", ModelEvent: AISessionEventTurnStart},
-		{ToolEvent: "PreToolUse", ModelEvent: AISessionEventToolUse},
-		{ToolEvent: "PostToolUse", ModelEvent: AISessionEventToolUse},
-		{ToolEvent: "Stop", ModelEvent: AISessionEventTurnEnd},
-		{ToolEvent: "Notification", ModelEvent: AISessionEventNotify},
-		{ToolEvent: "SessionEnd", ModelEvent: AISessionEventExit},
+		{ToolEvent: "UserPromptSubmit", ModelEvent: model.AISessionEventTurnStart},
+		{ToolEvent: "PreToolUse", ModelEvent: model.AISessionEventToolUse},
+		{ToolEvent: "PostToolUse", ModelEvent: model.AISessionEventToolUse},
+		{ToolEvent: "Stop", ModelEvent: model.AISessionEventTurnEnd},
+		{ToolEvent: "Notification", ModelEvent: model.AISessionEventNotify},
+		{ToolEvent: "SessionEnd", ModelEvent: model.AISessionEventExit},
 	}
 }
 

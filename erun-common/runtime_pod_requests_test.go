@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // runtimePodRequestsList is `kubectl get pods -o json` for a local-agent
@@ -56,7 +57,7 @@ func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	if requests.Unavailable != "" {
 		t.Fatalf("expected a reading, got unavailable: %s", requests.Unavailable)
 	}
-	runtime, ok := requests.Containers[DevopsComponentName]
+	runtime, ok := requests.Containers[config.DevopsComponentName]
 	if !ok {
 		t.Fatalf("expected the runtime container's own request, got %+v", requests.Containers)
 	}
@@ -183,9 +184,9 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 		"cpu_time_after_ns=2000000000",
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
-	req := ShellLaunchParams{Tenant: "erun", Environment: "code1", Type: config.EnvironmentTypeLocalAgent}
-	containerRunner := func(_ ShellLaunchParams, _, _ string) (RemoteCommandResult, error) {
-		return RemoteCommandResult{Stdout: reading}, nil
+	req := config.ShellLaunchParams{Tenant: "erun", Environment: "code1", Type: config.EnvironmentTypeLocalAgent}
+	containerRunner := func(_ config.ShellLaunchParams, _, _ string) (kube.RemoteCommandResult, error) {
+		return kube.RemoteCommandResult{Stdout: reading}, nil
 	}
 
 	t.Run("read", func(t *testing.T) {
@@ -224,7 +225,7 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 // is read. A zero-valued Requests here would be a reservation of nothing,
 // which is a claim rather than an absence.
 func TestDryRunTracesThePodSpecReadWithoutInventingAReservation(t *testing.T) {
-	req := ShellLaunchParams{Tenant: "erun", Environment: "code1"}
+	req := config.ShellLaunchParams{Tenant: "erun", Environment: "code1"}
 	var trace strings.Builder
 	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace)}
 	usage, err := RunRuntimeUsage(ctx, nil, nil, req, RuntimeUsageParams{Interval: time.Second})

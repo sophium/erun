@@ -11,20 +11,22 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
 type cloudCommandStoreInterface interface {
-	common.CloudStore
-	common.EnvironmentCloudAliasStore
+	cloud.CloudStore
+	cloud.EnvironmentCloudAliasStore
 	configpkg.OpenStore
 }
 
 // cloudDependencies tolerates a missing secret store: when it can't be created
 // the store stays nil, and Cloudflare operations that need the scoped token then
 // fail clearly rather than crashing.
-func cloudDependencies() common.CloudDependencies {
-	return common.DefaultCloudDependencies()
+func cloudDependencies() cloud.CloudDependencies {
+	return cloud.DefaultCloudDependencies()
 }
 
 // refreshEnvironmentHostCredentials re-injects the operator's short-lived AWS
@@ -35,7 +37,7 @@ func refreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenRe
 	return common.RefreshHostAWSCredentials(ctx, configpkg.ConfigStore{}, result, cloudDependencies())
 }
 
-func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, selectRunner SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"cloud",
 		"Cloud provider utilities",
@@ -47,7 +49,7 @@ func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, se
 	)
 }
 
-func newCloudRefreshCmd(store cloudCommandStoreInterface, deps common.CloudDependencies) *cobra.Command {
+func newCloudRefreshCmd(store cloudCommandStoreInterface, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "refresh TENANT ENVIRONMENT",
 		Short: "Refresh an environment's in-pod host AWS credentials",
@@ -76,7 +78,7 @@ func newCloudRefreshCmd(store cloudCommandStoreInterface, deps common.CloudDepen
 	return cmd
 }
 
-func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, tenant, environment string, deps common.CloudDependencies) error {
+func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, tenant, environment string, deps cloud.CloudDependencies) error {
 	result, err := common.ResolveOpen(store, common.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return err
@@ -104,7 +106,7 @@ func writeHostCredentialsRefreshed(ctx core.Context, result configpkg.OpenResult
 	return err
 }
 
-func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudInitCmd(store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"init",
 		"Initialize cloud provider configuration",
@@ -114,8 +116,8 @@ func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, selectR
 	)
 }
 
-func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
-	var params common.InitAWSCloudProviderParams
+func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+	var params cloud.InitAWSCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "aws",
 		Short: "Set up an AWS cloud provider alias",
@@ -139,7 +141,7 @@ func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps
 	return cmd
 }
 
-func runCloudInitAWSCommand(ctx core.Context, store common.CloudStore, promptRunner PromptRunner, params common.InitAWSCloudProviderParams, deps common.CloudDependencies) error {
+func runCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
 	var err error
 	if strings.TrimSpace(params.Profile) == "" && awsInitParamsNeedPrompt(params) {
 		printAWSInitGuidance(ctx)
@@ -175,15 +177,15 @@ func runCloudInitAWSCommand(ctx core.Context, store common.CloudStore, promptRun
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: AWS cloud provider initialization planned.")
 		return err
 	}
-	provider, err := common.InitAWSCloudProvider(ctx, store, params, deps)
+	provider, err := cloud.InitAWSCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
-	var params common.InitCloudflareCloudProviderParams
+func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+	var params cloud.InitCloudflareCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "cloudflare",
 		Short: "Set up a Cloudflare cloud provider alias",
@@ -210,7 +212,7 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 	return cmd
 }
 
-func runCloudInitCloudflareCommand(ctx core.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
+func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params cloud.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
 	switch {
 	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
 		var err error
@@ -225,7 +227,7 @@ func runCloudInitCloudflareCommand(ctx core.Context, store common.CloudStore, pr
 		}
 		params.AccountID = accountID
 	}
-	provider, err := common.InitCloudflareCloudProvider(ctx, store, params, deps)
+	provider, err := cloud.InitCloudflareCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
@@ -236,8 +238,8 @@ func runCloudInitCloudflareCommand(ctx core.Context, store common.CloudStore, pr
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-func newCloudInitERunCmd(store common.CloudStore, deps common.CloudDependencies) *cobra.Command {
-	var params common.InitERunCloudProviderParams
+func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *cobra.Command {
+	var params cloud.InitERunCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "erun",
 		Short: "Set up a hosted erun platform cloud provider alias",
@@ -249,7 +251,7 @@ func newCloudInitERunCmd(store common.CloudStore, deps common.CloudDependencies)
 			"a loopback listener when the issuer advertises no device endpoint.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun cloud init erun --api-url " + common.HostedPlatformAPIURL,
+		Example:      "  erun cloud init erun --api-url " + cloud.HostedPlatformAPIURL,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCloudInitERunCommand(commandContext(cmd), store, params, deps)
 		},
@@ -262,8 +264,8 @@ func newCloudInitERunCmd(store common.CloudStore, deps common.CloudDependencies)
 	return cmd
 }
 
-func runCloudInitERunCommand(ctx core.Context, store common.CloudStore, params common.InitERunCloudProviderParams, deps common.CloudDependencies) error {
-	provider, err := common.InitERunCloudProvider(ctx, store, params, deps)
+func runCloudInitERunCommand(ctx core.Context, store cloud.CloudStore, params cloud.InitERunCloudProviderParams, deps cloud.CloudDependencies) error {
+	provider, err := cloud.InitERunCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
@@ -274,8 +276,8 @@ func runCloudInitERunCommand(ctx core.Context, store common.CloudStore, params c
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps common.CloudDependencies) (string, error) {
-	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
+func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps cloud.CloudDependencies) (string, error) {
+	accounts, err := cloud.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil {
 		return "", err
 	}
@@ -290,13 +292,13 @@ func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps
 	}
 }
 
-func runCloudflareInitWizard(ctx core.Context, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) (common.InitCloudflareCloudProviderParams, error) {
+func runCloudflareInitWizard(ctx core.Context, promptRunner PromptRunner, selectRunner SelectRunner, params cloud.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) (cloud.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
 	_, _ = fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
 	_, _ = fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")
 	_, _ = fmt.Fprintln(out, "\nStep 1 of 2 · Create the token, then paste it below")
 	_, _ = fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
-	_, _ = fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
+	_, _ = fmt.Fprintln(out, "    "+cloud.CloudflareCreateTokenURL)
 	_, _ = fmt.Fprintln(out, "  Click Create Token → Create Custom Token, give it a name, then add")
 	_, _ = fmt.Fprintln(out, "  these permission rows (each row is Scope → Permission → Access; use")
 	_, _ = fmt.Fprintln(out, "  \"+ Add more\" for each):")
@@ -331,14 +333,14 @@ func runCloudflareInitWizard(ctx core.Context, promptRunner PromptRunner, select
 	return params, nil
 }
 
-func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner PromptRunner, deps common.CloudDependencies) (string, error) {
+func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner PromptRunner, deps cloud.CloudDependencies) (string, error) {
 	for {
 		token, err := requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
 		if err != nil {
 			return "", err
 		}
 		_, _ = fmt.Fprintln(ctx.Stdout, "  Verifying with Cloudflare…")
-		if _, err := common.VerifyCloudflareAPIToken(ctx, token, deps); err != nil {
+		if _, err := cloud.VerifyCloudflareAPIToken(ctx, token, deps); err != nil {
 			_, _ = fmt.Fprintln(ctx.Stdout, "  ✗ "+err.Error())
 			continue
 		}
@@ -347,8 +349,8 @@ func verifyCloudflareTokenInteractive(ctx core.Context, promptRunner PromptRunne
 	}
 }
 
-func resolveCloudflareAccountInteractive(ctx core.Context, promptRunner PromptRunner, selectRunner SelectRunner, token string, deps common.CloudDependencies) (string, error) {
-	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
+func resolveCloudflareAccountInteractive(ctx core.Context, promptRunner PromptRunner, selectRunner SelectRunner, token string, deps cloud.CloudDependencies) (string, error) {
+	accounts, err := cloud.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil || len(accounts) == 0 {
 		_, _ = fmt.Fprintln(ctx.Stdout, "  Could not auto-resolve the account from the token; enter it manually.")
 		return requiredCloudPrompt(promptRunner, "Cloudflare account ID", "")
@@ -395,14 +397,14 @@ func requiredCloudSecretPrompt(promptRunner PromptRunner, label string) (string,
 	return strings.TrimSpace(value), nil
 }
 
-func promptAWSInitParams(promptRunner PromptRunner, params common.InitAWSCloudProviderParams) (common.InitAWSCloudProviderParams, error) {
+func promptAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams) (cloud.InitAWSCloudProviderParams, error) {
 	if strings.TrimSpace(params.Profile) != "" {
 		return params, nil
 	}
 	return promptMissingAWSInitParams(promptRunner, params)
 }
 
-func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWSCloudProviderParams) (common.InitAWSCloudProviderParams, error) {
+func promptMissingAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams) (cloud.InitAWSCloudProviderParams, error) {
 	var err error
 	params.SSOStartURL, err = promptCloudValueIfEmpty(promptRunner, params.SSOStartURL, "AWS SSO start URL", "")
 	if err != nil {
@@ -429,7 +431,7 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWS
 
 // awsInitParamsNeedPrompt reports whether the AWS SSO wizard will ask the
 // operator for at least one value — used to gate the one-time guidance block.
-func awsInitParamsNeedPrompt(params common.InitAWSCloudProviderParams) bool {
+func awsInitParamsNeedPrompt(params cloud.InitAWSCloudProviderParams) bool {
 	return strings.TrimSpace(params.SSOStartURL) == "" ||
 		strings.TrimSpace(params.SSORegion) == "" ||
 		strings.TrimSpace(params.AccountID) == "" ||
@@ -480,7 +482,7 @@ func requiredCloudPrompt(promptRunner PromptRunner, label, defaultValue string) 
 	return strings.TrimSpace(value), nil
 }
 
-func traceAWSConfigureSetPlan(ctx core.Context, params common.InitAWSCloudProviderParams, profile string) {
+func traceAWSConfigureSetPlan(ctx core.Context, params cloud.InitAWSCloudProviderParams, profile string) {
 	region := strings.TrimSpace(params.Region)
 	if region == "" {
 		region = strings.TrimSpace(params.SSORegion)
@@ -501,7 +503,7 @@ func traceAWSConfigureSetPlan(ctx core.Context, params common.InitAWSCloudProvid
 	}
 }
 
-func traceAWSBearerTokenPlan(ctx core.Context, params common.InitAWSCloudProviderParams, audience string) {
+func traceAWSBearerTokenPlan(ctx core.Context, params cloud.InitAWSCloudProviderParams, audience string) {
 	profile := strings.TrimSpace(params.Profile)
 	if profile == "" {
 		profile = "erun-sso-<timestamp>"
@@ -539,7 +541,7 @@ func traceAWSEnableOIDCCommand(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", args...)
 }
 
-func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudLoginCmd(store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var flow string
 	var scopes []string
@@ -550,7 +552,7 @@ func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, select
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudLoginCommand(commandContext(cmd), store, promptRunner, selectRunner, common.CloudLoginParams{Alias: alias, Flow: flow, Scopes: scopes, Force: force}, deps)
+			return runCloudLoginCommand(commandContext(cmd), store, promptRunner, selectRunner, cloud.CloudLoginParams{Alias: alias, Flow: flow, Scopes: scopes, Force: force}, deps)
 		},
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to login")
@@ -561,7 +563,7 @@ func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, select
 	return cmd
 }
 
-func runCloudLoginCommand(ctx core.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.CloudLoginParams, deps common.CloudDependencies) error {
+func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params cloud.CloudLoginParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
 		if ctx.DryRun {
@@ -575,7 +577,7 @@ func runCloudLoginCommand(ctx core.Context, store common.CloudStore, promptRunne
 		}
 		alias = selected
 	}
-	provider, err := common.ResolveCloudProvider(store, alias)
+	provider, err := cloud.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
@@ -585,7 +587,7 @@ func runCloudLoginCommand(ctx core.Context, store common.CloudStore, promptRunne
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry run: cloud login planned for %s.\n", provider.Alias)
 		return err
 	}
-	status := common.CloudProviderTokenStatus(provider, deps)
+	status := cloud.CloudProviderTokenStatus(provider, deps)
 	if status.Status == configpkg.CloudTokenStatusActive && !params.Force {
 		return finishCloudLogin(ctx, store, status, deps)
 	}
@@ -596,7 +598,7 @@ func runCloudLoginCommand(ctx core.Context, store common.CloudStore, promptRunne
 // reports the status unchanged when the operator declines — a refusal is the
 // current state, not a failure. Split out of runCloudLoginCommand so that
 // function stays under the cyclop threshold; the sequence is unchanged.
-func confirmAndLoginCloudProvider(ctx core.Context, store common.CloudStore, promptRunner PromptRunner, alias, providerAlias string, status common.CloudProviderStatus, params common.CloudLoginParams, deps common.CloudDependencies) error {
+func confirmAndLoginCloudProvider(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, alias, providerAlias string, status cloud.CloudProviderStatus, params cloud.CloudLoginParams, deps cloud.CloudDependencies) error {
 	login, err := confirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
 	if err != nil {
 		return err
@@ -604,7 +606,7 @@ func confirmAndLoginCloudProvider(ctx core.Context, store common.CloudStore, pro
 	if !login {
 		return writeCloudStatus(ctx, status)
 	}
-	status, err = common.LoginCloudProviderAlias(ctx, store, common.CloudLoginParams{Alias: alias, Force: true, Flow: params.Flow, Scopes: params.Scopes}, deps)
+	status, err = cloud.LoginCloudProviderAlias(ctx, store, cloud.CloudLoginParams{Alias: alias, Force: true, Flow: params.Flow, Scopes: params.Scopes}, deps)
 	if err != nil {
 		return err
 	}
@@ -615,7 +617,7 @@ func confirmAndLoginCloudProvider(ctx core.Context, store common.CloudStore, pro
 // alias, additionally proves the session actually authenticates against the
 // real platform by calling GET /v1/whoami — the smallest end-to-end evidence
 // that a token round-trip worked, not just that a token was obtained.
-func finishCloudLogin(ctx core.Context, store common.CloudStore, status common.CloudProviderStatus, deps common.CloudDependencies) error {
+func finishCloudLogin(ctx core.Context, store cloud.CloudStore, status cloud.CloudProviderStatus, deps cloud.CloudDependencies) error {
 	if err := writeCloudStatus(ctx, status); err != nil {
 		return err
 	}
@@ -625,16 +627,16 @@ func finishCloudLogin(ctx core.Context, store common.CloudStore, status common.C
 	return writeERunWhoami(ctx, store, status.Alias, deps)
 }
 
-func writeERunWhoami(ctx core.Context, store common.CloudStore, alias string, deps common.CloudDependencies) error {
-	provider, err := common.ResolveCloudProvider(store, alias)
+func writeERunWhoami(ctx core.Context, store cloud.CloudStore, alias string, deps cloud.CloudDependencies) error {
+	provider, err := cloud.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
 	if provider.ERun == nil {
 		return nil
 	}
-	client := common.NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
-		token, err := common.CloudProviderBearerToken(ctx, store, common.CloudBearerParams{Alias: alias}, deps)
+	client := platformclient.NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
+		token, err := cloud.CloudProviderBearerToken(ctx, store, cloud.CloudBearerParams{Alias: alias}, deps)
 		if err != nil {
 			return "", err
 		}
@@ -667,7 +669,7 @@ func traceCloudLoginPlan(ctx core.Context, provider configpkg.CloudProviderConfi
 	}
 }
 
-func newCloudOIDCCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudOIDCCmd(store cloud.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var audience string
 	cmd := &cobra.Command{
@@ -676,7 +678,7 @@ func newCloudOIDCCmd(store common.CloudStore, promptRunner PromptRunner, selectR
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudOIDCCommand(commandContext(cmd), store, promptRunner, selectRunner, common.CloudBearerParams{
+			return runCloudOIDCCommand(commandContext(cmd), store, promptRunner, selectRunner, cloud.CloudBearerParams{
 				Alias:    alias,
 				Audience: audience,
 			}, deps)
@@ -688,7 +690,7 @@ func newCloudOIDCCmd(store common.CloudStore, promptRunner PromptRunner, selectR
 	return cmd
 }
 
-func runCloudOIDCCommand(ctx core.Context, store common.CloudStore, _ PromptRunner, selectRunner SelectRunner, params common.CloudBearerParams, deps common.CloudDependencies) error {
+func runCloudOIDCCommand(ctx core.Context, store cloud.CloudStore, _ PromptRunner, selectRunner SelectRunner, params cloud.CloudBearerParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
 		selected, err := selectCloudAliasPrompt(store, selectRunner)
@@ -697,14 +699,14 @@ func runCloudOIDCCommand(ctx core.Context, store common.CloudStore, _ PromptRunn
 		}
 		alias = selected
 	}
-	provider, err := common.ResolveCloudProvider(store, alias)
+	provider, err := cloud.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
 	if provider.Provider != configpkg.CloudProviderAWS {
 		return fmt.Errorf("cloud provider alias %q is a %q-type alias, which does not use AWS web-identity federation; its OIDC issuer is set at `cloud init`", provider.Alias, provider.Provider)
 	}
-	status, _, err := common.SetupCloudProviderOIDC(ctx, store, common.CloudBearerParams{
+	status, _, err := cloud.SetupCloudProviderOIDC(ctx, store, cloud.CloudBearerParams{
 		Alias:    alias,
 		Audience: params.Audience,
 	}, deps)
@@ -719,7 +721,7 @@ func runCloudOIDCCommand(ctx core.Context, store common.CloudStore, _ PromptRunn
 	return err
 }
 
-func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {
+func newCloudSetCmd(store cloud.EnvironmentCloudAliasStore) *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
 		Use:          "set TENANT ENVIRONMENT",
@@ -727,7 +729,7 @@ func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCloudSetCommand(commandContext(cmd), store, common.SetEnvironmentCloudAliasParams{
+			return runCloudSetCommand(commandContext(cmd), store, cloud.SetEnvironmentCloudAliasParams{
 				Tenant:      args[0],
 				Environment: args[1],
 				Alias:       alias,
@@ -742,8 +744,8 @@ func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {
 	return cmd
 }
 
-func runCloudSetCommand(ctx core.Context, store common.EnvironmentCloudAliasStore, params common.SetEnvironmentCloudAliasParams) error {
-	if _, err := common.SetEnvironmentCloudProviderAlias(ctx, store, params); err != nil {
+func runCloudSetCommand(ctx core.Context, store cloud.EnvironmentCloudAliasStore, params cloud.SetEnvironmentCloudAliasParams) error {
+	if _, err := cloud.SetEnvironmentCloudProviderAlias(ctx, store, params); err != nil {
 		return err
 	}
 	var err error
@@ -755,8 +757,8 @@ func runCloudSetCommand(ctx core.Context, store common.EnvironmentCloudAliasStor
 	return err
 }
 
-func selectCloudAliasPrompt(store common.CloudStore, selectRunner SelectRunner) (string, error) {
-	providers, err := common.ListCloudProviders(store)
+func selectCloudAliasPrompt(store cloud.CloudStore, selectRunner SelectRunner) (string, error) {
+	providers, err := cloud.ListCloudProviders(store)
 	if err != nil {
 		return "", err
 	}
@@ -779,7 +781,7 @@ func writeCloudProviderSaved(ctx core.Context, provider configpkg.CloudProviderC
 	return err
 }
 
-func writeCloudStatus(ctx core.Context, status common.CloudProviderStatus) error {
+func writeCloudStatus(ctx core.Context, status cloud.CloudProviderStatus) error {
 	line := fmt.Sprintf("%s: %s", status.Alias, status.Status)
 	if strings.TrimSpace(status.Message) != "" {
 		line += " (" + strings.TrimSpace(status.Message) + ")"

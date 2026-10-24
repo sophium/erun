@@ -197,7 +197,7 @@ func remoteOutputsFileHashes(ctx context.Context, hostAlias, outputsRemote strin
 	if len(paths) == 0 {
 		return nil
 	}
-	script := fmt.Sprintf("cd %s && xargs -0 -r sha256sum --zero", shellQuote(outputsRemote))
+	script := fmt.Sprintf("cd %s && xargs -0 -r sha256sum --zero", core.ShellQuote(outputsRemote))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	cmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
@@ -293,7 +293,7 @@ const remoteOutputsDirAbsentExitCode = 42
 // distinction applied to a helm read). GNU find's %P prints the path without
 // the leading "./" so entries pass SafeWorkspaceSyncPath.
 func remoteOutputsFiles(ctx context.Context, hostAlias, outputsRemote string) ([]string, error) {
-	script := fmt.Sprintf("cd %s 2>/dev/null || exit %d; find . -type f -printf '%%P\\0'", shellQuote(outputsRemote), remoteOutputsDirAbsentExitCode)
+	script := fmt.Sprintf("cd %s 2>/dev/null || exit %d; find . -type f -printf '%%P\\0'", core.ShellQuote(outputsRemote), remoteOutputsDirAbsentExitCode)
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	output, err := cmd.Output()
@@ -302,25 +302,12 @@ func remoteOutputsFiles(ctx context.Context, hostAlias, outputsRemote string) ([
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == remoteOutputsDirAbsentExitCode {
 			return nil, nil
 		}
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return nil, fmt.Errorf("list remote outputs: %w: %s", err, stderr)
 		}
 		return nil, fmt.Errorf("list remote outputs: %w", err)
 	}
 	return parseWorkspaceSyncPathList(output), nil
-}
-
-// stderrFromExitError trims the stderr exec.Cmd.Output() captures onto a
-// failed *exec.ExitError, so a caller that wrapped only "%w" (which renders
-// as the content-free "exit status N") can include the process's own
-// diagnostic instead. Returns "" for a non-ExitError (e.g. context
-// cancellation) or an ExitError with nothing on stderr.
-func stderrFromExitError(err error) string {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return strings.TrimSpace(string(exitErr.Stderr))
-	}
-	return ""
 }
 
 // pruneLocalArtifacts deletes host artifact files no longer present in the pod so
@@ -494,7 +481,7 @@ func EnsureLocalWorkspaceSyncTarget(localPath string) error {
 var errRemoteNotGitRepo = errors.New("remote workspace is not a git repository")
 
 func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath string) ([]string, error) {
-	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard", shellQuote(remotePath))
+	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
@@ -517,7 +504,7 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 // rather than failing outright, and reports false so the per-pass diagnostic can
 // say "unknown" instead of the "none missing" it would otherwise look like.
 func remoteWorkspaceMissingFiles(ctx context.Context, hostAlias, remotePath string) (map[string]struct{}, bool) {
-	script := fmt.Sprintf("cd %s && git ls-files -dz", shellQuote(remotePath))
+	script := fmt.Sprintf("cd %s && git ls-files -dz", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	output, err := cmd.Output()
@@ -533,7 +520,7 @@ func remoteWorkspaceMissingFiles(ctx context.Context, hostAlias, remotePath stri
 // Best-effort: a listing failure yields nil, so the sync degrades to keeping the
 // symlinks rather than failing the pass.
 func remoteWorkspaceSymlinkSet(ctx context.Context, hostAlias, remotePath string) map[string]struct{} {
-	script := fmt.Sprintf("cd %s && git ls-files -sz --exclude-standard", shellQuote(remotePath))
+	script := fmt.Sprintf("cd %s && git ls-files -sz --exclude-standard", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	output, err := cmd.Output()
@@ -628,7 +615,7 @@ func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, er
 // fetches that path — so correctness never depends on the metadata, only the
 // transfer volume does.
 func remoteWorkspaceFileMeta(ctx context.Context, hostAlias, remotePath string) map[string]workspaceFileMeta {
-	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard | xargs -0 -r stat -c '%%s %%Y %%n'", shellQuote(remotePath))
+	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard | xargs -0 -r stat -c '%%s %%Y %%n'", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(cmd)
 	output, err := cmd.Output()
@@ -786,7 +773,7 @@ func publishStagedWorkspaceFiles(staging, localPath string) error {
 // streamRemoteWorkspaceArchive pipes the pod's tar of paths into an extract
 // rooted at destination.
 func streamRemoteWorkspaceArchive(ctx context.Context, hostAlias, remotePath, destination string, paths []string) error {
-	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", shellQuote(remotePath))
+	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", core.ShellQuote(remotePath))
 	sshCmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	core.HideConsoleWindow(sshCmd)
 	sshCmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))

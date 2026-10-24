@@ -131,9 +131,9 @@ func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) Ru
 // than a running pod: the template is what the chart rendered, so it is the
 // artifact whose age is the whole question, and it does not depend on which
 // ReplicaSet a rollout happens to have reached.
-func runtimeDeploymentEnvArgs(req ShellLaunchParams) []string {
-	args := kubectlTargetArgs(req)
-	return append(args, "get", "deployment", RuntimeReleaseName(req.Tenant), "-o", "json")
+func runtimeDeploymentEnvArgs(req config.ShellLaunchParams) []string {
+	args := config.KubectlTargetArgs(req)
+	return append(args, "get", "deployment", config.RuntimeReleaseName(req.Tenant), "-o", "json")
 }
 
 // runtimeDeploymentDoc is the deliberately partial parse of that read: the only
@@ -191,11 +191,11 @@ func runtimeDeploymentContainerEnvNames(raw []byte, container string) (names []s
 // observed" -- for the read to resolve. It is what a diagnosis that never got
 // to read (an unreachable cluster) still reports, so a caller can tell a check
 // that does not apply from one that could not run.
-func runtimeAgentCredentialApplicability(req ShellLaunchParams) RuntimeAgentCredentialStatus {
+func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
 	return ResolveRuntimeAgentCredentialStatus(RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
-		Container: DevopsComponentName,
+		Container: config.DevopsComponentName,
 	})
 }
 
@@ -204,11 +204,11 @@ func runtimeAgentCredentialApplicability(req ShellLaunchParams) RuntimeAgentCred
 //
 // An install with no gateway configured pays nothing: the read is skipped
 // outright rather than resolved from an environment that was never fetched.
-func inspectRuntimeAgentCredentials(ctx core.Context, req ShellLaunchParams) RuntimeAgentCredentialStatus {
+func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
 	params := RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
-		Container: DevopsComponentName,
+		Container: config.DevopsComponentName,
 	}
 	if !config.EffectiveGateway(req.Claude, req.Gateway).Configured() {
 		return ResolveRuntimeAgentCredentialStatus(params)
@@ -222,10 +222,10 @@ func inspectRuntimeAgentCredentials(ctx core.Context, req ShellLaunchParams) Run
 		status.ReadError = fmt.Sprintf("read the runtime pod template: %v", kubectlErrorMessage(err, stderr))
 		return status
 	}
-	names, found := runtimeDeploymentContainerEnvNames(stdout, DevopsComponentName)
+	names, found := runtimeDeploymentContainerEnvNames(stdout, config.DevopsComponentName)
 	if !found {
 		status := ResolveRuntimeAgentCredentialStatus(params)
-		status.ReadError = fmt.Sprintf("the runtime deployment %q declares no %q container", RuntimeReleaseName(req.Tenant), DevopsComponentName)
+		status.ReadError = fmt.Sprintf("the runtime deployment %q declares no %q container", config.RuntimeReleaseName(req.Tenant), config.DevopsComponentName)
 		return status
 	}
 	params.ContainerEnvObserved = true

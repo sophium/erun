@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // A release tags locally as part of its recoverable, pre-publish stages
@@ -46,7 +48,7 @@ func TestCanSkipExistingReleaseTagDiagnosesLeftoverLocalTagAfterOriginAdvances(t
 	}
 
 	spec := ReleaseSpec{Version: "1.0.246", Branch: "main"}
-	skip, err := canSkipExistingReleaseTag(newTestClaimContext(), spec, repo, "v1.0.246", GitCommandRunner)
+	skip, err := canSkipExistingReleaseTag(newTestClaimContext(), spec, repo, "v1.0.246", gitx.GitCommandRunner)
 	if err == nil {
 		t.Fatalf("expected a mismatch error (skip=%v), got none", skip)
 	}

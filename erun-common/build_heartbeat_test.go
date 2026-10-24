@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // The line has to name the image and how long it has been going, because those
@@ -163,7 +164,7 @@ func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), Progress: heartbeat}
 
 	spec := DockerBuildSpec{
-		Image:          DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
+		Image:          helm.DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
 		DockerfilePath: "Dockerfile", ContextDir: ".",
 	}
 	duringBuild := ""

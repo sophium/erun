@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 func workspaceSyncPlanEnv(kind config.EnvironmentType, sshd, sync bool, localPath string) config.OpenResult {
@@ -69,7 +70,7 @@ func TestResolveWorkspaceSyncParamsAddressesThePodWorktree(t *testing.T) {
 // the edge's own listing rather than announced some other way.
 func TestAppendLocalToolsExtendsTheEdgeListing(t *testing.T) {
 	reply := []byte(`{"jsonrpc":"2.0","id":7,"result":{"tools":[{"name":"diff"}]}}`)
-	merged := mcpAppendLocalTools(reply, []MCPLocalTool{{Name: "workspace_sync", Description: "refresh the mirror"}})
+	merged := mcp.McpAppendLocalTools(reply, []mcp.MCPLocalTool{{Name: "workspace_sync", Description: "refresh the mirror"}})
 
 	var envelope struct {
 		ID     int `json:"id"`
@@ -98,16 +99,16 @@ func TestAppendLocalToolsExtendsTheEdgeListing(t *testing.T) {
 // answer is worse than not advertising a local tool.
 func TestAppendLocalToolsPassesThroughWhatItCannotParse(t *testing.T) {
 	reply := []byte(`not json`)
-	if got := mcpAppendLocalTools(reply, []MCPLocalTool{{Name: "workspace_sync"}}); string(got) != string(reply) {
+	if got := mcp.McpAppendLocalTools(reply, []mcp.MCPLocalTool{{Name: "workspace_sync"}}); string(got) != string(reply) {
 		t.Fatalf("got %q, want the reply untouched", got)
 	}
 }
 
 func TestLocalToolForMatchesOnlyItsOwnCall(t *testing.T) {
-	tools := []MCPLocalTool{{Name: "workspace_sync"}}
+	tools := []mcp.MCPLocalTool{{Name: "workspace_sync"}}
 
 	call := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"workspace_sync","arguments":{"preview":true}}}`)
-	tool, arguments, ok := mcpLocalToolFor(call, tools)
+	tool, arguments, ok := mcp.McpLocalToolFor(call, tools)
 	if !ok || tool.Name != "workspace_sync" {
 		t.Fatalf("expected the local tool to claim its own call, got %v %v", tool, ok)
 	}
@@ -116,10 +117,10 @@ func TestLocalToolForMatchesOnlyItsOwnCall(t *testing.T) {
 	}
 
 	other := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diff"}}`)
-	if _, _, claimed := mcpLocalToolFor(other, tools); claimed {
+	if _, _, claimed := mcp.McpLocalToolFor(other, tools); claimed {
 		t.Fatal("the edge's own tools must still be relayed")
 	}
-	if _, _, claimed := mcpLocalToolFor([]byte(`{"method":"tools/list"}`), tools); claimed {
+	if _, _, claimed := mcp.McpLocalToolFor([]byte(`{"method":"tools/list"}`), tools); claimed {
 		t.Fatal("a listing is not a call")
 	}
 }
@@ -127,7 +128,7 @@ func TestLocalToolForMatchesOnlyItsOwnCall(t *testing.T) {
 // A failing tool answers in-band, so the caller reads why instead of seeing the
 // session fault.
 func TestLocalToolReplyCarriesFailureAsContent(t *testing.T) {
-	reply, err := mcpLocalToolReply(json.RawMessage(`3`), "", errors.New("the SSH channel to the pod is not up"))
+	reply, err := mcp.McpLocalToolReply(json.RawMessage(`3`), "", errors.New("the SSH channel to the pod is not up"))
 	if err != nil {
 		t.Fatalf("render reply: %v", err)
 	}

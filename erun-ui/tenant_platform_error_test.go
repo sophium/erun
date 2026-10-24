@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // A refusal is shown beside the control the operator just used, so it must
 // read as a reason rather than as the exchange that produced it.
 func TestOperatorPlatformErrorNamesTheReasonNotTheWire(t *testing.T) {
-	wire := fmt.Errorf("platform api PATCH /v1/reviews/r1/status: http 409: conflict: %w", eruncommon.ErrPlatformConflict)
+	wire := fmt.Errorf("platform api PATCH /v1/reviews/r1/status: http 409: conflict: %w", platformclient.ErrPlatformConflict)
 
 	got := operatorPlatformError(actionAdvanceQueue, wire)
 	if got == nil {
@@ -35,11 +35,11 @@ func TestOperatorPlatformErrorMapsEachDistinctRefusal(t *testing.T) {
 		sentinel error
 		expect   string
 	}{
-		{"forbidden", eruncommon.ErrPlatformForbidden, "do not have permission"},
-		{"unauthorized", eruncommon.ErrPlatformUnauthorized, "Sign in again"},
-		{"not found", eruncommon.ErrPlatformNotFound, "no longer exists"},
-		{"conflict", eruncommon.ErrPlatformConflict, "Refresh and try again"},
-		{"not implemented", eruncommon.ErrPlatformNotImplemented, "cannot"},
+		{"forbidden", platformclient.ErrPlatformForbidden, "do not have permission"},
+		{"unauthorized", platformclient.ErrPlatformUnauthorized, "Sign in again"},
+		{"not found", platformclient.ErrPlatformNotFound, "no longer exists"},
+		{"conflict", platformclient.ErrPlatformConflict, "Refresh and try again"},
+		{"not implemented", platformclient.ErrPlatformNotImplemented, "cannot"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := operatorPlatformError(actionCloseReview, fmt.Errorf("wrapped: %w", tc.sentinel))
@@ -56,7 +56,7 @@ func TestOperatorPlatformErrorMapsEachDistinctRefusal(t *testing.T) {
 // someone else between the picker loading and the submit.
 func TestOperatorPlatformErrorNamesReviewerNotFoundDistinctly(t *testing.T) {
 	for _, action := range []platformAction{actionAddReviewer, actionRemoveReviewer} {
-		got := operatorPlatformError(action, fmt.Errorf("wrapped: %w", eruncommon.ErrPlatformNotFound))
+		got := operatorPlatformError(action, fmt.Errorf("wrapped: %w", platformclient.ErrPlatformNotFound))
 		if got == nil {
 			t.Fatalf("%s: expected an error", action)
 		}

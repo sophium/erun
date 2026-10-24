@@ -16,6 +16,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +25,6 @@ var (
 	ErrDefaultTenantNotConfigured      = errors.New("default tenant is not configured")
 	ErrDefaultEnvironmentNotConfigured = errors.New("default environment is not configured")
 	ErrTenantNotFound                  = errors.New("no such tenant exists")
-	ErrEnvironmentNotFound             = errors.New("no such environment exists")
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
@@ -109,22 +110,11 @@ func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAt
 	}
 }
 
-// RemoteAppSessionSocketDir holds persistent desktop session sockets in the
-// runtime pod. Pod-ephemeral on purpose: a dtach server is a process in the
-// container, so a socket that outlived its pod could never be attached to —
-// clearing them with the pod is what lets `claude --continue` resume the
-// conversation in a fresh session instead of failing against a dead socket.
-//
-// The name must not contain the desktop binary's process name. Freeing that
-// binary for a rebuild invites `pkill -f erun-app`, and a socket path carrying
-// that string puts every operator's live terminal in the blast radius.
-const RemoteAppSessionSocketDir = "/tmp/erun-sessions"
-
 // ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop
 // session ids so the desktop can rebuild tabs for sessions another ERun
 // window created.
 func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
-	prefix := sanitizeForFilename(tenant) + "-" + sanitizeForFilename(environment) + "-"
+	prefix := core.SanitizeForFilename(tenant) + "-" + core.SanitizeForFilename(environment) + "-"
 	var ids []string
 	for _, raw := range strings.Split(lsOutput, "\n") {
 		name := strings.TrimSpace(raw)
@@ -159,48 +149,6 @@ type OpenParams struct {
 	CommandScopesTenantByFlag bool
 }
 
-type ShellLaunchParams struct {
-	Dir                string
-	Tenant             string
-	Environment        string
-	Title              string
-	Namespace          string
-	KubernetesContext  string
-	RemoteRepo         bool
-	Type               configpkg.EnvironmentType
-	ManagedCloud       bool
-	CloudProviderAlias string
-	Idle               configpkg.EnvironmentIdleConfig
-	// AppSession, when non-empty, makes the remote shell a persistent,
-	// reattachable dtach session keyed by this id, so closing/reopening a tab
-	// or a transient kubectl-exec drop reconnects to the still-running shell
-	// (and the AI tab's claude keeps working in the pod) instead of spawning a
-	// parallel one. Empty keeps the ephemeral bare `erun open` behaviour.
-	AppSession string
-	// AI / Contribute select the persistent session's create-time program, run
-	// once on create so a reattach never re-runs it: Contribute enters the
-	// contribute clone with its env; AI launches the AI tool.
-	AI         bool
-	Contribute bool
-	AITool     string
-	Claude     configpkg.EnvironmentClaudeConfig
-	// Gateway is the erun-level OpenRouter catalog, when the operator has
-	// configured one, carried over from OpenResult.Gateway. The AI launch
-	// resolves this environment's effective gateway through it (model, Remote
-	// Control, context window), and so does the deploy diagnosis, to tell a
-	// gateway-routed environment whose pod template never consumed the gateway
-	// from a healthy one (runtime_agent_credentials.go).
-	Gateway *configpkg.OpenRouterConfig
-	// RuntimeImage lets the AI session prelude advise on the erun-build-env
-	// skill only when the env still runs the default published runtime image.
-	RuntimeImage string
-	// RuntimeVersion and RuntimePod are the env config's recorded runtime
-	// deploy intent, threaded through so observe can diff them against what
-	// the live helm release and running pods actually hold.
-	RuntimeVersion string
-	RuntimePod     configpkg.RuntimePodResources
-}
-
 type ShellLaunchPreview struct {
 	// SeedArgs is the kubectl exec that streams the SSH private key to the pod
 	// on stdin — the key is never in these args. Empty when the env has no key
@@ -211,7 +159,7 @@ type ShellLaunchPreview struct {
 	Script   string
 }
 
-type ShellLauncherFunc func(ShellLaunchParams) error
+type ShellLauncherFunc func(configpkg.ShellLaunchParams) error
 
 func OpenParamsForArgs(args []string) (OpenParams, error) {
 	switch len(args) {
@@ -496,7 +444,7 @@ func resolveOpenEnvironment(params OpenParams, tenantConfig configpkg.TenantConf
 func loadOpenEnvConfig(store configpkg.OpenStore, tenant, environment string) (configpkg.EnvConfig, error) {
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if errors.Is(err, configpkg.ErrNotInitialized) {
-		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
+		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", configpkg.ErrEnvironmentNotFound, environment)
 	}
 	if err != nil {
 		return configpkg.EnvConfig{}, err
@@ -596,13 +544,13 @@ func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot Proje
 	return "", false, nil
 }
 
-func ShellLaunchParamsFromResult(result configpkg.OpenResult) ShellLaunchParams {
-	return ShellLaunchParams{
+func ShellLaunchParamsFromResult(result configpkg.OpenResult) configpkg.ShellLaunchParams {
+	return configpkg.ShellLaunchParams{
 		Dir:                result.RepoPath,
 		Tenant:             result.Tenant,
 		Environment:        result.Environment,
 		Title:              result.Title,
-		Namespace:          KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:          configpkg.KubernetesNamespaceName(result.Tenant, result.Environment),
 		KubernetesContext:  strings.TrimSpace(result.EnvConfig.KubernetesContext),
 		RemoteRepo:         result.RemoteRepo(),
 		Type:               result.EnvConfig.ResolvedType(),
@@ -620,16 +568,16 @@ func ShellLaunchParamsFromResult(result configpkg.OpenResult) ShellLaunchParams 
 
 func LocalShellSetupScript(result configpkg.OpenResult) string {
 	commands := []string{
-		fmt.Sprintf("kubectl config use-context %s >/dev/null", shellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext))),
-		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", shellQuote(KubernetesNamespaceName(result.Tenant, result.Environment))),
-		fmt.Sprintf("cd %s", shellQuote(result.RepoPath)),
+		fmt.Sprintf("kubectl config use-context %s >/dev/null", core.ShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext))),
+		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", core.ShellQuote(configpkg.KubernetesNamespaceName(result.Tenant, result.Environment))),
+		fmt.Sprintf("cd %s", core.ShellQuote(result.RepoPath)),
 	}
 	return strings.Join(commands, " &&\n") + "\n"
 }
 
-func WaitForShellDeployment(req ShellLaunchParams) error {
-	if configpkg.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == configpkg.ExecutionModeLibrary {
-		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+func WaitForShellDeployment(req configpkg.ShellLaunchParams) error {
+	if configpkg.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == configpkg.ExecutionModeLibrary {
+		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, configpkg.RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
 			return enrichShellDeploymentError(req, err, runOpenKubectl)
 		}
 		return nil
@@ -640,7 +588,7 @@ func WaitForShellDeployment(req ShellLaunchParams) error {
 	return nil
 }
 
-func ExecShell(req ShellLaunchParams) error {
+func ExecShell(req configpkg.ShellLaunchParams) error {
 	// Stream the SSH private key to the pod on stdin before the interactive
 	// shell so it never appears in any kubectl exec argv (laptop `ps`, the
 	// pod's /proc/<pid>/cmdline, or cluster exec audit logs).
@@ -681,7 +629,7 @@ func ExecShell(req ShellLaunchParams) error {
 	return nil
 }
 
-func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
+func PreviewShellLaunch(req configpkg.ShellLaunchParams) (ShellLaunchPreview, error) {
 	script, err := buildRemoteShellScript(req)
 	if err != nil {
 		return ShellLaunchPreview{}, err
@@ -704,7 +652,7 @@ func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
 	}, nil
 }
 
-func RemoteShellWorktreePath(req ShellLaunchParams) string {
+func RemoteShellWorktreePath(req configpkg.ShellLaunchParams) string {
 	return remoteWorktreePath(req)
 }
 
@@ -716,14 +664,6 @@ func RemoteWorktreePathForRepoName(repoName string) string {
 	return path.Join("/home", "erun", "git", repoName)
 }
 
-func RuntimeReleaseName(tenant string) string {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return DevopsComponentName
-	}
-	return tenant + "-devops"
-}
-
 // TenantResourcePrefix is the prefix a tenant's component-chart Kubernetes
 // resources carry (<prefix>-postgres, <prefix>-api, <prefix>-powerdns, ...),
 // matching the charts' `{{ .Values.tenant | default "erun" }}` scoping: the
@@ -731,7 +671,7 @@ func RuntimeReleaseName(tenant string) string {
 // addresses those resources by name (API port-forward, PowerDNS exec) derives
 // the name through this so it stays in lockstep with the charts.
 func TenantResourcePrefix(tenant string) string {
-	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
+	return strings.TrimSuffix(configpkg.RuntimeReleaseName(tenant), "-devops")
 }
 
 // APIDeploymentName is the erun-backend-api chart's Deployment/Service resource
@@ -744,37 +684,26 @@ func APIDeploymentName(tenant string) string {
 	return TenantResourcePrefix(tenant) + "-api"
 }
 
-func kubectlDeploymentWaitArgs(req ShellLaunchParams) []string {
-	args := kubectlTargetArgs(req)
-	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+RuntimeReleaseName(req.Tenant))
+func kubectlDeploymentWaitArgs(req configpkg.ShellLaunchParams) []string {
+	args := configpkg.KubectlTargetArgs(req)
+	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+configpkg.RuntimeReleaseName(req.Tenant))
 	return args
 }
 
-func kubectlExecArgs(req ShellLaunchParams, script string) []string {
-	args := kubectlTargetArgs(req)
+func kubectlExecArgs(req configpkg.ShellLaunchParams, script string) []string {
+	args := configpkg.KubectlTargetArgs(req)
 	args = append(args, "exec", "-it")
-	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+configpkg.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }
 
-func kubectlTargetArgs(req ShellLaunchParams) []string {
-	args := make([]string, 0, 4)
-	if strings.TrimSpace(req.KubernetesContext) != "" {
-		args = append(args, "--context", req.KubernetesContext)
-	}
-	if strings.TrimSpace(req.Namespace) != "" {
-		args = append(args, "--namespace", req.Namespace)
-	}
-	return args
-}
-
-func buildRemoteShellScript(req ShellLaunchParams) (string, error) {
+func buildRemoteShellScript(req configpkg.ShellLaunchParams) (string, error) {
 	config, err := remoteShellConfigForRequest(req)
 	if err != nil {
 		return "", err
 	}
-	workdir := shellQuote(config.Workdir)
-	scriptLines := remoteShellBaseScriptLines(req, config, workdir, shellQuote(req.Title))
+	workdir := core.ShellQuote(config.Workdir)
+	scriptLines := remoteShellBaseScriptLines(req, config, workdir, core.ShellQuote(req.Title))
 	gitLines, err := remoteShellGitSeedLines(req, workdir)
 	if err != nil {
 		return "", err
@@ -792,7 +721,7 @@ type remoteShellConfig struct {
 	EnvYAML    string
 }
 
-func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, error) {
+func remoteShellConfigForRequest(req configpkg.ShellLaunchParams) (remoteShellConfig, error) {
 	remoteWorkdir := remoteWorktreePath(req)
 
 	tenantConfig, err := yaml.Marshal(configpkg.TenantConfig{
@@ -840,7 +769,7 @@ func seedRemoteConfigLines(quotedPath, content string) string {
 	return fmt.Sprintf("if [ ! -f %s ]; then\n  mkdir -p \"$(dirname %s)\"\n  cat > %s <<'EOF'\n%s\nEOF\nfi", quotedPath, quotedPath, quotedPath, content)
 }
 
-func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
+func remoteShellBaseScriptLines(req configpkg.ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
 	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
 	bashrcPath := markerDir + "/bashrc"
 	requestPath := markerDir + "/shell-request"
@@ -874,11 +803,11 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 // AppSession) must stay the original single bash invocation byte for byte;
 // with AppSession it wraps the shell in a reattachable dtach session so a
 // disconnect detaches instead of spawning a parallel chain.
-func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string) []string {
+func remoteShellLaunchLines(req configpkg.ShellLaunchParams, bashrcPath, markerDir string) []string {
 	if strings.TrimSpace(req.AppSession) == "" {
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
 	}
-	id := sanitizeForFilename(req.AppSession)
+	id := core.SanitizeForFilename(req.AppSession)
 	socket := RemoteAppSessionSocketPath(req.Tenant, req.Environment, id)
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
@@ -887,7 +816,7 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		redraw = "winch"
 	}
 	lines := []string{
-		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
+		fmt.Sprintf("mkdir -p \"%s\"", activity.RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
 	}
 	return append(lines, RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)
@@ -922,7 +851,7 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 		"attach_id=\"$$-$(date +%s)\"",
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
-	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
+	lines = append(lines, activity.RemoteAppSessionMasterScanLines(socket)...)
 	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
 		fmt.Sprintf("dtach -A \"%s\" -r %s %s || shell_status=$?", socket, redraw, launchCommand),
@@ -936,23 +865,7 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 // RemoteAppSessionAttachLines' own script builds, without reimplementing the
 // naming.
 func RemoteAppSessionSocketPath(tenant, environment, id string) string {
-	return fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(tenant), sanitizeForFilename(environment), sanitizeForFilename(id))
-}
-
-// remoteAppSessionMasterScanLines emits the sh lines that resolve $master_pid
-// and $master_program for the session socket: the dtach process with a
-// non-dtach child (the session program), and that child's name. Clients have no
-// children, and the -A creator's only child is the master itself. /proc-based
-// on purpose: the runtime image ships no ss/lsof, and an unidentifiable master
-// must leave $master_pid empty so callers fail open instead of killing the
-// session. The same scan answers "is this session still running" for the
-// heartbeat, so there is one definition of a session's master rather than two.
-func remoteAppSessionMasterScanLines(socket string) []string {
-	return []string{
-		"master_pid=\"\"",
-		"master_program=\"\"",
-		fmt.Sprintf("for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then for child_pid in $(pgrep -P \"$dtach_pid\" 2>/dev/null || true); do child_comm=\"$(cat \"/proc/$child_pid/comm\" 2>/dev/null)\"; if [ -n \"$child_comm\" ] && [ \"$child_comm\" != \"dtach\" ]; then master_pid=\"$dtach_pid\"; master_program=\"$child_comm\"; fi; done; fi; done", socket),
-	}
+	return fmt.Sprintf("%s/%s-%s-%s.dtach", activity.RemoteAppSessionSocketDir, core.SanitizeForFilename(tenant), core.SanitizeForFilename(environment), core.SanitizeForFilename(id))
 }
 
 // RemoteAppSessionEndScript returns the sh script that permanently ends a
@@ -961,7 +874,7 @@ func remoteAppSessionMasterScanLines(socket string) []string {
 // detach and leave the session running for the next attach.
 func RemoteAppSessionEndScript(tenant, environment, id string) string {
 	socket := RemoteAppSessionSocketPath(tenant, environment, id)
-	lines := remoteAppSessionMasterScanLines(socket)
+	lines := activity.RemoteAppSessionMasterScanLines(socket)
 	lines = append(lines,
 		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",
 		fmt.Sprintf("rm -f \"%s\" \"%s\"", socket, strings.TrimSuffix(socket, ".dtach")+".owner"),
@@ -973,7 +886,7 @@ func RemoteAppSessionEndScript(tenant, environment, id string) string {
 // per-tab prelude (run once on create) followed by the interactive shell. A
 // reattach connects to whatever this program is running, so the prelude — and
 // in particular the AI tool launch — never repeats.
-func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []string {
+func remoteSessionLauncherBody(req configpkg.ShellLaunchParams, bashrcPath string) []string {
 	var body []string
 	if req.Contribute {
 		// Match the desktop's former contribute prelude.
@@ -988,7 +901,7 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }
 
-func remoteShellGitSeedLines(req ShellLaunchParams, workdir string) ([]string, error) {
+func remoteShellGitSeedLines(req configpkg.ShellLaunchParams, workdir string) ([]string, error) {
 	if req.RemoteRepo {
 		return nil, nil
 	}
@@ -1003,7 +916,7 @@ func remoteShellGitSeedLines(req ShellLaunchParams, workdir string) ([]string, e
 	// The private key is never written by this script — it streams to the pod
 	// on stdin via seedRemoteSSHKey (see ExecShell) so it stays out of the
 	// kubectl exec argv. known_hosts and the ssh config are public and inline.
-	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n")), nil
+	return remoteShellGitSeedScriptLines(workdir, gitHost, core.ShellQuote(gitUser), core.ShellQuote(gitRepo), strings.Join(knownHostsLines, "\n")), nil
 }
 
 func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts string) []string {
@@ -1043,20 +956,16 @@ func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHost
 	}
 }
 
-func remoteWorktreePath(req ShellLaunchParams) string {
+func remoteWorktreePath(req configpkg.ShellLaunchParams) string {
 	return RemoteWorktreePathForRepoName(remoteWorktreeRepoName(req))
 }
 
-func remoteWorktreeRepoName(req ShellLaunchParams) string {
+func remoteWorktreeRepoName(req configpkg.ShellLaunchParams) string {
 	repoName := strings.TrimSpace(filepath.Base(strings.TrimSpace(req.Dir)))
 	if repoName == "" || repoName == "." || repoName == string(filepath.Separator) {
 		return "worktree"
 	}
 	return repoName
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func isShellReattachDeployExit(err error) bool {
@@ -1184,7 +1093,7 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry) ([]string, error) {
 
 const remoteSSHKeySeedScript = `umask 077; mkdir -p "$HOME/.ssh"; cat > "$HOME/.ssh/keys"; chmod 600 "$HOME/.ssh/keys"`
 
-func remoteShellPrivateKeyMaterial(req ShellLaunchParams) (string, error) {
+func remoteShellPrivateKeyMaterial(req configpkg.ShellLaunchParams) (string, error) {
 	if req.RemoteRepo {
 		return "", nil
 	}
@@ -1206,15 +1115,15 @@ func remoteShellPrivateKeyMaterial(req ShellLaunchParams) (string, error) {
 // remoteSSHKeySeedArgs streams the private key to the pod on stdin: -i (not
 // -it) keeps stdin a pipe for the key bytes, and the key is never in these
 // args.
-func remoteSSHKeySeedArgs(req ShellLaunchParams) []string {
-	args := kubectlTargetArgs(req)
-	return append(args, "exec", "-i", "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
+func remoteSSHKeySeedArgs(req configpkg.ShellLaunchParams) []string {
+	args := configpkg.KubectlTargetArgs(req)
+	return append(args, "exec", "-i", "deployment/"+configpkg.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
 }
 
 // seedRemoteSSHKey pipes the env's SSH private key to the pod on stdin so it
 // never touches a command line. Runs after the deployment is Available and
 // before the interactive shell exec.
-func seedRemoteSSHKey(req ShellLaunchParams) error {
+func seedRemoteSSHKey(req configpkg.ShellLaunchParams) error {
 	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
 	if err != nil {
 		return err

@@ -9,6 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 type idleProbeRoundTripper struct {
@@ -17,7 +19,7 @@ type idleProbeRoundTripper struct {
 
 func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
+	req.Header.Set(mcppkg.MCPIdleProbeHeader, "true")
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
@@ -173,11 +175,11 @@ func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string,
 	return strings.TrimSpace(out), nil
 }
 
-func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (eruncommon.EnvironmentIdleStatus, error) {
+func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (activity.EnvironmentIdleStatus, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return activity.EnvironmentIdleStatus{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -185,16 +187,16 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (erunco
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "idle"})
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return activity.EnvironmentIdleStatus{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return activity.EnvironmentIdleStatus{}, err
 	}
-	var status eruncommon.EnvironmentIdleStatus
+	var status activity.EnvironmentIdleStatus
 	if err := json.Unmarshal(data, &status); err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return activity.EnvironmentIdleStatus{}, err
 	}
 	return status, nil
 }

@@ -2,12 +2,13 @@ package cmd
 
 import (
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
 )
 
 // newContributeCmd groups the `erun contribute …` subcommands that drive
 // contribute-mode workflows.
-func newContributeCmd(runGit common.GitCommandRunnerFunc) *cobra.Command {
+func newContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contribute",
 		Short: "Run contribute-mode workflows that target the ERun source repository",
@@ -16,7 +17,7 @@ func newContributeCmd(runGit common.GitCommandRunnerFunc) *cobra.Command {
 	return cmd
 }
 
-func newContributeCloneCmd(runGit common.GitCommandRunnerFunc) *cobra.Command {
+func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "clone",
 		Short:         "Clone the ERun repository into $HOME/git/erun for contribute mode if it is not already present",

@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // connectWithCapabilities serves the tool surface a caller with these
@@ -37,7 +37,7 @@ func connectWithRuntime(t *testing.T, runtime RuntimeConfig, capabilities ...str
 	identity := authIdentity{
 		Tenant:       "acme",
 		User:         "operator@acme",
-		Capabilities: eruncommon.NewMCPCapabilitySet(capabilities),
+		Capabilities: mcptools.NewMCPCapabilitySet(capabilities),
 	}
 	info := model.BuildInfo{Version: "1.2.3"}
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
@@ -77,7 +77,7 @@ func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 // lists tools the caller cannot call teaches it about a surface it has no
 // business knowing, and invites an error where there should be none.
 func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
-	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
+	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	// diff/exec_diff and the job_*/exec_job_* pairs both appear during their
 	// rename's one-release alias window (#1186, #1246); the retired name
@@ -96,7 +96,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 
 // The tools that matter most: remote execution and everything that mutates.
 func TestReadCapabilityCannotSeeExecutionOrMutation(t *testing.T) {
-	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
+	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	for _, forbidden := range []string{"raw", "write", "commit", "deploy", "delete", "build", "push", "release", "context_init", "exec_agent", "exec_job_cancel"} {
 		if slices.Contains(got, forbidden) {
@@ -106,8 +106,8 @@ func TestReadCapabilityCannotSeeExecutionOrMutation(t *testing.T) {
 }
 
 func TestAdminCapabilitySeesEveryTool(t *testing.T) {
-	admin := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin)))
-	read := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
+	admin := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin)))
+	read := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	if len(admin) <= len(read) {
 		t.Fatalf("admin must expose more than read: admin=%d read=%d", len(admin), len(read))
@@ -130,7 +130,7 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 // tools, and no more -- neither observation (it is not a wider read) nor
 // anything that decides what environments exist or runs arbitrary code.
 func TestOperateCapabilitySeesOnlyLifecycleTools(t *testing.T) {
-	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityOperate)))
+	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityOperate)))
 
 	want := []string{"context_start", "context_stop", "deploy", "resize"}
 	if !slices.Equal(got, want) {
@@ -139,7 +139,7 @@ func TestOperateCapabilitySeesOnlyLifecycleTools(t *testing.T) {
 }
 
 func TestOperateCapabilityCannotSeeExecutionOrEnvironmentLifecycleDecisions(t *testing.T) {
-	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityOperate)))
+	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityOperate)))
 
 	for _, forbidden := range []string{
 		"raw", "exec_raw", "delete", "terraform", "init", "context_init",
@@ -158,7 +158,7 @@ func TestOperateCapabilityCannotSeeExecutionOrEnvironmentLifecycleDecisions(t *t
 func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
 	identity := authIdentity{
 		Tenant:       "acme",
-		Capabilities: eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityOperate)}),
+		Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityOperate)}),
 	}
 	called := false
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
@@ -178,7 +178,7 @@ func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
 // Calling a tool outside the caller's capabilities fails. It is unknown rather
 // than forbidden, because it was never registered for this caller.
 func TestCallingAToolOutsideTheCapabilityFails(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
 	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "raw"})
 	if err == nil {
@@ -191,7 +191,7 @@ func TestCallingAToolOutsideTheCapabilityFails(t *testing.T) {
 
 // A read-only caller must still be able to do what it is for.
 func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "version"}); err != nil {
 		t.Fatalf("a read capability must permit version: %v", err)
@@ -205,7 +205,7 @@ func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
 // proof the call reached the handler rather than being turned away at
 // registration.
 func TestReadCapabilityCanReachTheEnvironmentReadModelTools(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
 	for _, tool := range []string{"environment", "ai_sessions"} {
 		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tool})
@@ -234,7 +234,7 @@ func TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface(t *testing.T) {
 func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 	identity := authIdentity{
 		Tenant:       "acme",
-		Capabilities: eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)}),
+		Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)}),
 	}
 	called := false
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
@@ -274,7 +274,7 @@ func captureAuditLog(t *testing.T) *strings.Builder {
 func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 	out := captureAuditLog(t)
 
-	capabilities := eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)})
+	capabilities := mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)})
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, nil
 	}
@@ -329,7 +329,7 @@ func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T) {
 	out := captureAuditLog(t)
 
-	capabilities := eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)})
+	capabilities := mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)})
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, nil
 	}
@@ -382,7 +382,7 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // and it is the exact production code path a deployed edge runs against a
 // backend-minted token.
 func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere(t *testing.T) {
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityOperate))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityOperate))
 	t.Setenv(envMCPTrustedIssuer, issuer)
 	t.Setenv(envMCPAudience, "erun-mcp")
 	t.Setenv(envTenant, "acme")

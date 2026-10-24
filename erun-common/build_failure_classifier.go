@@ -26,10 +26,17 @@ import (
 // tied to the Testcontainers reaper: a bare "failed to create network" is not a
 // signature, because a test that creates its own network can fail with it for
 // a reason of its own, such as a subnet overlapping an existing one.
+//
+// "esockettimedout" is yarn's own clause for a package download the registry
+// stopped answering mid-install, e.g. "error Error:
+// https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz:
+// ESOCKETTIMEDOUT" -- the lockfile already pins what is fetched, so the
+// timeout says nothing about the change.
 var buildInconclusiveSignatures = []string{
 	"failed to resolve source metadata",
 	"failed to fetch oauth token",
 	"tls handshake timeout",
+	"esockettimedout",
 	"wait for reaper",
 	"reaper:",
 }

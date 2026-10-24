@@ -121,3 +121,7 @@ func cloudAliasListContains(aliases []string, alias string) bool {
 	}
 	return false
 }
+
+type CloudReadStore interface {
+	LoadERunConfig() (ERunConfig, string, error)
+}

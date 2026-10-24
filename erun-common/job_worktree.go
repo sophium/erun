@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // An agent job's working tree is the one thing its own exit status says
@@ -145,7 +147,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
-	other = reconcileEnvironmentJob(jobsDir, other, now, ProcessAlive, hostname)
+	other = reconcileEnvironmentJob(jobsDir, other, now, activity.ProcessAlive, hostname)
 	if other.Finished() {
 		return "", false
 	}
@@ -169,11 +171,11 @@ func agentJobDirtyWorktree(ctx core.Context, job EnvironmentJob) (dir, branch st
 	if inside, err := gitIsInsideWorkTree(ctx, dir); err != nil || !inside {
 		return "", "", false
 	}
-	changed, err := gitChangedWorkingTreeFiles(ctx, dir)
+	changed, err := gitx.GitChangedWorkingTreeFiles(ctx, dir)
 	if err != nil || len(changed) == 0 {
 		return "", "", false
 	}
-	branch, err = GitCurrentBranch(ctx, dir)
+	branch, err = gitx.GitCurrentBranch(ctx, dir)
 	if err != nil {
 		return "", "", false
 	}
@@ -206,7 +208,7 @@ func refuseAgentJobWorktreeCheckpoint(ctx core.Context, dir, branch string) (str
 // folding whichever step fails into outcome.reason so a caller always learns
 // what the supervisor actually managed to preserve.
 func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
-	commitResult, err := CommitWorkingTree(ctx, dir, CommitWorkingTreeParams{
+	commitResult, err := gitx.CommitWorkingTree(ctx, dir, gitx.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
 		// The checkpoint is this run's last act, and it is the only thing
@@ -217,7 +219,7 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 		// unrecoverable working tree. Bypass hooks here and nowhere else; a
 		// human-authored commit still runs them.
 		SkipHooks: true,
-	}, CommitWorkingTreeDependencies{})
+	}, gitx.CommitWorkingTreeDependencies{})
 	if err != nil {
 		outcome.reason = fmt.Sprintf("the working tree had uncommitted changes when the job ended and the "+
 			"automatic checkpoint commit failed: %v", err)
@@ -225,7 +227,7 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 	}
 	outcome.commit = commitResult.Commit
 
-	pushResult, err := PushWorkingTreeBranch(ctx, dir, PushWorkingTreeBranchParams{Branch: branch}, PushWorkingTreeBranchDependencies{})
+	pushResult, err := gitx.PushWorkingTreeBranch(ctx, dir, gitx.PushWorkingTreeBranchParams{Branch: branch}, gitx.PushWorkingTreeBranchDependencies{})
 	if err != nil {
 		outcome.reason = fmt.Sprintf("the job made a checkpoint commit (%s) for its uncommitted changes but could "+
 			"not push it: %v; that commit is only as safe as this one working tree", commitResult.Commit, err)

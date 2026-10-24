@@ -35,8 +35,8 @@ type ObservedHelmRelease struct {
 // observeHelmStatusArgs builds a read-only `helm status <release> -o json`
 // invocation, mirroring doctor's helmStatusArgs (doctor_deploy.go) with a JSON
 // output flag added so observe can parse it instead of only displaying it.
-func observeHelmStatusArgs(req ShellLaunchParams) []string {
-	args := []string{"status", RuntimeReleaseName(req.Tenant)}
+func observeHelmStatusArgs(req config.ShellLaunchParams) []string {
+	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -51,7 +51,7 @@ func observeHelmStatusArgs(req ShellLaunchParams) []string {
 // chart metadata at all (its top-level keys are apply_method, config, info,
 // manifest, name, namespace, version — no chart), so observe reads chart and
 // appVersion from list instead, which does carry them.
-func observeHelmListArgs(req ShellLaunchParams, releaseName string) []string {
+func observeHelmListArgs(req config.ShellLaunchParams, releaseName string) []string {
 	args := []string{"list", "--filter", "^" + regexp.QuoteMeta(releaseName) + "$"}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
@@ -128,7 +128,7 @@ func fetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 	release.RuntimePod = findRuntimePodResourceLimits(status.Config)
 	populateObservedChartFields(release, listArgs, releaseName, namespace)
 	if release.Chart != "" && !strings.Contains(strings.ToLower(release.Chart), "devops") {
-		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, DevopsComponentName, release.Name))
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, config.DevopsComponentName, release.Name))
 	}
 	return release
 }

@@ -8,15 +8,16 @@ import (
 
 	"github.com/briandowns/spinner"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"golang.org/x/term"
 )
 
-type OpenShellRunner func(core.Context, common.ShellLaunchParams) error
+type OpenShellRunner func(core.Context, config.ShellLaunchParams) error
 
 const desktopAppSessionEnvVar = common.DesktopSessionEnvVar
 
-func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
+func newOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
 		waitForShellDeployment = common.WaitForShellDeployment
 	}
@@ -24,7 +25,7 @@ func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) er
 		execShell = common.ExecShell
 	}
 
-	return func(ctx core.Context, req common.ShellLaunchParams) error {
+	return func(ctx core.Context, req config.ShellLaunchParams) error {
 		if err := runOpenShellWait(ctx, req, waitForShellDeployment); err != nil {
 			return err
 		}
@@ -32,14 +33,14 @@ func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) er
 	}
 }
 
-func runOpenShellWait(ctx core.Context, req common.ShellLaunchParams, waitForShellDeployment func(common.ShellLaunchParams) error) error {
+func runOpenShellWait(ctx core.Context, req config.ShellLaunchParams, waitForShellDeployment func(config.ShellLaunchParams) error) error {
 	if waitForShellDeployment == nil {
 		return fmt.Errorf("wait for shell deployment is required")
 	}
 	return runWithSpinner(
 		ctx,
-		" waiting for "+common.RuntimeReleaseName(req.Tenant)+" in "+req.Namespace,
-		"deployment available: "+common.RuntimeReleaseName(req.Tenant)+"\n",
+		" waiting for "+config.RuntimeReleaseName(req.Tenant)+" in "+req.Namespace,
+		"deployment available: "+config.RuntimeReleaseName(req.Tenant)+"\n",
 		func() error {
 			return waitForShellDeployment(req)
 		},

@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // AISessionRepository is the persistence access AISessionRoutes needs:
@@ -63,11 +62,11 @@ type reportAISessionEventRequest struct {
 // the "unknown must not render as a definite value" property
 // eruncommon.ResolveAISessionStatus's own default case protects locally.
 var validAISessionEvents = map[string]bool{
-	string(eruncommon.AISessionEventTurnStart): true,
-	string(eruncommon.AISessionEventToolUse):   true,
-	string(eruncommon.AISessionEventTurnEnd):   true,
-	string(eruncommon.AISessionEventNotify):    true,
-	string(eruncommon.AISessionEventExit):      true,
+	string(modelpkg.AISessionEventTurnStart): true,
+	string(modelpkg.AISessionEventToolUse):   true,
+	string(modelpkg.AISessionEventTurnEnd):   true,
+	string(modelpkg.AISessionEventNotify):    true,
+	string(modelpkg.AISessionEventExit):      true,
 }
 
 func (r AISessionRoutes) reportAISessionEvent(w http.ResponseWriter, req *http.Request) {
@@ -124,7 +123,7 @@ func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request
 		writeRepositoryError(w, req, err)
 		return
 	}
-	statuses := make([]eruncommon.AISessionStatus, len(events))
+	statuses := make([]modelpkg.AISessionStatus, len(events))
 	for i, event := range events {
 		statuses[i] = resolveAISessionStatus(event)
 	}
@@ -135,11 +134,11 @@ func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request
 // eruncommon.AISessionStatus shape LoadAISessionStatuses resolves locally, so
 // a caller reading this contract (once a read route exists) sees exactly the
 // desktop/MCP view, never a second, drifting resolution of the same states.
-func resolveAISessionStatus(event model.AISessionEvent) eruncommon.AISessionStatus {
-	return eruncommon.ResolveAISessionStatus(eruncommon.AISessionRecord{
+func resolveAISessionStatus(event model.AISessionEvent) modelpkg.AISessionStatus {
+	return modelpkg.ResolveAISessionStatus(modelpkg.AISessionRecord{
 		SessionID:  event.SessionID,
 		Tool:       event.Tool,
-		Event:      eruncommon.AISessionEventKind(event.Event),
+		Event:      modelpkg.AISessionEventKind(event.Event),
 		At:         event.OccurredAt,
 		ExitCode:   event.ExitCode,
 		ExitReason: event.ExitReason,

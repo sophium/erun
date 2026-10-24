@@ -9,6 +9,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // jobReportStore is the config store the reporting contract is exercised
@@ -46,7 +48,7 @@ func traceBuffer() (core.Context, *bytes.Buffer) {
 func TestReportJobStartWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 	ctx, trace := traceBuffer()
 
-	jobID := ReportJobStart(ctx, jobReportStore{}, CloudDependencies{}, ReportJobStartParams{
+	jobID := ReportJobStart(ctx, jobReportStore{}, cloud.CloudDependencies{}, ReportJobStartParams{
 		JobType:   "fix",
 		Summary:   "fixing the jobs claim race",
 		ActorKind: "agent",
@@ -68,7 +70,7 @@ func TestReportJobStartWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 func TestReportJobStartWithAnUnusableAliasTracesAndKeepsGoing(t *testing.T) {
 	ctx, trace := traceBuffer()
 
-	jobID := ReportJobStart(ctx, erunAliasStore(), CloudDependencies{}, ReportJobStartParams{
+	jobID := ReportJobStart(ctx, erunAliasStore(), cloud.CloudDependencies{}, ReportJobStartParams{
 		JobType:   "fix",
 		Summary:   "fixing the jobs claim race",
 		ActorKind: "agent",
@@ -89,7 +91,7 @@ func TestReportJobStartWithAnUnusableAliasTracesAndKeepsGoing(t *testing.T) {
 func TestReportJobOutcomeWithoutAJobIDSaysNothing(t *testing.T) {
 	ctx, trace := traceBuffer()
 
-	ReportJobOutcome(ctx, erunAliasStore(), CloudDependencies{}, ReportJobOutcomeParams{
+	ReportJobOutcome(ctx, erunAliasStore(), cloud.CloudDependencies{}, ReportJobOutcomeParams{
 		JobID:  "   ",
 		Status: "SUCCEEDED",
 	})
@@ -105,7 +107,7 @@ func TestReportJobOutcomeWithoutAJobIDSaysNothing(t *testing.T) {
 func TestReportJobOutcomeWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 	ctx, trace := traceBuffer()
 
-	ReportJobOutcome(ctx, jobReportStore{}, CloudDependencies{}, ReportJobOutcomeParams{
+	ReportJobOutcome(ctx, jobReportStore{}, cloud.CloudDependencies{}, ReportJobOutcomeParams{
 		JobID:  "job-1",
 		Status: "SUCCEEDED",
 	})
@@ -117,7 +119,7 @@ func TestReportJobOutcomeWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 
 func jobStatusError(t *testing.T, status int, body string) error {
 	t.Helper()
-	return platformStatusError(http.MethodPost, "/v1/jobs", status, []byte(body), http.Header{})
+	return platformclient.NewPlatformStatusError(http.MethodPost, "/v1/jobs", status, []byte(body), http.Header{})
 }
 
 // TestPlatformJobScopeHeldDetailsNamesTheHolder: the refusal's whole value is
@@ -129,7 +131,7 @@ func TestPlatformJobScopeHeldDetailsNamesTheHolder(t *testing.T) {
 		"scope":"sophium/erun#2109","jobId":"job-held","actorId":"erun/code4",
 		"summary":"fixing the jobs claim race","startedAt":"2026-09-21T12:00:00Z"}}`)
 
-	held, ok := PlatformJobScopeHeldDetails(err)
+	held, ok := platformclient.PlatformJobScopeHeldDetails(err)
 	if !ok {
 		t.Fatal("a JOB_SCOPE_HELD conflict was not recognised")
 	}
@@ -158,7 +160,7 @@ func TestPlatformJobScopeHeldDetailsRefusesAnyOtherConflict(t *testing.T) {
 		"an unparseable body":   jobStatusError(t, http.StatusConflict, `not json`),
 		"not a status error":    errors.New("connection reset"),
 	} {
-		if _, ok := PlatformJobScopeHeldDetails(err); ok {
+		if _, ok := platformclient.PlatformJobScopeHeldDetails(err); ok {
 			t.Errorf("%s: reported as a held scope", name)
 		}
 	}
@@ -173,7 +175,7 @@ func TestJobReportScopeHeldIsTracedAsWhatItIs(t *testing.T) {
 		"scope":"sophium/erun#2109","jobId":"job-held","actorId":"erun/code4",
 		"summary":"fixing the jobs claim race","startedAt":"2026-09-21T12:00:00Z"}}`)
 
-	held, ok := PlatformJobScopeHeldDetails(err)
+	held, ok := platformclient.PlatformJobScopeHeldDetails(err)
 	if !ok {
 		t.Fatal("precondition: the conflict should resolve to a holder")
 	}

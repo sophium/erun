@@ -6,8 +6,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type ContextListInput struct {
@@ -43,17 +44,17 @@ type ContextStartInput struct {
 
 // ContextListResult aliases the shared envelope so the CLI and the MCP tool
 // cannot drift into two spellings of the same listing.
-type ContextListResult = eruncommon.CloudContextListResult
+type ContextListResult = cloud.CloudContextListResult
 
 type ContextActionResult struct {
-	Preview bool                          `json:"preview"`
-	Context eruncommon.CloudContextStatus `json:"context,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                      `json:"preview"`
+	Context config.CloudContextStatus `json:"context,omitempty"`
+	Trace   []string                  `json:"trace,omitempty"`
 }
 
 func contextListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextListInput) (*mcp.CallToolResult, ContextListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextListInput) (*mcp.CallToolResult, ContextListResult, error) {
-		contexts, err := eruncommon.ListCloudContextStatuses(runtime.Store)
+		contexts, err := cloud.ListCloudContextStatuses(runtime.Store)
 		if err != nil {
 			return nil, ContextListResult{}, err
 		}
@@ -68,7 +69,7 @@ func contextInitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := eruncommon.InitCloudContext(ctx, runtime.Store, eruncommon.InitCloudContextParams{
+		status, err := cloud.InitCloudContext(ctx, runtime.Store, cloud.InitCloudContextParams{
 			Name:               input.Name,
 			CloudProviderAlias: input.CloudProviderAlias,
 			Region:             input.Region,
@@ -78,7 +79,7 @@ func contextInitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 			SubnetID:           input.SubnetID,
 			SecurityGroupID:    input.SecurityGroupID,
 			KeyName:            input.KeyName,
-		}, eruncommon.CloudContextDependencies{})
+		}, cloud.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}
@@ -87,7 +88,7 @@ func contextInitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 }
 
 func contextStopTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
-	return contextPowerTool(runtime, eruncommon.StopCloudContext)
+	return contextPowerTool(runtime, cloud.StopCloudContext)
 }
 
 func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextStartInput) (*mcp.CallToolResult, ContextActionResult, error) {
@@ -97,7 +98,7 @@ func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := eruncommon.StartCloudContext(ctx, runtime.Store, eruncommon.CloudContextParams{Name: input.Name, Force: input.Force}, eruncommon.CloudContextDependencies{})
+		status, err := cloud.StartCloudContext(ctx, runtime.Store, cloud.CloudContextParams{Name: input.Name, Force: input.Force}, cloud.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}
@@ -105,14 +106,14 @@ func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 	}
 }
 
-func contextPowerTool(runtime RuntimeConfig, run func(core.Context, eruncommon.CloudContextStore, eruncommon.CloudContextParams, eruncommon.CloudContextDependencies) (eruncommon.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
+func contextPowerTool(runtime RuntimeConfig, run func(core.Context, cloud.CloudContextStore, cloud.CloudContextParams, cloud.CloudContextDependencies) (config.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
 			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := run(ctx, runtime.Store, eruncommon.CloudContextParams{Name: input.Name}, eruncommon.CloudContextDependencies{})
+		status, err := run(ctx, runtime.Store, cloud.CloudContextParams{Name: input.Name}, cloud.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}

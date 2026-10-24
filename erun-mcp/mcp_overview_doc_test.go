@@ -14,6 +14,8 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // repoRootForOverviewDocTest returns the repo root. erun-mcp sits directly
@@ -145,7 +147,7 @@ func TestMCPOverviewDocumentsEveryTool(t *testing.T) {
 		t.Fatal("no tool rows parsed from the Full tool index; the rest of this test would pass vacuously")
 	}
 	documentedSet := toolNameSet(t, docPath, documented)
-	registered := eruncommon.MCPToolNames()
+	registered := mcptools.MCPToolNames()
 	registeredSet := toolNameSet(t, docPath, registered)
 
 	reportSetDifference(t, registered, documentedSet, docPath+": registered tool %q is missing from the Full tool index")
@@ -294,7 +296,7 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 			IsEffective:    true,
 		},
 		State: eruncommon.EnvironmentLifecycleRunning,
-		Idle:  &eruncommon.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
+		Idle:  &activity.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
 		Health: &eruncommon.EnvironmentHealth{
 			RootConfig: eruncommon.RootConfigInspection{ConfigStatus: eruncommon.RootConfigStatusOK},
 			Deploy:     eruncommon.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},

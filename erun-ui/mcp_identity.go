@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // desktopIdentity is the desktop's persistent Ed25519 identity: it signs the
@@ -26,11 +26,11 @@ func newDesktopIdentity(dir string) *desktopIdentity {
 }
 
 func (d *desktopIdentity) keyPath() string {
-	return eruncommon.DesktopIdentityKeyPath(d.dir)
+	return mcpauth.DesktopIdentityKeyPath(d.dir)
 }
 
 func (d *desktopIdentity) publicKeyPath() string {
-	return eruncommon.DesktopIdentityPublicKeyPath(d.dir)
+	return mcpauth.DesktopIdentityPublicKeyPath(d.dir)
 }
 
 func (d *desktopIdentity) ensure() error {
@@ -44,12 +44,12 @@ func (d *desktopIdentity) ensure() error {
 	}
 	switch data, err := os.ReadFile(d.keyPath()); {
 	case err == nil:
-		if _, derr := eruncommon.DesktopPublicKeyPEM(data); derr != nil {
+		if _, derr := mcpauth.DesktopPublicKeyPEM(data); derr != nil {
 			return fmt.Errorf("persisted desktop identity is invalid: %w", derr)
 		}
 		d.privatePEM = data
 	case os.IsNotExist(err):
-		priv, _, gerr := eruncommon.GenerateDesktopIdentity()
+		priv, _, gerr := mcpauth.GenerateDesktopIdentity()
 		if gerr != nil {
 			return gerr
 		}
@@ -67,7 +67,7 @@ func (d *desktopIdentity) ensure() error {
 }
 
 func (d *desktopIdentity) writePublicKeyLocked() error {
-	pub, err := eruncommon.DesktopPublicKeyPEM(d.privatePEM)
+	pub, err := mcpauth.DesktopPublicKeyPEM(d.privatePEM)
 	if err != nil {
 		return err
 	}
@@ -99,5 +99,5 @@ func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (
 	d.mu.Lock()
 	priv := d.privatePEM
 	d.mu.Unlock()
-	return eruncommon.SignDesktopMCPToken(priv, tenant, environment, now)
+	return mcpauth.SignDesktopMCPToken(priv, tenant, environment, now)
 }

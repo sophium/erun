@@ -4,15 +4,15 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // loadAccessRemedy resolves the copyable grant for a single restricted route,
 // for the surfaces that record one refusal rather than a panel's set. nil
 // means there is no command to hand over, which every caller renders as the
 // plain sentence it already had.
-func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, userID string, read string) *eruncommon.PlatformAccessRemedy {
+func loadAccessRemedy(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, userID string, read string) *platformclient.PlatformAccessRemedy {
 	remedies := loadAccessRemedies(ctx, client, capabilities, userID, read)
 	if len(remedies) == 0 {
 		return nil
@@ -45,7 +45,7 @@ func canReadTenantRoles(capabilities model.PlatformCapabilities) bool {
 // the caller's own user id is unknown, or no role covers the missing access —
 // in that last case there is genuinely no command to hand over, since a role
 // has to exist before anyone can be granted it.
-func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, userID string, reads ...string) map[string]eruncommon.PlatformAccessRemedy {
+func loadAccessRemedies(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, userID string, reads ...string) map[string]platformclient.PlatformAccessRemedy {
 	missing := make([]string, 0, len(reads))
 	for _, read := range reads {
 		if read != "" {
@@ -59,13 +59,13 @@ func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, 
 	if err != nil {
 		return nil
 	}
-	remedies := make(map[string]eruncommon.PlatformAccessRemedy, len(missing))
+	remedies := make(map[string]platformclient.PlatformAccessRemedy, len(missing))
 	for _, read := range missing {
-		method, apiPath, ok := eruncommon.SplitCapabilityRead(read)
+		method, apiPath, ok := platformclient.SplitCapabilityRead(read)
 		if !ok {
 			continue
 		}
-		remedy, found := eruncommon.PlatformAccessRemedyFor(userID, roles, method, apiPath)
+		remedy, found := platformclient.PlatformAccessRemedyFor(userID, roles, method, apiPath)
 		if !found {
 			continue
 		}

@@ -262,11 +262,11 @@ const DeployComponentSourcePublished = deployComponentSourcePublished
 // ladder (runtimeChartCandidates), which searches the same two charts in order
 // and then widens to the registry erun publishes the platform chart in.
 func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
-	chart := RuntimeReleaseName(tenant)
-	if chart != DevopsComponentName && tenantChartPublished {
+	chart := config.RuntimeReleaseName(tenant)
+	if chart != config.DevopsComponentName && tenantChartPublished {
 		return chart
 	}
-	return DevopsComponentName
+	return config.DevopsComponentName
 }
 
 // ResolveDeployableComponents lists the published component charts a deploy of a
@@ -284,7 +284,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 		return nil, err
 	}
 	tenant := resolvedTarget.Tenant
-	runtimeName := RuntimeReleaseName(tenant)
+	runtimeName := config.RuntimeReleaseName(tenant)
 
 	// The checklist lists what deploying a chosen version rolls out — the published
 	// component charts (installed by reference) plus the runtime — the same for every

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 const (
@@ -132,7 +132,7 @@ func isolateHostedUploadConfig(t *testing.T) string {
 // production one.
 func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	t.Helper()
-	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
+	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
@@ -151,13 +151,13 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 	return NewApp(erunUIDeps{
 		store: configpkg.ConfigStore{},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
-				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
+			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
 			},
-			RefreshERunTokens: func(core.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
-				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
+			RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
+				return cloud.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
 			},
 		},
 	})

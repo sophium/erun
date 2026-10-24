@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 type IdleInput struct {
@@ -14,15 +14,15 @@ type IdleInput struct {
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-func idleTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleInput) (*mcp.CallToolResult, eruncommon.EnvironmentIdleStatus, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleInput) (*mcp.CallToolResult, eruncommon.EnvironmentIdleStatus, error) {
+func idleTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleInput) (*mcp.CallToolResult, activity.EnvironmentIdleStatus, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleInput) (*mcp.CallToolResult, activity.EnvironmentIdleStatus, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.EnvironmentIdleStatus{}, err
+			return nil, activity.EnvironmentIdleStatus{}, err
 		}
-		status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
+		status, err := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 		if err != nil {
-			return nil, eruncommon.EnvironmentIdleStatus{}, err
+			return nil, activity.EnvironmentIdleStatus{}, err
 		}
 		return nil, status, nil
 	}

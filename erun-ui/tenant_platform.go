@@ -9,6 +9,9 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // tenant_platform.go resolves which erun-hosted-platform identity backs the
@@ -45,7 +48,7 @@ const (
 // context (resolved alias, URL, choices, identity claims) to render it.
 type tenantPlatformResolution struct {
 	state        string
-	client       *eruncommon.PlatformClient
+	client       *platformclient.PlatformClient
 	apiURL       string
 	alias        string
 	aliasChoices []string
@@ -92,15 +95,15 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 	}
 	apiURL := provider.ERun.APIURL
 
-	token, err := eruncommon.CloudProviderBearerToken(core.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
+	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
 	bearer := strings.TrimSpace(token.Token)
 	if err != nil || bearer == "" {
 		return tenantPlatformResolution{state: tenantPlatformStateNotSignedIn, alias: provider.Alias, apiURL: apiURL}, nil
 	}
 
-	issuer, _ := eruncommon.IssuerFromUnverifiedJWT(bearer)
-	subject, _ := eruncommon.SubjectFromUnverifiedJWT(bearer)
-	client := eruncommon.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
+	issuer, _ := mcpauth.IssuerFromUnverifiedJWT(bearer)
+	subject, _ := mcpauth.SubjectFromUnverifiedJWT(bearer)
+	client := platformclient.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
 		WithUsernameHint(a.tenantDashboardUsernameHint(provider.Alias))
 	return tenantPlatformResolution{
 		state:   tenantPlatformStateReady,
@@ -144,7 +147,7 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig
 	if chosen == "" {
 		return configpkg.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateChooseAlias, aliasChoices: tenantERunAliases}, nil
 	}
-	provider, err = eruncommon.ResolveCloudProvider(a.deps.store, chosen)
+	provider, err = cloud.ResolveCloudProvider(a.deps.store, chosen)
 	if err != nil {
 		return configpkg.CloudProviderConfig{}, nil, err
 	}
@@ -174,7 +177,7 @@ func (a *App) tenantSelectedERunAliases(tenantConfig configpkg.TenantConfig) []s
 		if alias == "" {
 			continue
 		}
-		candidate, err := eruncommon.ResolveCloudProvider(a.deps.store, alias)
+		candidate, err := cloud.ResolveCloudProvider(a.deps.store, alias)
 		if err != nil || candidate.Provider != configpkg.CloudProviderERun {
 			continue
 		}
@@ -228,7 +231,7 @@ func (a *App) tenantPlatformResolutionForResolveError(resolveErr error) (tenantP
 // writing to it is only reachable from an already-loaded Reviews tab). A
 // not-ready state therefore surfaces as a plain error here rather than the
 // dashboard's own four-state UI.
-func (a *App) tenantPlatformClient(ctx context.Context, tenant string) (*eruncommon.PlatformClient, context.Context, context.CancelFunc, error) {
+func (a *App) tenantPlatformClient(ctx context.Context, tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {
 		return nil, nil, nil, err
@@ -260,7 +263,7 @@ type uiConnectERunPlatformInput struct {
 // URL beyond the base address itself. It attaches the alias to the tenant the
 // click came from, which is the state the caller is asking to move.
 func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProviderStatus, error) {
-	provider, err := eruncommon.InitERunCloudProvider(core.Context{}, a.deps.store, eruncommon.InitERunCloudProviderParams{
+	provider, err := cloud.InitERunCloudProvider(core.Context{}, a.deps.store, cloud.InitERunCloudProviderParams{
 		APIURL: strings.TrimSpace(input.APIURL),
 	}, a.deps.cloudDeps)
 	if err != nil {
@@ -271,7 +274,7 @@ func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProv
 			return uiCloudProviderStatus{}, err
 		}
 	}
-	return cloudProviderStatusToUI(eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
+	return cloudProviderStatusToUI(cloud.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
 }
 
 // attachTenantCloudProviderAlias attaches alias to tenant's own cloud provider
@@ -289,7 +292,7 @@ func (a *App) attachTenantCloudProviderAlias(tenant, alias string) error {
 		return err
 	}
 	config.Name = tenant
-	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = eruncommon.AttachTenantCloudProviderAlias(
+	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = cloud.AttachTenantCloudProviderAlias(
 		config.CloudProviderAliases, config.PrimaryCloudProviderAlias, alias)
 	return a.deps.store.SaveTenantConfig(config)
 }
@@ -321,7 +324,7 @@ type uiPlatformUser struct {
 // the administrator hand-off (enrollERunPlatformUserError,
 // tenant_platform_error.go) rather than surfaced as the raw platform error.
 func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatformUser, error) {
-	user, err := eruncommon.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), eruncommon.PlatformCreateUserParams{
+	user, err := eruncommon.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), platformclient.PlatformCreateUserParams{
 		Username: strings.TrimSpace(input.Username),
 		Issuer:   strings.TrimSpace(input.Issuer),
 		Subject:  strings.TrimSpace(input.Subject),

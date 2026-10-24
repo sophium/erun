@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerPushSpec) DockerPushExecutionSpec {
@@ -19,7 +20,7 @@ func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerP
 // same-named image exists. The version and registry come from the resolved builds
 // (componentChartPublishVersion / the first build's registry+root); a project with
 // charts but no image build yields no specs.
-func resolveComponentChartSpecs(builds []DockerBuildSpec) ([]HelmChartPublishSpec, error) {
+func resolveComponentChartSpecs(builds []DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
 	version := componentChartPublishVersion(builds)
 	registry, projectRoot := componentChartRegistryAndRoot(builds)
 	if version == "" || registry == "" || projectRoot == "" {
@@ -29,9 +30,9 @@ func resolveComponentChartSpecs(builds []DockerBuildSpec) ([]HelmChartPublishSpe
 	if err != nil {
 		return nil, err
 	}
-	specs := make([]HelmChartPublishSpec, 0, len(contexts))
+	specs := make([]helm.HelmChartPublishSpec, 0, len(contexts))
 	for _, context := range contexts {
-		spec, err := resolveHelmChartPublishSpec(context.ChartPath, version, registry)
+		spec, err := helm.ResolveHelmChartPublishSpec(context.ChartPath, version, registry)
 		if err != nil {
 			return nil, err
 		}

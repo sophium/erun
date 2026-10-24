@@ -213,7 +213,7 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 				},
 			}
 
-			got, persistImage := resolveDeployRuntimeImage(ctx, target, chartRegistry, erunVersion, DevopsComponentName, "", "", false)
+			got, persistImage := resolveDeployRuntimeImage(ctx, target, chartRegistry, erunVersion, config.DevopsComponentName, "", "", false)
 
 			if tc.wantHonored {
 				if got != recordedImage {
@@ -295,7 +295,7 @@ func TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments(t *tes
 	ctx := core.Context{}
 	target := config.OpenResult{Tenant: "erun", EnvConfig: config.EnvConfig{}}
 
-	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", DevopsComponentName, "1.0.201", "", false)
+	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", config.DevopsComponentName, "1.0.201", "", false)
 
 	if persistImage != "" {
 		t.Fatalf("persistImage = %q, want empty for erun's own environments", persistImage)

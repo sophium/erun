@@ -11,6 +11,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -71,9 +72,9 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if exclusive && !cmd.Flags().Changed("ttl") {
-				ttl = common.DefaultExclusiveEnvironmentActivityLeaseTTL
+				ttl = activity.DefaultExclusiveEnvironmentActivityLeaseTTL
 			}
-			return runActivityLeaseTake(cmd, resolveOpen, common.TakeEnvironmentActivityLeaseParams{
+			return runActivityLeaseTake(cmd, resolveOpen, activity.TakeEnvironmentActivityLeaseParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -82,7 +83,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 				TTL:         ttl,
 				Scope:       scope,
 				Exclusive:   exclusive,
-				Holder:      common.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
+				Holder:      activity.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			}, jsonOutput)
 		},
 	}
@@ -90,7 +91,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "What the lease is holding the environment for (shown to the operator)")
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to take or renew (defaults to the name)")
 	cmd.Flags().IntVar(&pid, "pid", 0, "Holder process in the environment to reconcile the lease against; the lease is reclaimed once it exits")
-	cmd.Flags().DurationVar(&ttl, "ttl", common.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal (defaults to 5m instead when --exclusive is set)")
+	cmd.Flags().DurationVar(&ttl, "ttl", activity.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal (defaults to 5m instead when --exclusive is set)")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
@@ -99,7 +100,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
+func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params activity.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
 	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -120,22 +121,22 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params c
 	return err
 }
 
-func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
+func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params activity.TakeEnvironmentActivityLeaseParams) (activity.EnvironmentActivityLease, bool, error) {
 	if !environmentTargetsItself() {
 		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
 		if params.Exclusive {
-			scope := common.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
+			scope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name, "--exclusive", "--scope", scope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
 		}
-		return common.EnvironmentActivityLease{}, false, nil
+		return activity.EnvironmentActivityLease{}, false, nil
 	}
-	lease, err := common.TakeEnvironmentActivityLease(params)
+	lease, err := activity.TakeEnvironmentActivityLease(params)
 	if err != nil {
-		return common.EnvironmentActivityLease{}, false, err
+		return activity.EnvironmentActivityLease{}, false, err
 	}
 	return lease, true, nil
 }
@@ -192,8 +193,8 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 	// back to the plain summary rather than failing a release that already
 	// did the right thing.
 	note := ""
-	if outcome == common.EnvironmentActivityLeaseHeldElsewhere {
-		note, _ = common.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
+	if outcome == activity.EnvironmentActivityLeaseHeldElsewhere {
+		note, _ = activity.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id, note))
 	return err
@@ -207,12 +208,12 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 // full TTL. A no-match that the id turns out to be holding under the other
 // shape says so, and names the release that would match, rather than leaving
 // the operator to conclude the claim is already gone.
-func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
+func releaseLeaseSummary(outcome activity.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
 	trimmed := strings.TrimSpace(id)
 	switch outcome {
-	case common.EnvironmentActivityLeaseReleased:
+	case activity.EnvironmentActivityLeaseReleased:
 		return fmt.Sprintf("lease released: %s", trimmed)
-	case common.EnvironmentActivityLeaseHeldElsewhere:
+	case activity.EnvironmentActivityLeaseHeldElsewhere:
 		if note != "" {
 			return fmt.Sprintf("lease not released: %s is %s", trimmed, note)
 		}
@@ -220,29 +221,29 @@ func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, 
 	return fmt.Sprintf("lease not held: %s", trimmed)
 }
 
-func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
+func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (activity.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	if !environmentTargetsItself() {
 		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
 	if commandCtx.DryRun {
 		if exclusive {
-			resolvedScope := common.NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
+			resolvedScope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id, "--exclusive", "--scope", resolvedScope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
 		}
-		return common.EnvironmentActivityLeaseNotHeld, false, nil
+		return activity.EnvironmentActivityLeaseNotHeld, false, nil
 	}
 	if exclusive {
-		outcome, err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		outcome, err := activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		if err != nil {
-			return common.EnvironmentActivityLeaseNotHeld, false, err
+			return activity.EnvironmentActivityLeaseNotHeld, false, err
 		}
 		return outcome, true, nil
 	}
-	outcome, err := common.ReleaseEnvironmentActivityLease(tenant, environment, id)
+	outcome, err := activity.ReleaseEnvironmentActivityLease(tenant, environment, id)
 	if err != nil {
-		return common.EnvironmentActivityLeaseNotHeld, false, err
+		return activity.EnvironmentActivityLeaseNotHeld, false, err
 	}
 	return outcome, true, nil
 }
@@ -282,7 +283,7 @@ func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, 
 	return writeActivityLeases(ctx, leases, time.Now(), jsonOutput)
 }
 
-func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
+func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) ([]activity.EnvironmentActivityLease, bool, error) {
 	if !environmentTargetsItself() {
 		return listLeasesInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment)
 	}
@@ -290,19 +291,19 @@ func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen OpenRe
 		commandCtx.TraceCommand("", "activity", "lease-list", tenant, environment)
 		return nil, false, nil
 	}
-	leases, err := common.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, false, err
 	}
 	return leases, true, nil
 }
 
-func writeActivityLeases(ctx core.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
+func writeActivityLeases(ctx core.Context, leases []activity.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
 	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		if leases == nil {
-			leases = []common.EnvironmentActivityLease{}
+			leases = []activity.EnvironmentActivityLease{}
 		}
 		return encoder.Encode(leases)
 	}
@@ -324,12 +325,12 @@ func writeActivityLeases(ctx core.Context, leases []common.EnvironmentActivityLe
 // that refuses everyone else in its scope from one that refuses nobody — the
 // same invisibility that let an inert concurrency guard go unnoticed, because
 // nothing on this surface said the claim was there or what it covered.
-func activityLeaseSummary(lease common.EnvironmentActivityLease, now time.Time) string {
+func activityLeaseSummary(lease activity.EnvironmentActivityLease, now time.Time) string {
 	value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
 	if lease.Exclusive {
 		value = fmt.Sprintf("%s, exclusive on %s, held by %s, expires in %s",
 			lease.Name,
-			common.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
+			activity.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
 			lease.Holder.String(),
 			formatLeaseRemaining(lease, now))
 	}
@@ -339,7 +340,7 @@ func activityLeaseSummary(lease common.EnvironmentActivityLease, now time.Time) 
 	return value
 }
 
-func formatLeaseRemaining(lease common.EnvironmentActivityLease, now time.Time) string {
+func formatLeaseRemaining(lease activity.EnvironmentActivityLease, now time.Time) string {
 	remaining := lease.ExpiresAt.Sub(now)
 	if remaining < 0 {
 		remaining = 0
@@ -368,8 +369,8 @@ func newActivitySampleCmd() *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().StringVar(&procRoot, "proc-root", common.DefaultProcRoot, "Process filesystem to sample")
-	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
+	cmd.Flags().StringVar(&procRoot, "proc-root", activity.DefaultProcRoot, "Process filesystem to sample")
+	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", config.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON (alias for --output json)")
 	return cmd
 }
@@ -380,7 +381,7 @@ func recordActivityIf(found bool, tenant, environment, kind string) error {
 	if !found {
 		return nil
 	}
-	return common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+	return activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Kind:        kind,
@@ -391,24 +392,24 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
-	previous, err := common.LoadResidentActivitySample(tenant, environment)
+	previous, err := activity.LoadResidentActivitySample(tenant, environment)
 	if err != nil {
 		return err
 	}
-	result, err := common.ScanResidentActivity(procRoot, os.Getpid(), previous, time.Now())
+	result, err := activity.ScanResidentActivity(procRoot, os.Getpid(), previous, time.Now())
 	if err != nil {
 		return err
 	}
-	if err := common.SaveResidentActivitySample(tenant, environment, result.Sample); err != nil {
+	if err := activity.SaveResidentActivitySample(tenant, environment, result.Sample); err != nil {
 		return err
 	}
 	if err := retainRuntimeUsage(tenant, environment, cgroupRoot); err != nil {
 		return err
 	}
-	if err := recordActivityIf(result.Busy, tenant, environment, common.ActivityKindProcess); err != nil {
+	if err := recordActivityIf(result.Busy, tenant, environment, activity.ActivityKindProcess); err != nil {
 		return err
 	}
-	interactiveSSH, err := common.ScanInteractiveSSHSession(procRoot)
+	interactiveSSH, err := activity.ScanInteractiveSSHSession(procRoot)
 	if err != nil {
 		return err
 	}
@@ -418,7 +419,7 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	return writeActivitySampleResult(commandContext(cmd), result, jsonOutput)
 }
 
-func writeActivitySampleResult(ctx core.Context, result common.ResidentActivityResult, jsonOutput bool) error {
+func writeActivitySampleResult(ctx core.Context, result activity.ResidentActivityResult, jsonOutput bool) error {
 	if commandWantsJSON(ctx, jsonOutput) {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}
@@ -435,7 +436,7 @@ func writeActivitySampleResult(ctx core.Context, result common.ResidentActivityR
 // of empty samples would only ever support "no evidence", and this runs on a
 // laptop as readily as in a container.
 func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
-	sample := common.ReadLocalRuntimeUsage(cgroupRoot)
+	sample := config.ReadLocalRuntimeUsage(cgroupRoot)
 	if !sample.HasCounters() {
 		return nil
 	}

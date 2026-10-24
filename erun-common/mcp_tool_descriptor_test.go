@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // toolsListPayload holds real descriptors as a live edge returns them, including
@@ -72,7 +74,7 @@ type toolHints struct {
 // structured surface does.
 func encodeToolList(t *testing.T, payload string) []byte {
 	t.Helper()
-	var decoded MCPToolListResult
+	var decoded mcp.MCPToolListResult
 	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 		t.Fatalf("decode tools/list payload: %v", err)
 	}

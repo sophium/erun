@@ -5,7 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // push_review_notice.go makes one silent state visible at the moment it is
@@ -61,8 +64,8 @@ type PushedBranchReviewNoticeParams struct {
 // Traces the intended call before checking ctx.DryRun, the same contract
 // tracePlatformCall's other callers use, so --dry-run shows the check without
 // making it.
-func WarnPushedBranchWithoutReview(ctx core.Context, store CloudReadStore, deps CloudDependencies, params PushedBranchReviewNoticeParams) {
-	if !hasAnyErunPlatformAlias(store) {
+func WarnPushedBranchWithoutReview(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params PushedBranchReviewNoticeParams) {
+	if !cloud.HasAnyErunPlatformAlias(store) {
 		return
 	}
 	branch := strings.TrimSpace(params.Branch)
@@ -78,13 +81,13 @@ func WarnPushedBranchWithoutReview(ctx core.Context, store CloudReadStore, deps 
 		ctx.Trace("push review notice skipped: " + branch + " is the remote's default branch, which originates work rather than targeting it")
 		return
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("push review notice skipped: " + err.Error())
 		return
 	}
-	filter := PlatformReviewFilter{SourceBranch: branch}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews", reviewFilterTraceDetails(filter)...)
+	filter := platformclient.PlatformReviewFilter{SourceBranch: branch}
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", platformclient.ReviewFilterTraceDetails(filter)...)
 	if ctx.DryRun {
 		return
 	}
@@ -113,7 +116,7 @@ func pushedBranchWithoutReviewWarning(branch string) string {
 // that has not been closed. The list is filtered by the platform already; the
 // source-branch match is repeated here so a plane that ignores the filter
 // cannot be read as "this branch has a review" for some other branch.
-func branchHasLiveReview(reviews []PlatformReview, branch string) bool {
+func branchHasLiveReview(reviews []platformclient.PlatformReview, branch string) bool {
 	for _, review := range reviews {
 		if review.Status == "CLOSED" {
 			continue

@@ -7,6 +7,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +67,7 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 					ApplyRecommendation: applyRecommendation,
 				},
 				OverrideLease: overrideLease,
-				Holder:        common.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
+				Holder:        activity.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			})
 			if err != nil {
 				return err
@@ -106,12 +107,12 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 // answer "would this be refused", and a stale "no leases" answer would silently
 // defeat that. Reading leases has no side effect, so forcing the real call here
 // costs nothing dry-run is meant to avoid.
-func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver) func(string, string, time.Time) ([]common.EnvironmentActivityLease, error) {
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver) func(string, string, time.Time) ([]activity.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false
-	return func(tenant, environment string, now time.Time) ([]common.EnvironmentActivityLease, error) {
+	return func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error) {
 		if environmentTargetsItself() {
-			return common.LoadEnvironmentActivityLeases(tenant, environment, now)
+			return activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 		}
 		leases, _, err := listLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
 		return leases, err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -51,7 +52,7 @@ var ErrListExposedServicesForbidden = errors.New("list exposed services: forbidd
 // readiness of the certificate the latter backs it with -- never inferred
 // from the Ingress carrying a tls block alone, which is true well before
 // issuance actually completes.
-func ListExposedServices(req ShellLaunchParams) ([]ExposedService, error) {
+func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error) {
 	ingresses, err := fetchObservedIngresses(observeGetArgs(req, "ingress"))
 	if err != nil {
 		if isForbiddenKubectlError(err) {

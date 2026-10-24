@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"gopkg.in/yaml.v3"
 )
 
@@ -136,7 +137,7 @@ func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSuperv
 		if _, found := findCloudProvider(root.CloudProviders, provider.Alias); found {
 			continue
 		}
-		root.CloudProviders = upsertCloudProvider(root.CloudProviders, provider)
+		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
 		changed = true
 	}
 	if changed {

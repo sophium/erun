@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -17,12 +18,12 @@ const (
 // code3Reading is the reading this renderer exists for: `erun/code3` pinned
 // against its 6144Mi limit, peak at the ceiling, no OOM kill recorded yet. The
 // warnings fire; before this change nothing followed them.
-func code3Reading() common.RuntimeUsage {
+func code3Reading() config.RuntimeUsage {
 	const limit = int64(6144) * renderMiB
-	usage := common.RuntimeUsage{
+	usage := config.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "code3",
-		Memory: common.RuntimeMemoryUsage{
+		Memory: config.RuntimeMemoryUsage{
 			CurrentBytes:     limit * 98 / 100,
 			PeakBytes:        limit,
 			PeakObserved:     true,
@@ -30,7 +31,7 @@ func code3Reading() common.RuntimeUsage {
 			PercentOfLimit:   98.05,
 			OOMKillsObserved: true,
 		},
-		CPU: common.RuntimeCPUUsage{
+		CPU: config.RuntimeCPUUsage{
 			QuotaCores:         4,
 			UtilizationPercent: 88.7,
 			IntervalSeconds:    1,
@@ -97,7 +98,7 @@ func TestUsageReportRendersTheSizingRecommendationBesideTheWarnings(t *testing.T
 func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 	var out bytes.Buffer
 	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{
-		RuntimeUsage: common.RuntimeUsage{CPU: common.RuntimeCPUUsage{QuotaCores: 4, UtilizationPercent: 1, IntervalSeconds: 1}},
+		RuntimeUsage: config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 4, UtilizationPercent: 1, IntervalSeconds: 1}},
 	}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)
 	}
@@ -115,12 +116,12 @@ func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 // ceiling as provisioning, which is the whole of the defect.
 func TestUsageReportNamesTheLimitAndTheSchedulerRequest(t *testing.T) {
 	usage := code3Reading()
-	usage.Requests = &common.RuntimeUsageRequests{
-		Containers: map[string]common.KubernetesRequests{
+	usage.Requests = &config.RuntimeUsageRequests{
+		Containers: map[string]config.KubernetesRequests{
 			"erun-devops": {CPUMilli: 250, MemoryBytes: 1024 * renderMiB},
 			"erun-dind":   {CPUMilli: 250, MemoryBytes: 1024 * renderMiB},
 		},
-		Pod: common.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * renderMiB},
+		Pod: config.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * renderMiB},
 	}
 	var out bytes.Buffer
 	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
@@ -149,7 +150,7 @@ func TestUsageReportNamesTheLimitAndTheSchedulerRequest(t *testing.T) {
 // different answers and only one of them is true here.
 func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
 	usage := code3Reading()
-	usage.Requests = &common.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}
+	usage.Requests = &config.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}
 	var out bytes.Buffer
 	if err := writeUsageResult(core.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
 		t.Fatalf("writeUsageResult: %v", err)

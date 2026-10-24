@@ -4,66 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
-
-// The runtime pod's declared resource *requests* are the scheduler's own input:
-// a limit decides what a container may grow to, a request decides whether the
-// pod is admitted at all and how much of the node it reserves while it runs.
-// Every sizing surface erun had reported limits alone -- the cgroup ceiling a
-// usage reading divides against -- and `Mem 0% of 27.0 GiB` reads as
-// provisioned when the same environment reserves 1 GiB and holds 27 GiB only as
-// a ceiling. No cgroup file carries a request (memory.max is the limit,
-// memory.current the usage), so this cannot come from the reading script the
-// rest of runtime_usage.go runs: it is read from the pod spec, the one place a
-// request exists.
-//
-// It reads the live pod rather than the deploy's recorded intent because the
-// pod spec is what the scheduler actually acted on -- the chart's own request
-// defaults, a LimitRange's defaultRequest, and anything set out of band all end
-// up there and only there. Like every other reading in this package it reports
-// its own unavailability rather than failing the call: a pod spec that cannot
-// be read costs the request figures alone, never the usage reading beside them.
-
-// KubernetesRequests is one container's declared resources.requests, or a pod's
-// effective request, in the units the scheduler sums them in: millicores of CPU
-// and bytes of memory.
-//
-// A zero field is a container that declares nothing for that resource, which is
-// the scheduler's own reading of it -- an undeclared request reserves nothing --
-// so no renderer may turn it into a "0" that reads as a measured reservation.
-type KubernetesRequests struct {
-	CPUMilli    int64 `json:"cpuMilli,omitempty"`
-	MemoryBytes int64 `json:"memoryBytes,omitempty"`
-}
-
-// IsZero reports whether this pair carries no declaration at all, so a caller
-// can omit it instead of rendering a pair of zeros.
-func (r KubernetesRequests) IsZero() bool {
-	return r.CPUMilli == 0 && r.MemoryBytes == 0
-}
-
-// RuntimeUsageRequests is what the scheduler admits this environment's runtime
-// pod on, read from the live pod spec.
-type RuntimeUsageRequests struct {
-	// Containers is each container's own declared request, keyed by container
-	// name. A container that declares nothing for a resource is present with
-	// that resource zero, matching the pod spec; the runtime container and the
-	// erun-dind sidecar are the two an operator is comparing against their own
-	// limits above.
-	Containers map[string]KubernetesRequests `json:"containers,omitempty"`
-	// Pod is the effective request the scheduler sizes the pod for:
-	// max(max over the init containers, sum over the containers), per resource.
-	// Kubernetes admits a pod on the larger of the init phase's peak and the
-	// containers' sum, so summing the containers alone understates a pod whose
-	// init container asks for more.
-	Pod KubernetesRequests `json:"pod,omitempty"`
-	// Unavailable names why the pod spec could not be read -- no pod for this
-	// release, kubectl's own failure, a declared quantity this parser cannot
-	// read. Set with the rest of the reading left empty, so "could not read the
-	// reservation" never renders as "reserves nothing".
-	Unavailable string `json:"unavailable,omitempty"`
-}
 
 // RuntimePodRequestsRunnerFunc runs the one read-only kubectl invocation this
 // reading needs (RuntimePodRequestsArgs) and returns its stdout. The nil
@@ -78,9 +21,9 @@ type RuntimePodRequestsRunnerFunc func(args []string) ([]byte, error)
 // release's pods by the label the chart sets. Exported so a transport that
 // supplies its own runner builds the identical command rather than a second
 // spelling of it.
-func RuntimePodRequestsArgs(req ShellLaunchParams) []string {
-	args := kubectlTargetArgs(req)
-	args = append(args, "get", "pods", "-l", "app="+RuntimeReleaseName(req.Tenant), "-o", "json")
+func RuntimePodRequestsArgs(req config.ShellLaunchParams) []string {
+	args := config.KubectlTargetArgs(req)
+	args = append(args, "get", "pods", "-l", "app="+config.RuntimeReleaseName(req.Tenant), "-o", "json")
 	return args
 }
 
@@ -88,7 +31,7 @@ func RuntimePodRequestsArgs(req ShellLaunchParams) []string {
 // its caller: everything that can go wrong here is reported on the reading as
 // Unavailable, because losing the reservation figures must not cost the cgroup
 // reading beside them.
-func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req ShellLaunchParams) *RuntimeUsageRequests {
+func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams) *config.RuntimeUsageRequests {
 	ctx.TraceCommand("", "kubectl", RuntimePodRequestsArgs(req)...)
 	if ctx.DryRun {
 		// Nothing was read, and a zero reading would be a reservation of
@@ -101,11 +44,11 @@ func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerF
 	}
 	raw, err := runner(RuntimePodRequestsArgs(req))
 	if err != nil {
-		return &RuntimeUsageRequests{Unavailable: err.Error()}
+		return &config.RuntimeUsageRequests{Unavailable: err.Error()}
 	}
 	requests, err := parseRuntimePodRequests(raw)
 	if err != nil {
-		return &RuntimeUsageRequests{Unavailable: err.Error()}
+		return &config.RuntimeUsageRequests{Unavailable: err.Error()}
 	}
 	return requests
 }
@@ -124,7 +67,7 @@ func runPodRequestsKubectl(args []string) ([]byte, error) {
 // parseRuntimePodRequests turns one `kubectl get pods -o json` response into the
 // request reading. Pure, so the pod selection and the quantity rules are
 // testable without a cluster.
-func parseRuntimePodRequests(raw []byte) (*RuntimeUsageRequests, error) {
+func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("kubectl returned no pod list for this environment's release")
 	}
@@ -144,7 +87,7 @@ func parseRuntimePodRequests(raw []byte) (*RuntimeUsageRequests, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RuntimeUsageRequests{Containers: containers, Pod: podRequests}, nil
+	return &config.RuntimeUsageRequests{Containers: containers, Pod: podRequests}, nil
 }
 
 // selectRuntimePodForRequests picks the pod whose spec the reading reports. A
@@ -179,8 +122,8 @@ func selectRuntimePodForRequests(items []podStatusItem) (podStatusItem, bool) {
 // quantity this parser cannot read is an error rather than a zero: reporting a
 // smaller reservation than the pod declares is the one wrong answer that
 // matters here, since the whole reading exists to be compared against a limit.
-func declaredContainerRequests(pod podStatusItem) (map[string]KubernetesRequests, error) {
-	containers := make(map[string]KubernetesRequests, len(pod.Spec.Containers))
+func declaredContainerRequests(pod podStatusItem) (map[string]config.KubernetesRequests, error) {
+	containers := make(map[string]config.KubernetesRequests, len(pod.Spec.Containers))
 	for _, container := range pod.Spec.Containers {
 		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
 		if err != nil {
@@ -195,7 +138,7 @@ func declaredContainerRequests(pod podStatusItem) (map[string]KubernetesRequests
 }
 
 // effectivePodRequests is the request the scheduler admits the pod on.
-func effectivePodRequests(pod podStatusItem) (KubernetesRequests, error) {
+func effectivePodRequests(pod podStatusItem) (config.KubernetesRequests, error) {
 	return EffectiveKubernetesPodRequests(
 		kubernetesContainerResources(pod.Spec.Containers),
 		kubernetesContainerResources(pod.Spec.InitContainers),
@@ -236,24 +179,24 @@ func kubernetesContainerResources(containers []specContainerEntry) []KubernetesC
 // A container that declares nothing for a resource contributes zero, which is
 // the scheduler's own reading of it; a declared quantity that cannot be parsed
 // is an error, never a dropped zero.
-func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (KubernetesRequests, error) {
+func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (config.KubernetesRequests, error) {
 	sum, err := sumContainerRequests(containers)
 	if err != nil {
-		return KubernetesRequests{}, err
+		return config.KubernetesRequests{}, err
 	}
 	initPeak, err := maxContainerRequests(initContainers)
 	if err != nil {
-		return KubernetesRequests{}, err
+		return config.KubernetesRequests{}, err
 	}
 	return kubectlRequestsMax(sum, initPeak), nil
 }
 
-func sumContainerRequests(containers []KubernetesContainerResources) (KubernetesRequests, error) {
-	total := KubernetesRequests{}
+func sumContainerRequests(containers []KubernetesContainerResources) (config.KubernetesRequests, error) {
+	total := config.KubernetesRequests{}
 	for _, container := range containers {
 		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
-			return KubernetesRequests{}, fmt.Errorf("container %s: %w", container.Name, err)
+			return config.KubernetesRequests{}, fmt.Errorf("container %s: %w", container.Name, err)
 		}
 		total.CPUMilli += requests.CPUMilli
 		total.MemoryBytes += requests.MemoryBytes
@@ -261,20 +204,20 @@ func sumContainerRequests(containers []KubernetesContainerResources) (Kubernetes
 	return total, nil
 }
 
-func maxContainerRequests(containers []KubernetesContainerResources) (KubernetesRequests, error) {
-	peak := KubernetesRequests{}
+func maxContainerRequests(containers []KubernetesContainerResources) (config.KubernetesRequests, error) {
+	peak := config.KubernetesRequests{}
 	for _, container := range containers {
 		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
-			return KubernetesRequests{}, fmt.Errorf("init container %s: %w", container.Name, err)
+			return config.KubernetesRequests{}, fmt.Errorf("init container %s: %w", container.Name, err)
 		}
 		peak = kubectlRequestsMax(peak, requests)
 	}
 	return peak, nil
 }
 
-func kubectlRequestsMax(a, b KubernetesRequests) KubernetesRequests {
-	return KubernetesRequests{
+func kubectlRequestsMax(a, b config.KubernetesRequests) config.KubernetesRequests {
+	return config.KubernetesRequests{
 		CPUMilli:    max(a.CPUMilli, b.CPUMilli),
 		MemoryBytes: max(a.MemoryBytes, b.MemoryBytes),
 	}
@@ -283,19 +226,19 @@ func kubectlRequestsMax(a, b KubernetesRequests) KubernetesRequests {
 // kubernetesRequestsFromValues reads the cpu/memory entries of one
 // resources.requests map. An absent entry is no declaration; a present entry
 // that cannot be read is an error, never a dropped zero.
-func kubernetesRequestsFromValues(values map[string]string) (KubernetesRequests, error) {
-	requests := KubernetesRequests{}
+func kubernetesRequestsFromValues(values map[string]string) (config.KubernetesRequests, error) {
+	requests := config.KubernetesRequests{}
 	if raw := strings.TrimSpace(values["cpu"]); raw != "" {
-		milli, err := ParseKubernetesCPUToMilli(raw)
+		milli, err := config.ParseKubernetesCPUToMilli(raw)
 		if err != nil {
-			return KubernetesRequests{}, fmt.Errorf("cpu request %q: %w", raw, err)
+			return config.KubernetesRequests{}, fmt.Errorf("cpu request %q: %w", raw, err)
 		}
 		requests.CPUMilli = milli
 	}
 	if raw := strings.TrimSpace(values["memory"]); raw != "" {
-		mib, err := ParseKubernetesMemoryToMi(raw)
+		mib, err := config.ParseKubernetesMemoryToMi(raw)
 		if err != nil {
-			return KubernetesRequests{}, fmt.Errorf("memory request %q: %w", raw, err)
+			return config.KubernetesRequests{}, fmt.Errorf("memory request %q: %w", raw, err)
 		}
 		requests.MemoryBytes = mib * (1 << 20)
 	}

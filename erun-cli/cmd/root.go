@@ -10,6 +10,10 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -90,7 +94,7 @@ func newRootDependencies() rootDependencies {
 	dockerRegistryLogin := common.DockerRegistryLoginWithHostedRegistry(store, cloudDependencies())
 	deployHelmChart := common.WrapHelmChartDeployerWithNamespaceEnsure(ensureKubernetesNamespace, common.DeployHelmChart)
 	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(runPrompt, deployHelmChart, common.ClearHelmReleasePendingOperation)
-	runInit := newRunInit(store, config.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, recoveringDeployHelmChart)
+	runInit := newRunInit(store, config.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, kube.RunRemoteCommand, recoveringDeployHelmChart)
 	deps := rootDependencies{
 		configStore:               configStore,
 		store:                     store,
@@ -103,7 +107,7 @@ func newRootDependencies() rootDependencies {
 		push:                      newPushOperation(nil, dockerRegistryLogin, runSelect),
 		activateMCP:               newMCPForwarder(),
 		activateAPI:               newAPIForwarder(),
-		activateSSHD:              newSSHDActivator(common.RunRemoteCommand),
+		activateSSHD:              newSSHDActivator(kube.RunRemoteCommand),
 	}
 	deps.resolveOpen = deps.resolveOpenResult
 	deps.resolveRuntimeDeploySpec = deps.resolveRuntimeDeploySpecForOpenTarget
@@ -166,33 +170,33 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
 		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
-		newExecCmd(config.FindProjectRoot, common.GitCommandRunner, nil, d.resolveOpen, d.configStore, cloudDependencies()),
+		newExecCmd(config.FindProjectRoot, gitx.GitCommandRunner, nil, d.resolveOpen, d.configStore, cloudDependencies()),
 		newCloudCmd(d.configStore, runPrompt, runSelect, cloudDependencies()),
 		newOrchestratorCmd(d.configStore),
-		newContextCmd(d.configStore, runPrompt, runSelect, common.CloudContextDependencies{}),
+		newContextCmd(d.configStore, runPrompt, runSelect, cloud.CloudContextDependencies{}),
 		newPlatformCmd(d.configStore, runPrompt, cloudDependencies()),
 		newReviewCmd(d.configStore, cloudDependencies()),
 		newJobsCmd(d.configStore, cloudDependencies()),
 		newListCmd(d.configStore, config.FindProjectRoot),
 		newOutputsCmd(d.resolveOpen),
 		newInputsCmd(d.resolveOpen),
-		newDoctorCmd(d.resolveOpen, d.configStore, cloudDependencies(), common.CloudContextDependencies{}, runPrompt),
+		newDoctorCmd(d.resolveOpen, d.configStore, cloudDependencies(), cloud.CloudContextDependencies{}, runPrompt),
 		newObserveCmd(d.resolveOpen),
 		newServicesCmd(d.resolveOpen),
 		newUsageCmd(d.resolveOpen),
 		newE2ECmd(d.resolveOpen, config.FindProjectRoot),
-		newDeleteCmd(d.configStore, runPrompt, common.DeleteKubernetesNamespace),
+		newDeleteCmd(d.configStore, runPrompt, kube.DeleteKubernetesNamespace),
 		newExposeCmd(d.configStore, d.configStore, cloudDependencies(), config.FindProjectRoot),
 		newUnexposeCmd(d.configStore, d.configStore, cloudDependencies(), config.FindProjectRoot),
 		newTerraformCmd(d.configStore, config.FindProjectRoot),
-		newContributeCmd(common.GitCommandRunner),
+		newContributeCmd(gitx.GitCommandRunner),
 		newIdleCmd(d.configStore, d.resolveOpen),
 		newWhipCmd(d.configStore, d.resolveOpen),
 		deprecatedTopLevelJobCmd(d.resolveOpen),
-		newReleaseCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
+		newReleaseCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, gitx.GitCommandRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
 		newVersionCmd(func() (versionCommandInfo, error) {
 			return resolveVersionCommandBuildInfo(config.FindProjectRoot)
-		}, common.ResolveDefaultRuntimeRegistryVersions),
+		}, registry.ResolveDefaultRuntimeRegistryVersions),
 		newActivityCmd(d.configStore, d.resolveOpen),
 		newAdoptWorktreeCmd(),
 		newDindEntrypointCmd(),
@@ -233,7 +237,7 @@ func (d rootDependencies) pinCommand() *cobra.Command {
 func (d rootDependencies) sshdCommand() *cobra.Command {
 	return newSSHDCmd(func(ctx core.Context) core.Context {
 		return withCloudContextPreflight(ctx, d.store)
-	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, config.FindProjectRoot, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
+	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, config.FindProjectRoot, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, kube.RunRemoteCommand, writeLocalSSHConfig)
 }
 
 func (d rootDependencies) containerCommand() *cobra.Command {
@@ -303,10 +307,10 @@ func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
 }
 
 func withCloudContextPreflight(ctx core.Context, store any) core.Context {
-	cloudStore, ok := store.(common.CloudContextStore)
+	cloudStore, ok := store.(cloud.CloudContextStore)
 	if !ok {
 		return ctx
 	}
-	ctx.KubernetesContextPreflight = common.CloudContextPreflight(cloudStore, common.CloudContextDependencies{})
+	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(cloudStore, cloud.CloudContextDependencies{})
 	return ctx
 }

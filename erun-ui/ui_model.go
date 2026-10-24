@@ -4,6 +4,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 type uiState struct {
@@ -286,7 +288,7 @@ type uiBuildDetails struct {
 	Date    string `json:"date,omitempty"`
 }
 
-type uiVersion = eruncommon.RuntimeVersionSuggestion
+type uiVersion = registry.RuntimeVersionSuggestion
 
 // uiVersionNotice explains why a runtime-image source produced no version
 // suggestions, so the picker shows an actionable line instead of rendering
@@ -414,8 +416,8 @@ type uiTenantDashboard struct {
 	// that would give the caller the access they were refused, so a restricted
 	// tab hands over the request instead of only naming what is missing.
 	// Absent when no role covers the access or the roles could not be read.
-	AccessRemedies map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
-	User           *uiTenantDashboardUser                     `json:"user,omitempty"`
+	AccessRemedies map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	User           *uiTenantDashboardUser                         `json:"user,omitempty"`
 	// Users is the Users tab's roster: the tenant's users, read from
 	// GET /v1/users. Distinct from User above, which is the caller's own
 	// identity from whoami — the tab lists the tenant, not the caller, and an
@@ -779,15 +781,15 @@ type uiReviewDetail struct {
 	// that would give the caller the access they were refused, so a denial
 	// hands over the request instead of only naming what is missing. Absent
 	// when no role covers the access or the roles could not be read.
-	AccessRemedies     map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
-	Error              string                                     `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview                   `json:"review,omitempty"`
-	Comments           []uiReviewComment                          `json:"comments,omitempty"`
-	CommentsRestricted string                                     `json:"commentsRestricted,omitempty"`
-	CommentsError      string                                     `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild                   `json:"builds,omitempty"`
-	BuildsRestricted   string                                     `json:"buildsRestricted,omitempty"`
-	BuildsError        string                                     `json:"buildsError,omitempty"`
+	AccessRemedies     map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	Error              string                                         `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview                       `json:"review,omitempty"`
+	Comments           []uiReviewComment                              `json:"comments,omitempty"`
+	CommentsRestricted string                                         `json:"commentsRestricted,omitempty"`
+	CommentsError      string                                         `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild                       `json:"builds,omitempty"`
+	BuildsRestricted   string                                         `json:"buildsRestricted,omitempty"`
+	BuildsError        string                                         `json:"buildsError,omitempty"`
 	// QueuePosition is 1-based; 0 means the review is not in its target
 	// branch's merge queue right now.
 	QueuePosition int `json:"queuePosition,omitempty"`

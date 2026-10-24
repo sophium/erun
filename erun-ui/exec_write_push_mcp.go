@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // exec_write_push_mcp.go reaches the runtime pod's exec_commit/exec_push MCP
@@ -19,11 +19,11 @@ import (
 // execCommitViaMCP commits the runtime repo's working tree via the exec_commit
 // tool. wait is left at its default (synchronous), matching how the CLI's own
 // `erun exec commit` behaves today.
-func execCommitViaMCP(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error) {
+func execCommitViaMCP(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -37,31 +37,31 @@ func execCommitViaMCP(ctx context.Context, endpoint, bearer, branch, message str
 		},
 	})
 	if err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	var output struct {
-		Commit *eruncommon.CommitWorkingTreeResult `json:"commit"`
+		Commit *gitx.CommitWorkingTreeResult `json:"commit"`
 	}
 	if err := json.Unmarshal(data, &output); err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	if output.Commit == nil {
-		return eruncommon.CommitWorkingTreeResult{}, fmt.Errorf("exec_commit returned no result")
+		return gitx.CommitWorkingTreeResult{}, fmt.Errorf("exec_commit returned no result")
 	}
 	return *output.Commit, nil
 }
 
 // execPushViaMCP pushes the runtime repo's current branch via the exec_push
 // tool.
-func execPushViaMCP(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error) {
+func execPushViaMCP(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -75,20 +75,20 @@ func execPushViaMCP(ctx context.Context, endpoint, bearer, branch, remote string
 		},
 	})
 	if err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	var output struct {
-		Push *eruncommon.PushWorkingTreeBranchResult `json:"push"`
+		Push *gitx.PushWorkingTreeBranchResult `json:"push"`
 	}
 	if err := json.Unmarshal(data, &output); err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	if output.Push == nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, fmt.Errorf("exec_push returned no result")
+		return gitx.PushWorkingTreeBranchResult{}, fmt.Errorf("exec_push returned no result")
 	}
 	return *output.Push, nil
 }

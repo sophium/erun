@@ -7,6 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,7 +34,7 @@ import (
 // platformAliasSecretName derives the per-environment Secret `erun init` mints
 // from the operator's own signed-in erun platform alias.
 func platformAliasSecretName(tenant string) string {
-	return RuntimeReleaseName(tenant) + "-platform-alias"
+	return config.RuntimeReleaseName(tenant) + "-platform-alias"
 }
 
 // The runtime chart mounts this Secret read-only at
@@ -116,7 +118,7 @@ func renderPlatformAliasEntry(provider config.CloudProviderConfig) (string, erro
 // one silent-looking no-op the operator can actually lift. Every other unnamed
 // decline -- no alias, no session, no readable store -- is nil, so a caller
 // that names no alias keeps the silence it has always had.
-func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
+func resolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
 	explicit := hostAliasSelected(alias)
 	if store == nil || deps.CloudSecretStore == nil {
 		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(
@@ -231,7 +233,7 @@ stringData:
 // Host alias resolution is a local, read-only lookup (the caller's config store
 // plus the secret store), so it still runs under dry-run: the decision it makes
 // belongs in the trace either way.
-func provisionPlatformAliasSecret(ctx core.Context, store CloudReadStore, tenant, namespace, kubernetesContext string, deps CloudDependencies) (string, error) {
+func provisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore, tenant, namespace, kubernetesContext string, deps cloud.CloudDependencies) (string, error) {
 	provider, token, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if !ok {
 		if hostAliasSelected(ctx.PlatformAlias) {
@@ -248,14 +250,14 @@ func provisionPlatformAliasSecret(ctx core.Context, store CloudReadStore, tenant
 		return "", err
 	}
 	name := platformAliasSecretName(tenant)
-	args := kubectlApplyStdinArgs(namespace, kubernetesContext)
+	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply platform alias secret " + name + " (alias " + provider.Alias + ", token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return name, nil
 	}
-	manifest := renderPlatformAliasSecret(name, namespace, entry, cloudSecretFileName(provider.ERun.RefreshTokenRef), token)
-	if err := applySecretManifest(kubernetesContext, namespace, "platform alias secret", manifest, args); err != nil {
+	manifest := renderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef), token)
+	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "platform alias secret", manifest, args); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -307,7 +309,7 @@ func provisionPlatformAliasSecret(ctx core.Context, store CloudReadStore, tenant
 // cannot work from inside a pod. So the decline is traced, and only it: the
 // absence above still adds nothing.
 func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec) error {
-	if deployInput == nil || deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput == nil || deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	if strings.TrimSpace(deployInput.PlatformAliasSecretName) != "" {
@@ -321,7 +323,7 @@ func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec)
 		}
 		return nil
 	}
-	store, deps := config.ConfigStore{}, DefaultCloudDependencies()
+	store, deps := config.ConfigStore{}, cloud.DefaultCloudDependencies()
 	// Resolved before provisioning so "this host has nothing to give" is
 	// distinguishable from "there was nothing to do", and so the reason is in
 	// hand before the provisioning below re-resolves the same local, read-only

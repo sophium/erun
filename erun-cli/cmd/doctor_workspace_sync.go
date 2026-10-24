@@ -7,6 +7,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // runWorkspaceSyncDoctor diagnoses, and optionally repairs, the host-side SSH
@@ -128,7 +129,7 @@ func repairWorkspaceSyncProvisioning(ctx core.Context, configStore config.Config
 	if err := writeWorkspaceSyncLocalSSHConfig(ctx, result); err != nil {
 		return err
 	}
-	if _, err := syncRemoteSSHDKey(ctx, result, common.RunRemoteCommand); err != nil {
+	if _, err := syncRemoteSSHDKey(ctx, result, kube.RunRemoteCommand); err != nil {
 		return err
 	}
 	if _, err := ensureSSHDPortForward(ctx, result); err != nil {

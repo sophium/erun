@@ -14,6 +14,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // machineIdentityHostStore is a host holding one signed-in erun alias pointed
@@ -27,7 +29,7 @@ func machineIdentityHostStore(apiURL string) staticCloudStore {
 
 // fakePlatformAPI stands in for the two calls provisioning makes: resolving the
 // environment by name, and minting its identity.
-func fakePlatformAPI(t *testing.T, identity PlatformMachineIdentity) *httptest.Server {
+func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdentity) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
@@ -37,7 +39,7 @@ func fakePlatformAPI(t *testing.T, identity PlatformMachineIdentity) *httptest.S
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments":
-			_ = json.NewEncoder(w).Encode([]PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
+			_ = json.NewEncoder(w).Encode([]platformclient.PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/environments/"+identity.EnvironmentID+"/machine-identity":
 			_ = json.NewEncoder(w).Encode(identity)
 		default:
@@ -51,29 +53,29 @@ func fakePlatformAPI(t *testing.T, identity PlatformMachineIdentity) *httptest.S
 // machineIdentityDeps is the cloud dependency set provisioning needs, with the
 // network-facing halves stubbed: login (so the platform client can authenticate
 // as the host's alias) and OIDC discovery.
-func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (ERunTokens, error)) (CloudDependencies, CloudSecretStore) {
+func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, cloud.CloudSecretStore) {
 	t.Helper()
-	store := NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))
-	deps := CloudDependencies{
+	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
+	deps := cloud.CloudDependencies{
 		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
-			return OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: tokenEndpoint}, nil
+		FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+			return cloud.OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: tokenEndpoint}, nil
 		},
-		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
-			return ERunTokens{AccessToken: "caller-token"}, nil
+		RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
+			return cloud.ERunTokens{AccessToken: "caller-token"}, nil
 		},
-		ClientCredentialsERunTokens: func(_ core.Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
+		ClientCredentialsERunTokens: func(_ core.Context, _ cloud.OIDCDiscovery, clientID, clientSecret string) (cloud.ERunTokens, error) {
 			return exchange(clientID, clientSecret)
 		},
 	}
-	if err := store.SaveCloudSecret(erunRefreshTokenRef(testPlatformAliasProvider().Alias), "host-session"); err != nil {
+	if err := store.SaveCloudSecret(cloud.ErunRefreshTokenRef(testPlatformAliasProvider().Alias), "host-session"); err != nil {
 		t.Fatalf("seed host session: %v", err)
 	}
 	return deps, store
 }
 
-func testMachineIdentity() PlatformMachineIdentity {
-	return PlatformMachineIdentity{
+func testMachineIdentity() platformclient.PlatformMachineIdentity {
+	return platformclient.PlatformMachineIdentity{
 		EnvironmentID:   "0192aaaa-bbbb-cccc-dddd-eeeeffff0000",
 		EnvironmentName: "team-dev",
 		Issuer:          "https://auth.example",
@@ -93,9 +95,9 @@ func TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity(t *testi
 	identity := testMachineIdentity()
 	api := fakePlatformAPI(t, identity)
 	var sawClientID, sawClientSecret string
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(clientID, clientSecret string) (ERunTokens, error) {
+	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(clientID, clientSecret string) (cloud.ERunTokens, error) {
 		sawClientID, sawClientSecret = clientID, clientSecret
-		return ERunTokens{AccessToken: "machine-token"}, nil
+		return cloud.ERunTokens{AccessToken: "machine-token"}, nil
 	})
 
 	name, ok, err := provisionMachineIdentitySecret(testTraceContext(false), machineIdentityHostStore(api.URL), "team", "team-dev", "team-dev", "", deps)
@@ -120,7 +122,7 @@ func TestProvisionMachineIdentitySecretWritesTheEnvironmentsOwnIdentity(t *testi
 // assertMachineIdentityManifest checks the Secret the pod will actually mount:
 // the machine form of the alias entry, the credential it points at, and no
 // trace of the delegated session the host itself holds.
-func assertMachineIdentityManifest(t *testing.T, manifest string, identity PlatformMachineIdentity, apiURL string) {
+func assertMachineIdentityManifest(t *testing.T, manifest string, identity platformclient.PlatformMachineIdentity, apiURL string) {
 	t.Helper()
 	for _, want := range []string{
 		"kind: Secret",
@@ -156,8 +158,8 @@ func assertMachineIdentityManifest(t *testing.T, manifest string, identity Platf
 func TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	api := fakePlatformAPI(t, testMachineIdentity())
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (ERunTokens, error) {
-		return ERunTokens{}, context.DeadlineExceeded
+	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
+		return cloud.ERunTokens{}, context.DeadlineExceeded
 	})
 
 	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), machineIdentityHostStore(api.URL), "team", "team-dev", "team-dev", "", deps)
@@ -176,8 +178,8 @@ func TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse(t *testing.
 func TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	api := fakePlatformAPI(t, testMachineIdentity())
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (ERunTokens, error) {
-		return ERunTokens{AccessToken: "machine-token"}, nil
+	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
+		return cloud.ERunTokens{AccessToken: "machine-token"}, nil
 	})
 
 	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), machineIdentityHostStore(api.URL), "team", "not-registered", "team-dev", "", deps)
@@ -194,8 +196,8 @@ func TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered
 // not signed in has nothing to ask with, and most installs are that host.
 func TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias(t *testing.T) {
 	installCapturingKubectl(t)
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (ERunTokens, error) {
-		return ERunTokens{AccessToken: "machine-token"}, nil
+	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
+		return cloud.ERunTokens{AccessToken: "machine-token"}, nil
 	})
 
 	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "team-dev", "", deps)
@@ -212,7 +214,7 @@ func TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias(t *testing.T) {
 // and reading a client secret down the refresh-token path (or the reverse)
 // would present the wrong kind of credential to the issuer.
 func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.T) {
-	store := NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))
+	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
 	alias := testPlatformAliasProvider().Alias
 	ref := machineIdentityClientSecretRef(alias)
 	if err := store.SaveCloudSecret(ref, "client-secret-value"); err != nil {
@@ -229,25 +231,25 @@ func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.
 		},
 	}
 	refreshCalled, machineCalled := false, false
-	deps := CloudDependencies{
+	deps := cloud.CloudDependencies{
 		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
-			return OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: "https://auth.example/token"}, nil
+		FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+			return cloud.OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: "https://auth.example/token"}, nil
 		},
-		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
+		RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
 			refreshCalled = true
-			return ERunTokens{}, nil
+			return cloud.ERunTokens{}, nil
 		},
-		ClientCredentialsERunTokens: func(_ core.Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
+		ClientCredentialsERunTokens: func(_ core.Context, _ cloud.OIDCDiscovery, clientID, clientSecret string) (cloud.ERunTokens, error) {
 			machineCalled = true
 			if clientID != "client-env-0192" || clientSecret != "client-secret-value" {
 				t.Fatalf("grant presented %q/%q", clientID, clientSecret)
 			}
-			return ERunTokens{AccessToken: "machine-token"}, nil
+			return cloud.ERunTokens{AccessToken: "machine-token"}, nil
 		},
 	}
 
-	token, err := resolveERunAccessToken(testTraceContext(false), provider, deps)
+	token, err := cloud.ResolveERunAccessToken(testTraceContext(false), provider, deps)
 	if err != nil {
 		t.Fatalf("resolveERunAccessToken: %v", err)
 	}
@@ -281,7 +283,7 @@ func TestProvisionMachineIdentitySecretFallsBackOnAnAmbiguousHost(t *testing.T) 
 	captured := installCapturingKubectl(t)
 	store := ambiguousHostStore(t)
 
-	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), store, "team", "team-dev", "team-dev", "", DefaultCloudDependencies())
+	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), store, "team", "team-dev", "team-dev", "", cloud.DefaultCloudDependencies())
 	if err != nil {
 		t.Fatalf("an ambiguous host is a fallback for machine identity, not an error: %v", err)
 	}

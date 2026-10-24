@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type CloudListInput struct {
@@ -68,15 +68,15 @@ type CloudSetInput struct {
 // not tell "no aliases are configured" -- the diagnosis this tool exists to
 // confirm -- from "this tool does not report aliases".
 type CloudListResult struct {
-	CloudProviders []eruncommon.CloudProviderStatus `json:"cloudProviders"`
+	CloudProviders []cloud.CloudProviderStatus `json:"cloudProviders"`
 }
 
 type CloudActionResult struct {
-	Preview  bool                           `json:"preview"`
-	Alias    string                         `json:"alias,omitempty"`
-	Provider eruncommon.CloudProviderStatus `json:"provider,omitempty"`
-	Trace    []string                       `json:"trace,omitempty"`
-	Plan     []string                       `json:"plan,omitempty"`
+	Preview  bool                      `json:"preview"`
+	Alias    string                    `json:"alias,omitempty"`
+	Provider cloud.CloudProviderStatus `json:"provider,omitempty"`
+	Trace    []string                  `json:"trace,omitempty"`
+	Plan     []string                  `json:"plan,omitempty"`
 }
 
 type CloudSetResult struct {
@@ -89,7 +89,7 @@ type CloudSetResult struct {
 
 func cloudListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
-		statuses, err := eruncommon.ListCloudProviderStatuses(runtime.Store, cloudDependencies())
+		statuses, err := cloud.ListCloudProviderStatuses(runtime.Store, cloudDependencies())
 		if err != nil {
 			return nil, CloudListResult{}, err
 		}
@@ -101,7 +101,7 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := eruncommon.InitAWSCloudProviderParams{
+		params := cloud.InitAWSCloudProviderParams{
 			SSOStartURL:   input.SSOStartURL,
 			SSORegion:     input.SSORegion,
 			AccountID:     input.AccountID,
@@ -124,11 +124,11 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := eruncommon.InitAWSCloudProvider(ctx, runtime.Store, params, eruncommon.CloudDependencies{})
+		provider, err := cloud.InitAWSCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := eruncommon.CloudProviderTokenStatus(provider, eruncommon.CloudDependencies{})
+		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -137,7 +137,7 @@ func cloudInitCloudflareTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := eruncommon.InitCloudflareCloudProviderParams{
+		params := cloud.InitCloudflareCloudProviderParams{
 			AccountID: input.AccountID,
 			TokenName: input.TokenName,
 			APIToken:  input.APIToken,
@@ -150,11 +150,11 @@ func cloudInitCloudflareTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := eruncommon.InitCloudflareCloudProvider(ctx, runtime.Store, params, cloudDependencies())
+		provider, err := cloud.InitCloudflareCloudProvider(ctx, runtime.Store, params, cloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := eruncommon.CloudProviderTokenStatus(provider, cloudDependencies())
+		status := cloud.CloudProviderTokenStatus(provider, cloudDependencies())
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -163,7 +163,7 @@ func cloudInitERunTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToo
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := eruncommon.InitERunCloudProviderParams{APIURL: input.APIURL}
+		params := cloud.InitERunCloudProviderParams{APIURL: input.APIURL}
 		if input.Preview {
 			plan := []string{
 				"GET " + strings.TrimRight(strings.TrimSpace(input.APIURL), "/") + "/v1/platform",
@@ -172,11 +172,11 @@ func cloudInitERunTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToo
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := eruncommon.InitERunCloudProvider(ctx, runtime.Store, params, eruncommon.CloudDependencies{})
+		provider, err := cloud.InitERunCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := eruncommon.CloudProviderTokenStatus(provider, eruncommon.CloudDependencies{})
+		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -192,7 +192,7 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, cloudDependencies())
+		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, cloud.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, cloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
@@ -221,10 +221,10 @@ func cloudOIDCTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 				},
 			}, nil
 		}
-		status, _, err := eruncommon.SetupCloudProviderOIDC(ctx, runtime.Store, eruncommon.CloudBearerParams{
+		status, _, err := cloud.SetupCloudProviderOIDC(ctx, runtime.Store, cloud.CloudBearerParams{
 			Alias:    alias,
 			Audience: input.Audience,
-		}, eruncommon.CloudDependencies{})
+		}, cloud.CloudDependencies{})
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
@@ -240,7 +240,7 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		config, err := eruncommon.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, eruncommon.SetEnvironmentCloudAliasParams{
+		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, cloud.SetEnvironmentCloudAliasParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Alias:       input.Alias,
@@ -261,8 +261,8 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 // AWS runners default inside erun-common, so only Cloudflare's secret store is
 // wired here; a missing config dir intentionally leaves it nil so Cloudflare
 // operations fail clearly downstream rather than here.
-func cloudDependencies() eruncommon.CloudDependencies {
-	return eruncommon.DefaultCloudDependencies()
+func cloudDependencies() cloud.CloudDependencies {
+	return cloud.DefaultCloudDependencies()
 }
 
 func cloudAudienceForPlan(audience string) string {

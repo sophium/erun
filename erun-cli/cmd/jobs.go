@@ -5,7 +5,10 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +22,7 @@ import (
 // job`: that group is scoped to one environment's own jobs, and a platform
 // queue read is not. `erun job` is the deprecated alias for that group and is
 // on its way out, so nothing new is added under it.
-func newJobsCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := newCommandGroup(
 		"jobs",
@@ -33,7 +36,7 @@ func newJobsCmd(store common.CloudReadStore, deps common.CloudDependencies) *cob
 	return cmd
 }
 
-func newJobsListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var params common.JobListParams
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -72,7 +75,7 @@ func newJobsListCmd(store common.CloudReadStore, alias *string, deps common.Clou
 	return cmd
 }
 
-func newJobsShowCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "show <job-id>",
 		Short:        "Show one job in full",
@@ -101,7 +104,7 @@ func newJobsShowCmd(store common.CloudReadStore, alias *string, deps common.Clou
 	return cmd
 }
 
-func newJobsStartCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var params common.JobClaimParams
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -152,7 +155,7 @@ func newJobsStartCmd(store common.CloudReadStore, alias *string, deps common.Clo
 	return cmd
 }
 
-func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var params common.JobUpdateParams
 	cmd := &cobra.Command{
 		Use:   "finish <job-id>",
@@ -192,7 +195,7 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 	return cmd
 }
 
-func writePlatformJobList(ctx core.Context, jobs []common.PlatformJob) error {
+func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -208,7 +211,7 @@ func writePlatformJobList(ctx core.Context, jobs []common.PlatformJob) error {
 // writePlatformJobLine renders one row: what is being done, by whom, and how long it
 // has been going. The summary is the row's whole point, so it leads; the job
 // id trails so it can be copied into `erun jobs show`.
-func writePlatformJobLine(ctx core.Context, job common.PlatformJob) error {
+func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) error {
 	suffix := ""
 	if strings.TrimSpace(job.IssueRef) != "" {
 		suffix += " issue=" + job.IssueRef
@@ -221,7 +224,7 @@ func writePlatformJobLine(ctx core.Context, job common.PlatformJob) error {
 	return err
 }
 
-func writePlatformJobDetail(ctx core.Context, job common.PlatformJob) error {
+func writePlatformJobDetail(ctx core.Context, job platformclient.PlatformJob) error {
 	ended := "-"
 	if job.EndedAt != nil {
 		ended = job.EndedAt.UTC().Format("2006-01-02T15:04:05Z")

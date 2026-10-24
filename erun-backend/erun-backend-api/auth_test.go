@@ -14,11 +14,10 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // decodedAuthError reads the {code, message} envelope every auth-layer error
@@ -832,7 +831,7 @@ func TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/019abc", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
-	req.Header.Set(eruncommon.MCPToolAuditHeader, "review_show")
+	req.Header.Set(platformclient.MCPToolAuditHeader, "review_show")
 	rec := httptest.NewRecorder()
 	withAPIPath("/v1/reviews/{review_id}", middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

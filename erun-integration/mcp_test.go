@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -180,7 +180,7 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SessionID:  r.Header.Get("Mcp-Session-Id"),
 		Tool:       request.Params.Name,
 		Arguments:  request.Params.Arguments,
-		IdleProbe:  r.Header.Get(common.MCPIdleProbeHeader) == "true",
+		IdleProbe:  r.Header.Get(mcp.MCPIdleProbeHeader) == "true",
 	})
 	e.mu.Unlock()
 

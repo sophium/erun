@@ -10,6 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"gopkg.in/yaml.v3"
 )
 
@@ -98,7 +99,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
-		kubernetesContext = inClusterKubernetesContext
+		kubernetesContext = cloud.InClusterKubernetesContext
 	}
 	provider := get("ERUN_CLOUD_PROVIDER")
 	alias := get("ERUN_CLOUD_PROVIDER_ALIAS")
@@ -140,7 +141,7 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
 	// the runtime boot) already defaults it — otherwise the injected ""
 	// never matches the on-disk default and drift never clears.
-	contexts := []configpkg.CloudContextConfig{NormalizeCloudContextConfig(configpkg.CloudContextConfig{
+	contexts := []configpkg.CloudContextConfig{configpkg.NormalizeCloudContextConfig(configpkg.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,
@@ -441,10 +442,10 @@ func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected In
 		rootConfig.DefaultTenant = injected.Tenant
 	}
 	for _, provider := range injected.Providers {
-		rootConfig.CloudProviders = upsertCloudProvider(rootConfig.CloudProviders, provider)
+		rootConfig.CloudProviders = cloud.UpsertCloudProvider(rootConfig.CloudProviders, provider)
 	}
 	for _, context := range injected.Contexts {
-		rootConfig.CloudContexts = upsertCloudContext(rootConfig.CloudContexts, context)
+		rootConfig.CloudContexts = cloud.UpsertCloudContext(rootConfig.CloudContexts, context)
 	}
 	if !ctx.DryRun {
 		_ = configpkg.WriteRootConfigBackupIfDue(rootPath, configpkg.TimeNow)

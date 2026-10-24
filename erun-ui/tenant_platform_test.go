@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
@@ -74,10 +74,10 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 	}}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
-		cloudDeps: eruncommon.CloudDependencies{
-			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
+		cloudDeps: cloud.CloudDependencies{
+			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				t.Fatal("must not fetch discovery with no refresh token and no cache to check")
-				return eruncommon.OIDCDiscovery{}, nil
+				return cloud.OIDCDiscovery{}, nil
 			},
 		},
 	})
@@ -148,10 +148,10 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", CloudProviderAliases: []string{"team-cloud"}, PrimaryCloudProviderAlias: "team-cloud"},
 		}},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
+				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -183,7 +183,7 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	server := tenantDashboardAPI(t, "null", nil, &requests)
 	defer server.Close()
 
-	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
+	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
@@ -198,13 +198,13 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
 			"frs": {Name: "frs", CloudProviderAliases: []string{otherERunAlias, testERunAlias}, PrimaryCloudProviderAlias: testERunAlias},
 		}},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
-				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
+			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
 			},
-			RefreshERunTokens: func(core.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
-				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
+			RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
+				return cloud.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
 			},
 		},
 	})

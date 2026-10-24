@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // runtime_activity.go answers one question the desktop could not answer before:
@@ -104,7 +105,7 @@ func (a *App) probeRuntimeActivity(selection uiSelection) (uiRuntimeActivity, er
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeActivityTimeout)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection,
-		eruncommon.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
+		activitypkg.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
 	if err != nil {
 		return uiRuntimeActivity{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeActivityTimeout, err, func(e error) string { return e.Error() }))
 	}
@@ -142,9 +143,9 @@ func execInRuntimePodViaKubectl(ctx context.Context, selection uiSelection, stor
 		return "", fmt.Errorf("environment has no kubernetes context")
 	}
 	return kubectlText(ctx, kubernetesContext,
-		"--namespace", eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
+		"--namespace", config.KubernetesNamespaceName(selection.Tenant, selection.Environment),
 		"exec",
-		"deployment/"+eruncommon.RuntimeReleaseName(selection.Tenant),
+		"deployment/"+config.RuntimeReleaseName(selection.Tenant),
 		"--",
 		"/bin/sh", "-c", script,
 	)
@@ -164,7 +165,7 @@ func runtimeProcessSnapshotScript() string {
 }
 
 func runtimeActivityFromProbe(selection uiSelection, output string) uiRuntimeActivity {
-	heartbeats := eruncommon.ParseRemoteAppSessionHeartbeats(output)
+	heartbeats := activitypkg.ParseRemoteAppSessionHeartbeats(output)
 	sessions := make([]uiRuntimeSession, 0, len(heartbeats))
 	for _, heartbeat := range heartbeats {
 		sessions = append(sessions, uiRuntimeSession{
@@ -179,7 +180,7 @@ func runtimeActivityFromProbe(selection uiSelection, output string) uiRuntimeAct
 		Environment:     selection.Environment,
 		Available:       true,
 		Sessions:        sessions,
-		SessionsRunning: eruncommon.RunningRemoteAppSessions(heartbeats),
+		SessionsRunning: activitypkg.RunningRemoteAppSessions(heartbeats),
 		Processes:       groups,
 		MemoryHeldMiB:   totalMi,
 		MemoryHeld:      formatMebibytes(totalMi),

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // An exclusive claim taken at the scope an exclusive take actually defaults to
@@ -21,10 +22,10 @@ import (
 // file directly, so the test cannot agree with a bug the take path shares.
 func seedExclusiveClaim(t *testing.T, tenant, environment, id, name, scope string) {
 	t.Helper()
-	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant: tenant, Environment: environment, Name: name, ID: id,
 		Exclusive: true, Scope: scope, Now: time.Now(),
-		Holder: EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
+		Holder: activity.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
 	}); err != nil {
 		t.Fatalf("take exclusive claim %s: %v", id, err)
 	}
@@ -54,11 +55,11 @@ func TestGateMergeGuardRefusesADefaultScopedExclusiveClaim(t *testing.T) {
 	}
 	// The remedy has to name the scope the claim was actually taken on, or the
 	// release it suggests silently targets the other store and does nothing.
-	if conflict.Scope != defaultEnvironmentActivityLeaseScope {
-		t.Errorf("expected the refusal to carry the holder's own scope %q, got %q", defaultEnvironmentActivityLeaseScope, conflict.Scope)
+	if conflict.Scope != activity.DefaultEnvironmentActivityLeaseScope {
+		t.Errorf("expected the refusal to carry the holder's own scope %q, got %q", activity.DefaultEnvironmentActivityLeaseScope, conflict.Scope)
 	}
-	if !strings.Contains(err.Error(), "--scope "+defaultEnvironmentActivityLeaseScope) {
-		t.Errorf("expected the release remedy to name scope %q, got %q", defaultEnvironmentActivityLeaseScope, err.Error())
+	if !strings.Contains(err.Error(), "--scope "+activity.DefaultEnvironmentActivityLeaseScope) {
+		t.Errorf("expected the release remedy to name scope %q, got %q", activity.DefaultEnvironmentActivityLeaseScope, err.Error())
 	}
 }
 
@@ -93,8 +94,8 @@ func TestGateMergeGuardIgnoresAClaimOnAnUnrelatedNamedScope(t *testing.T) {
 // job-start guard already reads.
 func TestGateMergeGuardRefusesADifferentHoldersEnvironmentClaimUnderTheCallersOwnWorktreeClaim(t *testing.T) {
 	inPodGuardEnv(t, "erun", "code1")
-	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", defaultEnvironmentActivityLeaseScope)
-	seedExclusiveClaim(t, "erun", "code1", "other-gate", "another gate", EnvironmentActivityLeaseScopeEnvironment)
+	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", activity.DefaultEnvironmentActivityLeaseScope)
+	seedExclusiveClaim(t, "erun", "code1", "other-gate", "another gate", activity.EnvironmentActivityLeaseScopeEnvironment)
 
 	err := EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue")
 	if err == nil {

@@ -10,6 +10,8 @@ import (
 
 	"github.com/adrg/xdg"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -70,13 +72,13 @@ func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 	t.Setenv("ERUN_TENANT", "team")
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
 
-	const wantAwaitingInput = common.AISessionStateAwaitingInput
-	wantState := map[common.AISessionEventKind]common.AISessionState{
-		common.AISessionEventTurnStart: common.AISessionStateBusy,
-		common.AISessionEventToolUse:   common.AISessionStateBusy,
-		common.AISessionEventTurnEnd:   wantAwaitingInput,
-		common.AISessionEventNotify:    wantAwaitingInput,
-		common.AISessionEventExit:      common.AISessionStateExited,
+	const wantAwaitingInput = model.AISessionStateAwaitingInput
+	wantState := map[model.AISessionEventKind]model.AISessionState{
+		model.AISessionEventTurnStart: model.AISessionStateBusy,
+		model.AISessionEventToolUse:   model.AISessionStateBusy,
+		model.AISessionEventTurnEnd:   wantAwaitingInput,
+		model.AISessionEventNotify:    wantAwaitingInput,
+		model.AISessionEventExit:      model.AISessionStateExited,
 	}
 
 	for i, binding := range common.AISessionHookBindings() {
@@ -86,7 +88,7 @@ func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 			if err != nil {
 				t.Fatalf("hook %s: %v", binding.ToolEvent, err)
 			}
-			status, err := common.LoadAISessionStatus("team", "dev", sessionID)
+			status, err := activity.LoadAISessionStatus("team", "dev", sessionID)
 			if err != nil {
 				t.Fatalf("load status: %v", err)
 			}
@@ -175,7 +177,7 @@ func TestAISessionHookWithoutAnEnvironmentNamesTheNextAction(t *testing.T) {
 
 // runAISessionHook invokes the verb with the payload the given tool event sends,
 // asserting it reports no failure.
-func runAISessionHook(t *testing.T, sessionID string, modelEvent common.AISessionEventKind) error {
+func runAISessionHook(t *testing.T, sessionID string, modelEvent model.AISessionEventKind) error {
 	t.Helper()
 	payload := fmt.Sprintf(`{"session_id":%q,"transcript_path":"/home/erun/.claude/projects/-home-erun-git-erun/%s.jsonl","cwd":"/home/erun/git/erun","hook_event_name":"%s"}`, sessionID, sessionID, modelEvent)
 	err := executeAISessionHook(t, []string{"hook", "--event", string(modelEvent), "--tool", "claude"}, payload)

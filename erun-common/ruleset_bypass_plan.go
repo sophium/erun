@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // ruleset_bypass_plan.go is what has to exist before a repository's ruleset
@@ -194,12 +195,12 @@ func PlanRulesetBypass(ctx core.Context, params PlanRulesetBypassParams, deps Pl
 	result.Stage2File = rulesetPlanFilePath(inputs, "stage2")
 	result.RollbackFile = rulesetPlanFilePath(inputs, "rollback")
 
-	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/%d", githubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
+	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/%d", registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
 	if inputs.actorType == "User" {
-		ctx.Trace(fmt.Sprintf("github: GET %susers/%s to resolve the queue identity's actor id", githubAPIBaseURL, inputs.actor))
+		ctx.Trace(fmt.Sprintf("github: GET %susers/%s to resolve the queue identity's actor id", registry.GithubAPIBaseURL, inputs.actor))
 	}
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/collaborators/{queueActor}/permission to prove the queue identity can already push",
-		githubAPIBaseURL, inputs.owner, inputs.repo))
+		registry.GithubAPIBaseURL, inputs.owner, inputs.repo))
 	ctx.TraceCommand("", "write-json", result.RollbackFile)
 	ctx.TraceCommand("", "write-json", result.Stage1File)
 	ctx.TraceCommand("", "write-json", result.Stage2File)
@@ -291,7 +292,7 @@ type githubRulesetUpdate struct {
 }
 
 func getGitHubRuleset(ctx context.Context, client *http.Client, token, owner, repo string, id int64) (githubRuleset, error) {
-	requestURL := fmt.Sprintf("%srepos/%s/%s/rulesets/%d", githubAPIBaseURL, owner, repo, id)
+	requestURL := fmt.Sprintf("%srepos/%s/%s/rulesets/%d", registry.GithubAPIBaseURL, owner, repo, id)
 	var ruleset githubRuleset
 	if err := getGitHubJSON(ctx, client, token, requestURL, &ruleset); err != nil {
 		return githubRuleset{}, err
@@ -347,7 +348,7 @@ func resolveQueueActorID(ctx core.Context, client *http.Client, token string, in
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	}
-	if err := getGitHubJSON(context.Background(), client, token, githubAPIBaseURL+"users/"+inputs.actor, &user); err != nil {
+	if err := getGitHubJSON(context.Background(), client, token, registry.GithubAPIBaseURL+"users/"+inputs.actor, &user); err != nil {
 		return 0, fmt.Errorf("resolve queue identity %q on github: %w", inputs.actor, err)
 	}
 	ctx.Trace(fmt.Sprintf("plan-ruleset-bypass: queue identity %s is user id %d (%s)", user.Login, user.ID, user.Type))
@@ -366,7 +367,7 @@ func resolveQueueActorPushAccess(ctx core.Context, client *http.Client, token st
 	var permission struct {
 		Permission string `json:"permission"`
 	}
-	requestURL := fmt.Sprintf("%srepos/%s/%s/collaborators/%s/permission", githubAPIBaseURL, inputs.owner, inputs.repo, inputs.actor)
+	requestURL := fmt.Sprintf("%srepos/%s/%s/collaborators/%s/permission", registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.actor)
 	if err := getGitHubJSON(context.Background(), client, token, requestURL, &permission); err != nil {
 		return "", fmt.Errorf("read %s's permission on %s/%s: %w", inputs.actor, inputs.owner, inputs.repo, err)
 	}

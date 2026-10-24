@@ -141,8 +141,8 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 			return eruncommon.StopEnvironmentResult{
 				Tenant:      params.Result.Tenant,
 				Environment: params.Result.Environment,
-				Release:     eruncommon.RuntimeReleaseName(params.Result.Tenant),
-				Namespace:   eruncommon.KubernetesNamespaceName(params.Result.Tenant, params.Result.Environment),
+				Release:     config.RuntimeReleaseName(params.Result.Tenant),
+				Namespace:   config.KubernetesNamespaceName(params.Result.Tenant, params.Result.Environment),
 				Stopped:     true,
 			}, nil
 		},

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -96,10 +97,10 @@ func remoteInitMarkerWriteScript(marker RemoteInitMarker) string {
 	dir := "$HOME/" + relativeDir
 	target := dir + "/" + remoteInitMarkerFilename
 	return strings.Join([]string{
-		fmt.Sprintf("mkdir -p %s", shellQuote(dir)),
-		fmt.Sprintf("cat > %s <<'__ERUN_BOOTSTRAP_MARKER__'", shellQuote(target)),
+		fmt.Sprintf("mkdir -p %s", core.ShellQuote(dir)),
+		fmt.Sprintf("cat > %s <<'__ERUN_BOOTSTRAP_MARKER__'", core.ShellQuote(target)),
 		strings.TrimRight(string(data), "\n"),
 		"__ERUN_BOOTSTRAP_MARKER__",
-		fmt.Sprintf("chmod 600 %s", shellQuote(target)),
+		fmt.Sprintf("chmod 600 %s", core.ShellQuote(target)),
 	}, "\n")
 }

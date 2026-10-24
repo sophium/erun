@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // deployRuntimeImagePullProbe is the anonymousPullProbeFunc RunHelmDeploy
@@ -21,7 +23,7 @@ var deployRuntimeImagePullProbe anonymousPullProbeFunc = probeAnonymousManifestP
 // collides with, or silently repurposes, a secret an operator configured by
 // hand.
 func autoImagePullSecretName(tenant string) string {
-	return RuntimeReleaseName(tenant) + "-image-pull"
+	return config.RuntimeReleaseName(tenant) + "-image-pull"
 }
 
 // ensureRuntimeImagePullSecret is the deploy-time preflight against a private
@@ -70,12 +72,12 @@ func autoImagePullSecretName(tenant string) string {
 //     treated as "public": that is exactly the assumption that let this
 //     failure hide until the image actually went private.
 func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe anonymousPullProbeFunc) error {
-	image := strings.TrimSpace(deployInput.ImageOverrides[DevopsComponentName])
+	image := strings.TrimSpace(deployInput.ImageOverrides[config.DevopsComponentName])
 	if image == "" {
 		return nil
 	}
-	host := dockerRegistryFromImageTag(image)
-	if !isGHCRRegistry(host) {
+	host := registry.DockerRegistryFromImageTag(image)
+	if !registry.IsGHCRRegistry(host) {
 		return nil
 	}
 	_, repoName, tag, ok := parseDockerImageReference(image)
@@ -83,7 +85,7 @@ func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec,
 		return nil
 	}
 
-	if _, ok := resolveOCIRegistryBasicAuth(host); ok {
+	if _, ok := registry.ResolveOCIRegistryBasicAuth(host); ok {
 		name := autoImagePullSecretName(deployInput.Tenant)
 		if !slices.Contains(deployInput.ImagePullSecrets, name) {
 			deployInput.ImagePullSecrets = append(append([]string(nil), deployInput.ImagePullSecrets...), name)
@@ -98,7 +100,7 @@ func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec,
 		return nil
 	}
 
-	repoPath := DockerNamespaceFromTag(image) + "/" + repoName
+	repoPath := registry.DockerNamespaceFromTag(image) + "/" + repoName
 	pullable, err := probe(context.Background(), nil, repoPath, tag)
 	if err != nil {
 		return fmt.Errorf("could not determine whether %s is pullable with no credential, and none resolved to provision a pull secret: %w", image, err)

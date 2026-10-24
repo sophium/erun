@@ -1,25 +1,14 @@
 package eruncommon
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
-
-// imagePullSecretGetArgs reads a named Secret back as JSON, so its existing
-// .dockerconfigjson can be merged into rather than replaced.
-func imagePullSecretGetArgs(namespace, kubernetesContext, name string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", strings.TrimSpace(namespace), "get", "secret", strings.TrimSpace(name), "-o", "json")
-	return args
-}
 
 // renderImagePullSecret wraps dockerConfigJSON in a standard dockerconfigjson
 // Secret manifest, the same shape `kubectl create secret docker-registry`
@@ -35,7 +24,7 @@ metadata:
 type: kubernetes.io/dockerconfigjson
 stringData:
   %q: %q
-`, name, namespace, dockerConfigJSONSecretKey, dockerConfigJSON)
+`, name, namespace, config.DockerConfigJSONSecretKey, dockerConfigJSON)
 }
 
 // refreshImagePullSecrets re-mints every dockerconfigjson Secret named in
@@ -82,12 +71,12 @@ func refreshImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec) error
 // resolveImagePullSecretCredentials resolves a credential for every registry
 // host the deploy's images actually pull from, tracing (and skipping) any
 // host none resolves for rather than failing the whole refresh over it.
-func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeploySpec) map[string]registryBasicAuth {
+func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeploySpec) map[string]registry.RegistryBasicAuth {
 	hosts := imagePullSecretRegistryHosts(deployInput)
-	credentials := make(map[string]registryBasicAuth, len(hosts))
+	credentials := make(map[string]registry.RegistryBasicAuth, len(hosts))
 	var unresolved []string
 	for _, host := range hosts {
-		if auth, ok := resolveOCIRegistryBasicAuth(host); ok {
+		if auth, ok := registry.ResolveOCIRegistryBasicAuth(host); ok {
 			credentials[host] = auth
 		} else {
 			unresolved = append(unresolved, host)
@@ -99,87 +88,16 @@ func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeployS
 	return credentials
 }
 
-// kubectlSecretGetExecutionOperation is the ExecutionModeFor/
-// ExecutionModeReport key for the `kubectl get secret <name> -o json` read
-// (existingImagePullSecretAuths below), which applyImagePullSecrets runs
-// ahead of every image-pull-secret refresh so this run's resolved
-// credentials merge into the Secret's existing auths instead of replacing
-// them outright. Picked next after kubectl-pvc-get for the same narrow
-// shape -- a single resource kind (Secret), a single Get-by-name call, no
-// streaming, no mutation -- reusing kubernetesClientsetForContext rather
-// than adding new dependency surface. Unlike the namespace/PVC existence
-// checks, what this Get returns is read for its content (the Secret's own
-// dockerconfigjson), not just checked for presence; the Secret's own
-// "apply" (mutation) side stays on the subprocess path.
-const kubectlSecretGetExecutionOperation = "kubectl-secret-get"
-
-// existingImagePullSecretAuths dispatches to the subprocess or library path
-// per the kubectl-secret-get execution mode (see execution_mode.go), reading
-// a named dockerconfigjson Secret back so applyImagePullSecrets can overlay
-// this run's resolved credentials onto it instead of replacing the whole
-// document (see refreshImagePullSecrets). Called only for a real run: a dry
-// run has no cluster read to show without every dry-run scenario needing a
-// kubectl stub it otherwise has no reason to declare, the same tradeoff
-// TraceEnsureKubernetesNamespace makes for the namespace-exists check, so
-// applyImagePullSecrets states the merge as conditional instead of asserting
-// it. args is the exact get command already traced by the caller, used by
-// the subprocess path only.
-func existingImagePullSecretAuths(contextName, namespace, name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
-	if config.CurrentExecutionMode(kubectlSecretGetExecutionOperation) == config.ExecutionModeLibrary {
-		return libraryImagePullSecretAuths(contextName, namespace, name)
-	}
-	return defaultExistingImagePullSecretAuths(name, args)
-}
-
-// defaultExistingImagePullSecretAuths is the subprocess-backed path
-// existingImagePullSecretAuths dispatches to by default.
-//
-// A Secret that does not exist yet reads as no existing coverage, exactly
-// what a first deploy always saw. A Secret that exists but cannot be decoded
-// -- an unreadable base64 value, or a value that is not the auths document
-// shape -- is refused rather than silently rebuilt from the resolved subset
-// alone, because guessing wrong here would destroy exactly the coverage this
-// function exists to protect; a genuine cluster read failure (RBAC denial,
-// unreachable API server) is refused for the same reason.
-func defaultExistingImagePullSecretAuths(name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
-	output, err := core.Command("kubectl", args...).CombinedOutput()
-	if err != nil {
-		if KubernetesResourceNotFound(string(output)) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read existing image pull secret %s: %w: %s", name, err, strings.TrimSpace(string(output)))
-	}
-	var secret struct {
-		Data map[string]string `json:"data"`
-	}
-	if err := json.Unmarshal(output, &secret); err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: could not parse the existing secret", name)
-	}
-	encoded, ok := secret.Data[dockerConfigJSONSecretKey]
-	if !ok {
-		return nil, nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s holds an unreadable value", name, dockerConfigJSONSecretKey)
-	}
-	var file dockerConfigJSONFile
-	if err := json.Unmarshal(decoded, &file); err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, dockerConfigJSONSecretKey)
-	}
-	return file.Auths, nil
-}
-
 // mergeImagePullSecretAuths overlays this run's resolved credentials onto a
 // Secret's existing auths, leaving every host neither side names untouched.
 // A host with no existing entry and no resolved credential simply stays
 // absent -- this never invents an empty or placeholder entry.
-func mergeImagePullSecretAuths(existing map[string]dockerConfigJSONAuthEntry, credentials map[string]registryBasicAuth) map[string]dockerConfigJSONAuthEntry {
-	merged := make(map[string]dockerConfigJSONAuthEntry, len(existing)+len(credentials))
+func mergeImagePullSecretAuths(existing map[string]config.DockerConfigJSONAuthEntry, credentials map[string]registry.RegistryBasicAuth) map[string]config.DockerConfigJSONAuthEntry {
+	merged := make(map[string]config.DockerConfigJSONAuthEntry, len(existing)+len(credentials))
 	for host, entry := range existing {
 		merged[host] = entry
 	}
-	for host, entry := range dockerConfigJSONAuthEntriesForCredentials(credentials) {
+	for host, entry := range registry.DockerConfigJSONAuthEntriesForCredentials(credentials) {
 		merged[host] = entry
 	}
 	return merged
@@ -192,14 +110,14 @@ func mergeImagePullSecretAuths(existing map[string]dockerConfigJSONAuthEntry, cr
 // back and applies the merged result; dry-run traces both commands it would
 // run but executes neither, stating the merge as conditional on what the get
 // above would find (see existingImagePullSecretAuths for why).
-func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credentials map[string]registryBasicAuth) error {
-	applyArgs := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
+func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credentials map[string]registry.RegistryBasicAuth) error {
+	applyArgs := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		getArgs := imagePullSecretGetArgs(deployInput.Namespace, deployInput.KubernetesContext, name)
+		getArgs := registry.ImagePullSecretGetArgs(deployInput.Namespace, deployInput.KubernetesContext, name)
 		ctx.TraceCommand("", "kubectl", getArgs...)
 		ctx.Trace("apply image pull secret " + name + " (credential redacted)")
 		ctx.TraceCommand("", "kubectl", applyArgs...)
@@ -207,16 +125,16 @@ func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credent
 			ctx.Trace("image pull secret " + name + ": every host the read above already covers keeps its existing entry except the ones just resolved, which refresh")
 			continue
 		}
-		existing, err := existingImagePullSecretAuths(deployInput.KubernetesContext, deployInput.Namespace, name, getArgs)
+		existing, err := registry.ExistingImagePullSecretAuths(deployInput.KubernetesContext, deployInput.Namespace, name, getArgs)
 		if err != nil {
 			return err
 		}
-		dockerConfigJSON, err := dockerConfigJSONForAuthEntries(mergeImagePullSecretAuths(existing, credentials))
+		dockerConfigJSON, err := registry.DockerConfigJSONForAuthEntries(mergeImagePullSecretAuths(existing, credentials))
 		if err != nil {
 			return fmt.Errorf("render image pull secret %s: %w", name, err)
 		}
 		manifest := renderImagePullSecret(name, deployInput.Namespace, dockerConfigJSON)
-		if err := applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "image pull secret "+name, manifest, applyArgs); err != nil {
+		if err := kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "image pull secret "+name, manifest, applyArgs); err != nil {
 			return err
 		}
 	}

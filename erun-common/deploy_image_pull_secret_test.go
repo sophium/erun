@@ -6,6 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // imagePullSecretKubectlStub builds a kubectl stub that answers `get secret
@@ -52,9 +55,9 @@ func secretGetJSON(dockerConfigJSON string) string {
 
 func useNoECRLogin(t *testing.T) {
 	t.Helper()
-	prev := runECRLoginPassword
-	runECRLoginPassword = func(string) (string, bool) { return "", false }
-	t.Cleanup(func() { runECRLoginPassword = prev })
+	prev := registry.RunECRLoginPassword
+	registry.RunECRLoginPassword = func(string) (string, bool) { return "", false }
+	t.Cleanup(func() { registry.RunECRLoginPassword = prev })
 }
 
 // TestRefreshImagePullSecretsMergesUnresolvedHostAndOmitsNeverSeenHost proves
@@ -169,8 +172,8 @@ func TestExistingImagePullSecretAuthsRefusesMalformedSecret(t *testing.T) {
 	getBody := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`, badEncoded)
 	imagePullSecretKubectlStub(t, map[string]string{"regcred": getBody}, "")
 
-	args := imagePullSecretGetArgs("team-dev", "", "regcred")
-	_, err := existingImagePullSecretAuths("", "team-dev", "regcred", args)
+	args := registry.ImagePullSecretGetArgs("team-dev", "", "regcred")
+	_, err := registry.ExistingImagePullSecretAuths("", "team-dev", "regcred", args)
 	if err == nil {
 		t.Fatal("expected an error for a Secret whose .dockerconfigjson does not decode, got nil")
 	}
@@ -184,8 +187,8 @@ func TestExistingImagePullSecretAuthsRefusesMalformedSecret(t *testing.T) {
 // never invents an entry for a host with neither an existing entry nor a
 // resolved credential.
 func TestMergeImagePullSecretAuthsNoPlaceholderForUnresolvedHost(t *testing.T) {
-	existing := map[string]dockerConfigJSONAuthEntry{"ghcr.io": {Auth: "existing-value"}}
-	credentials := map[string]registryBasicAuth{"ghcr.io": {username: "alice", secret: "s3cret"}}
+	existing := map[string]config.DockerConfigJSONAuthEntry{"ghcr.io": {Auth: "existing-value"}}
+	credentials := map[string]registry.RegistryBasicAuth{"ghcr.io": {Username: "alice", Secret: "s3cret"}}
 
 	merged := mergeImagePullSecretAuths(existing, credentials)
 	if len(merged) != 1 {

@@ -2,10 +2,11 @@ package eruncommon
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // expose_platform_dns.go lets `erun expose`/`erun unexpose` perform the
@@ -32,14 +33,14 @@ import (
 // params.ServicesZone/PlatformNamespace being set. provider is the zero
 // value when the direct path is used, so callers can trace "via platform
 // api" only when it is non-zero.
-func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, cloudStore CloudReadStore, deps CloudDependencies, hasDirectOverride bool, explicit DNSRecordUpserterFunc) (DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
+func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordUpserterFunc) (DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
 	if explicit != nil {
 		return explicit, config.CloudProviderConfig{}, nil
 	}
-	if hasDirectOverride || !hasAnyErunPlatformAlias(cloudStore) {
+	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
 		return upsertPowerDNSRecord, config.CloudProviderConfig{}, nil
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
 		return nil, config.CloudProviderConfig{}, err
 	}
@@ -47,54 +48,18 @@ func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, c
 }
 
 // resolveUnexposeDNSDeleter is resolveExposeDNSUpserter's delete-side twin.
-func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, cloudStore CloudReadStore, deps CloudDependencies, hasDirectOverride bool, explicit DNSRecordDeleterFunc) (DNSRecordDeleterFunc, config.CloudProviderConfig, error) {
+func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordDeleterFunc) (DNSRecordDeleterFunc, config.CloudProviderConfig, error) {
 	if explicit != nil {
 		return explicit, config.CloudProviderConfig{}, nil
 	}
-	if hasDirectOverride || !hasAnyErunPlatformAlias(cloudStore) {
+	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
 		return deletePowerDNSRecord, config.CloudProviderConfig{}, nil
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
 		return nil, config.CloudProviderConfig{}, err
 	}
 	return platformDNSRecordDeleter(client, environment), provider, nil
-}
-
-// hasAnyErunPlatformAlias reports whether any erun-type cloud alias is
-// configured at all, local config lookup only. It is what keeps a caller
-// with zero configured aliases (the overwhelming majority, and every
-// existing use of expose/unexpose before this change) on the direct pdnsutil
-// path with no behavior change.
-func hasAnyErunPlatformAlias(cloudStore CloudReadStore) bool {
-	providers, err := ListCloudProviders(cloudStore)
-	if err != nil {
-		return false
-	}
-	for _, provider := range providers {
-		if provider.Provider == config.CloudProviderERun {
-			return true
-		}
-	}
-	return false
-}
-
-// resolvePlatformEnvironmentID finds environment's platform-assigned id by
-// name among the caller's own tenant's environments (row-level security
-// already scopes the list to the caller's tenant), since expose/unexpose
-// only know the environment by its local tenant/name pair, while the
-// hostname route is keyed by the platform's own environment id.
-func resolvePlatformEnvironmentID(ctx context.Context, client *PlatformClient, environment string) (string, error) {
-	environments, err := client.ListEnvironments(ctx)
-	if err != nil {
-		return "", fmt.Errorf("resolve platform environment id for %q: %w", environment, err)
-	}
-	for _, candidate := range environments {
-		if candidate.Name == environment {
-			return candidate.EnvironmentID, nil
-		}
-	}
-	return "", fmt.Errorf("environment %q is not registered on the erun platform; register it first (see `erun platform environment register`)", environment)
 }
 
 // platformDNSRecordUpserter adapts PlatformClient.SetEnvironmentHostname to
@@ -102,21 +67,21 @@ func resolvePlatformEnvironmentID(ctx context.Context, client *PlatformClient, e
 // time, rather than when the writer is constructed, so it never runs under
 // --dry-run: RunExposeService only ever invokes upsertDNSRecord after its
 // own dry-run check, mirroring upsertPowerDNSRecord's "live-only" contract.
-func platformDNSRecordUpserter(client *PlatformClient, environment string) DNSRecordUpserterFunc {
+func platformDNSRecordUpserter(client *platformclient.PlatformClient, environment string) DNSRecordUpserterFunc {
 	return func(params DNSRecordUpsertParams) error {
-		environmentID, err := resolvePlatformEnvironmentID(context.Background(), client, environment)
+		environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 		if err != nil {
 			return err
 		}
-		_, err = client.SetEnvironmentHostname(context.Background(), environmentID, PlatformSetEnvironmentHostnameParams{TargetIP: params.Value})
+		_, err = client.SetEnvironmentHostname(context.Background(), environmentID, platformclient.PlatformSetEnvironmentHostnameParams{TargetIP: params.Value})
 		return err
 	}
 }
 
 // platformDNSRecordDeleter is platformDNSRecordUpserter's delete-side twin.
-func platformDNSRecordDeleter(client *PlatformClient, environment string) DNSRecordDeleterFunc {
+func platformDNSRecordDeleter(client *platformclient.PlatformClient, environment string) DNSRecordDeleterFunc {
 	return func(DNSRecordDeleteParams) error {
-		environmentID, err := resolvePlatformEnvironmentID(context.Background(), client, environment)
+		environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 		if err != nil {
 			return err
 		}

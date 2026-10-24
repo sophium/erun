@@ -11,6 +11,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -442,7 +443,7 @@ func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 
 func (r *resolvedOpenRunner) recordActivity() {
 	if !r.ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
-		_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+		_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
 			Tenant:      r.result.Tenant,
 			Environment: r.result.Environment,
 			Kind:        config.ActivityKindCLI,
@@ -464,7 +465,7 @@ func (r *resolvedOpenRunner) validateIDEOptions() error {
 	return nil
 }
 
-func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParams) error {
+func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParams) error {
 	if r.resolveRuntimeDeploySpec == nil || r.deployHelmChart == nil {
 		return nil
 	}
@@ -504,7 +505,7 @@ func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error
 	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
 }
 
-func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
+func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
 	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
@@ -512,8 +513,8 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		return false, nil
 	}
 	deployed, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
-		Name:               common.RuntimeReleaseName(r.result.Tenant),
-		Namespace:          common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
+		Name:               config.RuntimeReleaseName(r.result.Tenant),
+		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
 		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
@@ -572,8 +573,8 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) commo
 // than inferred from a downstream forward timeout — this is the accurate signal
 // the desktop surfaces as "deploy this environment".
 func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
-	release := common.RuntimeReleaseName(r.result.Tenant)
-	namespace := common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	release := config.RuntimeReleaseName(r.result.Tenant)
+	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	if r.ctx.DryRun {
 		// Show the check in the dry-run plan, then assume present so the rest of
 		// the plan still renders. CheckKubernetesDeployment emits this same line
@@ -607,7 +608,7 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 // deploy when the operator asked for it, otherwise verify the runtime is there,
 // and either way start it if it was stopped. The wake comes last because it is
 // the step that must hold immediately before the port-forwards.
-func (r *resolvedOpenRunner) prepareRuntime(shellReq common.ShellLaunchParams) error {
+func (r *resolvedOpenRunner) prepareRuntime(shellReq config.ShellLaunchParams) error {
 	if r.options.Deploy {
 		// --deploy is operator-convenience only (root AGENTS.md § "Command
 		// primitives vs orchestration"): programmatic callers like the desktop
@@ -763,7 +764,7 @@ func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
 }
 
 func (r *resolvedOpenRunner) emitNoShellSetup() error {
-	namespace := common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	r.ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(r.result.EnvConfig.KubernetesContext))
 	r.ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 	r.ctx.TraceCommand("", "cd", r.result.RepoPath)
@@ -774,7 +775,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 	return emitLocalShellSetupForOpenResult(r.ctx, r.result, promptRunner, r.ctx.Stdout, r.ctx.Stderr)
 }
 
-func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams) {
+func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams) {
 	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
 		if len(preview.SeedArgs) > 0 {
 			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
@@ -792,7 +793,7 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams
 	}
 }
 
-func (r *resolvedOpenRunner) runShellLoop(shellReq common.ShellLaunchParams) error {
+func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
 		if errors.Is(err, common.ErrShellPodReplaced) {
@@ -1083,7 +1084,7 @@ func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect)
 	case openNoShellDialectPowerShell:
 		commands := []string{
 			"kubectl config use-context " + powerShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext)) + " | Out-Null",
-			"kubectl config set-context --current " + powerShellQuote("--namespace="+common.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
+			"kubectl config set-context --current " + powerShellQuote("--namespace="+config.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
 			"Set-Location -LiteralPath " + powerShellQuote(result.RepoPath),
 		}
 		return strings.Join(commands, "\n") + "\n"
@@ -1116,7 +1117,7 @@ func shouldInitOpenCommand(err error) bool {
 func shouldRunInitForOpenCommand(err error) bool {
 	return shouldInitRootCommand(err) ||
 		errors.Is(err, common.ErrTenantNotFound) ||
-		errors.Is(err, common.ErrEnvironmentNotFound)
+		errors.Is(err, config.ErrEnvironmentNotFound)
 }
 
 func shouldInitRootCommand(err error) bool {

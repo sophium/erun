@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -22,12 +23,12 @@ func quietOutputsContext() core.Context {
 
 func listAgentOutputsViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
-	return eruncommon.ResolveRuntimeOutputs(quietOutputsContext(), req, params, eruncommon.RunRemoteCommand)
+	return eruncommon.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 func downloadAgentOutputViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
-	return eruncommon.DownloadRuntimeOutput(quietOutputsContext(), req, params, eruncommon.RunRemoteCommand)
+	return eruncommon.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.

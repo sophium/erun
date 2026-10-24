@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -796,7 +797,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -856,7 +857,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -943,7 +944,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -977,7 +978,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1044,7 +1045,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1075,7 +1076,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.CommitWorkingTreeResult
+		var parsed gitx.CommitWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1213,7 +1214,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.PushWorkingTreeBranchResult
+		var parsed gitx.PushWorkingTreeBranchResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}

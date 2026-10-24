@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // writeModuleFixture lays down a single Terraform file referencing imageName
@@ -196,7 +197,7 @@ func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 func fakeExecutionForImage(imageName, tag, version string) BuildExecutionSpec {
 	return BuildExecutionSpec{
 		dockerPushes: []DockerPushSpec{
-			{Image: DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
+			{Image: helm.DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
 		},
 	}
 }

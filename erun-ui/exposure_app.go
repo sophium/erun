@@ -142,18 +142,18 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 // it isn't -- which of the two distinct reasons applies. A host environment
 // is checked first and always wins: it has no cluster to check a platform
 // block against, so that reason takes priority over the project's config.
-func (a *App) resolveExposureRequest(selection uiSelection) (req eruncommon.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
+func (a *App) resolveExposureRequest(selection uiSelection) (req configpkg.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return eruncommon.ShellLaunchParams{}, false, "", err
+		return configpkg.ShellLaunchParams{}, false, "", err
 	}
 	if config.Type == configpkg.EnvironmentTypeHost {
-		return eruncommon.ShellLaunchParams{}, false, uiExposureNotConfiguredHostEnvironment, nil
+		return configpkg.ShellLaunchParams{}, false, uiExposureNotConfiguredHostEnvironment, nil
 	}
-	req = eruncommon.ShellLaunchParams{
+	req = configpkg.ShellLaunchParams{
 		Tenant:            selection.Tenant,
 		Environment:       selection.Environment,
-		Namespace:         eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
+		Namespace:         configpkg.KubernetesNamespaceName(selection.Tenant, selection.Environment),
 		KubernetesContext: strings.TrimSpace(config.KubernetesContext),
 	}
 	if !eruncommon.ProjectHasExposablePlatform(a.exposeProjectRoot()) {

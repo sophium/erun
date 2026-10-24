@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // A release establishes that it can fast-forward exactly once, in sync-remote,
@@ -55,7 +56,7 @@ const releasePushRebaseAttempts = 2
 // release proceed exactly as it does today. The point is to turn a *known*
 // failure into an immediate one, not to invent a new way for a release to refuse
 // to start.
-func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	if branch == "" {
 		return nil
@@ -85,7 +86,7 @@ func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit G
 // remote-tracking ref, which is only what sync-remote already believed; the
 // fetch's own chatter is discarded because the release's trace lines already say
 // what was asked and what came back.
-func releaseBaseBranchAhead(projectRoot, branch string, runGit GitCommandRunnerFunc) (int, bool) {
+func releaseBaseBranchAhead(projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (int, bool) {
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
 		return 0, false
 	}
@@ -140,7 +141,7 @@ func isGitPushArgs(args []string) bool {
 // conflict-free by construction, so rebasing onto the branch as it stands now and
 // retrying is strictly better than stopping. It stays bounded: a rebase that
 // cannot apply, or a push that keeps failing, still surfaces the push's own error.
-func runReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+func runReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
 	err := runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
@@ -186,9 +187,9 @@ func releasePushStderrWriter(ctx core.Context, capture *strings.Builder) io.Writ
 // The caller owns output so that a push which is retried reports the notice
 // from the attempt that carried it, and so the rejection parse reads the same
 // bytes.
-func runReleasePush(ctx core.Context, dir string, runGit GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
+func runReleasePush(ctx core.Context, dir string, runGit gitx.GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
 	err := runGit(dir, ctx.Stdout, releasePushStderrWriter(ctx, output), args...)
-	reportRulesetBypassFromPushArgs(ctx, args, output.String())
+	gitx.ReportRulesetBypassFromPushArgs(ctx, args, output.String())
 	return err
 }
 
@@ -342,7 +343,7 @@ func releaseRepointFailedRecovery(spec ReleaseSpec) string {
 // replayed under a new sha. The remote already holds the tag at the old
 // commit, and an annotated tag update is never a fast-forward, so bringing it
 // back onto the branch always needs a force.
-func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot string, runGit GitCommandRunnerFunc) error {
+func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot string, runGit gitx.GitCommandRunnerFunc) error {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
 		return nil
@@ -397,7 +398,7 @@ func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (s
 // annotation message, and force-publishes it: the remote already has this
 // tag at the pre-rebase commit, and an annotated tag update is never a
 // fast-forward.
-func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit GitCommandRunnerFunc, tag, newCommit string) error {
+func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit gitx.GitCommandRunnerFunc, tag, newCommit string) error {
 	message, err := gitTagAnnotationSubject(projectRoot, tag)
 	if err != nil {
 		return err
@@ -431,7 +432,7 @@ func gitIsAncestorOfHead(projectRoot, commit string) (bool, error) {
 func gitCommitSubject(projectRoot, commit string) (string, error) {
 	output, err := core.Command("git", "-C", projectRoot, "show", "-s", "--format=%s", commit).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)
 		}
 		return "", err
@@ -448,7 +449,7 @@ func gitCommitSubject(projectRoot, commit string) (string, error) {
 func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]string, error) {
 	output, err := core.Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", revRange).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return nil, fmt.Errorf("%w: %s", err, stderr)
 		}
 		return nil, err
@@ -466,7 +467,7 @@ func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]strin
 func gitTagAnnotationSubject(projectRoot, tag string) (string, error) {
 	output, err := core.Command("git", "-C", projectRoot, "for-each-ref", "--format=%(contents:subject)", "refs/tags/"+tag).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)
 		}
 		return "", err
@@ -491,7 +492,7 @@ func releaseBranchPushArgs(spec ReleaseSpec, command ReleaseCommandSpec) []strin
 // than left half-done, so a failed absorb hands back the checkout the release was
 // working in, and its output rides on the error instead of the release's streams
 // (git's rebase chatter is version-dependent and says nothing on success).
-func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string, runGit GitCommandRunnerFunc) error {
+func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) error {
 	ctx.TraceCommand(projectRoot, "git", "fetch", "origin", branch)
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
 		return err

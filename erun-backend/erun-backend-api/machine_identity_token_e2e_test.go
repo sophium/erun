@@ -19,9 +19,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // This file closes the two proof gaps an audit of the landed machine-identity
@@ -281,7 +281,7 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 	issuer.expectCredential(f.identity.ClientID, f.identity.ClientSecret)
 
 	const secretRef = "erun/clientsecret/" + machineIdentityTokenAlias
-	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
+	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	mustNoErr(t, secrets.SaveCloudSecret(secretRef, f.identity.ClientSecret), "save the provisioned client secret")
 
 	store := staticCloudReadStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
@@ -294,11 +294,11 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 			ClientSecretRef: secretRef,
 		},
 	}}}}
-	token, err := eruncommon.CloudProviderBearerToken(
+	token, err := cloud.CloudProviderBearerToken(
 		core.Context{},
 		store,
-		eruncommon.CloudBearerParams{Alias: machineIdentityTokenAlias},
-		eruncommon.CloudDependencies{CloudSecretStore: secrets},
+		cloud.CloudBearerParams{Alias: machineIdentityTokenAlias},
+		cloud.CloudDependencies{CloudSecretStore: secrets},
 	)
 	mustNoErr(t, err, "mint the machine identity's token through the client_credentials grant")
 	if strings.TrimSpace(token.Token) == "" {

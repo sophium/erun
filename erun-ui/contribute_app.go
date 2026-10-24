@@ -249,12 +249,12 @@ func kubectlContributeAppPortForwardArgs(result config.OpenResult, localPort int
 	if c := strings.TrimSpace(result.EnvConfig.KubernetesContext); c != "" {
 		args = append(args, "--context", c)
 	}
-	if ns := eruncommon.KubernetesNamespaceName(result.Tenant, result.Environment); ns != "" {
+	if ns := config.KubernetesNamespaceName(result.Tenant, result.Environment); ns != "" {
 		args = append(args, "--namespace", ns)
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+eruncommon.RuntimeReleaseName(result.Tenant),
+		"deployment/"+config.RuntimeReleaseName(result.Tenant),
 		fmt.Sprintf("%d:%d", localPort, localPort),
 		"--address", "127.0.0.1",
 	)

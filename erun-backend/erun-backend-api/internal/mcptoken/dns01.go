@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // dns01TokenTTL is long-lived on purpose: a DNS-01 token is injected once at edge
@@ -47,8 +47,8 @@ func ParseDNS01Audience(audience string) (tenant, environment string, ok bool) {
 func (s *Signer) SignDNS01(tenant, environment string, now time.Time) (string, string, error) {
 	audience := DNS01Audience(tenant, environment)
 	// M2M token: the subject is the env identity, not an ERun user.
-	token, err := eruncommon.SignMCPToken(s.privatePEM, eruncommon.MCPTokenClaims{
-		Issuer:    eruncommon.DesktopMCPIssuer(),
+	token, err := mcpauth.SignMCPToken(s.privatePEM, mcpauth.MCPTokenClaims{
+		Issuer:    mcpauth.DesktopMCPIssuer(),
 		Subject:   audience,
 		Audience:  audience,
 		IssuedAt:  now.Unix(),
@@ -94,24 +94,24 @@ type eddsaHeader struct {
 // little of erun-common's file:// parse deliberately: the DNS-01 path is
 // backend-only and lives here rather than widening erun-common (whose coverage
 // is gated by the CLI integration suite, which never reaches this code).
-func parseEdDSAToken(token string) (signingInput string, claims eruncommon.MCPTokenClaims, signature []byte, err error) {
+func parseEdDSAToken(token string) (signingInput string, claims mcpauth.MCPTokenClaims, signature []byte, err error) {
 	segments := strings.Split(strings.TrimSpace(token), ".")
 	if len(segments) != 3 {
-		return "", eruncommon.MCPTokenClaims{}, nil, fmt.Errorf("malformed token: expected 3 JWT segments")
+		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("malformed token: expected 3 JWT segments")
 	}
 	var header eddsaHeader
 	if err := decodeSegment(segments[0], &header); err != nil {
-		return "", eruncommon.MCPTokenClaims{}, nil, fmt.Errorf("decode token header: %w", err)
+		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("decode token header: %w", err)
 	}
 	if header.Algorithm != "EdDSA" {
-		return "", eruncommon.MCPTokenClaims{}, nil, fmt.Errorf("unsupported token algorithm %q (only EdDSA)", header.Algorithm)
+		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("unsupported token algorithm %q (only EdDSA)", header.Algorithm)
 	}
 	if err := decodeSegment(segments[1], &claims); err != nil {
-		return "", eruncommon.MCPTokenClaims{}, nil, fmt.Errorf("decode token claims: %w", err)
+		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("decode token claims: %w", err)
 	}
 	signature, err = base64.RawURLEncoding.DecodeString(segments[2])
 	if err != nil {
-		return "", eruncommon.MCPTokenClaims{}, nil, fmt.Errorf("decode token signature: %w", err)
+		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("decode token signature: %w", err)
 	}
 	return segments[0] + "." + segments[1], claims, signature, nil
 }

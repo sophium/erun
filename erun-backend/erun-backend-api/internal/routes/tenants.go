@@ -7,12 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type TenantRepository interface {
@@ -176,7 +175,7 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 	// non-injective (a-b + c and a + b-c both collapse to a-b-c), a
 	// cross-tenant namespace-collision/takeover vector on a public
 	// provisioning surface.
-	if err := eruncommon.ValidateTenantName(name); err != nil {
+	if err := config.ValidateTenantName(name); err != nil {
 		return repository.CreateTenantParams{}, http.StatusBadRequest, err.Error()
 	}
 	if issuer == "" {

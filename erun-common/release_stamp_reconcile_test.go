@@ -2,6 +2,8 @@ package eruncommon
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // A release that fails after its "release" stage stamp commit leaves that
@@ -43,11 +45,11 @@ func TestResolveReleaseVersionCommitUsesHeadWhenNoLeftoverStampExists(t *testing
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
 
 	ctx := newTestClaimContext()
-	want, err := GitShortCommit(ctx, repo)
+	want, err := gitx.GitShortCommit(ctx, repo)
 	if err != nil {
 		t.Fatalf("GitShortCommit: %v", err)
 	}
-	got, err := resolveReleaseVersionCommit(ctx, repo, "main", GitShortCommit, GitCommandRunner)
+	got, err := resolveReleaseVersionCommit(ctx, repo, "main", gitx.GitShortCommit, gitx.GitCommandRunner)
 	if err != nil {
 		t.Fatalf("resolveReleaseVersionCommit: %v", err)
 	}
@@ -69,7 +71,7 @@ func TestResolveReleaseVersionCommitSkipsPastAnUnpushedLeftoverStampAndMintsTheO
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
 
 	ctx := newTestClaimContext()
-	workCommit, err := GitShortCommit(ctx, repo)
+	workCommit, err := gitx.GitShortCommit(ctx, repo)
 	if err != nil {
 		t.Fatalf("GitShortCommit at work commit: %v", err)
 	}
@@ -78,7 +80,7 @@ func TestResolveReleaseVersionCommitSkipsPastAnUnpushedLeftoverStampAndMintsTheO
 	// The failed first attempt's own stamp: committed locally, never pushed.
 	writeAndCommit(t, repo, "chart-version.txt", wantVersion+"\n", releaseStampCommitPrefix+wantVersion)
 
-	got, err := resolveReleaseVersionCommit(ctx, repo, "main", GitShortCommit, GitCommandRunner)
+	got, err := resolveReleaseVersionCommit(ctx, repo, "main", gitx.GitShortCommit, gitx.GitCommandRunner)
 	if err != nil {
 		t.Fatalf("resolveReleaseVersionCommit: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestResolveReleaseVersionCommitSkipsPastAChainOfUnpushedLeftoverStamps(t *t
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
 
 	ctx := newTestClaimContext()
-	workCommit, err := GitShortCommit(ctx, repo)
+	workCommit, err := gitx.GitShortCommit(ctx, repo)
 	if err != nil {
 		t.Fatalf("GitShortCommit at work commit: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestResolveReleaseVersionCommitSkipsPastAChainOfUnpushedLeftoverStamps(t *t
 	writeAndCommit(t, repo, "chart-version.txt", "1.0.268-pr.attempt1\n", releaseStampCommitPrefix+"1.0.268-pr.attempt1")
 	writeAndCommit(t, repo, "chart-version.txt", "1.0.268-pr.attempt2\n", releaseStampCommitPrefix+"1.0.268-pr.attempt2")
 
-	got, err := resolveReleaseVersionCommit(ctx, repo, "main", GitShortCommit, GitCommandRunner)
+	got, err := resolveReleaseVersionCommit(ctx, repo, "main", gitx.GitShortCommit, gitx.GitCommandRunner)
 	if err != nil {
 		t.Fatalf("resolveReleaseVersionCommit: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestFindLeftoverReleaseStampBaseNeverWalksPastAPushedStamp(t *testing.T) {
 	runGitForTest(t, repo, "push", "-q", "origin", "main")
 
 	ctx := newTestClaimContext()
-	_, found, err := findLeftoverReleaseStampBase(ctx, repo, "main", GitCommandRunner)
+	_, found, err := findLeftoverReleaseStampBase(ctx, repo, "main", gitx.GitCommandRunner)
 	if err != nil {
 		t.Fatalf("findLeftoverReleaseStampBase: %v", err)
 	}

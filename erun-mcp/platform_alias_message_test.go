@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // The MCP platform tools resolve their alias through the same shared resolver
@@ -27,7 +28,7 @@ func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) s
 // token status is irrelevant here because resolution fails before any token is
 // minted.
 func erunTypeProvider(alias string) config.CloudProviderConfig {
-	return eruncommon.NormalizeCloudProviderConfig(config.CloudProviderConfig{
+	return cloud.NormalizeCloudProviderConfig(config.CloudProviderConfig{
 		Alias:    alias,
 		Provider: config.CloudProviderERun,
 		ERun:     &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},

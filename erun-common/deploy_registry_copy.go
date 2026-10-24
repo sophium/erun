@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // registryCopy is one image mirrored from the FROM registry to a TO registry
@@ -17,8 +18,8 @@ type registryCopy struct {
 	Image string // "name:version"
 }
 
-func (c registryCopy) command() commandSpec {
-	return commandSpec{
+func (c registryCopy) command() helm.CommandSpec {
+	return helm.CommandSpec{
 		Name: "docker",
 		Args: []string{
 			"buildx", "imagetools", "create",
@@ -102,7 +103,7 @@ func deployCopyImages(execution DeploySpec) []string {
 		seen[ref] = struct{}{}
 		images = append(images, ref)
 	}
-	if execution.Deploy.ReleaseName == RuntimeReleaseName(execution.Target.Tenant) {
+	if execution.Deploy.ReleaseName == config.RuntimeReleaseName(execution.Target.Tenant) {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
@@ -118,10 +119,10 @@ func deployCopyImages(execution DeploySpec) []string {
 }
 
 func runtimeCopyImage(execution DeploySpec) (string, string) {
-	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[DevopsComponentName]); override != "" {
+	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[config.DevopsComponentName]); override != "" {
 		return imageNameVersion(override)
 	}
-	return DevopsComponentName, execution.Deploy.Version
+	return config.DevopsComponentName, execution.Deploy.Version
 }
 
 func imageNameVersion(reference string) (string, string) {

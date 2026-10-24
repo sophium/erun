@@ -8,8 +8,9 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // TestUsageToolCarriesTheStandingSizingRecommendation covers the fix for the
@@ -71,7 +72,7 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 // actually carry what it names.
 func usageToolDescriptionForTest(t *testing.T) string {
 	t.Helper()
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 	for _, tool := range listTools(t, session) {
 		if tool.Name == "usage" {
 			return tool.Description
@@ -229,7 +230,7 @@ func usageTestStoreOfType(tenant, environment string, envType config.Environment
 // lower verdict on both resources.
 func seedUsageHistoryForTest(t *testing.T, tenant, environment string) {
 	t.Helper()
-	dir, err := eruncommon.EnvironmentActivityDir(tenant, environment)
+	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("EnvironmentActivityDir: %v", err)
 	}

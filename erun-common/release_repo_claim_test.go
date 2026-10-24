@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // The environment-scoped exclusive lease in release_claim_test.go passed
@@ -42,7 +44,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	now := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
 	sha, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, now, nil)
 	if err != nil {
 		t.Fatalf("first environment's claim: %v", err)
@@ -51,7 +53,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 		t.Fatalf("expected a real repository claim, got an inconclusive no-op")
 	}
 
-	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
 	_, err = takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, now.Add(time.Second), nil)
 	if err == nil {
 		t.Fatal("expected a second release of the same version from a different checkout to be refused")
@@ -88,7 +90,7 @@ func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(
 	now := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
 	if _, err := takeReleaseRepoClaim(ctx, envA, "build", "1.0.215", holder, now, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
@@ -110,14 +112,14 @@ func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(
 func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testing.T) {
 	cases := []struct {
 		name        string
-		holder      EnvironmentActivityLeaseHolder
+		holder      activity.EnvironmentActivityLeaseHolder
 		environment string
 		want        string
 	}{
-		{"holder and environment", EnvironmentActivityLeaseHolder{Tenant: "erun"}, "build", "tenant erun, environment build"},
-		{"environment only, holder unnamed", EnvironmentActivityLeaseHolder{}, "build", "environment build"},
-		{"holder only, no environment", EnvironmentActivityLeaseHolder{Tenant: "erun"}, "", "tenant erun"},
-		{"neither", EnvironmentActivityLeaseHolder{}, "", "an unnamed holder"},
+		{"holder and environment", activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "build", "tenant erun, environment build"},
+		{"environment only, holder unnamed", activity.EnvironmentActivityLeaseHolder{}, "build", "environment build"},
+		{"holder only, no environment", activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "", "tenant erun"},
+		{"neither", activity.EnvironmentActivityLeaseHolder{}, "", "an unnamed holder"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,7 +139,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	start := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
 	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
@@ -147,7 +149,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	// envB's release ever proceeds is if the claim reclaims itself once it
 	// lapses.
 	afterLapse := start.Add(releaseVersionClaimTTL + time.Minute)
-	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
 	sha, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, afterLapse, nil)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
@@ -198,7 +200,7 @@ func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testi
 	start := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	running := EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-a"}
+	running := activity.EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-a"}
 	if _, err := takeReleaseVersionClaim(tenant, environment, version, running, os.Getpid(), start); err != nil {
 		t.Fatalf("running release's local claim: %v", err)
 	}
@@ -218,7 +220,7 @@ func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testi
 		t.Fatal("a live local holder must read as present")
 	}
 
-	second := EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-b"}
+	second := activity.EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-b"}
 	_, err := takeReleaseRepoClaim(ctx, repo, environment, version, second, retry, localHolderAlive)
 	if err == nil {
 		t.Fatal("expected a second release in the same environment to be refused while the first is running")
@@ -237,7 +239,7 @@ func TestReleaseRepoClaimRefusalNamesTheDeliberateRemedy(t *testing.T) {
 	start := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	err := (&ReleaseRepoClaimConflictError{
 		Version:     "1.0.289",
-		Holder:      EnvironmentActivityLeaseHolder{Tenant: "erun"},
+		Holder:      activity.EnvironmentActivityLeaseHolder{Tenant: "erun"},
 		Environment: "build",
 		StartedAt:   start,
 		ExpiresAt:   start.Add(releaseVersionClaimTTL),
@@ -266,7 +268,7 @@ func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
 
 	now := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
 	ctx := newTestClaimContext()
-	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
 
 	sha, err := takeReleaseRepoClaim(ctx, env, "build", "1.0.220", holder, now, nil)
 	if err != nil {
@@ -292,7 +294,7 @@ func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *te
 
 	started := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
 	ctx := newTestClaimContext()
-	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
 
 	sha, err := takeReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, started, nil)
 	if err != nil {
@@ -333,13 +335,13 @@ func TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt(t *testing.T)
 	start := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
 	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
 	afterLapse := start.Add(releaseVersionClaimTTL + time.Minute)
-	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
 	sha, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, afterLapse, nil)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
@@ -368,12 +370,12 @@ func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing
 	start := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
 	ctx := newTestClaimContext()
 
-	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
 	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
-	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
 	_, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, start.Add(15*time.Minute), nil)
 	if err == nil {
 		t.Fatal("expected the second claim to be refused")
@@ -429,7 +431,7 @@ func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T
 	spec := ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: ReleaseModeStable}
 	command := ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	if err := runReleaseBranchPush(ctx, spec, command, GitCommandRunner); err != nil {
+	if err := runReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
 		t.Fatalf("runReleaseBranchPush: %v", err)
 	}
 
@@ -489,7 +491,7 @@ func TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideThe
 	spec := ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: ReleaseModeStable}
 	command := ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	if err := runReleaseBranchPush(ctx, spec, command, GitCommandRunner); err != nil {
+	if err := runReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
 		t.Fatalf("runReleaseBranchPush: %v", err)
 	}
 
@@ -536,7 +538,7 @@ func TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject(t *testing.
 	spec := ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: ReleaseModeStable}
 	command := ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	err := runReleaseBranchPush(ctx, spec, command, GitCommandRunner)
+	err := runReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner)
 	if err == nil {
 		t.Fatal("expected an ambiguous replayed tag subject to refuse rather than silently retag")
 	}

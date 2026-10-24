@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // jobs.go mirrors review.go's platform-call shape for the jobs surface:
@@ -17,16 +18,16 @@ import (
 // PlatformJobResult is one platform job's tool result. It is named apart
 // from job.go's JobResult, which is an environment-scoped in-pod job.
 type PlatformJobResult struct {
-	Preview bool                   `json:"preview"`
-	Job     eruncommon.PlatformJob `json:"job,omitempty"`
-	Trace   []string               `json:"trace,omitempty"`
+	Preview bool                       `json:"preview"`
+	Job     platformclient.PlatformJob `json:"job,omitempty"`
+	Trace   []string                   `json:"trace,omitempty"`
 }
 
 // PlatformJobListResult is a platform job listing's tool result.
 type PlatformJobListResult struct {
-	Preview bool                     `json:"preview"`
-	Jobs    []eruncommon.PlatformJob `json:"jobs,omitempty"`
-	Trace   []string                 `json:"trace,omitempty"`
+	Preview bool                         `json:"preview"`
+	Jobs    []platformclient.PlatformJob `json:"jobs,omitempty"`
+	Trace   []string                     `json:"trace,omitempty"`
 }
 
 type JobsListInput struct {

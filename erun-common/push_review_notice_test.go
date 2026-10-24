@@ -11,6 +11,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // pushNoticeStore is the smallest CloudReadStore the notice needs: a config
@@ -54,17 +56,17 @@ func pushNoticeStoreWithAlias(apiURL string) pushNoticeStore {
 }
 
 // pushNoticeDeps wires the cached token the lookup will authenticate with.
-func pushNoticeDeps(t *testing.T) CloudDependencies {
+func pushNoticeDeps(t *testing.T) cloud.CloudDependencies {
 	t.Helper()
-	cached, err := json.Marshal(erunAccessTokenCache{
+	cached, err := json.Marshal(cloud.ErunAccessTokenCache{
 		AccessToken: "push-notice-token",
 		ExpiresAt:   time.Now().Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("encode cached access token: %v", err)
 	}
-	return CloudDependencies{CloudSecretStore: pushNoticeSecrets{
-		secrets: map[string]string{erunAccessTokenCacheRef(pushNoticeAlias): string(cached)},
+	return cloud.CloudDependencies{CloudSecretStore: pushNoticeSecrets{
+		secrets: map[string]string{cloud.ErunAccessTokenCacheRef(pushNoticeAlias): string(cached)},
 	}}
 }
 
@@ -95,7 +97,7 @@ func TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch(t *te
 			t.Errorf("Authorization = %q, want the cached bearer token", r.Header.Get("Authorization"))
 		}
 		requestedQuery = r.URL.RawQuery
-		_ = json.NewEncoder(w).Encode([]PlatformReview{})
+		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
 	}))
 	defer srv.Close()
 
@@ -120,7 +122,7 @@ func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *te
 	for _, status := range []string{"OPEN", "READY", "MERGE", "MERGED", "FAILED"} {
 		t.Run(status, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode([]PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
+				_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
 			}))
 			defer srv.Close()
 
@@ -138,7 +140,7 @@ func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *te
 // is an orphan again.
 func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
+		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
 	}))
 	defer srv.Close()
 
@@ -154,7 +156,7 @@ func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T
 // after the eventual squash message, so only sourceBranch identifies one.
 func TestWarnPushedBranchWithoutReviewMatchesTheSourceBranch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]PlatformReview{
+		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
 			{ReviewID: "r1", Name: "feature/2204-orphan", SourceBranch: "feature/2204-other", Status: "OPEN"},
 		})
 	}))
@@ -188,7 +190,7 @@ func TestWarnPushedBranchWithoutReviewSkipsTheRemoteDefaultBranch(t *testing.T) 
 // no network call, no output at all, not even a trace line.
 func TestWarnPushedBranchWithoutReviewSilentWithoutAnAlias(t *testing.T) {
 	out := &bytes.Buffer{}
-	WarnPushedBranchWithoutReview(pushNoticeContext(out), pushNoticeStore{}, CloudDependencies{}, pushNoticeParams("feature/2204-orphan"))
+	WarnPushedBranchWithoutReview(pushNoticeContext(out), pushNoticeStore{}, cloud.CloudDependencies{}, pushNoticeParams("feature/2204-orphan"))
 	if out.Len() != 0 {
 		t.Fatalf("a machine with no platform alias produced %q", out.String())
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // reviewDetailFixedResponses serves every path reviewDetailAPI answers with a
@@ -231,8 +231,8 @@ func TestFetchReviewBuildsConcurrentlyReturnsPartialResultsOnFailure(t *testing.
 	}))
 	defer server.Close()
 
-	client := eruncommon.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
-	reviews := []eruncommon.PlatformReview{{ReviewID: "review-good", Name: "Good"}, {ReviewID: "review-bad", Name: "Bad"}}
+	client := platformclient.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
+	reviews := []platformclient.PlatformReview{{ReviewID: "review-good", Name: "Good"}, {ReviewID: "review-bad", Name: "Bad"}}
 	builds, err := fetchReviewBuildsConcurrently(t.Context(), client, reviews)
 	if err == nil {
 		t.Fatalf("expected the forced failure to surface")

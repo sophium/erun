@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // DefaultRuntimeOutputsDir is the canonical agent outputs directory inside the
@@ -91,7 +93,7 @@ type RuntimeOutputDownloadParams struct {
 
 // RuntimeOutputsRunner runs a /bin/sh script in the env's runtime pod and
 // returns its captured output.
-type RuntimeOutputsRunner func(req ShellLaunchParams, script string) (RemoteCommandResult, error)
+type RuntimeOutputsRunner func(req config.ShellLaunchParams, script string) (kube.RemoteCommandResult, error)
 
 func resolveOutputsDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
@@ -132,13 +134,13 @@ func sanitizeOutputEntryName(name string) (string, error) {
 // ResolveRuntimeOutputs lists one directory in the env's runtime pod,
 // newest-first. A missing directory yields an empty result, not an error, and
 // dry-run returns an empty result without contacting the pod.
-func ResolveRuntimeOutputs(ctx core.Context, req ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
+func ResolveRuntimeOutputs(ctx core.Context, req config.ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return RuntimeOutputsListResult{}, err
 	}
 	if run == nil {
-		run = RunRemoteCommand
+		run = kube.RunRemoteCommand
 	}
 	ctx.Trace("outputs: listing " + dir)
 	script := runtimeOutputsListScript(dir)
@@ -147,7 +149,7 @@ func ResolveRuntimeOutputs(ctx core.Context, req ShellLaunchParams, params Runti
 	}
 	out, err := run(req, script)
 	if err != nil {
-		return RuntimeOutputsListResult{}, fmt.Errorf("list runtime outputs%s: %w", formatRemoteCommandStderr(out.Stderr), err)
+		return RuntimeOutputsListResult{}, fmt.Errorf("list runtime outputs%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	entries := parseRuntimeOutputsListing(out.Stdout)
 	for i := range entries {
@@ -182,8 +184,8 @@ func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputR
 
 // traceRuntimeOutputsScript returns true when the context is in dry-run, in which
 // case the caller must not run the command.
-func traceRuntimeOutputsScript(ctx core.Context, req ShellLaunchParams, label, script string) bool {
-	traceArgs := append([]string{}, kubectlRemoteExecArgs(req, script)...)
+func traceRuntimeOutputsScript(ctx core.Context, req config.ShellLaunchParams, label, script string) bool {
+	traceArgs := append([]string{}, kube.KubectlRemoteExecArgs(req, script)...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
 	}
@@ -195,7 +197,7 @@ func traceRuntimeOutputsScript(ctx core.Context, req ShellLaunchParams, label, s
 // runtimeOutputsListScript emits one tab-separated record per entry: type (f/d),
 // size, mtime epoch, basename. A missing directory prints nothing.
 func runtimeOutputsListScript(dir string) string {
-	quoted := shellQuote(dir)
+	quoted := core.ShellQuote(dir)
 	return fmt.Sprintf("if [ -d %s ]; then find %s -mindepth 1 -maxdepth 1 -printf '%%y\\t%%s\\t%%T@\\t%%f\\n'; fi", quoted, quoted)
 }
 

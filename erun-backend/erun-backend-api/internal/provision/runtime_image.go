@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TenantRuntimeImage is the tenant's own <tenant>-devops runtime image at a
@@ -19,7 +19,7 @@ func TenantRuntimeImage(registry, tenant, version string) string {
 // image — the same canonical image `erun deploy --runtime-image` installs on
 // an operator's own machine.
 func CanonicalRuntimeImage(registry, version string) string {
-	return fmt.Sprintf("%s/%s:%s", registry, eruncommon.DevopsComponentName, version)
+	return fmt.Sprintf("%s/%s:%s", registry, config.DevopsComponentName, version)
 }
 
 // ResolveRuntimeImage is the one decision every Job that runs a tenant's erun

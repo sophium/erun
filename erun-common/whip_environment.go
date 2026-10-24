@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // The environment half of the whip pass runs where its target
@@ -45,7 +47,7 @@ var whipNudgeSleep = time.Sleep
 // exec.
 func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment string) (bool, error) {
 	socket := RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
-	script := strings.Join(append(remoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
+	script := strings.Join(append(activitypkg.RemoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
 	out, err := runner("sh", "-c", script)
 	if err != nil {
 		return false, fmt.Errorf("whip: probing environment session liveness: %w", err)
@@ -97,7 +99,7 @@ type whipEnvironmentState struct {
 }
 
 func whipEnvironmentStatePath(tenant, environment string) (string, error) {
-	return config.ResolveCacheFilePath(filepath.Join("erun", "whip", sanitizeForFilename(tenant), sanitizeForFilename(environment), "state.json"))
+	return config.ResolveCacheFilePath(filepath.Join("erun", "whip", core.SanitizeForFilename(tenant), core.SanitizeForFilename(environment), "state.json"))
 }
 
 func loadWhipEnvironmentState(tenant, environment string) (whipEnvironmentState, bool) {
@@ -137,12 +139,12 @@ func saveWhipEnvironmentState(tenant, environment string, state whipEnvironmentS
 // activity records the idle/auto-stop machinery already writes rather than a
 // second, whip-only probe.
 func latestEnvironmentAgentActivity(tenant, environment string) time.Time {
-	activity, err := LoadEnvironmentActivity(tenant, environment)
+	activity, err := activitypkg.LoadEnvironmentActivity(tenant, environment)
 	if err != nil {
 		return time.Time{}
 	}
 	var latest time.Time
-	for _, kind := range []string{config.ActivityKindCodex, ActivityKindProcess} {
+	for _, kind := range []string{config.ActivityKindCodex, activitypkg.ActivityKindProcess} {
 		if snapshot, ok := activity[kind]; ok && snapshot.LastActivity.After(latest) {
 			latest = snapshot.LastActivity
 		}

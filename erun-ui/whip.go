@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // WhipNow is the desktop's own operator-triggered whip pass -- the control
@@ -135,12 +136,12 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
-		if a.classifyMCPUnreachable(mcpPort) == eruncommon.LocalMCPStaleForward {
+		if a.classifyMCPUnreachable(mcpPort) == mcp.LocalMCPStaleForward {
 			return eruncommon.WhipResult{
 				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
 				Decision:  eruncommon.WhipDecisionNone,
 				Reason:    eruncommon.WhipReasonUnreachable,
-				Error:     eruncommon.DescribeLocalMCPUnreachable(tenant, environment, mcpPort),
+				Error:     mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort),
 			}
 		}
 		return eruncommon.WhipResult{

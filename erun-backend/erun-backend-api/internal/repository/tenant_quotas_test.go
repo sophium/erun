@@ -3,7 +3,7 @@ package repository
 import (
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // parseKubernetesQuantityOrFatal is a t.Fatal-on-error wrapper so the test
@@ -29,14 +29,14 @@ func parseKubernetesQuantityOrFatal(t *testing.T, parse func(string) (int64, err
 // the dind sidecar, as #1061 was) fails this test instead of passing by
 // construction.
 func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
-	devopsCPU := parseKubernetesQuantityOrFatal(t, eruncommon.ParseKubernetesCPUToMilli, eruncommon.DefaultRuntimePodCPU)
-	dindCPU := parseKubernetesQuantityOrFatal(t, eruncommon.ParseKubernetesCPUToMilli, eruncommon.DefaultRuntimeDindCPU)
-	devopsMemory := parseKubernetesQuantityOrFatal(t, eruncommon.ParseKubernetesMemoryToMi, eruncommon.DefaultRuntimePodMemory)
-	dindMemory := parseKubernetesQuantityOrFatal(t, eruncommon.ParseKubernetesMemoryToMi, eruncommon.DefaultRuntimeDindMemory)
+	devopsCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimePodCPU)
+	dindCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimeDindCPU)
+	devopsMemory := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesMemoryToMi, config.DefaultRuntimePodMemory)
+	dindMemory := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesMemoryToMi, config.DefaultRuntimeDindMemory)
 
 	wantCPU := int(devopsCPU + dindCPU)
 	wantMemory := int(devopsMemory + dindMemory)
-	wantStorage := eruncommon.DefaultRuntimeHomePVCGi + eruncommon.DefaultRuntimeDockerPVCGi + eruncommon.DefaultRuntimeWorktreePVCGi
+	wantStorage := config.DefaultRuntimeHomePVCGi + config.DefaultRuntimeDockerPVCGi + config.DefaultRuntimeWorktreePVCGi
 
 	got := [3]int{DefaultMaxCPUMillicores, DefaultMaxMemoryMB, DefaultMaxStorageGB}
 	want := [3]int{wantCPU, wantMemory, wantStorage}

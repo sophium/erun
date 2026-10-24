@@ -5,7 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // job_report.go lets an agent or orchestrator record the work it is doing to
@@ -50,11 +53,11 @@ type ReportJobStartParams struct {
 // Like ReportBuildOutcome it degrades completely silently with no alias
 // configured (the overwhelming majority of invocations) and records every
 // other reason as a trace. It never warns, never errors, and never blocks.
-func ReportJobStart(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportJobStartParams) string {
-	if !hasAnyErunPlatformAlias(store) {
+func ReportJobStart(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportJobStartParams) string {
+	if !cloud.HasAnyErunPlatformAlias(store) {
 		return ""
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("job record to erun platform skipped: " + err.Error())
 		return ""
@@ -64,13 +67,13 @@ func ReportJobStart(ctx core.Context, store CloudReadStore, deps CloudDependenci
 		ctx.Trace("job record to erun platform skipped: " + err.Error())
 		return ""
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobReportTraceDetails(params)...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobReportTraceDetails(params)...)
 	if ctx.DryRun {
 		return ""
 	}
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), jobReportTimeout)
 	defer cancel()
-	created, err := client.ClaimJob(timeoutCtx, PlatformClaimJobParams{
+	created, err := client.ClaimJob(timeoutCtx, platformclient.PlatformClaimJobParams{
 		EnvironmentID: environmentID,
 		JobType:       params.JobType,
 		IssueRef:      params.IssueRef,
@@ -85,7 +88,7 @@ func ReportJobStart(ctx core.Context, store CloudReadStore, deps CloudDependenci
 		// so it is reported as what it is rather than as another opaque
 		// failure -- still a trace, never a warning, since the work itself is
 		// unaffected either way.
-		if held, ok := PlatformJobScopeHeldDetails(err); ok {
+		if held, ok := platformclient.PlatformJobScopeHeldDetails(err); ok {
 			ctx.Trace("job record to erun platform skipped: scope " + held.Scope +
 				" is held by " + held.ActorID + " (started " + held.StartedAt + "): " + held.Summary)
 			return ""
@@ -113,26 +116,26 @@ type ReportJobOutcomeParams struct {
 // never a propagated error. An empty JobID means the start was never
 // recorded, so there is nothing to close and nothing is said about it -- the
 // caller that had no id already saw why.
-func ReportJobOutcome(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportJobOutcomeParams) {
+func ReportJobOutcome(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportJobOutcomeParams) {
 	if strings.TrimSpace(params.JobID) == "" {
 		return
 	}
-	if !hasAnyErunPlatformAlias(store) {
+	if !cloud.HasAnyErunPlatformAlias(store) {
 		return
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("job outcome report to erun platform skipped: " + err.Error())
 		return
 	}
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID,
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID,
 		"status="+params.Status)
 	if ctx.DryRun {
 		return
 	}
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), jobReportTimeout)
 	defer cancel()
-	updated, err := client.UpdateJob(timeoutCtx, params.JobID, PlatformUpdateJobParams{
+	updated, err := client.UpdateJob(timeoutCtx, params.JobID, platformclient.PlatformUpdateJobParams{
 		Status:  params.Status,
 		Summary: params.Summary,
 	})
@@ -147,13 +150,13 @@ func ReportJobOutcome(ctx core.Context, store CloudReadStore, deps CloudDependen
 // local environment name, both network calls bounded by jobReportTimeout. An
 // empty name means host-side work: there is no environment to resolve and no
 // error, which is a real case rather than a gap.
-func resolveJobReportEnvironment(client *PlatformClient, environment string) (string, error) {
+func resolveJobReportEnvironment(client *platformclient.PlatformClient, environment string) (string, error) {
 	if strings.TrimSpace(environment) == "" {
 		return "", nil
 	}
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), jobReportTimeout)
 	defer cancel()
-	return resolvePlatformEnvironmentID(timeoutCtx, client, environment)
+	return cloud.ResolvePlatformEnvironmentID(timeoutCtx, client, environment)
 }
 
 func jobReportTraceDetails(params ReportJobStartParams) []string {

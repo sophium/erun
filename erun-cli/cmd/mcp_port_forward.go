@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 const mcpPortForwardStartupTimeout = 5 * time.Second
@@ -20,7 +21,7 @@ type MCPForwarder func(core.Context, config.OpenResult) error
 
 // Aliased rather than redeclared so the shape the CLI writes and the shape the
 // desktop reads cannot drift apart.
-type mcpPortForwardState = common.PortForwardState
+type mcpPortForwardState = kube.PortForwardState
 
 func newMCPForwarder() MCPForwarder {
 	return func(ctx core.Context, result config.OpenResult) error {
@@ -40,7 +41,7 @@ func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, erro
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		Namespace:         common.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
 		LocalPort:         localPort,
 	}
 
@@ -115,18 +116,18 @@ func adoptForeignMCPPortForward(ctx core.Context, statePath string, expected mcp
 func reusableRecordedPortForward(ctx core.Context, kind, logPath string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
 	bound := canConnectLocalPort(localPort)
 	matches := stateMatchesMCPTarget(state, expected)
-	health := common.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
+	health := kube.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
 	switch health {
-	case common.PortForwardServing:
+	case kube.PortForwardServing:
 		// A serving forward is reused as-is and keeps writing to the log it
 		// opened when it started, so this touch is the only chance to re-apply
 		// the cap for as long as it stays up.
 		rotatePortForwardLogIfOversized(ctx, kind, logPath)
 		return true
-	case common.PortForwardStale:
+	case kube.PortForwardStale:
 		ctx.Trace(fmt.Sprintf("%s: the port-forward on 127.0.0.1:%d holds the local port but its edge does not answer; re-establishing it", kind, localPort))
 		reapRecordedPortForwardProcess(matches, state.ProcessID, localPort)
-	case common.PortForwardDropped:
+	case kube.PortForwardDropped:
 		if reapRecordedPortForwardProcess(matches, state.ProcessID, localPort) {
 			ctx.Trace(fmt.Sprintf("%s: the recorded port-forward for 127.0.0.1:%d never bound its port; clearing it (PID %d) before starting a fresh one", kind, localPort, state.ProcessID))
 		}
@@ -225,13 +226,13 @@ func kubectlMCPPortForwardArgs(result config.OpenResult, localPort int) []string
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
 	}
-	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
+	namespace := config.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+common.RuntimeReleaseName(result.Tenant),
+		"deployment/"+config.RuntimeReleaseName(result.Tenant),
 		fmt.Sprintf("%d:%d", localPort, config.MCPPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
@@ -287,7 +288,7 @@ func canConnectLocalPort(port int) bool {
 }
 
 func canReachLocalMCPEndpoint(port int) bool {
-	return common.CanReachLocalMCPEndpoint(port)
+	return mcp.CanReachLocalMCPEndpoint(port)
 }
 
 func mcpPortForwardTimeoutDetail(logPath string) string {

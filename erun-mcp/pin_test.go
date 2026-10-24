@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 func writePinTestFile(t *testing.T, path, body string) {
@@ -149,8 +150,8 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
 		Store:   store,
-		ResolveRuntimeRegistryVersions: func(context.Context) (eruncommon.RuntimeRegistryVersions, error) {
-			return eruncommon.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
+		ResolveRuntimeRegistryVersions: func(context.Context) (registry.RuntimeRegistryVersions, error) {
+			return registry.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
 		},
 	}
 	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Version: "1.0.228"})

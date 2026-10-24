@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // A linux package component is <tenant>-devops/linux/<name>/Dockerfile. It is
@@ -183,7 +185,7 @@ func detectedProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, projec
 	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
 		return "", false, nil
 	}
-	linuxDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "linux")
+	linuxDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "linux")
 	if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
 		return "", false, err
 	} else if ok {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -55,7 +56,7 @@ var ErrListEnvironmentServicesForbidden = errors.New("list environment services:
 // would make, in the same order. Traced and returned up front rather than
 // discovered during execution because ListEnvironmentServices itself holds no
 // Context -- it is the desktop's call, and the desktop has no trace to emit.
-func RunListEnvironmentServices(ctx core.Context, req ShellLaunchParams) (EnvironmentServiceList, error) {
+func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) (EnvironmentServiceList, error) {
 	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "service")...)
 	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "ingress")...)
@@ -75,7 +76,7 @@ func RunListEnvironmentServices(ctx core.Context, req ShellLaunchParams) (Enviro
 // the exposure erun-expose already gave it. Both reads are plain `kubectl
 // get`s, so this is safe to grant to a caller that must never be handed
 // `erun exec raw`.
-func ListEnvironmentServices(req ShellLaunchParams) ([]EnvironmentService, error) {
+func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService, error) {
 	services, err := fetchObservedServices(observeGetArgs(req, "service"))
 	if err != nil {
 		if isForbiddenKubectlError(err) {

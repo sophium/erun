@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // This covers what the integration suite cannot reach deterministically: the
@@ -16,7 +18,7 @@ import (
 func TestWorkingHoursAllDaySpanIsAlwaysInside(t *testing.T) {
 	for _, second := range []int{0, 1, 30, 59} {
 		now := time.Date(2026, time.January, 1, 23, 59, second, 0, time.UTC)
-		outside, _, err := workingHoursStatus("00:00-23:59", "UTC", now)
+		outside, _, err := activity.WorkingHoursStatus("00:00-23:59", "UTC", now)
 		if err != nil {
 			t.Fatalf("second=%d: %v", second, err)
 		}
@@ -31,7 +33,7 @@ func TestWorkingHoursAllDaySpanIsAlwaysInside(t *testing.T) {
 // (09:00-17:00 excludes 17:00 exactly) is deliberate and must not change.
 func TestWorkingHoursOrdinaryWindowStillExcludesItsEndMinute(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 17, 0, 0, 0, time.UTC)
-	outside, _, err := workingHoursStatus("09:00-17:00", "UTC", now)
+	outside, _, err := activity.WorkingHoursStatus("09:00-17:00", "UTC", now)
 	if err != nil {
 		t.Fatal(err)
 	}

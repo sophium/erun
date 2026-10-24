@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // TestDrainPortForwardOutputKeepsDrainingAfterReportingThePort reproduces a
@@ -36,16 +38,16 @@ done`
 		t.Fatalf("start: %v", err)
 	}
 
-	result := make(chan portForwardResult, 1)
-	go drainPortForwardOutput(stdout, result)
+	result := make(chan kube.PortForwardResult, 1)
+	go kube.DrainPortForwardOutput(stdout, result)
 
 	select {
 	case found := <-result:
-		if found.err != nil {
-			t.Fatalf("unexpected error finding the port: %v", found.err)
+		if found.Err != nil {
+			t.Fatalf("unexpected error finding the port: %v", found.Err)
 		}
-		if found.port != 38471 {
-			t.Errorf("port = %d, want 38471", found.port)
+		if found.Port != 38471 {
+			t.Errorf("port = %d, want 38471", found.Port)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for the forwarding port to be reported")

@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // The MCP transport (erun-mcp/server.go's mcp.NewStreamableHTTPHandler) is
@@ -109,9 +110,9 @@ var attachUpgrader = websocket.Upgrader{
 func attachHTTPHandler(runtime RuntimeConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		identity := authIdentityFrom(r.Context())
-		if !identity.Capabilities.Allows(eruncommon.MCPCapabilityAttach) {
+		if !identity.Capabilities.Allows(mcptools.MCPCapabilityAttach) {
 			auditToolDecision(identity, attachToolName, false)
-			writeForbidden(w, fmt.Sprintf("attach requires the %s capability", eruncommon.MCPCapabilityAttach))
+			writeForbidden(w, fmt.Sprintf("attach requires the %s capability", mcptools.MCPCapabilityAttach))
 			return
 		}
 		session := strings.TrimSpace(r.PathValue("session"))

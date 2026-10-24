@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // TestJobPresenceLeaseRecordsInitiator is the regression test for the defect.
@@ -34,12 +36,12 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	_, stop := startEnvironmentJobHeartbeat(tenant, environment, recorder, 15*time.Minute, nil, false)
 	defer stop()
 
-	leases, err := LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		t.Fatalf("load leases: %v", err)
 	}
 	leaseID := environmentJobLeaseID(id)
-	var found *EnvironmentActivityLease
+	var found *activity.EnvironmentActivityLease
 	for i := range leases {
 		if leases[i].ID == leaseID {
 			found = &leases[i]

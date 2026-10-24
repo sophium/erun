@@ -6,6 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // writeDoctorGitPushAccess is the MCP counterpart of the CLI's
@@ -19,14 +20,14 @@ import (
 // confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
 // reports the same skip instead of paying its own kubectl exec timeout to
 // rediscover it.
-func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req eruncommon.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
+func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
 		return writeDoctorPodUnreachableSkip(runCtx, "Git push access")
 	}
-	status, err := eruncommon.InspectGitPushAccess(runCtx, nil, req, target.RepoPath)
+	status, err := gitx.InspectGitPushAccess(runCtx, nil, req, target.RepoPath)
 	if err != nil || runCtx.DryRun || status.RemoteURL == "" {
 		return err
 	}
@@ -35,14 +36,14 @@ func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req
 	return err
 }
 
-func mcpGitFetchStatusLine(status eruncommon.GitPushAccessStatus) string {
+func mcpGitFetchStatusLine(status gitx.GitPushAccessStatus) string {
 	if status.FetchOK {
 		return "ok"
 	}
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func mcpGitPushStatusLine(target config.OpenResult, status eruncommon.GitPushAccessStatus) string {
+func mcpGitPushStatusLine(target config.OpenResult, status gitx.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // The reproduction this closes: an agent job's own exit status says nothing
@@ -451,10 +453,10 @@ func TestCommitWorkingTreeStillHonorsRepositoryHooksWhenNotSkipped(t *testing.T)
 	marker := rejectCommitsWithAHook(t, repo)
 	dirtyWorkingTree(t, repo)
 
-	_, err := CommitWorkingTree(testContext(), repo, CommitWorkingTreeParams{
+	_, err := gitx.CommitWorkingTree(testContext(), repo, gitx.CommitWorkingTreeParams{
 		Branch:  "feature/lane",
 		Message: "a person's own commit",
-	}, CommitWorkingTreeDependencies{})
+	}, gitx.CommitWorkingTreeDependencies{})
 	if err == nil {
 		t.Fatalf("CommitWorkingTree committed despite a rejecting pre-commit hook; hook enforcement " +
 			"must stay in force for callers that do not opt out")

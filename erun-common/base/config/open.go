@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
@@ -107,4 +108,67 @@ func containsTrimmedString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+var ErrEnvironmentNotFound = errors.New("no such environment exists")
+
+type ShellLaunchParams struct {
+	Dir                string
+	Tenant             string
+	Environment        string
+	Title              string
+	Namespace          string
+	KubernetesContext  string
+	RemoteRepo         bool
+	Type               EnvironmentType
+	ManagedCloud       bool
+	CloudProviderAlias string
+	Idle               EnvironmentIdleConfig
+	// AppSession, when non-empty, makes the remote shell a persistent,
+	// reattachable dtach session keyed by this id, so closing/reopening a tab
+	// or a transient kubectl-exec drop reconnects to the still-running shell
+	// (and the AI tab's claude keeps working in the pod) instead of spawning a
+	// parallel one. Empty keeps the ephemeral bare `erun open` behaviour.
+	AppSession string
+	// AI / Contribute select the persistent session's create-time program, run
+	// once on create so a reattach never re-runs it: Contribute enters the
+	// contribute clone with its env; AI launches the AI tool.
+	AI         bool
+	Contribute bool
+	AITool     string
+	Claude     EnvironmentClaudeConfig
+	// Gateway is the erun-level OpenRouter catalog, when the operator has
+	// configured one, carried over from OpenResult.Gateway. The AI launch
+	// resolves this environment's effective gateway through it (model, Remote
+	// Control, context window), and so does the deploy diagnosis, to tell a
+	// gateway-routed environment whose pod template never consumed the gateway
+	// from a healthy one (runtime_agent_credentials.go).
+	Gateway *OpenRouterConfig
+	// RuntimeImage lets the AI session prelude advise on the erun-build-env
+	// skill only when the env still runs the default published runtime image.
+	RuntimeImage string
+	// RuntimeVersion and RuntimePod are the env config's recorded runtime
+	// deploy intent, threaded through so observe can diff them against what
+	// the live helm release and running pods actually hold.
+	RuntimeVersion string
+	RuntimePod     RuntimePodResources
+}
+
+func RuntimeReleaseName(tenant string) string {
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" {
+		return DevopsComponentName
+	}
+	return tenant + "-devops"
+}
+
+func KubectlTargetArgs(req ShellLaunchParams) []string {
+	args := make([]string, 0, 4)
+	if strings.TrimSpace(req.KubernetesContext) != "" {
+		args = append(args, "--context", req.KubernetesContext)
+	}
+	if strings.TrimSpace(req.Namespace) != "" {
+		args = append(args, "--namespace", req.Namespace)
+	}
+	return args
 }

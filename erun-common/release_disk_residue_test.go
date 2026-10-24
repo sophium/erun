@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // The reproduction this closes: `erun build --release` ran its
@@ -122,7 +123,7 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 		},
 	}
 
-	err := runClaimedReleaseSpec(ctx, spec, GitCommandRunner, nil, &publisher)
+	err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher)
 	if err == nil {
 		t.Fatalf("expected the headroom preflight to refuse; the repository now holds tags %q", gitTagsForTest(t, repo))
 	}
@@ -191,7 +192,7 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 		},
 	}
 
-	if err := runClaimedReleaseSpec(ctx, spec, GitCommandRunner, nil, nil); err != nil {
+	if err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, nil); err != nil {
 		t.Fatalf("a release with no publisher marks source control only and must not be refused for disk, got %v", err)
 	}
 	if tags := gitTagsForTest(t, repo); !strings.Contains(tags, "v1.0.301") {
@@ -203,7 +204,7 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 		Publish: func(core.Context) error { t.Fatal("the publish ran despite the refusal"); return nil },
 		Verify:  func(core.Context) error { return nil },
 	}
-	if err := runClaimedReleaseSpec(ctx, spec, GitCommandRunner, nil, &publisher); err == nil {
+	if err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher); err == nil {
 		t.Fatal("expected the disk-headroom preflight to refuse a build-and-publish release")
 	}
 	if tags := gitTagsForTest(t, repo); tags != "" {

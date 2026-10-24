@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // The observe tool published `drift` in its outputSchema while no surface
@@ -48,7 +48,7 @@ func observeOutputSchema(t *testing.T, session *mcp.ClientSession) *jsonschema.S
 // contract must say the verdict is always there, so a generated client models
 // it as present rather than as a field it may never see.
 func TestObserveToolRequiresTheDriftProperty(t *testing.T) {
-	schema := observeOutputSchema(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
+	schema := observeOutputSchema(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	if !slices.Contains(schema.Required, "drift") {
 		t.Fatalf("published outputSchema does not require `drift`; required = %v", schema.Required)
@@ -83,7 +83,7 @@ func TestObserveToolReturnsTheDriftKey(t *testing.T) {
 		// one environment this server would be scoped to.
 		Store: usageTestStore("tenant-a", "dev"),
 	}
-	session := connectWithRuntime(t, runtime, string(eruncommon.MCPCapabilityRead))
+	session := connectWithRuntime(t, runtime, string(mcptools.MCPCapabilityRead))
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "observe",

@@ -7,6 +7,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // platform_machine_identity.go delivers a *machine* identity into an
@@ -58,7 +61,7 @@ type provisionedMachineIdentity struct {
 // dressed up as a feature; each is traced, because a deployment that silently
 // stayed on the operator's identity is indistinguishable from one that never
 // tried.
-func provisionMachineIdentitySecret(ctx core.Context, store CloudReadStore, tenant, environment, namespace, kubernetesContext string, deps CloudDependencies) (string, bool, error) {
+func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStore, tenant, environment, namespace, kubernetesContext string, deps cloud.CloudDependencies) (string, bool, error) {
 	provisioned, ok, err := resolveMachineIdentity(ctx, store, environment, deps)
 	if err != nil || !ok {
 		return "", false, err
@@ -69,11 +72,11 @@ func provisionMachineIdentitySecret(ctx core.Context, store CloudReadStore, tena
 	}
 	ref := machineIdentityClientSecretRef(provisioned.provider.Alias)
 	name := platformAliasSecretName(tenant)
-	args := kubectlApplyStdinArgs(namespace, kubernetesContext)
+	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply machine identity secret " + name + " (identity " + provisioned.subject + ", client secret redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
-	manifest := renderPlatformAliasSecret(name, namespace, entry, cloudSecretFileName(ref), provisioned.clientSecret)
-	if err := applySecretManifest(kubernetesContext, namespace, "machine identity secret", manifest, args); err != nil {
+	manifest := renderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
+	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "machine identity secret", manifest, args); err != nil {
 		return "", false, err
 	}
 	ctx.Trace("machine identity: " + environment + " now authenticates as its own identity (" + provisioned.subject + ")")
@@ -88,8 +91,8 @@ func provisionMachineIdentitySecret(ctx core.Context, store CloudReadStore, tena
 // replaces a working delegated session with a pod that can reach nothing --
 // and the only moment erun can tell the two apart is here, in the process that
 // just minted it.
-func resolveMachineIdentity(ctx core.Context, store CloudReadStore, environment string, deps CloudDependencies) (provisionedMachineIdentity, bool, error) {
-	deps = normalizeCloudDependencies(deps)
+func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, environment string, deps cloud.CloudDependencies) (provisionedMachineIdentity, bool, error) {
+	deps = cloud.NormalizeCloudDependencies(deps)
 	client, host, ok, err := machineIdentityPlatformClient(ctx, store, deps)
 	if err != nil || !ok {
 		return provisionedMachineIdentity{}, false, err
@@ -118,7 +121,7 @@ func resolveMachineIdentity(ctx core.Context, store CloudReadStore, environment 
 // machineIdentityPlatformClient is the platform client provisioning calls with:
 // this host's own signed-in alias, since that is the only credential the
 // invoking process has. Nothing about it reaches the environment.
-func machineIdentityPlatformClient(ctx core.Context, store CloudReadStore, deps CloudDependencies) (*PlatformClient, config.CloudProviderConfig, bool, error) {
+func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies) (*platformclient.PlatformClient, config.CloudProviderConfig, bool, error) {
 	// Re-resolved rather than threaded from the caller so "this host has
 	// nothing to ask with" is decided in the one place that already decides it,
 	// and without a second network-free resolution to keep in step.
@@ -140,7 +143,7 @@ func machineIdentityPlatformClient(ctx core.Context, store CloudReadStore, deps 
 		// statement every runtime deploy already carries.
 		return nil, config.CloudProviderConfig{}, false, nil
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, provider.Alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, provider.Alias, deps)
 	if err != nil {
 		return nil, config.CloudProviderConfig{}, false, err
 	}
@@ -149,20 +152,20 @@ func machineIdentityPlatformClient(ctx core.Context, store CloudReadStore, deps 
 
 // fetchMachineIdentity resolves the environment's platform id and asks for its
 // identity, reporting the reason it could not when it could not.
-func fetchMachineIdentity(ctx core.Context, client *PlatformClient, environment string) (PlatformMachineIdentity, bool) {
-	environmentID, err := resolvePlatformEnvironmentID(context.Background(), client, environment)
+func fetchMachineIdentity(ctx core.Context, client *platformclient.PlatformClient, environment string) (platformclient.PlatformMachineIdentity, bool) {
+	environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 	if err != nil {
 		ctx.Trace("machine identity: " + err.Error() + "; leaving the environment's platform identity as it is")
-		return PlatformMachineIdentity{}, false
+		return platformclient.PlatformMachineIdentity{}, false
 	}
 	identity, err := client.MintMachineIdentity(context.Background(), environmentID)
 	if err != nil {
 		ctx.Trace("machine identity: the platform would not mint one for " + environment + " (" + err.Error() + "); leaving its platform identity as it is")
-		return PlatformMachineIdentity{}, false
+		return platformclient.PlatformMachineIdentity{}, false
 	}
 	if strings.TrimSpace(identity.ClientID) == "" || strings.TrimSpace(identity.ClientSecret) == "" {
 		ctx.Trace("machine identity: the platform returned no usable credential for " + environment + "; leaving its platform identity as it is")
-		return PlatformMachineIdentity{}, false
+		return platformclient.PlatformMachineIdentity{}, false
 	}
 	return identity, true
 }
@@ -175,7 +178,7 @@ func fetchMachineIdentity(ctx core.Context, client *PlatformClient, environment 
 // The issuer is the identity's own rather than the host's, because that is
 // where its tokens are minted; where a tenant's identity lives in the
 // platform's issuer the two are already the same value.
-func machineIdentityProviderConfig(host config.CloudProviderConfig, identity PlatformMachineIdentity) config.CloudProviderConfig {
+func machineIdentityProviderConfig(host config.CloudProviderConfig, identity platformclient.PlatformMachineIdentity) config.CloudProviderConfig {
 	provider := host
 	provider.OIDCIssuerURL = strings.TrimSpace(identity.Issuer)
 	provider.ERun = &config.ERunProviderConfig{
@@ -183,14 +186,14 @@ func machineIdentityProviderConfig(host config.CloudProviderConfig, identity Pla
 		ClientID:        strings.TrimSpace(identity.ClientID),
 		ClientSecretRef: machineIdentityClientSecretRef(host.Alias),
 	}
-	return NormalizeCloudProviderConfig(provider)
+	return cloud.NormalizeCloudProviderConfig(provider)
 }
 
 // verifyMachineIdentityCredential exchanges the freshly minted credential for
 // a token, the one check that stands between a working environment and one
 // whose platform access has just been replaced by a credential nothing
 // accepts.
-func verifyMachineIdentityCredential(ctx core.Context, identity PlatformMachineIdentity, deps CloudDependencies) error {
+func verifyMachineIdentityCredential(ctx core.Context, identity platformclient.PlatformMachineIdentity, deps cloud.CloudDependencies) error {
 	discovery, err := deps.FetchOIDCDiscovery(ctx, strings.TrimSpace(identity.Issuer))
 	if err != nil {
 		return err

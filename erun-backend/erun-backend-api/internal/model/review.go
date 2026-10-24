@@ -3,7 +3,6 @@ package model
 import (
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/uptrace/bun"
 )
@@ -17,12 +16,12 @@ type ReviewStatus string
 // ever reach. The reviews table's own CHECK constraint is the third place the
 // set appears; it is the database's enforcement of the same vocabulary.
 const (
-	ReviewStatusOpen   ReviewStatus = eruncommon.ReviewStatusOpen
-	ReviewStatusClosed ReviewStatus = eruncommon.ReviewStatusClosed
-	ReviewStatusFailed ReviewStatus = eruncommon.ReviewStatusFailed
-	ReviewStatusReady  ReviewStatus = eruncommon.ReviewStatusReady
-	ReviewStatusMerge  ReviewStatus = eruncommon.ReviewStatusMerge
-	ReviewStatusMerged ReviewStatus = eruncommon.ReviewStatusMerged
+	ReviewStatusOpen   ReviewStatus = model.ReviewStatusOpen
+	ReviewStatusClosed ReviewStatus = model.ReviewStatusClosed
+	ReviewStatusFailed ReviewStatus = model.ReviewStatusFailed
+	ReviewStatusReady  ReviewStatus = model.ReviewStatusReady
+	ReviewStatusMerge  ReviewStatus = model.ReviewStatusMerge
+	ReviewStatusMerged ReviewStatus = model.ReviewStatusMerged
 )
 
 type Review struct {

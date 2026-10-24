@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // worktreeClaimSuffix names the runtime release's dedicated worktree volume; it
@@ -41,7 +42,7 @@ func announceWorktreeVolumeChange(ctx core.Context, spec HelmDeploySpec) {
 	}
 	// Only the runtime release owns the worktree volume; a component chart's
 	// deploy carries the same env fields but creates no claim.
-	if strings.TrimSpace(spec.ReleaseName) != RuntimeReleaseName(spec.Tenant) {
+	if strings.TrimSpace(spec.ReleaseName) != config.RuntimeReleaseName(spec.Tenant) {
 		return
 	}
 	worktreePath := podWorktreePath(spec.WorktreeRepoName)
@@ -98,8 +99,8 @@ func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
 // claim is not there" from "the answer is unknown" either way, so a cluster
 // erun cannot read never passes for a settled worktree.
 func worktreeClaimExists(contextName, namespace, claim string) (bool, error) {
-	if config.CurrentExecutionMode(kubectlPVCGetExecutionOperation) == config.ExecutionModeLibrary {
-		return libraryPersistentVolumeClaimExists(contextName, namespace, claim)
+	if config.CurrentExecutionMode(kube.KubectlPVCGetExecutionOperation) == config.ExecutionModeLibrary {
+		return kube.LibraryPersistentVolumeClaimExists(contextName, namespace, claim)
 	}
 	return defaultWorktreeClaimExists(contextName, namespace, claim)
 }
@@ -110,7 +111,7 @@ func defaultWorktreeClaimExists(contextName, namespace, claim string) (bool, err
 		return true, nil
 	}
 	message := strings.TrimSpace(string(output))
-	if KubernetesResourceNotFound(message) {
+	if kube.KubernetesResourceNotFound(message) {
 		return false, nil
 	}
 	if message == "" {

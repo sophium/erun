@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // TestBuildFingerprintSurvivesAPodRoll pins the identity a build is cached
@@ -39,7 +41,7 @@ func TestBuildFingerprintSurvivesAPodRoll(t *testing.T) {
 		return DockerBuildSpec{
 			ContextDir:     root,
 			DockerfilePath: dockerfile,
-			Image: DockerImageReference{
+			Image: helm.DockerImageReference{
 				Registry:  "ghcr.io/sophium",
 				ImageName: "comp",
 				Version:   "1.0.291-snapshot-20260921T193239Z",

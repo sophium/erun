@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The runtime pod relays the routing values the chart injects into Claude Code's
@@ -251,7 +252,7 @@ func installRuntimeClaudeSessionSettings(settings map[string]any) {
 // in the shell so a Claude the operator runs with no erun environment in scope
 // forks nothing on every turn boundary; nothing it prints or exits with reaches
 // the turn.
-func runtimeAISessionHookCommand(event AISessionEventKind) string {
+func runtimeAISessionHookCommand(event model.AISessionEventKind) string {
 	return `if [ -n "${ERUN_TENANT}" ] && [ -n "${ERUN_ENVIRONMENT}" ]; then ` + AISessionHookVerbPath + " --event " + string(event) + " --tool claude >/dev/null 2>&1 || true; fi"
 }
 

@@ -10,13 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type EnvironmentRepository interface {
@@ -787,7 +785,7 @@ func namespaceLabelRune(r rune) bool {
 // times out five minutes later with the real cause in a FailedCreate event on
 // a ReplicaSet the caller never sees (#1061).
 var minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB = func() (int, int, int) {
-	cpu, memory, storage := eruncommon.MinimumRuntimeNamespaceQuota()
+	cpu, memory, storage := config.MinimumRuntimeNamespaceQuota()
 	return int(cpu), int(memory), int(storage)
 }()
 

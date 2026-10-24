@@ -1,7 +1,6 @@
 package eruncommon
 
 import (
-	"bytes"
 	"fmt"
 	"net/url"
 	"path"
@@ -10,6 +9,10 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 type remoteRepositoryState struct {
@@ -32,9 +35,9 @@ var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.ama
 // The env it takes is the one this run just reconciled, so init's own deploy sees
 // the settings this invocation supplied rather than the params they arrived in —
 // the two diverge whenever a flag was omitted and the stored value stands.
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (ShellLaunchParams, remoteRepositorySpec, remoteProvisionedSecrets, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (config.ShellLaunchParams, remoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
-	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
+	target.EnvConfig.RuntimePod = config.NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
 	// init's own deploy must see it. Without it `erun init --runtime-registry`
 	// would only take effect on the next deploy — no use to an env that cannot
@@ -58,7 +61,7 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	// missing. Resolves to "" when the host has nothing to give.
 	registryCredentialSecretName, err := s.resolveRegistryCredentialSecret(target)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	target.EnvConfig.RegistryCredentialSecretName = registryCredentialSecretName
 
@@ -69,7 +72,7 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	// invoking host is not signed in to a platform alias to give.
 	platformAliasSecret, err := s.resolvePlatformAliasSecret(target)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	target.EnvConfig.PlatformAliasSecretName = platformAliasSecret
 	provisioned := remoteProvisionedSecrets{registryCredential: registryCredentialSecretName, platformAlias: platformAliasSecret}
@@ -77,10 +80,10 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if err := s.ensureRemoteRegistryCredentials(target, req); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if params.NoGit {
 		return req, remoteRepositorySpec{}, provisioned, s.ensureRemoteWorktree(req, projectRoot)
@@ -88,7 +91,7 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if state.Exists {
 		return req, remoteRepositorySpec{}, provisioned, s.pullRemoteRepository(req, projectRoot)
@@ -96,7 +99,7 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+		return config.ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	return req, repository, provisioned, s.cloneRemoteRepository(req, projectRoot, repository)
 }
@@ -118,8 +121,8 @@ type remoteProvisionedSecrets struct {
 // only fail loudly; this is what gives it something to find.
 func (s bootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResult) (string, error) {
 	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
-	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
-	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
+	namespace := config.KubernetesNamespaceName(target.Tenant, target.Environment)
+	return registrypkg.ProvisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
 
 // resolvePlatformAliasSecret mints the Secret carrying the identity the runtime
@@ -141,14 +144,14 @@ func (s bootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResul
 // silent: a deployment that stayed on the operator's identity has to be
 // distinguishable from one that never asked.
 func (s bootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (string, error) {
-	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
+	namespace := config.KubernetesNamespaceName(target.Tenant, target.Environment)
 	// The runner's own store, so the alias is resolved against the same config
 	// the rest of init reads rather than whatever the default store finds.
-	var store CloudReadStore = config.ConfigStore{}
+	var store config.CloudReadStore = config.ConfigStore{}
 	if s.Store != nil {
 		store = s.Store
 	}
-	deps := DefaultCloudDependencies()
+	deps := cloud.DefaultCloudDependencies()
 	name, provisioned, err := provisionMachineIdentitySecret(s.Context, store, target.Tenant, target.Environment, namespace, target.EnvConfig.KubernetesContext, deps)
 	if err != nil {
 		return "", err
@@ -159,19 +162,19 @@ func (s bootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (s
 	return provisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
 }
 
-func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {
+func (s bootstrapRunner) writeRemoteInitMarker(req config.ShellLaunchParams, marker RemoteInitMarker) error {
 	script := strings.Join([]string{
 		"set -eu",
 		remoteInitMarkerWriteScript(marker),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-init-marker", script)
 	if err != nil {
-		return fmt.Errorf("write remote init marker: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("write remote init marker: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
 
-func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState) (remoteRepositorySpec, error) {
+func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState) (remoteRepositorySpec, error) {
 	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
 	if err != nil {
 		return remoteRepositorySpec{}, err
@@ -190,7 +193,7 @@ func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams
 	return repository, nil
 }
 
-func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, error) {
+func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, error) {
 	repository, err := s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
 	if err != nil {
 		return remoteRepositorySpec{}, err
@@ -241,21 +244,21 @@ func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) conf
 	return resolved
 }
 
-func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot string) error {
+func (s bootstrapRunner) ensureRemoteWorktree(req config.ShellLaunchParams, projectRoot string) error {
 	script := strings.Join([]string{
 		"set -eu",
-		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
+		fmt.Sprintf("mkdir -p %s", core.ShellQuote(projectRoot)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-worktree", script)
 	if err != nil {
-		return fmt.Errorf("create remote worktree: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("create remote worktree: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
 
-func (s bootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
+func (s bootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req config.ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
 	runtimeImage = strings.TrimSpace(runtimeImage)
-	runtimeImageStated := runtimeImage != "" && runtimeImage != DevopsComponentName
+	runtimeImageStated := runtimeImage != "" && runtimeImage != config.DevopsComponentName
 	if runtimeImageStated {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}
@@ -297,7 +300,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req Shell
 // config entry, a gh session, or GH_TOKEN/GITHUB_TOKEN -- not that it is valid
 // or correctly scoped; release's own preflight still confirms that before
 // spending a build.
-func (s bootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResult, req ShellLaunchParams) error {
+func (s bootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResult, req config.ShellLaunchParams) error {
 	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	for _, registry := range registries {
 		configured, err := s.remoteGHCRCredentialConfigured(req, registry)
@@ -305,7 +308,7 @@ func (s bootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResul
 			return fmt.Errorf("check registry credentials for %s: %w", registry, err)
 		}
 		if !configured {
-			return &MissingGHCRCredentialError{Registry: registry}
+			return &registrypkg.MissingGHCRCredentialError{Registry: registry}
 		}
 	}
 	return nil
@@ -326,7 +329,7 @@ func ghcrRegistriesRequiringCredential(list config.ContainerRegistries) []string
 			continue
 		}
 		registry := strings.TrimSpace(entry.Registry)
-		if registry == "" || !isGHCRRegistry(registry) {
+		if registry == "" || !registrypkg.IsGHCRRegistry(registry) {
 			continue
 		}
 		if !entry.HasRole(config.RegistryRoleBuild) && !entry.HasRole(config.RegistryRoleDeploy) {
@@ -344,10 +347,10 @@ func ghcrRegistriesRequiringCredential(list config.ContainerRegistries) []string
 // remoteGHCRCredentialConfigured execs into the pod to check for a ghcr.io
 // credential. Dry-run does not exec into a real pod, so it reports configured
 // rather than failing a plan preview over pod state a preview cannot know.
-func (s bootstrapRunner) remoteGHCRCredentialConfigured(req ShellLaunchParams, registry string) (bool, error) {
+func (s bootstrapRunner) remoteGHCRCredentialConfigured(req config.ShellLaunchParams, registry string) (bool, error) {
 	output, err := s.runRemoteScript(req, "registry-credential-check", remoteGHCRCredentialCheckScript(registry))
 	if err != nil {
-		return false, fmt.Errorf("%w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return false, fmt.Errorf("%w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	if s.Context.DryRun {
 		return true, nil
@@ -367,7 +370,7 @@ func remoteGHCRCredentialCheckScript(registry string) string {
 	return strings.Join([]string{
 		"set -eu",
 		"found=0",
-		fmt.Sprintf("if [ -f \"$HOME/.docker/config.json\" ] && grep -q %s \"$HOME/.docker/config.json\" 2>/dev/null; then found=1; fi", shellQuote(host)),
+		fmt.Sprintf("if [ -f \"$HOME/.docker/config.json\" ] && grep -q %s \"$HOME/.docker/config.json\" 2>/dev/null; then found=1; fi", core.ShellQuote(host)),
 		"if [ \"$found\" -eq 0 ] && command -v gh >/dev/null 2>&1 && gh auth token -h github.com >/dev/null 2>&1; then found=1; fi",
 		"if [ \"$found\" -eq 0 ] && { [ -n \"${GH_TOKEN:-}\" ] || [ -n \"${GITHUB_TOKEN:-}\" ]; }; then found=1; fi",
 		"printf '%s\\n' \"$found\"",
@@ -428,7 +431,7 @@ func (s bootstrapRunner) resolveRemoteRepositoryCredentials(params BootstrapInit
 	return spec, nil
 }
 
-func (s bootstrapRunner) resolveExistingRemoteHostConfig(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, bool, error) {
+func (s bootstrapRunner) resolveExistingRemoteHostConfig(params BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, bool, error) {
 	if !state.HasSSHConfig {
 		return repository, false, nil
 	}
@@ -461,7 +464,7 @@ func (s bootstrapRunner) resolveExistingRemoteHostConfig(params BootstrapInitPar
 	return repository, true, nil
 }
 
-func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, repository remoteRepositorySpec, publicKey string) error {
+func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, repository remoteRepositorySpec, publicKey string) error {
 	publicKey = strings.TrimSpace(publicKey)
 	if publicKey != "" {
 		if repository.CodeCommitHost != "" {
@@ -483,12 +486,12 @@ func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tena
 		}}
 	}
 
-	return WaitForGitAccess(s.Context, s.Sleep, func() error {
+	return gitx.WaitForGitAccess(s.Context, s.Sleep, func() error {
 		return s.verifyRemoteRepositoryAccess(req, repository)
 	})
 }
 
-func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoot string) (remoteRepositoryState, error) {
+func (s bootstrapRunner) remoteRepositoryState(req config.ShellLaunchParams, projectRoot string) (remoteRepositoryState, error) {
 	script := strings.Join([]string{
 		"set -eu",
 		"mkdir -p \"$HOME/.ssh\"",
@@ -501,8 +504,8 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 		"if [ ! -f \"$codecommit_key\" ]; then ssh-keygen -t rsa -b 4096 -N '' -f \"$codecommit_key\" >/dev/null 2>&1; fi",
 		"chmod 600 \"$codecommit_key\"",
 		"chmod 644 \"$codecommit_key.pub\"",
-		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
-		fmt.Sprintf("if [ -d %s/.git ]; then printf 'repo_exists\\n'; else printf 'repo_missing\\n'; fi", shellQuote(projectRoot)),
+		fmt.Sprintf("mkdir -p %s", core.ShellQuote(projectRoot)),
+		fmt.Sprintf("if [ -d %s/.git ]; then printf 'repo_exists\\n'; else printf 'repo_missing\\n'; fi", core.ShellQuote(projectRoot)),
 		"printf '__ERUN_REMOTE_PUBLIC_KEY__\\n'",
 		"cat \"$key.pub\"",
 		"printf '\\n__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__\\n'",
@@ -552,60 +555,60 @@ func remoteRepositoryStateSection(lines []string, marker string) string {
 	return ""
 }
 
-func (s bootstrapRunner) verifyRemoteRepositoryAccess(req ShellLaunchParams, repository remoteRepositorySpec) error {
+func (s bootstrapRunner) verifyRemoteRepositoryAccess(req config.ShellLaunchParams, repository remoteRepositorySpec) error {
 	script := strings.Join([]string{
 		"set -eu",
 		remoteRepositorySSHConfigScript(repository),
-		fmt.Sprintf("ssh_command=%s", shellQuote(remoteRepositorySSHCommand(repository))),
-		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repository.URL)),
+		fmt.Sprintf("ssh_command=%s", core.ShellQuote(remoteRepositorySSHCommand(repository))),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", core.ShellQuote(repository.URL)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-access", script)
 	if err != nil {
-		return fmt.Errorf("verify remote repository access: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("verify remote repository access: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
 
-func (s bootstrapRunner) verifyRemoteRepositoryAccessWithHostConfig(req ShellLaunchParams, repository remoteRepositorySpec) error {
+func (s bootstrapRunner) verifyRemoteRepositoryAccessWithHostConfig(req config.ShellLaunchParams, repository remoteRepositorySpec) error {
 	script := strings.Join([]string{
 		"set -eu",
 		"test -s \"$HOME/.ssh/config\"",
-		fmt.Sprintf("ssh_command=%s", shellQuote(`ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`)),
-		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repository.URL)),
+		fmt.Sprintf("ssh_command=%s", core.ShellQuote(`ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`)),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", core.ShellQuote(repository.URL)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-existing-host-config", script)
 	if err != nil {
-		return fmt.Errorf("verify remote repository access with existing SSH host config: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("verify remote repository access with existing SSH host config: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
 
-func (s bootstrapRunner) cloneRemoteRepository(req ShellLaunchParams, projectRoot string, repository remoteRepositorySpec) error {
+func (s bootstrapRunner) cloneRemoteRepository(req config.ShellLaunchParams, projectRoot string, repository remoteRepositorySpec) error {
 	script := strings.Join([]string{
 		"set -eu",
 		remoteRepositorySSHConfigScript(repository),
-		fmt.Sprintf("ssh_command=%s", shellQuote(remoteRepositorySSHCommand(repository))),
-		fmt.Sprintf("mkdir -p %s", shellQuote(path.Dir(projectRoot))),
-		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
-		fmt.Sprintf("if [ -n \"$(ls -A %s 2>/dev/null)\" ] && [ ! -d %s/.git ]; then echo 'remote worktree directory exists and is not empty' >&2; exit 1; fi", shellQuote(projectRoot), shellQuote(projectRoot)),
-		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" clone %s %s", shellQuote(repository.URL), shellQuote(projectRoot)),
+		fmt.Sprintf("ssh_command=%s", core.ShellQuote(remoteRepositorySSHCommand(repository))),
+		fmt.Sprintf("mkdir -p %s", core.ShellQuote(path.Dir(projectRoot))),
+		fmt.Sprintf("mkdir -p %s", core.ShellQuote(projectRoot)),
+		fmt.Sprintf("if [ -n \"$(ls -A %s 2>/dev/null)\" ] && [ ! -d %s/.git ]; then echo 'remote worktree directory exists and is not empty' >&2; exit 1; fi", core.ShellQuote(projectRoot), core.ShellQuote(projectRoot)),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" clone %s %s", core.ShellQuote(repository.URL), core.ShellQuote(projectRoot)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-clone", script)
 	if err != nil {
-		return fmt.Errorf("clone remote repository: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("clone remote repository: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
 
-func (s bootstrapRunner) pullRemoteRepository(req ShellLaunchParams, projectRoot string) error {
+func (s bootstrapRunner) pullRemoteRepository(req config.ShellLaunchParams, projectRoot string) error {
 	script := strings.Join([]string{
 		"set -eu",
 		"ssh_command='ssh -i \"$HOME/.ssh/id_ed25519\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'",
-		fmt.Sprintf("git -C %s -c core.sshCommand=\"$ssh_command\" pull --ff-only", shellQuote(projectRoot)),
+		fmt.Sprintf("git -C %s -c core.sshCommand=\"$ssh_command\" pull --ff-only", core.ShellQuote(projectRoot)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-pull", script)
 	if err != nil {
-		return fmt.Errorf("pull remote repository: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+		return fmt.Errorf("pull remote repository: %w%s", err, kube.FormatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
@@ -695,43 +698,15 @@ func codeCommitSetupDetails(repository remoteRepositorySpec, publicKey, keyID st
 	}, "\n")
 }
 
-func (s bootstrapRunner) runRemoteScript(req ShellLaunchParams, label, script string) (RemoteCommandResult, error) {
-	traceArgs := append([]string{}, kubectlRemoteExecArgs(req, script)...)
+func (s bootstrapRunner) runRemoteScript(req config.ShellLaunchParams, label, script string) (kube.RemoteCommandResult, error) {
+	traceArgs := append([]string{}, kube.KubectlRemoteExecArgs(req, script)...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
 	}
 	s.Context.TraceCommand("", "kubectl", traceArgs...)
 	s.Context.TraceBlock(label, script)
 	if s.Context.DryRun {
-		return RemoteCommandResult{}, nil
+		return kube.RemoteCommandResult{}, nil
 	}
 	return s.RunRemoteCommand(req, script)
-}
-
-func kubectlRemoteExecArgs(req ShellLaunchParams, script string) []string {
-	args := kubectlTargetArgs(req)
-	args = append(args, "exec")
-	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
-	return args
-}
-
-func RunRemoteCommand(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
-	cmd := core.Command("kubectl", kubectlRemoteExecArgs(req, script)...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return RemoteCommandResult{
-		Stdout: stdout.String(),
-		Stderr: stderr.String(),
-	}, err
-}
-
-func formatRemoteCommandStderr(stderr string) string {
-	stderr = strings.TrimSpace(stderr)
-	if stderr == "" {
-		return ""
-	}
-	return ": " + stderr
 }

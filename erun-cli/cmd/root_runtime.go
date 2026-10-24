@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -114,7 +115,7 @@ func bootstrapInitExitError(err error) error {
 	return err
 }
 
-func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
+func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
 	return func(ctx core.Context, params common.BootstrapInitParams) error {
 		ctx = withCloudContextPreflight(ctx, store)
 		params.RuntimeVersionDefault = currentBuildInfo().Version

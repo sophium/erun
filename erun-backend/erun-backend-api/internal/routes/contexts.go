@@ -11,9 +11,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type ContextRepository interface {
@@ -224,7 +224,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 	}
 
 	store := newInMemoryCloudStore(bootstrap.alias)
-	params := eruncommon.InitCloudContextParams{
+	params := cloud.InitCloudContextParams{
 		Name:               bootstrap.name,
 		CloudProviderAlias: bootstrap.alias,
 		Region:             bootstrap.region,
@@ -235,7 +235,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 	// Zero-value dependencies: InitCloudContext normalizes them to its own
 	// defaults, and in DryRun the default RunAWS/RunKubectl only trace the argv
 	// (they never invoke the real CLIs).
-	if _, err := eruncommon.InitCloudContext(ctx, store, params, eruncommon.CloudContextDependencies{}); err != nil {
+	if _, err := cloud.InitCloudContext(ctx, store, params, cloud.CloudContextDependencies{}); err != nil {
 		return nil, err
 	}
 	return splitTraceLines(trace.String()), nil

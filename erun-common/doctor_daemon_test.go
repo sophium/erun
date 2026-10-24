@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 func doctorTestContext() core.Context {
@@ -68,7 +69,7 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev", Type: tc.envType}
+			req := config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev", Type: tc.envType}
 			assertDoctorDaemonDecision(t, ResolveDoctorDockerDaemon(req), tc.wantKind, tc.wantContainer, tc.wantLabel, tc.wantReason)
 		})
 	}
@@ -122,11 +123,11 @@ func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) 
 	for _, envType := range []config.EnvironmentType{config.EnvironmentTypeRuntime, ""} {
 		t.Run("type="+string(envType), func(t *testing.T) {
 			runnerCalls := 0
-			runner := func(ShellLaunchParams, string, string) (RemoteCommandResult, error) {
+			runner := func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error) {
 				runnerCalls++
-				return RemoteCommandResult{}, nil
+				return kube.RemoteCommandResult{}, nil
 			}
-			req := ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: envType}
+			req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: envType}
 			ctx := doctorTestContext()
 
 			_, err := RunDoctorAction(ctx, runner, req, DoctorActionPruneImages)
@@ -152,16 +153,16 @@ func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) 
 // the caller can say what the prune actually did rather than only repeating
 // docker's own text.
 func TestDoctorDockerStorageRunsAgainstTheResolvedDaemon(t *testing.T) {
-	req := ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
+	req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Kind != DoctorDockerDaemonDindSidecar {
 		t.Fatalf("remote-agent daemon = %+v, want the dind sidecar", daemon)
 	}
 
 	var gotContainer, gotScript string
-	runner := func(_ ShellLaunchParams, container, script string) (RemoteCommandResult, error) {
+	runner := func(_ config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
 		gotContainer, gotScript = container, script
-		return RemoteCommandResult{Stdout: strings.Join([]string{
+		return kube.RemoteCommandResult{Stdout: strings.Join([]string{
 			doctorDockerReadMarker + "before",
 			"Images|11.32GB|11.32GB (100%)",
 			"Build Cache|0B|0B",
@@ -217,7 +218,7 @@ func TestDoctorHostDaemonRunsLocallyWithoutAShell(t *testing.T) {
 	writeDockerStub(t, binDir, localDockerStubScript("Images|11.32GB|11.32GB (100%)", "Build Cache|0B|0B"))
 	t.Setenv("PATH", binDir)
 
-	req := ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
+	req := config.ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Kind != DoctorDockerDaemonHost || daemon.Container != "" {
 		t.Fatalf("host daemon = %+v, want a local daemon with no container", daemon)
@@ -251,7 +252,7 @@ func TestDoctorHostDaemonToleratesAReadItCannotMake(t *testing.T) {
 	writeDockerStub(t, binDir, localDockerStubScript("Images  21  0  11.32GB  11.32GB (100%)"))
 	t.Setenv("PATH", binDir)
 
-	req := ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
+	req := config.ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
 	daemon := ResolveDoctorDockerDaemon(req)
 	result, err := runDoctorDockerSteps(doctorTestContext(), nil, req, daemon, "doctor-inspect", doctorInspectionSteps())
 	if err != nil {
@@ -298,7 +299,7 @@ func assertDoctorReportOnly(t *testing.T, report string, want ...string) {
 // rather than an empty report that reads like a daemon with nothing in it.
 func TestDoctorHostDaemonReadFailureIsReportedNotInvented(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	req := ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
+	req := config.ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
 	daemon := ResolveDoctorDockerDaemon(req)
 	if _, err := runDoctorDockerSteps(doctorTestContext(), nil, req, daemon, "doctor-inspect", doctorInspectionSteps()); err == nil {
 		t.Fatalf("an unreachable local docker must be reported, not rendered as an empty daemon")
@@ -377,7 +378,7 @@ func TestDoctorPruneSummaryTellsAPruneThatFreedNothingFromOneThatReclaimed(t *te
 // owes every figure below it: the same table from two different daemons has to
 // be readable as two different daemons.
 func TestDoctorDockerDaemonLineNamesTheDaemon(t *testing.T) {
-	req := ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
+	req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
 	line := DoctorDockerDaemonLine(ResolveDoctorDockerDaemon(req))
 	for _, want := range []string{"erun-dind", "frs-build", "frs-devops"} {
 		if !strings.Contains(line, want) {
@@ -385,7 +386,7 @@ func TestDoctorDockerDaemonLineNamesTheDaemon(t *testing.T) {
 		}
 	}
 
-	unavailable := DoctorDockerDaemonLine(ResolveDoctorDockerDaemon(ShellLaunchParams{Type: config.EnvironmentTypeRuntime}))
+	unavailable := DoctorDockerDaemonLine(ResolveDoctorDockerDaemon(config.ShellLaunchParams{Type: config.EnvironmentTypeRuntime}))
 	if !strings.Contains(unavailable, "no build daemon") || !strings.Contains(unavailable, "runtime") {
 		t.Fatalf("an environment with no build daemon must say so and why: %q", unavailable)
 	}

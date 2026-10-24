@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // uiTenantReviewCreateCapability reports whether the signed-in user may open
@@ -21,7 +21,7 @@ type uiTenantReviewCreateCapability struct {
 	// they were refused, so the notice hands over the request rather than only
 	// naming the capability. Absent when no role covers the write or the
 	// tenant's roles could not be read.
-	AccessRemedy *eruncommon.PlatformAccessRemedy `json:"accessRemedy,omitempty"`
+	AccessRemedy *platformclient.PlatformAccessRemedy `json:"accessRemedy,omitempty"`
 }
 
 // TenantReviewCreateCapability mirrors tenant_dashboard.go's own

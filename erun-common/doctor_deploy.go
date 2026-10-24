@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -42,8 +43,8 @@ type DeployDiagnosisResult struct {
 	AgentCredentials RuntimeAgentCredentialStatus
 }
 
-func helmStatusArgs(req ShellLaunchParams) []string {
-	args := []string{"status", RuntimeReleaseName(req.Tenant)}
+func helmStatusArgs(req config.ShellLaunchParams) []string {
+	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -53,8 +54,8 @@ func helmStatusArgs(req ShellLaunchParams) []string {
 	return args
 }
 
-func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
-	args := kubectlTargetArgs(req)
+func deployDiagnosisPodArgs(req config.ShellLaunchParams) []string {
+	args := config.KubectlTargetArgs(req)
 	return append(args, "get", "pods", "-o", "wide")
 }
 
@@ -70,7 +71,7 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 // rediscover the exact fact the helm read just established. ClusterUnreachable
 // carries that determination forward so every later doctor section can skip
 // its own probe the same way instead of independently rediscovering it.
-func RunDeployDiagnosis(ctx core.Context, req ShellLaunchParams) DeployDiagnosisResult {
+func RunDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	podArgs := deployDiagnosisPodArgs(req)
@@ -85,7 +86,7 @@ func RunDeployDiagnosis(ctx core.Context, req ShellLaunchParams) DeployDiagnosis
 		AgentCredentials: runtimeAgentCredentialApplicability(req),
 	}
 	if helmErr != nil && !isHelmReleaseNotFound(helmStatus) {
-		result.HelmReadError = observeHelmReadErrorMessage(RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
+		result.HelmReadError = observeHelmReadErrorMessage(config.RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
 		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(helmStatus)
 	}
 	if result.ClusterUnreachable {
@@ -169,7 +170,7 @@ func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryA
 
 // DeployRecoveryActionPromptLabel is the interactive confirm shown before the
 // action runs.
-func DeployRecoveryActionPromptLabel(action DeployRecoveryAction, req ShellLaunchParams) string {
+func DeployRecoveryActionPromptLabel(action DeployRecoveryAction, req config.ShellLaunchParams) string {
 	target := strings.TrimSpace(req.Tenant) + "/" + strings.TrimSpace(req.Environment)
 	switch action {
 	case DeployRecoveryClearPendingHelm:
@@ -208,10 +209,10 @@ func DeployRecoveryActionDescription(action DeployRecoveryAction) string {
 	}
 }
 
-func helmRollbackArgs(req ShellLaunchParams) []string {
+func helmRollbackArgs(req config.ShellLaunchParams) []string {
 	// `helm rollback <release>` with no revision rolls back to the previous
 	// release revision (the last one helm recorded as deployed).
-	args := []string{"rollback", RuntimeReleaseName(req.Tenant)}
+	args := []string{"rollback", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -223,11 +224,11 @@ func helmRollbackArgs(req ShellLaunchParams) []string {
 
 // RunDeployRecovery runs the chosen helm-level recovery against the runtime
 // release, mutating the cluster only on a real (non-dry-run) run.
-func RunDeployRecovery(ctx core.Context, req ShellLaunchParams, action DeployRecoveryAction) (string, error) {
+func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action DeployRecoveryAction) (string, error) {
 	switch action {
 	case DeployRecoveryClearPendingHelm:
 		clear := HelmReleaseRecoveryParams{
-			ReleaseName:       RuntimeReleaseName(req.Tenant),
+			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),
 			Verbosity:         ctx.Verbosity,

@@ -10,6 +10,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 type APIForwarder func(core.Context, config.OpenResult) error
@@ -32,18 +33,18 @@ func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, erro
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		Namespace:         common.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
 		LocalPort:         localPort,
 	}
 
 	apiDeployment := common.APIDeploymentName(result.Tenant)
-	ctx.TraceCommand("", "kubectl", common.KubectlGetDeploymentArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)...)
+	ctx.TraceCommand("", "kubectl", kube.KubectlGetDeploymentArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)...)
 
 	if ctx.DryRun {
 		return ensureAPIPortForwardDryRun(ctx, result, state, expectedState, localPort)
 	}
 
-	exists, err := common.DeploymentPresent(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
+	exists, err := kube.DeploymentPresent(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
 	if err != nil {
 		return 0, err
 	}
@@ -194,7 +195,7 @@ func kubectlAPIPortForwardArgs(result config.OpenResult, localPort int) []string
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
 	}
-	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
+	namespace := config.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}

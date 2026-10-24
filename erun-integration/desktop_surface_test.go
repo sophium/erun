@@ -14,8 +14,8 @@ import (
 	"testing"
 
 	cmd "github.com/sophium/erun/cmd"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-integration/internal/desktopsurface"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -154,10 +154,10 @@ func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
 
 // mcpCapabilities returns one Capability per registered MCP tool.
 func mcpCapabilities() []desktopsurface.Capability {
-	names := eruncommon.MCPToolNames()
+	names := mcptools.MCPToolNames()
 	capabilities := make([]desktopsurface.Capability, 0, len(names))
 	for _, name := range names {
-		descriptor, ok := eruncommon.MCPToolDescriptorFor(name)
+		descriptor, ok := mcptools.MCPToolDescriptorFor(name)
 		if !ok {
 			continue
 		}
@@ -177,8 +177,8 @@ func mcpCapabilities() []desktopsurface.Capability {
 // double-count the same capability under its CLI identity too.
 func mcpCoveredCLIPaths() map[string]bool {
 	covered := make(map[string]bool)
-	for _, name := range eruncommon.MCPToolNames() {
-		descriptor, ok := eruncommon.MCPToolDescriptorFor(name)
+	for _, name := range mcptools.MCPToolNames() {
+		descriptor, ok := mcptools.MCPToolDescriptorFor(name)
 		if !ok || len(descriptor.CLIPath) == 0 {
 			continue
 		}
@@ -241,8 +241,8 @@ func cliOnlyCapabilities(t testing.TB) []desktopsurface.Capability {
 func operatorFacingCommandPaths() []string {
 	covered := mcpCoveredCLIPaths()
 	agentFacingTool := make(map[string]bool)
-	for _, name := range eruncommon.MCPToolNames() {
-		descriptor, ok := eruncommon.MCPToolDescriptorFor(name)
+	for _, name := range mcptools.MCPToolNames() {
+		descriptor, ok := mcptools.MCPToolDescriptorFor(name)
 		if !ok || len(descriptor.CLIPath) == 0 || !descriptor.AgentFacing {
 			continue
 		}

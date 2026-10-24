@@ -16,6 +16,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
@@ -1557,7 +1558,7 @@ func (a *App) ListOrchestratorLaunchChoices() (orchestratorLaunchChoices, error)
 // are erun platform aliases", shared by this picker and the tenant platform
 // resolution, so the two cannot come to disagree about what the host has.
 func (a *App) configuredERunAliases() ([]string, error) {
-	providers, err := eruncommon.ListCloudProviders(a.deps.store)
+	providers, err := cloud.ListCloudProviders(a.deps.store)
 	if err != nil {
 		return nil, err
 	}

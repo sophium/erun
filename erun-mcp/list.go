@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 type ListInput struct {
@@ -102,7 +103,7 @@ func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string
 func buildListToolResult(ctx core.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift, err := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}

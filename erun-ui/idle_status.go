@@ -8,6 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
@@ -49,7 +51,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 
 type resolvedUIIdleStatus struct {
 	ui     uiIdleStatus
-	status eruncommon.EnvironmentIdleStatus
+	status activity.EnvironmentIdleStatus
 }
 
 // loadLocalIdleStatus assembles the idle status from what the host itself
@@ -58,14 +60,14 @@ type resolvedUIIdleStatus struct {
 // false: this reading may be stale relative to whatever the pod is actually
 // doing right now.
 func (a *App) loadLocalIdleStatus(result config.OpenResult) (resolvedUIIdleStatus, error) {
-	status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
+	status, err := activity.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return resolvedUIIdleStatus{}, err
 	}
 	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status, false), status: status}, nil
 }
 
-func (a *App) idleStatusToUI(result config.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
+func (a *App) idleStatusToUI(result config.OpenResult, status activity.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
 	ui.FromPod = fromPod
 	a.verifyLeaseJobIDs(result.Tenant, result.Environment, ui.Leases)
@@ -79,13 +81,13 @@ func (a *App) idleStatusToUI(result config.OpenResult, status eruncommon.Environ
 	// idle-stop.log on the pod persists across pod and host restarts. If the
 	// context is observably running again, the recorded error is from a
 	// previous lifetime and should not be advertised next to a healthy env.
-	if ui.CloudContextStatus == eruncommon.CloudContextStatusRunning {
+	if ui.CloudContextStatus == cloud.CloudContextStatusRunning {
 		ui.StopError = ""
 	}
 	return ui
 }
 
-func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
+func idleStatusToUI(status activity.EnvironmentIdleStatus) uiIdleStatus {
 	markers := make([]uiIdleMarker, 0, len(status.Markers))
 	for _, marker := range status.Markers {
 		markers = append(markers, uiIdleMarker{
@@ -123,7 +125,7 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 // produces exactly that shape with no job behind it at all, so the JobID set
 // here is a candidate, not proof. verifyLeaseJobIDs clears it when no job
 // record actually backs it.
-func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
+func environmentLeasesToUI(leases []activity.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
 	if len(leases) == 0 {
 		return nil
 	}
@@ -177,7 +179,7 @@ func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uiEnvironme
 	}
 }
 
-func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
+func idleMarkerClientsToUI(clients []activity.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
 	if len(clients) == 0 {
 		return nil
 	}
@@ -192,13 +194,13 @@ func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []u
 	return out
 }
 
-func (a *App) mergeLocalIdleActivity(result config.OpenResult, status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
-	local, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
+func (a *App) mergeLocalIdleActivity(result config.OpenResult, status activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
+	local, err := activity.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return status
 	}
 	if len(status.Activity) > 0 {
-		remoteWithLocalPolicy, err := eruncommon.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, status.Leases, time.Now())
+		remoteWithLocalPolicy, err := activity.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, status.Leases, time.Now())
 		if err == nil {
 			remoteWithLocalPolicy.ManagedCloud = status.ManagedCloud
 			remoteWithLocalPolicy.StopBlockedReason = status.StopBlockedReason
@@ -209,7 +211,7 @@ func (a *App) mergeLocalIdleActivity(result config.OpenResult, status eruncommon
 	return mergeNewerActivityMarkers(status, local)
 }
 
-func mergeNewerActivityMarkers(status, local eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
+func mergeNewerActivityMarkers(status, local activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
 	status.ManagedCloud = local.ManagedCloud
 	status.StopBlockedReason = local.StopBlockedReason
 	for _, localMarker := range local.Markers {
@@ -234,7 +236,7 @@ func mergeNewerActivityMarkers(status, local eruncommon.EnvironmentIdleStatus) e
 	return recomputeStopEligible(status)
 }
 
-func recomputeStopEligible(status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
+func recomputeStopEligible(status activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
 	if !status.ManagedCloud {
 		status.StopEligible = false
 		if status.StopBlockedReason == "" {
@@ -262,7 +264,7 @@ func recomputeStopEligible(status eruncommon.EnvironmentIdleStatus) eruncommon.E
 	return status
 }
 
-func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
+func uiStopBlockedReason(markers []activity.EnvironmentIdleMarker) string {
 	for _, marker := range markers {
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
@@ -283,12 +285,12 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 // The desktop no longer fires auto-stop — the in-pod idle monitor owns that.
 // This only clears the post-fire latch when an env reappears as running, so a
 // stale "already fired" flag never sticks forever for future start callers.
-func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
+func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ activity.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
 	}
-	if strings.TrimSpace(cloudContext.Status) == eruncommon.CloudContextStatusRunning {
+	if strings.TrimSpace(cloudContext.Status) == cloud.CloudContextStatusRunning {
 		a.clearIdleStopsForCloudContext(cloudContext.Name)
 	}
 }
@@ -462,7 +464,7 @@ func (a *App) selectionKeysForCloudContext(name string) []string {
 	return cleared
 }
 
-func activitySecondsUntilIdle(status eruncommon.EnvironmentIdleStatus) int64 {
+func activitySecondsUntilIdle(status activity.EnvironmentIdleStatus) int64 {
 	var seconds int64
 	for _, marker := range status.Markers {
 		if marker.Name == "working-hours" || marker.Idle {

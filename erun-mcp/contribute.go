@@ -6,6 +6,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // ContributeCloneInput is the MCP tool input for `contribute_clone`.
@@ -19,7 +20,7 @@ type ContributeCloneInput struct {
 func contributeCloneTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContributeCloneInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContributeCloneInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := simpleJobExecute(runtime, input.Verbosity, func(ctx core.Context, _ string) error {
-			return eruncommon.RunContributeClone(ctx, "", eruncommon.GitCommandRunner)
+			return eruncommon.RunContributeClone(ctx, "", gitx.GitCommandRunner)
 		})
 		envelope, err := runJobEnvelope(runtime, "contribute_clone", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err

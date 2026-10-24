@@ -12,13 +12,14 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
 
 const (
 	defaultMCPHost = "127.0.0.1"
 	defaultMCPPort = 17000
-	defaultMCPPath = common.MCPServerPath
+	defaultMCPPath = mcp.MCPServerPath
 )
 
 type mcpLaunchContext struct {
@@ -54,7 +55,7 @@ func newMCPCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), r
 				Environment:       result.Environment,
 				RepoPath:          result.RepoPath,
 				KubernetesContext: result.EnvConfig.KubernetesContext,
-				Namespace:         common.KubernetesNamespaceName(result.Tenant, result.Environment),
+				Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
 			}
 			commandArgs := mcpCommandArgs(host, resolvedPort, path, runtime)
 			ctx.TraceCommand("", "emcp", commandArgs...)

@@ -5,19 +5,19 @@ import (
 	"os"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // The location, and the migration off earlier ones, are shared (erun-common):
 // the desktop reads the same files to tell a reachable environment from one
 // nobody opened, and `erun delete` has to clear a record wherever it lives.
 func portForwardStatePath(kind, tenant, environment string, dryRun bool) (string, error) {
-	return common.ResolvePortForwardStatePath(kind, tenant, environment, dryRun)
+	return kube.ResolvePortForwardStatePath(kind, tenant, environment, dryRun)
 }
 
 func portForwardLogPath(statePath string) string {
-	return common.PortForwardLogPathForState(statePath)
+	return kube.PortForwardLogPathForState(statePath)
 }
 
 // portForwardLogMaxBytes bounds each kubectl port-forward log. A log that
@@ -64,7 +64,7 @@ func rotatePortForwardLogIfOversized(ctx core.Context, kind, logPath string) {
 // housekeeping and must never stop an operator opening the environment they
 // asked for.
 func reclaimOrphanedPortForwardRecords(ctx core.Context) {
-	if err := common.ReclaimOrphanedPortForwardRecords(ctx); err != nil {
+	if err := kube.ReclaimOrphanedPortForwardRecords(ctx); err != nil {
 		ctx.Trace(fmt.Sprintf("portforward: orphan reclaim skipped: %v", err))
 	}
 }

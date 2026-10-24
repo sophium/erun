@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // A release used to build every platform and only then push them all. On a
@@ -20,7 +22,7 @@ import (
 func buildSpecForPushOrder(promote bool) DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:  "/src",
-		Image:       DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3", Version: "1.2.3"},
+		Image:       helm.DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3", Version: "1.2.3"},
 		Platforms:   []string{"linux/amd64", "linux/arm64"},
 		Push:        true,
 		Promote:     promote,
@@ -30,7 +32,7 @@ func buildSpecForPushOrder(promote bool) DockerBuildSpec {
 
 // indexOfCommand returns the position of the first traced command whose joined
 // arguments contain every needle, or -1.
-func indexOfCommand(commands []commandSpec, needles ...string) int {
+func indexOfCommand(commands []helm.CommandSpec, needles ...string) int {
 	for i, command := range commands {
 		joined := strings.Join(command.Args, " ")
 		if slices.ContainsFunc(needles, func(n string) bool { return !strings.Contains(joined, n) }) {

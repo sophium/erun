@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 const testGatewayURL = "https://openrouter.ai/api"
@@ -22,9 +23,9 @@ func (s failingSecretStore) LoadCloudSecret(string) (string, error) {
 func (s failingSecretStore) DeleteCloudSecret(string) error { return nil }
 
 // emptySecretStore is a store holding nothing, the ordinary "not saved yet" case.
-func emptySecretStore(t *testing.T) CloudSecretStore {
+func emptySecretStore(t *testing.T) cloud.CloudSecretStore {
 	t.Helper()
-	return NewFileCloudSecretStore(t.TempDir())
+	return cloud.NewFileCloudSecretStore(t.TempDir())
 }
 
 func TestResolveGatewayCredentialPrefersTheSavedValue(t *testing.T) {
@@ -32,7 +33,7 @@ func TestResolveGatewayCredentialPrefersTheSavedValue(t *testing.T) {
 	// what makes saving one meaningful. The host here is on the same gateway, so
 	// the fallback would otherwise answer — this pins which one wins.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_BASE_URL":"`+testGatewayURL+`","ANTHROPIC_AUTH_TOKEN":"from-host"}}`)
-	store := NewFileCloudSecretStore(t.TempDir())
+	store := cloud.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "saved-by-operator"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestResolveGatewayCredentialTrimsWhatItDelivers(t *testing.T) {
 	// A token pasted into a settings file or a dialog routinely carries a
 	// trailing newline. Delivered raw it would be sent as part of the credential
 	// and rejected by the gateway, so it is trimmed on the way out.
-	store := NewFileCloudSecretStore(t.TempDir())
+	store := cloud.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "  sk-or-v1-abc\n"); err != nil {
 		t.Fatalf("save: %v", err)
 	}

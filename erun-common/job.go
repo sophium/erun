@@ -9,6 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A job is an activity lease plus an outcome. The lease already records what is
@@ -538,13 +542,13 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (Environm
 		}
 		return EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), ProcessAlive, currentJobHostname()), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activity.ProcessAlive, currentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning records
 // that aged out as it reads.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), ProcessAlive, currentJobHostname())
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activity.ProcessAlive, currentJobHostname())
 }
 
 func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]EnvironmentJob, error) {
@@ -664,7 +668,7 @@ func demoteEnvironmentJobToUnknown(job EnvironmentJob, now time.Time, hostname s
 // alive -- a checked, named cause beats a guessed one, but only when it is
 // actually attributable to this job rather than some earlier, unrelated one.
 func reconcileSamePodUnknownReason(job EnvironmentJob, hostname string, restartRunner openKubectlRunnerFunc) (kind, reason string) {
-	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, DevopsComponentName, restartRunner)
+	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, config.DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
 		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
 		if summary := environmentJobResourceStateSummaryFunc(); summary != "" {
@@ -675,7 +679,7 @@ func reconcileSamePodUnknownReason(job EnvironmentJob, hostname string, restartR
 	if terminatedReason == "" {
 		terminatedReason = "no reason reported"
 	}
-	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
+	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, config.DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
 }
 
 // environmentJobResourceStateSummary renders this pod's own cgroup state at
@@ -698,7 +702,7 @@ func reconcileSamePodUnknownReason(job EnvironmentJob, hostname string, restartR
 var environmentJobResourceStateSummaryFunc = environmentJobResourceStateSummary
 
 func environmentJobResourceStateSummary() string {
-	usage := ReadLocalRuntimeUsage(DefaultCgroupRoot)
+	usage := config.ReadLocalRuntimeUsage(config.DefaultCgroupRoot)
 	var parts []string
 	if usage.Memory.Unavailable == "" && !usage.Memory.Unlimited && usage.Memory.LimitBytes > 0 {
 		part := fmt.Sprintf("memory %.2f/%.2f GiB", gibibytes(usage.Memory.CurrentBytes), gibibytes(usage.Memory.LimitBytes))
@@ -750,7 +754,7 @@ func environmentJobChildren(dir, parentID string, now time.Time) []EnvironmentJo
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
-		children = append(children, reconcileEnvironmentJob(dir, job, now, ProcessAlive, hostname))
+		children = append(children, reconcileEnvironmentJob(dir, job, now, activity.ProcessAlive, hostname))
 	}
 	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 	return children
@@ -1059,7 +1063,7 @@ func readEnvironmentJobLogPage(path string, offset, maxBytes int64) ([]byte, int
 }
 
 func environmentJobDir(tenant, environment string) (string, error) {
-	dir, err := EnvironmentActivityDir(tenant, environment)
+	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
 		return "", err
 	}
@@ -1071,7 +1075,7 @@ func resolveEnvironmentJobID(id string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("job id is required")
 	}
-	sanitized := sanitizeForFilename(value)
+	sanitized := core.SanitizeForFilename(value)
 	if sanitized == "" || sanitized == "_" || sanitized == "." || sanitized == ".." {
 		return "", fmt.Errorf("job id %q has no usable characters", value)
 	}

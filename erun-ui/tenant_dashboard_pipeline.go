@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // loadTenantDashboardPipeline is the Pipeline tab's own panel: every job and
@@ -22,7 +22,7 @@ import (
 // Degrades independently like every other panel here: a caller who cannot
 // read GET /v1/pipeline gets a named restriction, and a read that fails
 // carries its own error, neither of which blanks a neighbouring panel.
-func loadTenantDashboardPipeline(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardPipeline(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabPipeline}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadPipeline); restricted != "" {
 		panel.Restricted = restricted
@@ -38,7 +38,7 @@ func loadTenantDashboardPipeline(ctx context.Context, client *eruncommon.Platfor
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-func tenantDashboardPipeline(issues []eruncommon.PlatformPipelineIssue) []uiPipelineIssue {
+func tenantDashboardPipeline(issues []platformclient.PlatformPipelineIssue) []uiPipelineIssue {
 	converted := make([]uiPipelineIssue, 0, len(issues))
 	for _, issue := range issues {
 		converted = append(converted, uiPipelineIssue{
@@ -49,7 +49,7 @@ func tenantDashboardPipeline(issues []eruncommon.PlatformPipelineIssue) []uiPipe
 	return converted
 }
 
-func tenantDashboardPipelineItems(items []eruncommon.PlatformPipelineItem) []uiPipelineItem {
+func tenantDashboardPipelineItems(items []platformclient.PlatformPipelineItem) []uiPipelineItem {
 	converted := make([]uiPipelineItem, 0, len(items))
 	for _, item := range items {
 		converted = append(converted, uiPipelineItem{
@@ -68,7 +68,7 @@ func tenantDashboardPipelineItems(items []eruncommon.PlatformPipelineItem) []uiP
 // nil when the platform sent none. An item carries exactly one of the two,
 // and a synthesised empty one would render as a record that exists but says
 // nothing -- the opposite of the "which record is this" the row is for.
-func tenantDashboardPipelineJob(job *eruncommon.PlatformPipelineJob) *uiPipelineJob {
+func tenantDashboardPipelineJob(job *platformclient.PlatformPipelineJob) *uiPipelineJob {
 	if job == nil {
 		return nil
 	}
@@ -95,7 +95,7 @@ func tenantDashboardOptionalTime(value *time.Time) string {
 	return tenantDashboardTime(*value)
 }
 
-func tenantDashboardPipelineReview(review *eruncommon.PlatformPipelineReview) *uiPipelineReview {
+func tenantDashboardPipelineReview(review *platformclient.PlatformPipelineReview) *uiPipelineReview {
 	if review == nil {
 		return nil
 	}

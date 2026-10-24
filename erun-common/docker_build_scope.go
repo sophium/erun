@@ -192,7 +192,7 @@ func detectedProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, proje
 	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
 		return "", false, nil
 	}
-	dockerDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "docker")
+	dockerDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "docker")
 	if ok, err := isDockerBuildModuleDir(dockerDir); err != nil {
 		return "", false, err
 	} else if ok {

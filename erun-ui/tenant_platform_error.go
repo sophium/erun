@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // A platform refusal reaches the operator beside the control they just used,
@@ -43,21 +43,21 @@ func operatorPlatformError(action platformAction, err error) error {
 
 	var sentence string
 	switch {
-	case errors.Is(err, eruncommon.ErrPlatformForbidden):
+	case errors.Is(err, platformclient.ErrPlatformForbidden):
 		sentence = fmt.Sprintf("You do not have permission to %s.", action)
-	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
+	case errors.Is(err, platformclient.ErrPlatformUnauthorized):
 		sentence = "Your sign-in is no longer valid for this tenant. Sign in again and retry."
-	case errors.Is(err, eruncommon.ErrPlatformNotFound):
+	case errors.Is(err, platformclient.ErrPlatformNotFound):
 		if action == actionAddReviewer || action == actionRemoveReviewer {
 			sentence = fmt.Sprintf("erun could not %s: the review or reviewer no longer exists. Refresh and try again.", action)
 		} else {
 			sentence = "That review no longer exists. Refresh to see the current list."
 		}
-	case errors.Is(err, eruncommon.ErrPlatformConflict):
+	case errors.Is(err, platformclient.ErrPlatformConflict):
 		// A conflict is the one refusal that is usually transient and usually
 		// somebody else's write, so it says what to do rather than what broke.
 		sentence = fmt.Sprintf("Someone else changed this while you were working, so erun did not %s. Refresh and try again.", action)
-	case errors.Is(err, eruncommon.ErrPlatformNotImplemented):
+	case errors.Is(err, platformclient.ErrPlatformNotImplemented):
 		sentence = fmt.Sprintf("This control plane cannot %s.", action)
 	default:
 		return err
@@ -82,11 +82,11 @@ func enrollERunPlatformUserError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, eruncommon.ErrPlatformForbidden):
+	case errors.Is(err, platformclient.ErrPlatformForbidden):
 		log.Printf("erun-app: enroll self refused: %v", err)
 		return enrollmentHandoffError{}
-	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
-		switch eruncommon.PlatformAuthErrorCode(err) {
+	case errors.Is(err, platformclient.ErrPlatformUnauthorized):
+		switch platformclient.PlatformAuthErrorCode(err) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
 			// Neither is an enrollment answer -- the wire form stays primary,
 			// same as tenantDashboardIdentityFailure's own fall-through.

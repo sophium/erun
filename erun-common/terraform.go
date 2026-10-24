@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // TerraformStore is the read surface RunTerraform needs to resolve the target
@@ -151,7 +152,7 @@ type terraformStep struct {
 // dispatches non-interactively into the env's own runtime pod via kubectl
 // exec, the same primitive erun doctor/outputs/sshd already use. nil defaults
 // to RunRemoteCommand.
-func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
+func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -374,7 +375,7 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	if err != nil {
 		return terraformTarget{}, err
 	}
-	if err := ValidateTenantName(tenant); err != nil {
+	if err := configpkg.ValidateTenantName(tenant); err != nil {
 		return terraformTarget{}, err
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
@@ -433,21 +434,21 @@ func requiresTerraformConfirmation(op TerraformOperation) bool {
 // plan/init dispatch automatically (read-only), while apply/destroy still
 // requires --confirm-environment (or an interactive terminal that can answer
 // the same prompt) before anything runs.
-func dispatchTerraform(ctx core.Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
+func dispatchTerraform(ctx core.Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
 		return TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
 	}
 
-	req := ShellLaunchParams{
+	req := configpkg.ShellLaunchParams{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
-		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
+		Namespace:         configpkg.KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext: target.KubeContext,
 	}
 	script := terraformDispatchScript(target, params.Operation)
 
 	ctx.Trace(fmt.Sprintf("terraform: %s/%s is a %s environment — dispatching %s non-interactively into its own runtime pod instead of running on this machine", target.Tenant, target.Environment, terraformEnvTypeLabel(string(target.EnvType)), params.Operation))
-	traceRemoteCommand(ctx, req, "terraform-dispatch", script)
+	kube.TraceRemoteCommand(ctx, req, "terraform-dispatch", script)
 
 	dispatched := TerraformResult{
 		Tenant:      target.Tenant,
@@ -469,13 +470,13 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 		}
 	}
 	if dispatch == nil {
-		dispatch = RunRemoteCommand
+		dispatch = kube.RunRemoteCommand
 	}
 	result, err := dispatch(req, script)
 	dispatched.Stdout = result.Stdout
 	dispatched.Stderr = result.Stderr
 	if err != nil {
-		return TerraformResult{}, fmt.Errorf("terraform %s: %w%s", params.Operation, err, formatRemoteCommandStderr(result.Stderr))
+		return TerraformResult{}, fmt.Errorf("terraform %s: %w%s", params.Operation, err, kube.FormatRemoteCommandStderr(result.Stderr))
 	}
 	return dispatched, nil
 }
@@ -488,9 +489,9 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 // approved target.Environment — the in-pod process has no stdin to prompt on,
 // so it must not need to.
 func terraformDispatchScript(target terraformTarget, op TerraformOperation) string {
-	args := []string{"erun", "terraform", string(op), "--tenant", shellQuote(target.Tenant), "--environment", shellQuote(target.Environment)}
+	args := []string{"erun", "terraform", string(op), "--tenant", core.ShellQuote(target.Tenant), "--environment", core.ShellQuote(target.Environment)}
 	if requiresTerraformConfirmation(op) {
-		args = append(args, "--confirm-environment", shellQuote(target.Environment))
+		args = append(args, "--confirm-environment", core.ShellQuote(target.Environment))
 	}
 	return strings.Join(args, " ")
 }
@@ -553,7 +554,7 @@ func resolveTerraformPlan(params TerraformParams, target terraformTarget, store 
 		Tenant:                  tenant,
 		Environment:             environment,
 		Operation:               string(op),
-		Namespace:               KubernetesNamespaceName(tenant, environment),
+		Namespace:               configpkg.KubernetesNamespaceName(tenant, environment),
 		Directory:               dir,
 		RootSource:              string(source),
 		ConfiguredTerraformBase: configuredBase,

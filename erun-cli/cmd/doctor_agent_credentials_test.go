@@ -11,7 +11,7 @@ import (
 )
 
 func agentCredentialDiagnosis(state common.RuntimeAgentCredentialState) common.DeployDiagnosisResult {
-	status := common.RuntimeAgentCredentialStatus{State: state, Container: common.DevopsComponentName}
+	status := common.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
 	if state == common.RuntimeAgentCredentialMissing || state == common.RuntimeAgentCredentialConfigured {
 		status.GatewayBaseURL = "https://openrouter.ai/api"
 	}

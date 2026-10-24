@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // atlasSumBasename is the file name Atlas writes for a migration directory's
@@ -51,7 +52,7 @@ func runAtlasMigrateHash(root, migrationsDir string) error {
 // produced the conflict already checked out every non-conflicting file from
 // both sides before reporting failure, so regenerating from disk can never
 // disagree with what actually landed.
-func resolveAtlasSumConflicts(root string, runGit GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
+func resolveAtlasSumConflicts(root string, runGit gitx.GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
 	var remaining []string
 	for _, file := range conflicted {
 		if filepath.Base(file) != atlasSumBasename {

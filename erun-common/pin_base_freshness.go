@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // A pin plan is only as current as the checkout it was resolved from. Every
@@ -86,7 +87,7 @@ func resolvePinBaseFreshness(ctx core.Context, projectRoot string) (PinBaseFresh
 	if strings.TrimSpace(projectRoot) == "" {
 		return PinBaseFreshness{}, false
 	}
-	branch, err := GitCurrentBranch(ctx, projectRoot)
+	branch, err := gitx.GitCurrentBranch(ctx, projectRoot)
 	if err != nil {
 		return PinBaseFreshness{}, false
 	}

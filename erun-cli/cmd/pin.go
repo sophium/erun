@@ -9,6 +9,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -209,7 +210,7 @@ func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.Op
 // verifyPinTargetPublished refuses a target the registry does not carry. An
 // empty tag listing is not proof of absence, so it is treated as "cannot check"
 // rather than "not there".
-func verifyPinTargetPublished(target string, versions common.RuntimeRegistryVersions) error {
+func verifyPinTargetPublished(target string, versions registry.RuntimeRegistryVersions) error {
 	wanted := strings.TrimPrefix(strings.TrimSpace(target), "v")
 	if len(versions.Tags) == 0 {
 		return nil
@@ -225,8 +226,8 @@ func verifyPinTargetPublished(target string, versions common.RuntimeRegistryVers
 // resolvePinRegistryVersions reads what erun has actually published. A pin is
 // only meaningful against a released version, so the registry — not a local
 // guess — is what decides which targets exist.
-func resolvePinRegistryVersions(ctx context.Context) (common.RuntimeRegistryVersions, error) {
-	return common.ResolveDefaultRuntimeRegistryVersions(ctx)
+func resolvePinRegistryVersions(ctx context.Context) (registry.RuntimeRegistryVersions, error) {
+	return registry.ResolveDefaultRuntimeRegistryVersions(ctx)
 }
 
 // resolvePinProjectRoot finds the tree whose pins are being rewritten. The

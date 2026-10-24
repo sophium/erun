@@ -11,6 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // TestHostedMarkerSurvivesAReload is the case the plan names directly: the
@@ -113,7 +114,7 @@ func TestPlanPullLocalPortRangeStartIgnoresTheEnvironmentItself(t *testing.T) {
 }
 
 func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
-	_, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeHost)}, "", 0)
+	_, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeHost)}, "", 0)
 	if err == nil {
 		t.Fatal("a host row was accepted as hostable")
 	}
@@ -124,15 +125,15 @@ func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
 
 func TestNewPullAsNewEnvironmentRequiresAUsableRepoPath(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, "", 0); err == nil {
+	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, "", 0); err == nil {
 		t.Fatal("a local-agent pull-as-new was accepted with no repo path")
 	}
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, dir, configpkg.LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, dir, configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a real directory was refused: %v", err)
 	}
 	// A runtime env rides a PVC worktree, so it needs no host path and an
 	// empty one is not a refusal.
-	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeRuntime)}, "", configpkg.LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeRuntime)}, "", configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a runtime pull-as-new was refused for want of a host path: %v", err)
 	}
 }
@@ -178,7 +179,7 @@ func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
 			{Name: "taken", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort},
 		},
 	}
-	client := &stubDefinitionClient{row: PlatformEnvironment{
+	client := &stubDefinitionClient{row: platformclient.PlatformEnvironment{
 		EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeRuntime),
 	}}
 	_, err := PullEnvironmentDefinition(context.Background(), store, client, EnvDefinitionPullParams{
@@ -210,7 +211,7 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 	version := "1.2.3"
 	hostile := "localrepopath-placeholder"
 	client := &stubDefinitionClient{
-		row: PlatformEnvironment{
+		row: platformclient.PlatformEnvironment{
 			EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh",
 			Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context",
 		},
@@ -261,7 +262,7 @@ func hostedDefinitionFixture(name string) configpkg.EnvConfig {
 }
 
 func hostedDefinitionClient(config configpkg.EnvConfig) *stubDefinitionClient {
-	return &stubDefinitionClient{row: PlatformEnvironment{
+	return &stubDefinitionClient{row: platformclient.PlatformEnvironment{
 		EnvironmentID:     config.Hosted.EnvironmentID,
 		TenantID:          config.Hosted.TenantID,
 		Name:              config.Name,
@@ -374,7 +375,7 @@ func TestPullStampsTheDigestToo(t *testing.T) {
 		},
 	}}}
 	client := &stubDefinitionClient{
-		row:        PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
+		row:        platformclient.PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
 		definition: configpkg.PlatformEnvDefinition{RuntimeVersion: &version},
 	}
 
@@ -446,7 +447,7 @@ func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig
 // stubDefinitionClient answers the three platform reads and writes a pull
 // makes, from fixed values.
 type stubDefinitionClient struct {
-	row             PlatformEnvironment
+	row             platformclient.PlatformEnvironment
 	definition      configpkg.PlatformEnvDefinition
 	rawDefinition   []byte
 	definitionReads int
@@ -454,21 +455,21 @@ type stubDefinitionClient struct {
 
 func (c *stubDefinitionClient) APIHost() string { return "https://api.example.test" }
 
-func (c *stubDefinitionClient) GetEnvironment(context.Context, string) (PlatformEnvironment, error) {
+func (c *stubDefinitionClient) GetEnvironment(context.Context, string) (platformclient.PlatformEnvironment, error) {
 	return c.row, nil
 }
 
-func (c *stubDefinitionClient) GetEnvironmentDefinition(context.Context, string) (PlatformEnvDefinitionRecord, error) {
+func (c *stubDefinitionClient) GetEnvironmentDefinition(context.Context, string) (platformclient.PlatformEnvDefinitionRecord, error) {
 	c.definitionReads++
 	definition := c.definition
 	if len(c.rawDefinition) > 0 {
 		if err := json.Unmarshal(c.rawDefinition, &definition); err != nil {
-			return PlatformEnvDefinitionRecord{}, err
+			return platformclient.PlatformEnvDefinitionRecord{}, err
 		}
 	}
-	return PlatformEnvDefinitionRecord{EnvironmentID: c.row.EnvironmentID, TenantID: c.row.TenantID, Revision: 3, Definition: definition}, nil
+	return platformclient.PlatformEnvDefinitionRecord{EnvironmentID: c.row.EnvironmentID, TenantID: c.row.TenantID, Revision: 3, Definition: definition}, nil
 }
 
-func (c *stubDefinitionClient) PutEnvironmentDefinition(context.Context, string, configpkg.PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
-	return PlatformEnvDefinitionRecord{}, nil
+func (c *stubDefinitionClient) PutEnvironmentDefinition(context.Context, string, configpkg.PlatformEnvDefinition) (platformclient.PlatformEnvDefinitionRecord, error) {
+	return platformclient.PlatformEnvDefinitionRecord{}, nil
 }

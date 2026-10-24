@@ -16,8 +16,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 type mockOIDCProvider struct {
@@ -302,15 +301,15 @@ func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
 // the same auth the MCP edge uses, with the API audience enforced.
 func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	privatePEM, keyPath := newDesktopIdentity(t)
-	issuer := eruncommon.FileIssuer(keyPath)
+	issuer := mcpauth.FileIssuer(keyPath)
 	verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{DesktopPublicKeyPath: keyPath})
 	now := time.Now()
 
 	t.Run("valid desktop token authenticates", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		claims := mustVerify(t, verifier, token)
@@ -320,10 +319,10 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	})
 
 	t.Run("a token minted for an MCP env audience is rejected against the API", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.MCPTokenAudience("acme", "prod"),
+			Audience:  mcpauth.MCPTokenAudience("acme", "prod"),
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected an MCP-audience token to be rejected against the API")
@@ -331,20 +330,20 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 
 	t.Run("a token claiming the trusted issuer but signed by a different key is rejected", func(t *testing.T) {
 		attackerPrivate, _ := newDesktopIdentity(t)
-		token := signDesktopToken(t, attackerPrivate, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, attackerPrivate, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "intruder",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected a token signed by a key other than the trusted public key to be rejected")
 	})
 
 	t.Run("expired token is rejected", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(-time.Minute).Unix(),
 		})
 		mustReject(t, verifier, token, "expected an expired token to be rejected")
@@ -358,18 +357,18 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 			DesktopPublicKeyPath: keyPath,
 			AllowedAudiences:     []string{"console-client"},
 		})
-		accepted := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		accepted := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustVerify(t, verifier, accepted)
 
 		// Neither the desktop's own MCP audience nor the OIDC allow-list's
 		// entry is an API audience for a desktop-signed token.
-		for _, audience := range []string{eruncommon.MCPTokenAudience("acme", "prod"), "console-client"} {
-			rejected := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		for _, audience := range []string{mcpauth.MCPTokenAudience("acme", "prod"), "console-client"} {
+			rejected := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 				Issuer:    issuer,
 				Subject:   "dev-user",
 				Audience:  audience,
@@ -381,10 +380,10 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 
 	t.Run("a desktop token from an untrusted file issuer is rejected", func(t *testing.T) {
 		otherPrivate, otherPath := newDesktopIdentity(t)
-		token := signDesktopToken(t, otherPrivate, eruncommon.MCPTokenClaims{
-			Issuer:    eruncommon.FileIssuer(otherPath),
+		token := signDesktopToken(t, otherPrivate, mcpauth.MCPTokenClaims{
+			Issuer:    mcpauth.FileIssuer(otherPath),
 			Subject:   "intruder",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected a token from a non-configured file issuer to be rejected")
@@ -395,7 +394,7 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 // file:// issuer resolves it, returning the private key and that path.
 func newDesktopIdentity(t *testing.T) (privatePEM []byte, keyPath string) {
 	t.Helper()
-	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, publicPEM, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate desktop identity: %v", err)
 	}
@@ -406,9 +405,9 @@ func newDesktopIdentity(t *testing.T) (privatePEM []byte, keyPath string) {
 	return privatePEM, keyPath
 }
 
-func signDesktopToken(t *testing.T, privateKey []byte, claims eruncommon.MCPTokenClaims) string {
+func signDesktopToken(t *testing.T, privateKey []byte, claims mcpauth.MCPTokenClaims) string {
 	t.Helper()
-	token, err := eruncommon.SignMCPToken(privateKey, claims)
+	token, err := mcpauth.SignMCPToken(privateKey, claims)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}

@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // runtimeOutputChunkBytes bounds how much payload one `kubectl exec` carries.
@@ -46,7 +48,7 @@ type runtimeOutputSource struct {
 // a series of bounded ranges rather than one stream, and the reassembled bytes
 // are checked against the pod's own digest. Dry-run returns a preview result
 // with no bytes and no transfer.
-func DownloadRuntimeOutput(ctx core.Context, req ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return RuntimeOutputResult{}, err
@@ -56,7 +58,7 @@ func DownloadRuntimeOutput(ctx core.Context, req ShellLaunchParams, params Runti
 		return RuntimeOutputResult{}, err
 	}
 	if run == nil {
-		run = RunRemoteCommand
+		run = kube.RunRemoteCommand
 	}
 	target := path.Join(dir, name)
 	ctx.Trace("outputs: downloading " + target)
@@ -71,10 +73,10 @@ func DownloadRuntimeOutput(ctx core.Context, req ShellLaunchParams, params Runti
 
 // fetchRuntimeOutput asks the pod what it would send, reads it, and refuses a
 // payload the pod does not vouch for.
-func fetchRuntimeOutput(ctx core.Context, req ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	out, err := run(req, probe)
 	if err != nil {
-		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, formatRemoteCommandStderr(out.Stderr), err)
+		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	source, head, err := parseRuntimeOutputProbe(name, out.Stdout)
 	if err != nil {
@@ -98,7 +100,7 @@ func fetchRuntimeOutput(ctx core.Context, req ShellLaunchParams, name, probe str
 // sent plus however many more it takes, and reports how far it got when a range
 // cannot be read: the size of the transfer is what makes it fail, so an operator
 // must never have to infer that from a bare stream error.
-func transferRuntimeOutput(ctx core.Context, req ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
+func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
 	if source.Size > MaxRuntimeOutputBytes {
 		return nil, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, source.Size, MaxRuntimeOutputBytes)
 	}
@@ -127,13 +129,13 @@ func transferRuntimeOutput(ctx core.Context, req ShellLaunchParams, name string,
 // readRuntimeOutputRange reads one range, retrying a failed or short read. A
 // range whose decoded length is not the requested one is treated as a failed
 // read, so a truncated stream can never be assembled into a plausible file.
-func readRuntimeOutputRange(ctx core.Context, req ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
+func readRuntimeOutputRange(ctx core.Context, req config.ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
 	script := runtimeOutputRangeScript(sourcePath, offset, length)
 	var last error
 	for attempt := 1; attempt <= runtimeOutputChunkAttempts; attempt++ {
 		out, err := run(req, script)
 		if err != nil {
-			last = fmt.Errorf("read bytes %d-%d%s: %w", offset, offset+length-1, formatRemoteCommandStderr(out.Stderr), err)
+			last = fmt.Errorf("read bytes %d-%d%s: %w", offset, offset+length-1, kube.FormatRemoteCommandStderr(out.Stderr), err)
 		} else if chunk, decodeErr := decodeRuntimeOutputChunk(out.Stdout, length); decodeErr != nil {
 			last = fmt.Errorf("read bytes %d-%d: %w", offset, offset+length-1, decodeErr)
 		} else {
@@ -196,8 +198,8 @@ func gunzipRuntimeOutputChunk(data []byte) ([]byte, error) {
 // directory download. A leftover staging file is the pod's problem to carry, so
 // it is removed even when the transfer failed — and a failed removal is only
 // traced, because the bytes the caller asked for have already arrived.
-func discardRuntimeOutputStagedArchive(ctx core.Context, req ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
-	script := "rm -f " + shellQuote(stagedPath)
+func discardRuntimeOutputStagedArchive(ctx core.Context, req config.ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
+	script := "rm -f " + core.ShellQuote(stagedPath)
 	ctx.TraceBlock("outputs discard staged archive", script)
 	if _, err := run(req, script); err != nil {
 		ctx.Trace(fmt.Sprintf("outputs: could not remove the staged archive %s: %v", stagedPath, err))
@@ -246,9 +248,9 @@ func parseRuntimeOutputProbe(name, stdout string) (runtimeOutputSource, []byte, 
 // the length and digest of whatever will be sent, and sends the first range with
 // it. /dev, /proc, and /sys are excluded defensively from the archive.
 func runtimeOutputProbeScript(dir, name string) string {
-	quotedDir := shellQuote(dir)
-	quotedName := shellQuote(name)
-	target := shellQuote(path.Join(dir, name))
+	quotedDir := core.ShellQuote(dir)
+	quotedName := core.ShellQuote(name)
+	target := core.ShellQuote(path.Join(dir, name))
 	limit := strconv.Itoa(MaxRuntimeOutputBytes)
 	return strings.Join([]string{
 		"target=" + target,
@@ -287,7 +289,7 @@ func runtimeOutputProbeScript(dir, name string) string {
 
 // runtimeOutputRangeScript reads one byte range of the staged payload.
 func runtimeOutputRangeScript(sourcePath string, offset, length int64) string {
-	return runtimeOutputRangePipeline(shellQuote(sourcePath), offset, length)
+	return runtimeOutputRangePipeline(core.ShellQuote(sourcePath), offset, length)
 }
 
 // runtimeOutputRangePipeline emits the range read itself, announcing whether it

@@ -6,6 +6,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // reportGitPushAccess flags the asymmetry that makes this expensive to
@@ -32,7 +33,7 @@ func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis c
 		return reportPodSkippedUnreachable(ctx, "Git push access")
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	status, err := common.InspectGitPushAccess(ctx, nil, req, result.RepoPath)
+	status, err := gitx.InspectGitPushAccess(ctx, nil, req, result.RepoPath)
 	if err != nil {
 		if ctx.DryRun {
 			return nil
@@ -47,14 +48,14 @@ func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis c
 	return err
 }
 
-func gitFetchStatusLine(status common.GitPushAccessStatus) string {
+func gitFetchStatusLine(status gitx.GitPushAccessStatus) string {
 	if status.FetchOK {
 		return "ok"
 	}
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func gitPushStatusLine(result config.OpenResult, status common.GitPushAccessStatus) string {
+func gitPushStatusLine(result config.OpenResult, status gitx.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

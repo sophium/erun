@@ -2,6 +2,7 @@ package cmd
 
 import (
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -19,7 +20,7 @@ func noticeStaleRuntimePortForwards(ctx core.Context, specs []common.DeploySpec)
 		return
 	}
 	for _, spec := range specs {
-		if spec.SkipHelm || spec.Deploy.ReleaseName != common.RuntimeReleaseName(spec.Target.Tenant) {
+		if spec.SkipHelm || spec.Deploy.ReleaseName != config.RuntimeReleaseName(spec.Target.Tenant) {
 			continue
 		}
 		if !runtimeMCPPortForwardIsStale(spec.Target.Tenant, spec.Target.Environment) {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // Authentication says which tenant is calling; this says what that caller may
@@ -30,7 +30,7 @@ import (
 type authIdentity struct {
 	Tenant       string
 	User         string
-	Capabilities eruncommon.MCPCapabilitySet
+	Capabilities mcptools.MCPCapabilitySet
 }
 
 type authContextKey struct{}
@@ -47,7 +47,7 @@ func authIdentityFrom(ctx context.Context) authIdentity {
 	if identity, ok := ctx.Value(authContextKey{}).(authIdentity); ok {
 		return identity
 	}
-	return authIdentity{Capabilities: eruncommon.AdminMCPCapabilitySet()}
+	return authIdentity{Capabilities: mcptools.AdminMCPCapabilitySet()}
 }
 
 // toolRegistrar carries what a registration needs to decide. It exists because
@@ -204,7 +204,7 @@ func outputSchemaFor[Out any]() *jsonschema.Schema {
 // registration is loud and immediate; a silent conservative default would be
 // the same invisible-wrong-answer this table exists to remove.
 func describeTool(tool *mcp.Tool) {
-	descriptor, ok := eruncommon.MCPToolDescriptorFor(tool.Name)
+	descriptor, ok := mcptools.MCPToolDescriptorFor(tool.Name)
 	if !ok {
 		panic(fmt.Sprintf("erun-mcp: tool %q has no descriptor in erun-common's MCPToolDescriptor table; add one so it does not ship on the MCP spec defaults", tool.Name))
 	}
@@ -266,7 +266,7 @@ func guardTool[In, Out any](identity authIdentity, name string, metrics *metrics
 			var zero Out
 			auditToolDecision(caller, name, false)
 			metrics.recordAuditEvent(action, "agent", "error")
-			return nil, zero, fmt.Errorf("tool %q requires the %s capability", name, eruncommon.MCPToolCapability(name))
+			return nil, zero, fmt.Errorf("tool %q requires the %s capability", name, mcptools.MCPToolCapability(name))
 		}
 		auditToolDecision(caller, name, true)
 		result, out, err := handler(ctx, req, input)

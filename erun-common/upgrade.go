@@ -9,6 +9,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // UpgradeVersionsOverrideEnv is a test-only seam that forces the upgrade
@@ -16,12 +18,12 @@ import (
 // without a registry. Not a production knob.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
 
-func runtimeVersionsOverrideFromEnvWithError() (RuntimeRegistryVersions, string, bool) {
+func runtimeVersionsOverrideFromEnvWithError() (registrypkg.RuntimeRegistryVersions, string, bool) {
 	raw := strings.TrimSpace(os.Getenv(UpgradeVersionsOverrideEnv))
 	if raw == "" {
-		return RuntimeRegistryVersions{}, "", false
+		return registrypkg.RuntimeRegistryVersions{}, "", false
 	}
-	var versions RuntimeRegistryVersions
+	var versions registrypkg.RuntimeRegistryVersions
 	var forcedError string
 	for _, part := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
@@ -42,13 +44,13 @@ func runtimeVersionsOverrideFromEnvWithError() (RuntimeRegistryVersions, string,
 
 // RegistryVersionsLookup queries one image repository for its latest channel
 // versions.
-type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error)
+type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (registrypkg.RuntimeRegistryVersions, error)
 
 // SourcedRuntimeVersions pairs a registry with the runtime versions it offers
 // for an environment's runtime image.
 type SourcedRuntimeVersions struct {
 	Registry string
-	Versions RuntimeRegistryVersions
+	Versions registrypkg.RuntimeRegistryVersions
 }
 
 // EnvVersionsResolver resolves the candidate runtime versions for one
@@ -71,7 +73,7 @@ func UpgradeVersionsResolverForStore(_ DeployStore, lookup RegistryVersionsLooku
 			}
 			return []SourcedRuntimeVersions{{Versions: versions}}, nil
 		}
-		repository := RuntimeReleaseName(tenant)
+		repository := config.RuntimeReleaseName(tenant)
 		sourced := make([]SourcedRuntimeVersions, 0, 4)
 		queried := make(map[string]struct{}, 4)
 		var firstErr error
@@ -423,12 +425,12 @@ type UpgradeItemDeployer func(ctx core.Context, item UpgradePlanItem) error
 type UpgradeOccupancyError struct {
 	Tenant      string
 	Environment string
-	Holders     []EnvironmentActivityLease
+	Holders     []activity.EnvironmentActivityLease
 }
 
 func (e *UpgradeOccupancyError) Error() string {
 	return fmt.Sprintf("%s/%s is held by %s -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes",
-		e.Tenant, e.Environment, FormatLeaseHolders(e.Holders))
+		e.Tenant, e.Environment, activity.FormatLeaseHolders(e.Holders))
 }
 
 // LeaseGuardedUpgradeDeployer wraps deploy so a held environment refuses
@@ -440,13 +442,13 @@ func (e *UpgradeOccupancyError) Error() string {
 // the deploy's own duration, which also guards the roll itself against a
 // second, concurrent upgrade racing the same environment -- the same
 // exclusive-claim shape runtime_resize.go's RunRuntimeResize already uses.
-func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
+func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder activity.EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
 	if now == nil {
 		now = time.Now
 	}
 	return func(ctx core.Context, item UpgradePlanItem) error {
 		nowValue := now()
-		leases, err := LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
+		leases, err := activity.LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
 		if err != nil {
 			return fmt.Errorf("upgrade: %s/%s: reading activity leases: %w", item.Tenant, item.Environment, err)
 		}
@@ -454,7 +456,7 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			if !override {
 				return &UpgradeOccupancyError{Tenant: item.Tenant, Environment: item.Environment, Holders: leases}
 			}
-			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), FormatLeaseHolders(leases)))
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), activity.FormatLeaseHolders(leases)))
 		}
 		// A dry run must show this refusal (or override) exactly as a real run
 		// would, but must not itself claim the exclusive lease -- that would be
@@ -465,14 +467,14 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			return deploy(ctx, item)
 		}
 
-		lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		lease, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 			Tenant: item.Tenant, Environment: item.Environment, Name: "upgrade", Exclusive: true, Holder: holder, Now: nowValue,
 		})
 		if err != nil {
 			return fmt.Errorf("upgrade: %s/%s: %w", item.Tenant, item.Environment, err)
 		}
 		defer func() {
-			_, _ = ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
+			_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
 		}()
 
 		return deploy(ctx, item)
@@ -611,7 +613,7 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 	return lagging
 }
 
-func channelTarget(versions RuntimeRegistryVersions, channel string) string {
+func channelTarget(versions registrypkg.RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == config.UpgradeChannelSnapshot {
 		// An absent snapshot side is not "nothing newer exists" — it means the
 		// registry publishes no snapshots at all, and the stable release is then
@@ -635,13 +637,13 @@ func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 // that snapshot stream, while a snapshot whose base outranks the stable
 // belongs to the next, newer stream. Unparseable versions keep the snapshot
 // target.
-func stableSupersedesSnapshot(versions RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
+func stableSupersedesSnapshot(versions registrypkg.RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
 	stable = strings.TrimSpace(versions.LatestStable)
 	snapshot = strings.TrimSpace(versions.LatestSnapshot)
 	if stable == "" || snapshot == "" {
 		return stable, snapshot, false
 	}
-	stableVersion, ok := parseRegistryStableVersion(stable)
+	stableVersion, ok := registrypkg.ParseRegistryStableVersion(stable)
 	if !ok {
 		return stable, snapshot, false
 	}
@@ -649,9 +651,9 @@ func stableSupersedesSnapshot(versions RuntimeRegistryVersions) (stable, snapsho
 	if !found {
 		return stable, snapshot, false
 	}
-	baseVersion, ok := parseRegistryStableVersion(base)
+	baseVersion, ok := registrypkg.ParseRegistryStableVersion(base)
 	if !ok {
 		return stable, snapshot, false
 	}
-	return stable, snapshot, compareSemver(stableVersion, baseVersion) >= 0
+	return stable, snapshot, registrypkg.CompareSemver(stableVersion, baseVersion) >= 0
 }

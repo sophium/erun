@@ -13,7 +13,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // tenantEchoHandler is reached only after the middleware authorizes; it echoes
@@ -36,7 +36,7 @@ func identityWithToken(t *testing.T) (issuer, token string) {
 // resolves no claims to admin).
 func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) {
 	t.Helper()
-	priv, pub, err := eruncommon.GenerateDesktopIdentity()
+	priv, pub, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}
@@ -44,8 +44,8 @@ func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) 
 	if err := os.WriteFile(path, pub, 0o600); err != nil {
 		t.Fatalf("write public key: %v", err)
 	}
-	issuer = eruncommon.FileIssuer(path)
-	token, err = eruncommon.SignMCPToken(priv, eruncommon.MCPTokenClaims{
+	issuer = mcpauth.FileIssuer(path)
+	token, err = mcpauth.SignMCPToken(priv, mcpauth.MCPTokenClaims{
 		Issuer:    issuer,
 		Audience:  "erun-mcp",
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
@@ -235,7 +235,7 @@ func TestAuthMiddlewareOIDCDispatch(t *testing.T) {
 	cfg := mcpAuthConfig{
 		trustedIssuers: map[string]string{provider.issuer(): "acme"},
 		audience:       audience,
-		oidc:           eruncommon.NewOIDCVerifier(),
+		oidc:           mcpauth.NewOIDCVerifier(),
 	}
 
 	t.Run("valid OIDC token is authorized and resolves the tenant", func(t *testing.T) {

@@ -76,7 +76,7 @@ func (e DoctorDockerDaemonUnavailableError) Error() string {
 // — the same signal the runtime chart uses to render the erun-dind sidecar at
 // all (EnvironmentType.UsesDindSidecar) — because a prune aimed anywhere else
 // reports a reclaim this environment's builds cannot use.
-func ResolveDoctorDockerDaemon(req ShellLaunchParams) DoctorDockerDaemon {
+func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) DoctorDockerDaemon {
 	switch {
 	// Checked before the type cases below: this is the predicate the chart's
 	// own dind condition mirrors, so the two cannot disagree about which
@@ -87,7 +87,7 @@ func ResolveDoctorDockerDaemon(req ShellLaunchParams) DoctorDockerDaemon {
 			Container: runtimeDindContainerName,
 			Label:     "the " + runtimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
-				runtimeDindContainerName, RuntimeReleaseName(req.Tenant), req.Namespace),
+				runtimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
 		return DoctorDockerDaemon{
@@ -219,7 +219,7 @@ func doctorDockerScript(steps []doctorDockerStep) string {
 			if !first {
 				lines = append(lines, "printf '\\n'")
 			}
-			lines = append(lines, "printf '%s\\n' "+shellQuote(step.header))
+			lines = append(lines, "printf '%s\\n' "+core.ShellQuote(step.header))
 		}
 		first = false
 		command := step.executable() + " " + strings.Join(quotedDockerArgs(step.args), " ")
@@ -228,9 +228,9 @@ func doctorDockerScript(steps []doctorDockerStep) string {
 			continue
 		}
 		lines = append(lines,
-			"printf '%s\\n' "+shellQuote(doctorDockerReadMarker+step.readKey),
+			"printf '%s\\n' "+core.ShellQuote(doctorDockerReadMarker+step.readKey),
 			command,
-			"printf '%s\\n' "+shellQuote(doctorDockerReadMarker+step.readKey+":end"),
+			"printf '%s\\n' "+core.ShellQuote(doctorDockerReadMarker+step.readKey+":end"),
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -246,7 +246,7 @@ func quotedDockerArgs(args []string) []string {
 			quoted = append(quoted, arg)
 			continue
 		}
-		quoted = append(quoted, shellQuote(arg))
+		quoted = append(quoted, core.ShellQuote(arg))
 	}
 	return quoted
 }
@@ -337,7 +337,7 @@ func formatDockerStoreBytes(bytes uint64) string {
 
 // runDoctorDockerSteps runs steps against daemon through the transport that
 // daemon is reachable by, and returns both the output and the store readings.
-func runDoctorDockerSteps(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerSteps(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}

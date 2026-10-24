@@ -31,7 +31,7 @@ func MigrateDefaultDevopsChartAppVersion(ctx core.Context, projectRoot, tenant, 
 	}
 	projectRoot = filepath.Clean(projectRoot)
 
-	moduleName := RuntimeReleaseName(tenant)
+	moduleName := config.RuntimeReleaseName(tenant)
 	chartPath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "Chart.yaml")
 	if _, err := os.Stat(chartPath); err != nil {
 		if os.IsNotExist(err) {
@@ -77,7 +77,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 	for _, componentName := range runtimeComponentNames(target.Tenant) {
 		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", nil)
 		if err == nil {
-			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
+			spec.Deploy.ReleaseName = config.RuntimeReleaseName(target.Tenant)
 			return spec, nil
 		}
 		if !isHelmChartNotFoundForComponent(err) {
@@ -93,14 +93,14 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 // and deploy resolve the same chart — or fall back to the published one —
 // uniformly.
 func runtimeComponentNames(tenant string) []string {
-	names := []string{DevopsComponentName}
+	names := []string{config.DevopsComponentName}
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
 		return names
 	}
 
 	tenantComponent := tenant + "-devops"
-	if tenantComponent == DevopsComponentName {
+	if tenantComponent == config.DevopsComponentName {
 		return names
 	}
 	return append([]string{tenantComponent}, names...)

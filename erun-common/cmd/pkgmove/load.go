@@ -70,6 +70,9 @@ type sourceFile struct {
 	// docs maps a declared name's offset to the offset of the doc comment
 	// that describes it, so a rename can update a comment that leads with it.
 	docs map[int]int
+	// pkgRefs holds the offset of every identifier that names an imported
+	// package, so a local that shadows an import's name is not read as a use.
+	pkgRefs map[int]bool
 }
 
 type siteKey struct {
@@ -187,7 +190,7 @@ func (w *world) registerFile(pkg *packages.Package, file *ast.File, inModule boo
 	}
 	sf := &sourceFile{
 		path: name, inModule: inModule, pkgPath: pkg.PkgPath, fset: pkg.Fset, ast: file, src: src,
-		names: map[string]bool{}, imports: map[string]bool{}, importNames: map[string]string{}, docs: map[int]int{},
+		names: map[string]bool{}, imports: map[string]bool{}, importNames: map[string]string{}, docs: map[int]int{}, pkgRefs: map[int]bool{},
 	}
 	if inModule {
 		rel, _ := filepath.Rel(w.rootDir, name)
@@ -244,16 +247,7 @@ func recordSpecDoc(spec ast.Spec, doc *ast.CommentGroup, note func([]*ast.Ident,
 func (w *world) collectFile(pkg *packages.Package, sf *sourceFile) {
 	file := pkg.Syntax[indexOfFile(pkg, sf.path)]
 	qualified := qualifiedSelectors(file, pkg.TypesInfo)
-	for _, spec := range file.Imports {
-		p, _ := strconv.Unquote(spec.Path.Value)
-		if spec.Name != nil {
-			sf.imports[spec.Name.Name] = true
-			sf.importNames[p] = spec.Name.Name
-		} else if pn, ok := pkg.TypesInfo.Implicits[spec].(*types.PkgName); ok {
-			sf.imports[pn.Name()] = true
-			sf.importNames[p] = pn.Name()
-		}
-	}
+	collectImportNames(pkg, file, sf)
 	for id, obj := range pkg.TypesInfo.Defs {
 		if !w.sameFile(pkg, id, sf) {
 			continue
@@ -264,8 +258,27 @@ func (w *world) collectFile(pkg *packages.Package, sf *sourceFile) {
 		w.recordDef(pkg, id, obj)
 	}
 	for id, obj := range pkg.TypesInfo.Uses {
-		if w.sameFile(pkg, id, sf) {
-			w.recordUse(pkg, id, obj, qualified)
+		if !w.sameFile(pkg, id, sf) {
+			continue
+		}
+		if _, isImport := obj.(*types.PkgName); isImport {
+			sf.pkgRefs[pkg.Fset.Position(id.Pos()).Offset] = true
+		}
+		w.recordUse(pkg, id, obj, qualified)
+	}
+}
+
+// collectImportNames records the name each of a file's imports is referred
+// to by.
+func collectImportNames(pkg *packages.Package, file *ast.File, sf *sourceFile) {
+	for _, spec := range file.Imports {
+		p, _ := strconv.Unquote(spec.Path.Value)
+		if spec.Name != nil {
+			sf.imports[spec.Name.Name] = true
+			sf.importNames[p] = spec.Name.Name
+		} else if pn, ok := pkg.TypesInfo.Implicits[spec].(*types.PkgName); ok {
+			sf.imports[pn.Name()] = true
+			sf.importNames[p] = pn.Name()
 		}
 	}
 }

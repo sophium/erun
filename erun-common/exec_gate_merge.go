@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // GateMergeSource is one branch to squash into the prospective merge, in the
@@ -104,8 +105,8 @@ type GateMergeWorkingTreeResult struct {
 type GateMergeWorkingTreeDependencies struct {
 	WorkingTreeClean func(ctx core.Context, root string) (bool, error)
 	ResolveRef       func(ctx core.Context, root, ref string) (string, error)
-	RunGit           GitCommandRunnerFunc
-	ConflictedFiles  func(root string, runGit GitCommandRunnerFunc) ([]string, error)
+	RunGit           gitx.GitCommandRunnerFunc
+	ConflictedFiles  func(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error)
 	// StagedPaths reads back what a squash actually staged. A source that
 	// stages nothing contributes nothing to the prospective merge, so it is
 	// skipped rather than committed — see gateMergeOneSource.
@@ -123,13 +124,13 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 		deps.ResolveRef = gitResolveRef
 	}
 	if deps.RunGit == nil {
-		deps.RunGit = GitCommandRunner
+		deps.RunGit = gitx.GitCommandRunner
 	}
 	if deps.ConflictedFiles == nil {
 		deps.ConflictedFiles = gitMergeConflictedFiles
 	}
 	if deps.StagedPaths == nil {
-		deps.StagedPaths = gitStagedFiles
+		deps.StagedPaths = gitx.GitStagedFiles
 	}
 	if deps.RunAtlasHash == nil {
 		deps.RunAtlasHash = runAtlasMigrateHash
@@ -478,7 +479,7 @@ func traceGateMergePlan(ctx core.Context, root string, sources []GateMergeSource
 	for _, source := range sources {
 		ctx.TraceCommand(root, "git", "merge", "--squash", gateMergeFetchRef(source.Branch))
 		ctx.TraceCommand(root, "git", gateMergeTrailerLogArgs(targetRef, gateMergeFetchRef(source.Branch))...)
-		ctx.TraceCommand(root, "git", commitVerbArgs(true, "<message + the branch trailers>")...)
+		ctx.TraceCommand(root, "git", gitx.CommitVerbArgs(true, "<message + the branch trailers>")...)
 	}
 	return fetchArgs
 }
@@ -602,7 +603,7 @@ func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource
 	// so the repository's own hooks are skipped: a formatter hook running
 	// under a different toolchain than the build rewrote a staged file, and
 	// the merge commit failed the lint its source had passed.
-	if output, err := runGitCapturingOutput(root, deps, commitVerbArgs(true, gateMergeCommitMessage(source.Message, trailers))...); err != nil {
+	if output, err := runGitCapturingOutput(root, deps, gitx.CommitVerbArgs(true, gateMergeCommitMessage(source.Message, trailers))...); err != nil {
 		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, output)
 	}
 
@@ -676,7 +677,7 @@ func gitResolveRef(ctx core.Context, root, ref string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", root, "rev-parse", ref)
 	output, err := core.Command("git", "-C", root, "rev-parse", ref).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)
 		}
 		return "", err

@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // These tests lock the repair for the failure that has no other witness: an
@@ -112,12 +113,12 @@ func forwardRepairTestApp(
 		resolveCLIPath:      func() string { return "/tmp/erun" },
 		canConnectLocalPort: func(int) bool { return probe.bound() },
 		canReachMCPEndpoint: func(int) bool { return probe.answers() },
-		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
 			if !probe.answers() {
-				return eruncommon.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+				return activity.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 			}
-			return eruncommon.EnvironmentIdleStatus{
-				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+			return activity.EnvironmentIdleStatus{
+				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
 		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
@@ -131,8 +132,8 @@ func forwardRepairTestApp(
 		// neutral default so that fallback answering does not itself look like
 		// a failure in tests that do not care about it.
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
-			data, err := json.Marshal(eruncommon.EnvironmentIdleStatus{
-				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+			data, err := json.Marshal(activity.EnvironmentIdleStatus{
+				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			})
 			if err != nil {
 				return "", err
@@ -330,8 +331,8 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 	// The fussy-edge case: the tunnel carries traffic, but the idle query
 	// against it fails. That is a question the environment declined, not a
 	// forward pointed at a vanished pod.
-	app.deps.loadIdleStatus = func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-		return eruncommon.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
+	app.deps.loadIdleStatus = func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+		return activity.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
 	}
 	state := sweepUntilRebindSettles(t, app)
 	if !state.reachable || state.observed {

@@ -26,7 +26,7 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 		return DeploySpec{
 			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:       RuntimeReleaseName(tenant),
+				ReleaseName:       config.RuntimeReleaseName(tenant),
 				Version:           mintedVersion,
 				ContainerRegistry: registry,
 			},
@@ -124,7 +124,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				RuntimeImage: "ghcr.io/sophium/erun-devops",
 			}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:          RuntimeReleaseName(tenant),
+				ReleaseName:          config.RuntimeReleaseName(tenant),
 				Version:              version,
 				ContainerRegistry:    "ghcr.io/sophium",
 				ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,
@@ -152,7 +152,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				RuntimeImage: "custom-fork-image",
 			}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:          RuntimeReleaseName("erun"),
+				ReleaseName:          config.RuntimeReleaseName("erun"),
 				Version:              version,
 				ResolvedRuntimeImage: "ghcr.io/sophium/erun-devops:" + version,
 				// PersistRuntimeImage left empty: the erun product's own
@@ -179,7 +179,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				RuntimeRunningImage: "ghcr.io/sophium/frs-devops:" + version,
 			}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:          RuntimeReleaseName(tenant),
+				ReleaseName:          config.RuntimeReleaseName(tenant),
 				Version:              version,
 				ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,
 				PersistRuntimeImage:  "frs-devops",
@@ -210,7 +210,7 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 		spec := DeploySpec{
 			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "prod"}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:         RuntimeReleaseName(tenant),
+				ReleaseName:         config.RuntimeReleaseName(tenant),
 				Version:             version,
 				ContainerRegistry:   "ghcr.io/sophium",
 				PersistRuntimeChart: override,
@@ -234,7 +234,7 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 				RuntimeChart: override,
 			}},
 			Deploy: HelmDeploySpec{
-				ReleaseName:       RuntimeReleaseName(tenant),
+				ReleaseName:       config.RuntimeReleaseName(tenant),
 				Version:           version,
 				ContainerRegistry: "ghcr.io/sophium",
 				// PersistRuntimeChart left empty: this deploy named no override.
@@ -263,9 +263,9 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 
 	spec := DeploySpec{
 		Target:        config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
-		DeployContext: KubernetesDeployContext{ComponentName: RuntimeReleaseName(tenant)},
+		DeployContext: KubernetesDeployContext{ComponentName: config.RuntimeReleaseName(tenant)},
 		Deploy: HelmDeploySpec{
-			ReleaseName:       RuntimeReleaseName(tenant),
+			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Version:           mintedVersion,
 			ContainerRegistry: "ghcr.io/sophium",
 		},

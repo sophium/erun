@@ -9,20 +9,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
-
-// publishedChartRepoPath is the path segment every published chart lives under,
-// keeping the chart's tag space separate from the image repository of the same
-// name (<registry>/erun-devops), which holds the image tags.
-const publishedChartRepoPath = "charts"
-
-// PublishedDevopsChartOCIRepo is the OCI repository the release flow pushes
-// the canonical runtime chart to. The "/charts" suffix keeps the chart's tag
-// space separate from the image repository of the same name
-// (<registry>/erun-devops), which holds the runtime image tags.
-func PublishedDevopsChartOCIRepo(containerRegistry string) string {
-	return "oci://" + strings.TrimSpace(containerRegistry) + "/" + publishedChartRepoPath
-}
 
 // ociChartReferenceRegistry is PublishedDevopsChartOCIRepo's inverse: the
 // registry a published-chart reference addresses, or "" for a reference that is
@@ -32,7 +21,7 @@ func ociChartReferenceRegistry(reference string) string {
 	if !isOCIChartReference(trimmed) {
 		return ""
 	}
-	registry, _, ok := strings.Cut(strings.TrimPrefix(trimmed, "oci://"), "/"+publishedChartRepoPath+"/")
+	registry, _, ok := strings.Cut(strings.TrimPrefix(trimmed, "oci://"), "/"+helm.PublishedChartRepoPath+"/")
 	if !ok {
 		return ""
 	}
@@ -50,7 +39,7 @@ type runtimeChartCandidate struct {
 }
 
 func (c runtimeChartCandidate) reference() string {
-	return PublishedDevopsChartOCIRepo(c.registry) + "/" + c.chart
+	return helm.PublishedDevopsChartOCIRepo(c.registry) + "/" + c.chart
 }
 
 func (c runtimeChartCandidate) describe() string {
@@ -68,13 +57,13 @@ func (c runtimeChartCandidate) describe() string {
 func runtimeChartCandidates(target config.OpenResult, chartRegistry string) []runtimeChartCandidate {
 	chartRegistry = strings.TrimSpace(chartRegistry)
 	candidates := make([]runtimeChartCandidate, 0, 3)
-	if tenantChart := RuntimeReleaseName(target.Tenant); tenantChart != DevopsComponentName {
+	if tenantChart := config.RuntimeReleaseName(target.Tenant); tenantChart != config.DevopsComponentName {
 		candidates = append(candidates, runtimeChartCandidate{chartRegistry, tenantChart, "the tenant's own umbrella"})
 	}
-	candidates = append(candidates, runtimeChartCandidate{chartRegistry, DevopsComponentName, "the shared platform chart"})
+	candidates = append(candidates, runtimeChartCandidate{chartRegistry, config.DevopsComponentName, "the shared platform chart"})
 	platformRegistry, why := platformChartRegistry(target)
 	if platformRegistry != "" && platformRegistry != chartRegistry {
-		candidates = append(candidates, runtimeChartCandidate{platformRegistry, DevopsComponentName, why})
+		candidates = append(candidates, runtimeChartCandidate{platformRegistry, config.DevopsComponentName, why})
 	}
 	return candidates
 }
@@ -162,7 +151,7 @@ func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenR
 		outcomes = append(outcomes, candidate.describe()+": confirmed absent")
 	}
 	if deferToOverride {
-		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
+		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), config.DevopsComponentName, "the shared platform chart"}
 		ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; --runtime-chart names the coordinate to install instead")
 		return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates, searched: true}, nil
 	}
@@ -200,7 +189,7 @@ func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, r
 		}
 		if stockRuntimePinMovesWithDeployVersion(target.Tenant, target.EnvConfig, chart.name, chartVersion, version) {
 			ctx.Trace("deploy: the env's runtime chart " + reference + " is pinned at " + chartVersion +
-				", which is behind this deploy's " + version + " on " + DevopsComponentName + "'s own release line; moving the pin to the deploy version")
+				", which is behind this deploy's " + version + " on " + config.DevopsComponentName + "'s own release line; moving the pin to the deploy version")
 			chart.version = strings.TrimSpace(version)
 			chart.movedPin = true
 			return chart, nil
@@ -295,7 +284,7 @@ func isTenantRuntimeUmbrella(tenant, chartName string) bool {
 	if tenant == "" || chartName == "" {
 		return false
 	}
-	return chartName == RuntimeReleaseName(tenant) && chartName != DevopsComponentName
+	return chartName == config.RuntimeReleaseName(tenant) && chartName != config.DevopsComponentName
 }
 
 // tenantUmbrellaHoldTrace is the one message both unconfirmed outcomes share:
@@ -303,7 +292,7 @@ func isTenantRuntimeUmbrella(tenant, chartName string) bool {
 // reason is the outcome-specific clause.
 func tenantUmbrellaHoldTrace(chart resolvedRuntimeChart, name, stated, version, reason string) string {
 	return "deploy: holding back the env's runtime umbrella " + chart.reference + " at " + stated + ": the tenant's own " + name + " " +
-		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + DevopsComponentName +
+		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + config.DevopsComponentName +
 		" than the one deployed; publish the tenant's charts at " + version + " (`erun push --version " + version + "`) and redeploy"
 }
 
@@ -388,7 +377,7 @@ func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, ver
 	registry := publishedTenantComponentChartRegistry(target)
 
 	required := make([]string, 0, len(components)+1)
-	runtimeChart := RuntimeReleaseName(target.Tenant)
+	runtimeChart := config.RuntimeReleaseName(target.Tenant)
 	// An env that states its runtime chart is not riding a tenant chart at this
 	// version, so requiring one here would fail a deploy that is perfectly
 	// coherent: the components run on the tenant's line, the runtime chart on the
@@ -398,7 +387,7 @@ func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, ver
 	switch {
 	case runtimeSelected && runtimeChartStated:
 		ctx.Trace("deploy: the env states its runtime chart " + strings.TrimSpace(target.EnvConfig.RuntimeChart) + "; verifying only the tenant's component charts at " + version)
-	case runtimeSelected && runtimeChart != DevopsComponentName:
+	case runtimeSelected && runtimeChart != config.DevopsComponentName:
 		// The tenant's own runtime chart is normally published alongside its
 		// components by the same `erun push`, so it usually shares their
 		// registry and is verified together, below. When it doesn't -- an
@@ -490,9 +479,9 @@ func probeChartVersion(ctx context.Context, containerRegistry, chartName, versio
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
 		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version), nil
 	}
-	versions, err := ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistryConfig{
+	versions, err := registrypkg.ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistryConfig{
 		Namespace:  containerRegistry,
-		Repository: publishedChartRepoPath + "/" + chartName,
+		Repository: helm.PublishedChartRepoPath + "/" + chartName,
 		Insecure:   insecure,
 	})
 	if err != nil {
@@ -586,7 +575,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	// reads a registry. A deploy running inside the target env's own runtime pod
 	// resolves the credential that env declared for itself first, so a private
 	// namespace read is definitive instead of anonymous-and-therefore-refused.
-	configureInPodDeclaredRegistryAuth(ctx, target)
+	registrypkg.ConfigureInPodDeclaredRegistryAuth(ctx, target)
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -595,8 +584,8 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	if version == "" {
 		// Dry-run contract: the decision that stops the plan must surface as a
 		// trace line before the error return.
-		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
-		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
+		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + config.DevopsComponentName + " chart")
+		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", config.DevopsComponentName)
 	}
 
 	chart, err := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason, strings.TrimSpace(runtimeChartOverride) != "")
@@ -606,7 +595,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
 	deployContext := KubernetesDeployContext{
-		ComponentName: DevopsComponentName,
+		ComponentName: config.DevopsComponentName,
 		ChartPath:     chart.reference,
 	}
 	valuesFilePath := publishedDevopsValuesOverlayPath(ctx, target)
@@ -627,7 +616,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		// roll never converges.
 		deployInput.PersistRuntimeChart = chart.reference + ":" + chart.version
 	}
-	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
+	deployInput.ReleaseName = config.RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
@@ -635,7 +624,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	deployInput.RuntimeChartRegistry = chart.registry
 	image, persistImage := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
 	if image != "" {
-		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
+		deployInput.ImageOverrides = map[string]string{config.DevopsComponentName: image}
 		deployInput.ResolvedRuntimeImage = image
 	} else {
 		// No override applies, so the chart's own stock default wins -- see
@@ -686,7 +675,7 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 		return DeploySpec{}, fmt.Errorf("version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", componentName)
 	}
 
-	chartReference := PublishedDevopsChartOCIRepo(registry) + "/" + componentName
+	chartReference := helm.PublishedDevopsChartOCIRepo(registry) + "/" + componentName
 	ctx.Trace("deploy: no local chart for " + componentName + "; using published chart " + chartReference + " version " + version)
 
 	deployContext := KubernetesDeployContext{
@@ -868,7 +857,7 @@ func (e *PublishedChartNotFoundError) Error() string {
 		return msg + helmOutputSuffix(e.HelmOutput)
 	}
 	msg += ": no chart is published at " + version + " at any coordinate the deploy probed — " + strings.Join(e.Candidates, ", ") + ". " +
-		"The " + DevopsComponentName + " platform chart is published only beside the runtime image erun releases, so a registry holding just this project's own images has it at no version: " +
+		"The " + config.DevopsComponentName + " platform chart is published only beside the runtime image erun releases, so a registry holding just this project's own images has it at no version: " +
 		"point the environment at the registry that does, with `erun init <tenant> <env> --runtime-registry <registry>`, which persists it as the env's runtimeregistry and redeploys."
 	if tenantChart := strings.TrimSpace(e.TenantChart); tenantChart != "" {
 		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun build --release`) — then deploy."
@@ -942,7 +931,7 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
 		recorded := strings.TrimSpace(target.EnvConfig.RuntimeImage)
 		if runtimeImageExplicit {
-			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + config.DevopsComponentName + ")")
 			return image, recorded
 		}
 		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
@@ -950,10 +939,10 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 		if stale == "" {
 			if moved := laggingStockRuntimeImagePin(target, registry, image, staleChartName, version); moved != "" {
 				ctx.Trace("deploy: moving the env's runtime image pin " + image + " to " + moved +
-					" (the env rides " + DevopsComponentName + "'s own release line, so the pin moves with the deploy version)")
+					" (the env rides " + config.DevopsComponentName + "'s own release line, so the pin moves with the deploy version)")
 				return moved, moved
 			}
-			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + config.DevopsComponentName + ")")
 			return image, recorded
 		}
 		ctx.Trace(stale)
@@ -985,10 +974,10 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 		return ""
 	}
 	switch {
-	case chartName != "" && chartName != DevopsComponentName:
-		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
+	case chartName != "" && chartName != config.DevopsComponentName:
+		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + config.DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
 	case chartVersion != "" && chartVersion != version:
-		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
+		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + config.DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
 	}
 	return ""
 }
@@ -1021,14 +1010,14 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 //     states its *own* <tenant>-devops umbrella has named a chart on the
 //     deploy's own line, which resolveTenantUmbrellaPin handles.
 func stockRuntimePinMovesWithDeployVersion(tenant string, env config.EnvConfig, pinName, pinVersion, version string) bool {
-	if strings.TrimSpace(pinName) != DevopsComponentName {
+	if strings.TrimSpace(pinName) != config.DevopsComponentName {
 		return false
 	}
 	version = strings.TrimSpace(version)
 	if strings.TrimSpace(pinVersion) == "" || strings.TrimSpace(pinVersion) == version || version == "" {
 		return false
 	}
-	if RuntimeReleaseName(tenant) != DevopsComponentName {
+	if config.RuntimeReleaseName(tenant) != config.DevopsComponentName {
 		return false
 	}
 	for _, reference := range []string{env.RuntimeImage, env.RuntimeRunningImage} {
@@ -1081,11 +1070,11 @@ func moveRuntimeImagePinToVersion(image, registry, version string) string {
 // to default to (the erun product tenant rides the stock image itself, so it
 // emits no override and the chart's own default wins).
 func defaultDeployRuntimeImageBareName(tenant, chartName string) string {
-	if chartName != "" && chartName != DevopsComponentName {
+	if chartName != "" && chartName != config.DevopsComponentName {
 		return chartName
 	}
-	tenantImage := RuntimeReleaseName(tenant)
-	if tenant == "" || tenantImage == DevopsComponentName {
+	tenantImage := config.RuntimeReleaseName(tenant)
+	if tenant == "" || tenantImage == config.DevopsComponentName {
 		return ""
 	}
 	return tenantImage
@@ -1109,10 +1098,10 @@ func defaultDeployRuntimeImage(ctx core.Context, registry, version, tenant, char
 	if image == "" {
 		return ""
 	}
-	if chartName != "" && chartName != DevopsComponentName {
-		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + DevopsComponentName + ")")
+	if chartName != "" && chartName != config.DevopsComponentName {
+		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + config.DevopsComponentName + ")")
 	} else {
-		ctx.Trace("deploy: defaulting runtime image to the tenant's " + RuntimeReleaseName(tenant) + " image " + image + " (imageOverrides." + DevopsComponentName + ")")
+		ctx.Trace("deploy: defaulting runtime image to the tenant's " + config.RuntimeReleaseName(tenant) + " image " + image + " (imageOverrides." + config.DevopsComponentName + ")")
 	}
 	return image
 }

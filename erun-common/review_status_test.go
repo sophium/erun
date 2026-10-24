@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // A status filter is operator input, and the listing it narrows is the review
@@ -19,18 +21,18 @@ func TestNormalizeReviewStatus(t *testing.T) {
 	}{
 		{"empty means no status filter", "", ""},
 		{"blank means no status filter", "   ", ""},
-		{"open", "OPEN", ReviewStatusOpen},
-		{"closed", "CLOSED", ReviewStatusClosed},
-		{"failed", "FAILED", ReviewStatusFailed},
-		{"ready", "READY", ReviewStatusReady},
-		{"merge", "MERGE", ReviewStatusMerge},
-		{"merged", "MERGED", ReviewStatusMerged},
-		{"lower case resolves to the stored spelling", "ready", ReviewStatusReady},
-		{"surrounding space is ignored", "  merged  ", ReviewStatusMerged},
+		{"open", "OPEN", model.ReviewStatusOpen},
+		{"closed", "CLOSED", model.ReviewStatusClosed},
+		{"failed", "FAILED", model.ReviewStatusFailed},
+		{"ready", "READY", model.ReviewStatusReady},
+		{"merge", "MERGE", model.ReviewStatusMerge},
+		{"merged", "MERGED", model.ReviewStatusMerged},
+		{"lower case resolves to the stored spelling", "ready", model.ReviewStatusReady},
+		{"surrounding space is ignored", "  merged  ", model.ReviewStatusMerged},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := NormalizeReviewStatus(tc.in)
+			got, err := model.NormalizeReviewStatus(tc.in)
 			if err != nil {
 				t.Fatalf("NormalizeReviewStatus(%q) returned an unexpected error: %v", tc.in, err)
 			}
@@ -43,13 +45,13 @@ func TestNormalizeReviewStatus(t *testing.T) {
 
 func TestNormalizeReviewStatusNamesTheAcceptedValues(t *testing.T) {
 	for _, in := range []string{"BOGUS", "ZZZZ", "MERGEDD", "SUCCEEDED"} {
-		got, err := NormalizeReviewStatus(in)
+		got, err := model.NormalizeReviewStatus(in)
 		if err == nil {
 			t.Fatalf("NormalizeReviewStatus(%q) = %q, want an error naming the accepted values", in, got)
 		}
 		for _, want := range []string{
-			ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
-			ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged,
+			model.ReviewStatusOpen, model.ReviewStatusClosed, model.ReviewStatusFailed,
+			model.ReviewStatusReady, model.ReviewStatusMerge, model.ReviewStatusMerged,
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("NormalizeReviewStatus(%q) error %q does not name the accepted value %s", in, err, want)
@@ -61,7 +63,7 @@ func TestNormalizeReviewStatusNamesTheAcceptedValues(t *testing.T) {
 // The refusal must happen before the platform call, so a mistyped filter never
 // resolves an alias or reports a real-looking empty result.
 func TestRunReviewListRefusesAnUnknownStatusBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewList(core.Context{}, nil, "", ReviewListParams{Status: "BOGUS"}, CloudDependencies{})
+	_, err := RunReviewList(core.Context{}, nil, "", ReviewListParams{Status: "BOGUS"}, cloud.CloudDependencies{})
 	if err == nil {
 		t.Fatalf("RunReviewList with status %q succeeded, want a bad-argument error", "BOGUS")
 	}
@@ -81,12 +83,12 @@ func TestRunReviewListRefusesAnUnknownStatusBeforeAnyPlatformCall(t *testing.T) 
 // could filter on a status no row can hold (or be refused one that rows do).
 func TestReviewStatusVocabularyIsClosed(t *testing.T) {
 	got := map[string]bool{}
-	for _, status := range reviewStatuses {
+	for _, status := range model.ReviewStatuses {
 		got[status] = true
 	}
 	want := []string{
-		ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
-		ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged,
+		model.ReviewStatusOpen, model.ReviewStatusClosed, model.ReviewStatusFailed,
+		model.ReviewStatusReady, model.ReviewStatusMerge, model.ReviewStatusMerged,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("reviewStatuses holds %d distinct values, want %d", len(got), len(want))

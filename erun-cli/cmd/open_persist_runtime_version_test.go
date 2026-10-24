@@ -42,7 +42,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 		},
 		SkipHelm: true,
 		Deploy: common.HelmDeploySpec{
-			ReleaseName:       common.RuntimeReleaseName(tenant),
+			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
 			ContainerRegistry: registry,
@@ -112,7 +112,7 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
 		Deploy: common.HelmDeploySpec{
-			ReleaseName:          common.RuntimeReleaseName(tenant),
+			ReleaseName:          config.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",
 			ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,

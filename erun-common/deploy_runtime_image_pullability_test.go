@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -48,7 +49,7 @@ func TestEnsureRuntimeImagePullSecretNonGHCRRegistryIsNoOp(t *testing.T) {
 	ctx, _ := runtimeImagePullTraceContext(false)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "111122223333.dkr.ecr.us-east-1.amazonaws.com/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "111122223333.dkr.ecr.us-east-1.amazonaws.com/frs-devops:1.0.86"},
 	}
 	if err := ensureRuntimeImagePullSecret(ctx, &spec, failingProbe(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -69,7 +70,7 @@ func TestEnsureRuntimeImagePullSecretAttachesWhenCredentialResolves(t *testing.T
 	ctx, trace := runtimeImagePullTraceContext(false)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	if err := ensureRuntimeImagePullSecret(ctx, &spec, failingProbe(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -95,7 +96,7 @@ func TestEnsureRuntimeImagePullSecretDoesNotDuplicateAnExistingEntry(t *testing.
 	spec := HelmDeploySpec{
 		Tenant:           "frs",
 		ImagePullSecrets: []string{name},
-		ImageOverrides:   map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides:   map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	if err := ensureRuntimeImagePullSecret(ctx, &spec, failingProbe(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -115,7 +116,7 @@ func TestEnsureRuntimeImagePullSecretPublicImageWithNoCredentialDeploysUnchanged
 	ctx, trace := runtimeImagePullTraceContext(false)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	probe := func(_ context.Context, _ *http.Client, repoPath, tag string) (bool, error) {
 		if repoPath != "sophium/frs-devops" || tag != "1.0.86" {
@@ -143,7 +144,7 @@ func TestEnsureRuntimeImagePullSecretRefusesPrivateImageWithNoCredential(t *test
 	ctx, _ := runtimeImagePullTraceContext(false)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
 	err := ensureRuntimeImagePullSecret(ctx, &spec, probe)
@@ -168,7 +169,7 @@ func TestEnsureRuntimeImagePullSecretRefusesOnInconclusiveProbe(t *testing.T) {
 	ctx, _ := runtimeImagePullTraceContext(false)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	probeErr := errors.New("dial tcp ghcr.io: connection refused")
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, probeErr }
@@ -193,7 +194,7 @@ func TestEnsureRuntimeImagePullSecretDryRunNeverProbes(t *testing.T) {
 	ctx, trace := runtimeImagePullTraceContext(true)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	if err := ensureRuntimeImagePullSecret(ctx, &spec, failingProbe(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -220,7 +221,7 @@ func TestEnsureRuntimeImagePullSecretDryRunWithCredentialStillAttaches(t *testin
 	ctx, _ := runtimeImagePullTraceContext(true)
 	spec := HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	if err := ensureRuntimeImagePullSecret(ctx, &spec, failingProbe(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -258,7 +259,7 @@ func TestRunHelmDeployRefusesBeforeAnyMutationForPrivateRuntimeImage(t *testing.
 		KubernetesContext: "in-cluster",
 		Namespace:         "frs-build",
 		ChartPath:         "oci://ghcr.io/sophium/charts/erun-devops",
-		ImageOverrides:    map[string]string{DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides:    map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 
 	realProbe := deployRuntimeImagePullProbe

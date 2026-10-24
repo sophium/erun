@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // BearerTokenVerifier authenticates hosted-API bearer tokens, dispatching on the
@@ -25,7 +25,7 @@ type BearerTokenVerifier struct {
 	allowedAudiences  []string
 	trustedFileIssuer string
 	audience          string
-	verifier          *eruncommon.OIDCVerifier
+	verifier          *mcpauth.OIDCVerifier
 	now               func() time.Time
 }
 
@@ -77,24 +77,24 @@ func NewBearerTokenVerifier(options BearerTokenVerifierOptions) *BearerTokenVeri
 	}
 	audience := strings.TrimSpace(options.Audience)
 	if audience == "" {
-		audience = eruncommon.APITokenAudience
+		audience = mcpauth.APITokenAudience
 	}
 	trustedFileIssuer := ""
 	if path := strings.TrimSpace(options.DesktopPublicKeyPath); path != "" {
-		trustedFileIssuer = eruncommon.FileIssuer(path)
+		trustedFileIssuer = mcpauth.FileIssuer(path)
 	}
 	return &BearerTokenVerifier{
 		allowedIssuers:    allowed,
 		allowedAudiences:  allowedAudiences,
 		trustedFileIssuer: trustedFileIssuer,
 		audience:          audience,
-		verifier:          eruncommon.NewOIDCVerifier(),
+		verifier:          mcpauth.NewOIDCVerifier(),
 		now:               time.Now,
 	}
 }
 
 func (v *BearerTokenVerifier) VerifyBearerToken(ctx context.Context, token string) (Claims, error) {
-	issuer, err := eruncommon.IssuerFromUnverifiedJWT(token)
+	issuer, err := mcpauth.IssuerFromUnverifiedJWT(token)
 	if err != nil {
 		return Claims{}, err
 	}
@@ -102,7 +102,7 @@ func (v *BearerTokenVerifier) VerifyBearerToken(ctx context.Context, token strin
 	// Enforcing the API audience here rejects a desktop token minted for a
 	// different (e.g. MCP) audience, even though the same desktop key signed it.
 	if v.trustedFileIssuer != "" && issuer == v.trustedFileIssuer {
-		claims, fileErr := eruncommon.VerifyMCPToken(ctx, nil, token, v.trustedFileIssuer, v.audience, v.now())
+		claims, fileErr := mcpauth.VerifyMCPToken(ctx, nil, token, v.trustedFileIssuer, v.audience, v.now())
 		if fileErr != nil {
 			return Claims{}, fileErr
 		}

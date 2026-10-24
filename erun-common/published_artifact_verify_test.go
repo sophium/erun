@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // isTransientRegistryReadError decides between "retry the read-back" and "abort
@@ -159,7 +160,7 @@ func TestIsTransientRegistryReadErrorMatchesEveryMarker(t *testing.T) {
 		"service unavailable", "too many requests", "500", "502", "503",
 	}
 	for _, marker := range markers {
-		if !isTransientRegistryReadError(marker) {
+		if !helm.IsTransientRegistryReadError(marker) {
 			t.Errorf("marker %q does not classify as transient; a registry answer carrying it would abort the publish", marker)
 		}
 	}
@@ -167,7 +168,7 @@ func TestIsTransientRegistryReadErrorMatchesEveryMarker(t *testing.T) {
 
 func TestIsTransientRegistryReadErrorClassifiesRealisticRegistryOutput(t *testing.T) {
 	for _, sample := range transientRegistryReadSamples() {
-		if !isTransientRegistryReadError(sample.output) {
+		if !helm.IsTransientRegistryReadError(sample.output) {
 			t.Errorf("output %q (%s) classified as final; this is the under-match that aborts a release", sample.output, sample.source)
 		}
 	}
@@ -175,7 +176,7 @@ func TestIsTransientRegistryReadErrorClassifiesRealisticRegistryOutput(t *testin
 
 func TestIsTransientRegistryReadErrorTreatsFinalFailuresAsFinal(t *testing.T) {
 	for _, sample := range finalRegistryReadSamples() {
-		if isTransientRegistryReadError(sample.output) {
+		if helm.IsTransientRegistryReadError(sample.output) {
 			t.Errorf("output %q (%s) classified as transient; retrying it only delays the same verdict", sample.output, sample.source)
 		}
 	}
@@ -200,13 +201,13 @@ func TestReadBackPublishedArtifactRetriesTransientReadsUpToTheBound(t *testing.T
 	lastErr := errors.New("exit status 1")
 	attempts := 0
 
-	err := readBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
+	err := helm.ReadBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
 		attempts++
 		return transientReadBackOutput, lastErr
 	})
 
-	if attempts != registryVerifyMaxAttempts {
-		t.Fatalf("attempts = %d, want the bounded %d: a read-back that never succeeds must fail instead of retrying forever", attempts, registryVerifyMaxAttempts)
+	if attempts != helm.RegistryVerifyMaxAttempts {
+		t.Fatalf("attempts = %d, want the bounded %d: a read-back that never succeeds must fail instead of retrying forever", attempts, helm.RegistryVerifyMaxAttempts)
 	}
 	if !errors.Is(err, lastErr) {
 		t.Fatalf("err = %v, want the last read's own error, not a generic failure", err)
@@ -227,7 +228,7 @@ func TestReadBackPublishedArtifactDoesNotRetryAFinalFailure(t *testing.T) {
 	lastErr := errors.New("exit status 1")
 	attempts := 0
 
-	err := readBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
+	err := helm.ReadBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
 		attempts++
 		return finalReadBackOutput, lastErr
 	})
@@ -247,7 +248,7 @@ func TestReadBackPublishedArtifactStopsRetryingOnceTheReadSucceeds(t *testing.T)
 	ctx, log := captureRegistryReadLog()
 	attempts := 0
 
-	err := readBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
+	err := helm.ReadBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
 		attempts++
 		if attempts == 1 {
 			return transientReadBackOutput, errors.New("exit status 1")

@@ -19,7 +19,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/registrytoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // This file exercises the registry token endpoint against the *real*
@@ -56,7 +56,7 @@ type testHarness struct {
 
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
-	apiPriv, apiPub, err := eruncommon.GenerateDesktopIdentity()
+	apiPriv, apiPub, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate api identity: %v", err)
 	}
@@ -64,11 +64,11 @@ func newTestHarness(t *testing.T) *testHarness {
 	if err := os.WriteFile(pubPath, apiPub, 0o600); err != nil {
 		t.Fatalf("write api public key: %v", err)
 	}
-	apiIssuer := eruncommon.FileIssuer(pubPath)
+	apiIssuer := mcpauth.FileIssuer(pubPath)
 
 	verifier := backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{DesktopPublicKeyPath: pubPath})
 
-	registryPriv, _, err := eruncommon.GenerateDesktopIdentity()
+	registryPriv, _, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate registry signing key: %v", err)
 	}
@@ -94,7 +94,7 @@ func (h *testHarness) close() { h.server.Close() }
 
 func (h *testHarness) apiToken(t *testing.T, audience string, issuedAt, expiresAt time.Time) string {
 	t.Helper()
-	token, err := eruncommon.SignMCPToken(h.apiPrivatePEM, eruncommon.MCPTokenClaims{
+	token, err := mcpauth.SignMCPToken(h.apiPrivatePEM, mcpauth.MCPTokenClaims{
 		Issuer:    h.apiIssuer,
 		Subject:   "user-1",
 		Audience:  audience,
@@ -159,7 +159,7 @@ func TestValidTenantScopeIsGranted(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	now := time.Now()
-	token := h.apiToken(t, eruncommon.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
+	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull,push")
 	if resp.StatusCode != http.StatusOK {
@@ -178,7 +178,7 @@ func TestCrossTenantScopeGrantsNothing(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	now := time.Now()
-	token := h.apiToken(t, eruncommon.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
+	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:other-tenant/secret:pull,push")
 	if resp.StatusCode != http.StatusOK {
@@ -194,7 +194,7 @@ func TestExpiredTokenIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	now := time.Now()
-	token := h.apiToken(t, eruncommon.APITokenAudience, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-2*time.Hour), now.Add(-time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull")
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -210,7 +210,7 @@ func TestWrongAudienceTokenIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	now := time.Now()
-	token := h.apiToken(t, eruncommon.MCPTokenAudience("frs", "prod"), now.Add(-time.Minute), now.Add(time.Hour))
+	token := h.apiToken(t, mcpauth.MCPTokenAudience("frs", "prod"), now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull")
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -223,7 +223,7 @@ func TestWrongAudienceTokenIsRejected(t *testing.T) {
 func TestUnknownIssuerIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
-	otherPriv, otherPub, err := eruncommon.GenerateDesktopIdentity()
+	otherPriv, otherPub, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate other identity: %v", err)
 	}
@@ -232,10 +232,10 @@ func TestUnknownIssuerIsRejected(t *testing.T) {
 		t.Fatalf("write other public key: %v", err)
 	}
 	now := time.Now()
-	token, err := eruncommon.SignMCPToken(otherPriv, eruncommon.MCPTokenClaims{
-		Issuer:    eruncommon.FileIssuer(otherPath),
+	token, err := mcpauth.SignMCPToken(otherPriv, mcpauth.MCPTokenClaims{
+		Issuer:    mcpauth.FileIssuer(otherPath),
 		Subject:   "user-1",
-		Audience:  eruncommon.APITokenAudience,
+		Audience:  mcpauth.APITokenAudience,
 		IssuedAt:  now.Add(-time.Minute).Unix(),
 		ExpiresAt: now.Add(time.Hour).Unix(),
 	})
@@ -267,7 +267,7 @@ func TestMissingServiceParameterIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	now := time.Now()
-	token := h.apiToken(t, eruncommon.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
+	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
 
 	req, err := http.NewRequest(http.MethodGet, h.server.URL+"/v2/token?scope=repository:frs/hello:pull", nil)
 	if err != nil {

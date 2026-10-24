@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A resize turns the standing sizing recommendation (runtime_sizing.go) into
@@ -200,8 +201,8 @@ func runtimeDindResizeActions(current, target config.RuntimePodResources) []Runt
 }
 
 func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind config.RuntimePodResources, ceiling config.NamespaceResourceQuota, input RuntimeResizeInput, recommendation *RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
-	current = NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
-	currentDind = NormalizeRuntimeDindPodResources(currentDind)
+	current = config.NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
+	currentDind = config.NormalizeRuntimeDindPodResources(currentDind)
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
 	explicitDindCPU := strings.TrimSpace(input.DindCPU)
@@ -215,13 +216,13 @@ func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind c
 	if err != nil {
 		return RuntimeResizePlan{}, err
 	}
-	target = NormalizeRuntimePodResources(target)
-	if err := ValidateRuntimePodResources(target); err != nil {
+	target = config.NormalizeRuntimePodResources(target)
+	if err := config.ValidateRuntimePodResources(target); err != nil {
 		return RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
 	}
 
-	dindTarget := NormalizeRuntimeDindPodResources(resolveRuntimeDindResizeTarget(currentDind, explicitDindCPU, explicitDindMemory))
-	if err := ValidateRuntimeDindPodResources(dindTarget); err != nil {
+	dindTarget := config.NormalizeRuntimeDindPodResources(resolveRuntimeDindResizeTarget(currentDind, explicitDindCPU, explicitDindMemory))
+	if err := config.ValidateRuntimeDindPodResources(dindTarget); err != nil {
 		return RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
 	}
 
@@ -255,9 +256,9 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget config.RuntimePodResou
 	if ceiling.IsZero() {
 		return nil
 	}
-	if quotaCPUMilli, err := ParseKubernetesCPUToMilli(ceiling.CPU); err == nil {
-		dindCPUMilli, _ := ParseKubernetesCPUToMilli(dindTarget.CPU)
-		if targetCPUMilli, tErr := ParseKubernetesCPUToMilli(target.CPU); tErr == nil && targetCPUMilli+dindCPUMilli > quotaCPUMilli {
+	if quotaCPUMilli, err := config.ParseKubernetesCPUToMilli(ceiling.CPU); err == nil {
+		dindCPUMilli, _ := config.ParseKubernetesCPUToMilli(dindTarget.CPU)
+		if targetCPUMilli, tErr := config.ParseKubernetesCPUToMilli(target.CPU); tErr == nil && targetCPUMilli+dindCPUMilli > quotaCPUMilli {
 			available := quotaCPUMilli - dindCPUMilli
 			if available < 0 {
 				available = 0
@@ -265,9 +266,9 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget config.RuntimePodResou
 			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, dindTarget.CPU, ceiling.CPU, formatAvailableCPUMilli(available))
 		}
 	}
-	if quotaMemMi, err := ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
-		dindMemMi, _ := ParseKubernetesMemoryToMi(dindTarget.Memory)
-		if targetMemMi, tErr := ParseKubernetesMemoryToMi(target.Memory); tErr == nil && targetMemMi+dindMemMi > quotaMemMi {
+	if quotaMemMi, err := config.ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
+		dindMemMi, _ := config.ParseKubernetesMemoryToMi(dindTarget.Memory)
+		if targetMemMi, tErr := config.ParseKubernetesMemoryToMi(target.Memory); tErr == nil && targetMemMi+dindMemMi > quotaMemMi {
 			available := quotaMemMi - dindMemMi
 			if available < 0 {
 				available = 0
@@ -289,7 +290,7 @@ func formatAvailableCPUMilli(milli int64) string {
 	if milli <= 0 {
 		return "0"
 	}
-	return FormatKubernetesCPUFromMilli(milli)
+	return config.FormatKubernetesCPUFromMilli(milli)
 }
 
 // RuntimeResizeOccupancyError is returned when a resize is refused because the
@@ -297,11 +298,11 @@ func formatAvailableCPUMilli(milli int64) string {
 // which would kill any live session inside it, so it is refused, naming every
 // holder, unless the caller explicitly overrides it.
 type RuntimeResizeOccupancyError struct {
-	Holders []EnvironmentActivityLease
+	Holders []activity.EnvironmentActivityLease
 }
 
 func (e *RuntimeResizeOccupancyError) Error() string {
-	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", FormatLeaseHolders(e.Holders))
+	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", activity.FormatLeaseHolders(e.Holders))
 }
 
 // checkRuntimeResizeOccupancy loads every currently held lease (plain and
@@ -323,9 +324,9 @@ func (e *RuntimeResizeOccupancyError) Error() string {
 // CLI transport supply a loader that dispatches to the environment's own
 // edge instead; RunRuntimeResize falls back to the direct, in-pod-correct
 // read when the caller leaves it nil.
-func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error), tenant, environment string, now time.Time, override bool) ([]EnvironmentActivityLease, error) {
+func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error), tenant, environment string, now time.Time, override bool) ([]activity.EnvironmentActivityLease, error) {
 	if load == nil {
-		load = LoadEnvironmentActivityLeases
+		load = activity.LoadEnvironmentActivityLeases
 	}
 	leases, err := load(tenant, environment, now)
 	if err != nil {
@@ -344,7 +345,7 @@ type RuntimeResizeParams struct {
 	Environment   string
 	Input         RuntimeResizeInput
 	OverrideLease bool
-	Holder        EnvironmentActivityLeaseHolder
+	Holder        activity.EnvironmentActivityLeaseHolder
 }
 
 // RuntimeResizeDependencies mirrors the shape `erun deploy` already injects
@@ -364,14 +365,14 @@ type RuntimeResizeDependencies struct {
 	// pod); the CLI transport supplies a dispatching implementation for a
 	// host-side invocation targeting a remote environment (see
 	// checkRuntimeResizeOccupancy).
-	LoadActivityLeases func(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error)
+	LoadActivityLeases func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error)
 }
 
 // RuntimeResizeResult reports what a resize did (or would do), for both
 // transports to render.
 type RuntimeResizeResult struct {
 	Plan             RuntimeResizePlan
-	OverriddenLeases []EnvironmentActivityLease
+	OverriddenLeases []activity.EnvironmentActivityLease
 }
 
 // RunRuntimeResize resolves the target size, checks occupancy, and — outside
@@ -408,11 +409,11 @@ func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment stri
 
 // traceRuntimeResizeOverriddenLeases names every holder the resize is about to
 // roll through, so an override is never silent.
-func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment string, leases []EnvironmentActivityLease) {
+func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment string, leases []activity.EnvironmentActivityLease) {
 	if len(leases) == 0 {
 		return
 	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), FormatLeaseHolders(leases)))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), activity.FormatLeaseHolders(leases)))
 }
 
 // applyRuntimeResize persists the new sizing and rolls the runtime pod onto it.
@@ -480,14 +481,14 @@ func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params R
 		return RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil
 	}
 
-	lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	lease, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant: tenant, Environment: environment, Name: "resize", Exclusive: true, Holder: params.Holder, Now: now,
 	})
 	if err != nil {
 		return RuntimeResizeResult{}, fmt.Errorf("resize: %w", err)
 	}
 	defer func() {
-		_, _ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
+		_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
 	}()
 
 	if err := applyRuntimeResize(ctx, deps, tenant, environment, target, plan); err != nil {

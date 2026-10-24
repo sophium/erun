@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // ReleasePublisher is the publish half of a release: it puts the release
@@ -141,7 +142,7 @@ func reportAlreadyPublishedReleaseArtifacts(ctx core.Context, tags []releasePubl
 // before anything is published is expected to 404 on a first release, and
 // retrying that would slow down every release for the common case.
 func dockerImageManifestResolves(ctx core.Context, tag string, insecure bool) bool {
-	spec := commandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
+	spec := helm.CommandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
 	_, err := runCommandCapturingOutput(ctx, spec)
 	return err == nil
 }

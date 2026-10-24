@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // tokenTTL bounds a minted MCP token's lifetime. The per-env edge is
@@ -35,7 +35,7 @@ type Signer struct {
 // for self-verifying tokens the backend both signs and checks (DNS-01), and for
 // handing to a hosted deploy so the runtime's MCP edge trusts it.
 func NewSigner(privatePEM []byte) (*Signer, error) {
-	publicPEM, err := eruncommon.DesktopPublicKeyPEM(privatePEM)
+	publicPEM, err := mcpauth.DesktopPublicKeyPEM(privatePEM)
 	if err != nil {
 		return nil, fmt.Errorf("mcp signing key: %w", err)
 	}
@@ -80,9 +80,9 @@ func parseEd25519PublicKey(publicPEM []byte) (ed25519.PublicKey, error) {
 // (MCPCapabilitiesFromClaims), not something this hosted signer should ever
 // produce unasked. Returns the token and the audience it was minted for.
 func (s *Signer) Sign(tenant, environment, subject, scope string, now time.Time) (string, string, error) {
-	audience := eruncommon.MCPTokenAudience(tenant, environment)
-	token, err := eruncommon.SignMCPToken(s.privatePEM, eruncommon.MCPTokenClaims{
-		Issuer:    eruncommon.DesktopMCPIssuer(),
+	audience := mcpauth.MCPTokenAudience(tenant, environment)
+	token, err := mcpauth.SignMCPToken(s.privatePEM, mcpauth.MCPTokenClaims{
+		Issuer:    mcpauth.DesktopMCPIssuer(),
 		Subject:   subject,
 		Audience:  audience,
 		IssuedAt:  now.Unix(),

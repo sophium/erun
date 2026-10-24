@@ -9,6 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // review_commands.go is the shared planning/execution layer `erun review`
@@ -34,55 +36,13 @@ type ReviewListParams struct {
 	WaitingOnMe    bool
 }
 
-// The statuses a review can hold: a review is OPEN while it is being worked on
-// and settles on exactly one of the others. This is the platform's own closed
-// vocabulary -- erun-backend-api's model derives its stored spellings from
-// these constants and its reviews table constrains status to exactly this set,
-// so a value outside it names no row anywhere.
-const (
-	ReviewStatusOpen   = "OPEN"
-	ReviewStatusClosed = "CLOSED"
-	ReviewStatusFailed = "FAILED"
-	ReviewStatusReady  = "READY"
-	ReviewStatusMerge  = "MERGE"
-	ReviewStatusMerged = "MERGED"
-)
-
-// reviewStatuses is the closed vocabulary in the order the help text and the
-// refusal both present it.
-var reviewStatuses = []string{
-	ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
-	ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged,
-}
-
-// NormalizeReviewStatus validates a review status filter and resolves it to
-// the spelling the platform stores, accepting any casing. The empty value
-// means "no status filter". The error names the accepted values, since this is
-// operator input from a flag or a tool argument: a mistyped filter that reached
-// the platform would come back as an empty listing, indistinguishable from a
-// review queue that genuinely has nothing in that state -- and an operator
-// reads "no reviews" as a conclusion they act on.
-func NormalizeReviewStatus(status string) (string, error) {
-	trimmed := strings.TrimSpace(status)
-	if trimmed == "" {
-		return "", nil
-	}
-	normalized := strings.ToUpper(trimmed)
-	for _, candidate := range reviewStatuses {
-		if normalized == candidate {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("unsupported review status %q: expected one of %s", trimmed, strings.Join(reviewStatuses, ", "))
-}
-
 // RunReviewList lists reviews visible to the caller's tenant, narrowed by the
 // given filters.
-func RunReviewList(ctx core.Context, store CloudReadStore, alias string, params ReviewListParams, deps CloudDependencies) ([]PlatformReview, error) {
+func RunReviewList(ctx core.Context, store config.CloudReadStore, alias string, params ReviewListParams, deps cloud.CloudDependencies) ([]platformclient.PlatformReview, error) {
 	// Resolved before the alias lookup on purpose: a mistyped filter is a bad
 	// argument, and reporting it must not depend on the platform being
 	// reachable or even configured.
-	status, err := NormalizeReviewStatus(params.Status)
+	status, err := model.NormalizeReviewStatus(params.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +61,7 @@ func RunReviewList(ctx core.Context, store CloudReadStore, alias string, params 
 	if err := validateReviewListParams(params); err != nil {
 		return nil, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +86,8 @@ func validateReviewListParams(params ReviewListParams) error {
 	return nil
 }
 
-func reviewListFilter(params ReviewListParams) PlatformReviewFilter {
-	return PlatformReviewFilter{
+func reviewListFilter(params ReviewListParams) platformclient.PlatformReviewFilter {
+	return platformclient.PlatformReviewFilter{
 		Repository:     params.Repository,
 		TargetBranch:   params.TargetBranch,
 		SourceBranch:   params.SourceBranch,
@@ -140,8 +100,8 @@ func reviewListFilter(params ReviewListParams) PlatformReviewFilter {
 // traceReviewList traces every network call RunReviewList would make in
 // order, including the whoami lookup --mine/--waiting-on-me trigger, so a
 // dry run's trace matches what a real run actually does.
-func traceReviewList(ctx core.Context, provider config.CloudProviderConfig, filter PlatformReviewFilter, params ReviewListParams) {
-	details := reviewFilterTraceDetails(filter)
+func traceReviewList(ctx core.Context, provider config.CloudProviderConfig, filter platformclient.PlatformReviewFilter, params ReviewListParams) {
+	details := platformclient.ReviewFilterTraceDetails(filter)
 	if params.Mine {
 		details = append(details, "authorUserId=<caller>")
 	}
@@ -149,14 +109,14 @@ func traceReviewList(ctx core.Context, provider config.CloudProviderConfig, filt
 		details = append(details, "reviewerUserId=<caller>")
 	}
 	if params.Mine || params.WaitingOnMe {
-		tracePlatformCall(ctx, provider, "GET", "/v1/whoami")
+		cloud.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews", details...)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", details...)
 }
 
 // resolveReviewListCallerFilters resolves --mine/--waiting-on-me to the
 // caller's own user id via whoami, filling filter in place.
-func resolveReviewListCallerFilters(client *PlatformClient, params ReviewListParams, filter *PlatformReviewFilter) error {
+func resolveReviewListCallerFilters(client *platformclient.PlatformClient, params ReviewListParams, filter *platformclient.PlatformReviewFilter) error {
 	if !params.Mine && !params.WaitingOnMe {
 		return nil
 	}
@@ -179,21 +139,21 @@ func resolveReviewListCallerFilters(client *PlatformClient, params ReviewListPar
 // UnresolvedThreads counts root comments (threads) still OPEN; a thread's
 // status is its root comment's Status, since replies never carry their own.
 type ReviewDetail struct {
-	Review            PlatformReview    `json:"review"`
-	Comments          []PlatformComment `json:"comments"`
-	Builds            []PlatformBuild   `json:"builds"`
-	UnresolvedThreads int               `json:"unresolvedThreads"`
+	Review            platformclient.PlatformReview    `json:"review"`
+	Comments          []platformclient.PlatformComment `json:"comments"`
+	Builds            []platformclient.PlatformBuild   `json:"builds"`
+	UnresolvedThreads int                              `json:"unresolvedThreads"`
 }
 
 // RunReviewShow fetches one review together with its comments and builds.
-func RunReviewShow(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (ReviewDetail, error) {
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+func RunReviewShow(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (ReviewDetail, error) {
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return ReviewDetail{}, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/builds")
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/builds")
 	if ctx.DryRun {
 		return ReviewDetail{}, nil
 	}
@@ -217,7 +177,7 @@ func RunReviewShow(ctx core.Context, store CloudReadStore, alias, reviewID strin
 // never carry their own (comments_validate in erun-backend-db enforces this).
 // Exported so other transports (erun-ui's tenant dashboard) can compute the
 // same count from a comment list without re-deriving the rule.
-func CountUnresolvedThreads(comments []PlatformComment) int {
+func CountUnresolvedThreads(comments []platformclient.PlatformComment) int {
 	count := 0
 	for _, comment := range comments {
 		if strings.TrimSpace(comment.ParentCommentID) == "" && comment.Status == "OPEN" {
@@ -232,7 +192,7 @@ func CountUnresolvedThreads(comments []PlatformComment) int {
 // reply can be refused with the root id the caller should retry against
 // instead. A commentID absent from comments (e.g. a wrong review id) is
 // reported as not-a-reply and left to the backend's own not-found error.
-func threadRootCommentID(comments []PlatformComment, commentID string) (string, bool) {
+func threadRootCommentID(comments []platformclient.PlatformComment, commentID string) (string, bool) {
 	for _, comment := range comments {
 		if comment.CommentID != commentID {
 			continue
@@ -249,35 +209,35 @@ func threadRootCommentID(comments []PlatformComment, commentID string) (string, 
 // and RunReviewUnresolve: it lists the review's comments (both to trace the
 // lookup and to enforce that only a thread's root, never a reply, is
 // addressable) before issuing the status PATCH.
-func runReviewCommentStatus(ctx core.Context, store CloudReadStore, alias, reviewID, commentID, status string, deps CloudDependencies) (PlatformComment, error) {
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+func runReviewCommentStatus(ctx core.Context, store config.CloudReadStore, alias, reviewID, commentID, status string, deps cloud.CloudDependencies) (platformclient.PlatformComment, error) {
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformComment{}, err
+		return platformclient.PlatformComment{}, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/comments/"+commentID+"/status", "status="+status)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/comments/"+commentID+"/status", "status="+status)
 	if ctx.DryRun {
-		return PlatformComment{}, nil
+		return platformclient.PlatformComment{}, nil
 	}
 	comments, err := client.ListComments(context.Background(), reviewID)
 	if err != nil {
-		return PlatformComment{}, err
+		return platformclient.PlatformComment{}, err
 	}
 	if rootID, isReply := threadRootCommentID(comments, commentID); isReply {
-		return PlatformComment{}, fmt.Errorf("comment %s is a reply; only a thread's root comment can be resolved or unresolved — retry against root comment %s", commentID, rootID)
+		return platformclient.PlatformComment{}, fmt.Errorf("comment %s is a reply; only a thread's root comment can be resolved or unresolved — retry against root comment %s", commentID, rootID)
 	}
-	return client.UpdateCommentStatus(context.Background(), reviewID, commentID, PlatformUpdateCommentStatusParams{Status: status})
+	return client.UpdateCommentStatus(context.Background(), reviewID, commentID, platformclient.PlatformUpdateCommentStatusParams{Status: status})
 }
 
 // RunReviewResolve marks a comment thread CLOSED (resolved). commentID must
 // be a thread's root comment; addressing a reply is refused.
-func RunReviewResolve(ctx core.Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+func RunReviewResolve(ctx core.Context, store config.CloudReadStore, alias, reviewID, commentID string, deps cloud.CloudDependencies) (platformclient.PlatformComment, error) {
 	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "CLOSED", deps)
 }
 
 // RunReviewUnresolve reopens a comment thread (marks it OPEN). commentID must
 // be a thread's root comment; addressing a reply is refused.
-func RunReviewUnresolve(ctx core.Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+func RunReviewUnresolve(ctx core.Context, store config.CloudReadStore, alias, reviewID, commentID string, deps cloud.CloudDependencies) (platformclient.PlatformComment, error) {
 	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "OPEN", deps)
 }
 
@@ -285,15 +245,15 @@ func RunReviewUnresolve(ctx core.Context, store CloudReadStore, alias, reviewID,
 // branches belong to, resolved from the caller's own remote or the checkout
 // they are standing in, so a tenant serving more than one repository can tell
 // whose review this is.
-func RunReviewCreate(ctx core.Context, store CloudReadStore, alias string, params PlatformCreateReviewParams, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewCreate(ctx core.Context, store config.CloudReadStore, alias string, params platformclient.PlatformCreateReviewParams, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	repository, err := ResolveReviewRepository(ctx, params.Repository, "review create")
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
 	params.Repository = repository
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
 	details := []string{
 		"repository=" + params.Repository,
@@ -304,9 +264,9 @@ func RunReviewCreate(ctx core.Context, store CloudReadStore, alias string, param
 	if strings.TrimSpace(params.IssueRef) != "" {
 		details = append(details, "issueRef="+strings.TrimSpace(params.IssueRef))
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews", details...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews", details...)
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
 	return client.CreateReview(context.Background(), params)
 }
@@ -323,24 +283,24 @@ type ReviewCommentParams struct {
 }
 
 // RunReviewComment posts a comment (or a reply) on a review.
-func RunReviewComment(ctx core.Context, store CloudReadStore, alias string, params ReviewCommentParams, deps CloudDependencies) (PlatformComment, error) {
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+func RunReviewComment(ctx core.Context, store config.CloudReadStore, alias string, params ReviewCommentParams, deps cloud.CloudDependencies) (platformclient.PlatformComment, error) {
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformComment{}, err
+		return platformclient.PlatformComment{}, err
 	}
 	details := []string{
 		"commitId=" + params.CommitID,
 		"filePath=" + params.FilePath,
-		"line=" + formatCommentLine(params.Line),
+		"line=" + platformclient.FormatCommentLine(params.Line),
 	}
 	if strings.TrimSpace(params.ParentCommentID) != "" {
 		details = append(details, "replyTo="+params.ParentCommentID)
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/comments", details...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/comments", details...)
 	if ctx.DryRun {
-		return PlatformComment{}, nil
+		return platformclient.PlatformComment{}, nil
 	}
-	return client.CreateComment(context.Background(), params.ReviewID, PlatformCreateCommentParams{
+	return client.CreateComment(context.Background(), params.ReviewID, platformclient.PlatformCreateCommentParams{
 		CommitID:        params.CommitID,
 		FilePath:        params.FilePath,
 		Line:            params.Line,
@@ -350,16 +310,16 @@ func RunReviewComment(ctx core.Context, store CloudReadStore, alias string, para
 }
 
 // RunReviewClose closes a review.
-func RunReviewClose(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+func RunReviewClose(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=CLOSED")
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=CLOSED")
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
-	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "CLOSED"})
+	return client.UpdateReviewStatus(context.Background(), reviewID, platformclient.PlatformUpdateReviewStatusParams{Status: "CLOSED"})
 }
 
 // ReviewRecordBuildParams is the `erun review record-build` input. Every
@@ -378,16 +338,16 @@ type ReviewRecordBuildParams struct {
 // promotes it to MERGE if it was already the merge queue's head — there is no
 // separate "set review status" call for this, by design (a READY with no
 // build is a different thing: the missed-merge-window requeue).
-func RunReviewRecordBuild(ctx core.Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
+func RunReviewRecordBuild(ctx core.Context, store config.CloudReadStore, alias string, params ReviewRecordBuildParams, deps cloud.CloudDependencies) (platformclient.PlatformBuild, error) {
 	if strings.TrimSpace(params.Version) == "" {
-		return PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
+		return platformclient.PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
 	}
 	if err := ensureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
-		return PlatformBuild{}, err
+		return platformclient.PlatformBuild{}, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformBuild{}, err
+		return platformclient.PlatformBuild{}, err
 	}
 	details := []string{
 		"commitId=" + params.CommitID,
@@ -397,11 +357,11 @@ func RunReviewRecordBuild(ctx core.Context, store CloudReadStore, alias string, 
 	if strings.TrimSpace(params.FailureDetail) != "" {
 		details = append(details, "failureDetail="+params.FailureDetail)
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/builds", details...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/builds", details...)
 	if ctx.DryRun {
-		return PlatformBuild{}, nil
+		return platformclient.PlatformBuild{}, nil
 	}
-	return client.CreateBuild(context.Background(), params.ReviewID, PlatformCreateBuildParams{
+	return client.CreateBuild(context.Background(), params.ReviewID, platformclient.PlatformCreateBuildParams{
 		CommitID:      params.CommitID,
 		Kind:          "RECORDED",
 		Version:       params.Version,
@@ -434,24 +394,24 @@ func RunReviewRecordBuild(ctx core.Context, store CloudReadStore, alias string, 
 // did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED —
 // either way the answer is a fact about the repository rather than the
 // caller's word.
-func RunReviewReportMerged(ctx core.Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewReportMerged(ctx core.Context, store config.CloudReadStore, alias, reviewID, buildID, remoteURL string, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(remoteURL) == "" {
-		return PlatformReview{}, fmt.Errorf("review id and remote url are required")
+		return platformclient.PlatformReview{}, fmt.Errorf("review id and remote url are required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
 	details := []string{"status=MERGED"}
 	if strings.TrimSpace(buildID) != "" {
 		details = append(details, "buildId="+buildID)
 	}
 	details = append(details, "remoteUrl="+remoteURL)
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", details...)
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", details...)
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
-	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{
+	return client.UpdateReviewStatus(context.Background(), reviewID, platformclient.PlatformUpdateReviewStatusParams{
 		Status:    "MERGED",
 		BuildID:   buildID,
 		RemoteURL: remoteURL,
@@ -477,39 +437,39 @@ func RunReviewReportMerged(ctx core.Context, store CloudReadStore, alias, review
 // the server already treats MERGE -> READY as unconditionally valid for any
 // review at MERGE — so it takes no --reason: there is no gate to make
 // accountable, and the status endpoint has no field to persist one in.
-func RunReviewRequeue(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewRequeue(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" {
-		return PlatformReview{}, fmt.Errorf("review id is required")
+		return platformclient.PlatformReview{}, fmt.Errorf("review id is required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=READY")
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=READY")
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
 	review, err := client.GetReview(context.Background(), reviewID)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
 	if review.Status != "MERGE" {
-		return PlatformReview{}, fmt.Errorf("review %s is %s, not MERGE; requeue only recovers a review stuck at MERGE", reviewID, review.Status)
+		return platformclient.PlatformReview{}, fmt.Errorf("review %s is %s, not MERGE; requeue only recovers a review stuck at MERGE", reviewID, review.Status)
 	}
-	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "READY"})
+	return client.UpdateReviewStatus(context.Background(), reviewID, platformclient.PlatformUpdateReviewStatusParams{Status: "READY"})
 }
 
 // RunReviewReviewersList lists the users assigned to review a review.
-func RunReviewReviewersList(ctx core.Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) ([]PlatformReviewer, error) {
+func RunReviewReviewersList(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) ([]platformclient.PlatformReviewer, error) {
 	if strings.TrimSpace(reviewID) == "" {
 		return nil, fmt.Errorf("review id is required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/reviewers")
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/reviewers")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -521,8 +481,8 @@ func RunReviewReviewersList(ctx core.Context, store CloudReadStore, alias, revie
 // the backend's tenant-scoped foreign key alone (collaboration/reviews): it
 // resolves the caller's own tenant's enrolled users (RLS scopes ListUsers's
 // empty TenantID to the caller's tenant) and checks userID is one of them.
-func ensureReviewerIsEnrolledInCallerTenant(client *PlatformClient, userID string) error {
-	users, err := client.ListUsers(context.Background(), PlatformListUsersParams{})
+func ensureReviewerIsEnrolledInCallerTenant(client *platformclient.PlatformClient, userID string) error {
+	users, err := client.ListUsers(context.Background(), platformclient.PlatformListUsersParams{})
 	if err != nil {
 		return fmt.Errorf("resolve your tenant's enrolled users: %w", err)
 	}
@@ -536,35 +496,35 @@ func ensureReviewerIsEnrolledInCallerTenant(client *PlatformClient, userID strin
 
 // RunReviewReviewerAdd assigns userID as a reviewer on reviewID. A userID not
 // enrolled in the caller's own tenant is refused before the network call.
-func RunReviewReviewerAdd(ctx core.Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) (PlatformReviewer, error) {
+func RunReviewReviewerAdd(ctx core.Context, store config.CloudReadStore, alias, reviewID, userID string, deps cloud.CloudDependencies) (platformclient.PlatformReviewer, error) {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
-		return PlatformReviewer{}, fmt.Errorf("review id and user id are required")
+		return platformclient.PlatformReviewer{}, fmt.Errorf("review id and user id are required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReviewer{}, err
+		return platformclient.PlatformReviewer{}, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/users")
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+reviewID+"/reviewers", "userId="+userID)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/users")
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+reviewID+"/reviewers", "userId="+userID)
 	if ctx.DryRun {
-		return PlatformReviewer{}, nil
+		return platformclient.PlatformReviewer{}, nil
 	}
 	if err := ensureReviewerIsEnrolledInCallerTenant(client, userID); err != nil {
-		return PlatformReviewer{}, err
+		return platformclient.PlatformReviewer{}, err
 	}
-	return client.AddReviewer(context.Background(), reviewID, PlatformAddReviewerParams{UserID: userID})
+	return client.AddReviewer(context.Background(), reviewID, platformclient.PlatformAddReviewerParams{UserID: userID})
 }
 
 // RunReviewReviewerRemove unassigns userID from reviewID's reviewers.
-func RunReviewReviewerRemove(ctx core.Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) error {
+func RunReviewReviewerRemove(ctx core.Context, store config.CloudReadStore, alias, reviewID, userID string, deps cloud.CloudDependencies) error {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("review id and user id are required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return err
 	}
-	tracePlatformCall(ctx, provider, "DELETE", "/v1/reviews/"+reviewID+"/reviewers/"+userID)
+	cloud.TracePlatformCall(ctx, provider, "DELETE", "/v1/reviews/"+reviewID+"/reviewers/"+userID)
 	if ctx.DryRun {
 		return nil
 	}
@@ -578,7 +538,7 @@ func RunReviewReviewerRemove(ctx core.Context, store CloudReadStore, alias, revi
 // states which. An empty Repository is only reachable when neither is
 // available, and lists or advances across every repository's queue, which the
 // caller sees in the trace rather than discovering by promotion.
-func resolveMergeQueueRepository(ctx core.Context, params PlatformMergeQueueParams, traceLabel string) (PlatformMergeQueueParams, error) {
+func resolveMergeQueueRepository(ctx core.Context, params platformclient.PlatformMergeQueueParams, traceLabel string) (platformclient.PlatformMergeQueueParams, error) {
 	remote := strings.TrimSpace(params.Repository)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
@@ -594,7 +554,7 @@ func resolveMergeQueueRepository(ctx core.Context, params PlatformMergeQueuePara
 	}
 	repository, err := model.RepositoryIdentity(remote)
 	if err != nil {
-		return PlatformMergeQueueParams{}, err
+		return platformclient.PlatformMergeQueueParams{}, err
 	}
 	params.Repository = repository
 	ctx.Trace(traceLabel + ": repository = " + repository)
@@ -603,16 +563,16 @@ func resolveMergeQueueRepository(ctx core.Context, params PlatformMergeQueuePara
 
 // RunReviewMergeQueueList lists one repository's merge queue for a target
 // branch.
-func RunReviewMergeQueueList(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) ([]PlatformReview, error) {
+func RunReviewMergeQueueList(ctx core.Context, store config.CloudReadStore, alias string, params platformclient.PlatformMergeQueueParams, deps cloud.CloudDependencies) ([]platformclient.PlatformReview, error) {
 	params, err := resolveMergeQueueRepository(ctx, params, "review queue list")
 	if err != nil {
 		return nil, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", mergeQueueTraceDetails(params)...)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -623,18 +583,18 @@ func RunReviewMergeQueueList(ctx core.Context, store CloudReadStore, alias strin
 // MERGE, refusing with a *PlatformMergeQueueBlockedError when that review
 // still has unresolved comment threads. RunReviewMergeQueueOverrideAdvance is
 // the deliberate, audited way past that refusal.
-func RunReviewMergeQueueAdvance(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueAdvance(ctx core.Context, store config.CloudReadStore, alias string, params platformclient.PlatformMergeQueueParams, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	params, err := resolveMergeQueueRepository(ctx, params, "review queue advance")
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", mergeQueueTraceDetails(params)...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
 	return client.AdvanceMergeQueue(context.Background(), params)
 }
@@ -642,29 +602,29 @@ func RunReviewMergeQueueAdvance(ctx core.Context, store CloudReadStore, alias st
 // RunReviewMergeQueueOverrideAdvance bypasses RunReviewMergeQueueAdvance's
 // unresolved-thread gate. reason is required and is recorded in the
 // platform's audit trail; a blank one is refused before the network call.
-func RunReviewMergeQueueOverrideAdvance(ctx core.Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, reason string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueOverrideAdvance(ctx core.Context, store config.CloudReadStore, alias string, params platformclient.PlatformMergeQueueParams, reason string, deps cloud.CloudDependencies) (platformclient.PlatformReview, error) {
 	if strings.TrimSpace(reason) == "" {
-		return PlatformReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
+		return platformclient.PlatformReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
 	}
 	params, err := resolveMergeQueueRepository(ctx, params, "review queue override-advance")
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformReview{}, err
+		return platformclient.PlatformReview{}, err
 	}
 	details := append(mergeQueueTraceDetails(params), "reason="+reason)
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", details...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", details...)
 	if ctx.DryRun {
-		return PlatformReview{}, nil
+		return platformclient.PlatformReview{}, nil
 	}
 	return client.OverrideAdvanceMergeQueue(context.Background(), params, reason)
 }
 
 // mergeQueueTraceDetails renders a merge-queue address for a dry-run trace, in
 // a fixed order so the trace is deterministic.
-func mergeQueueTraceDetails(params PlatformMergeQueueParams) []string {
+func mergeQueueTraceDetails(params platformclient.PlatformMergeQueueParams) []string {
 	var details []string
 	if strings.TrimSpace(params.Repository) != "" {
 		details = append(details, "repository="+params.Repository)

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // job_commands.go is the shared planning/execution layer `erun jobs
@@ -92,7 +95,7 @@ func NormalizeJobStatus(status string) (string, error) {
 // what they are doing in prose, and since when -- the payload that makes the
 // refusal actionable rather than a bare conflict.
 type JobScopeHeldError struct {
-	Held PlatformJobScopeHeld
+	Held platformclient.PlatformJobScopeHeld
 }
 
 func (e *JobScopeHeldError) Error() string {
@@ -103,7 +106,7 @@ func (e *JobScopeHeldError) Error() string {
 		e.Held.Scope, e.Held.ActorID, e.Held.StartedAt, e.Held.Summary)
 }
 
-func (e *JobScopeHeldError) Unwrap() error { return ErrPlatformConflict }
+func (e *JobScopeHeldError) Unwrap() error { return platformclient.ErrPlatformConflict }
 
 // JobListParams narrows `erun jobs list`. Every field is optional.
 type JobListParams struct {
@@ -117,18 +120,18 @@ type JobListParams struct {
 // RunJobList lists the caller's tenant's jobs, the live queue first. It is
 // the operator's view of what is being worked on right now and what recently
 // finished.
-func RunJobList(ctx core.Context, store CloudReadStore, alias string, params JobListParams, deps CloudDependencies) ([]PlatformJob, error) {
+func RunJobList(ctx core.Context, store config.CloudReadStore, alias string, params JobListParams, deps cloud.CloudDependencies) ([]platformclient.PlatformJob, error) {
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
 		return nil, err
 	}
 	params.Status = status
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	filter := PlatformJobFilter(params)
-	tracePlatformCall(ctx, provider, "GET", "/v1/jobs", jobFilterTraceDetails(filter)...)
+	filter := platformclient.PlatformJobFilter(params)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/jobs", jobFilterTraceDetails(filter)...)
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -156,24 +159,24 @@ type JobClaimParams struct {
 // RunJobClaim records a job starting. With Scope set it is a claim on that
 // scope; a 409 becomes a *JobScopeHeldError naming the holder, so a caller
 // can pick up something else instead of duplicating the work.
-func RunJobClaim(ctx core.Context, store CloudReadStore, alias string, params JobClaimParams, deps CloudDependencies) (PlatformJob, error) {
+func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, params JobClaimParams, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
 	params, err := normalizeJobClaim(params)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
 	environmentID, err := resolveJobReportEnvironment(client, params.Environment)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobClaimTraceDetails(params)...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobClaimTraceDetails(params)...)
 	if ctx.DryRun {
-		return PlatformJob{}, nil
+		return platformclient.PlatformJob{}, nil
 	}
-	created, err := client.ClaimJob(context.Background(), PlatformClaimJobParams{
+	created, err := client.ClaimJob(context.Background(), platformclient.PlatformClaimJobParams{
 		EnvironmentID: environmentID,
 		JobType:       params.JobType,
 		Status:        params.Status,
@@ -185,10 +188,10 @@ func RunJobClaim(ctx core.Context, store CloudReadStore, alias string, params Jo
 		LocalJobID:    params.LocalJobID,
 	})
 	if err != nil {
-		if held, ok := PlatformJobScopeHeldDetails(err); ok {
-			return PlatformJob{}, &JobScopeHeldError{Held: held}
+		if held, ok := platformclient.PlatformJobScopeHeldDetails(err); ok {
+			return platformclient.PlatformJob{}, &JobScopeHeldError{Held: held}
 		}
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
 	return created, nil
 }
@@ -254,28 +257,28 @@ type JobUpdateParams struct {
 }
 
 // RunJobUpdate reports a job's progress or its outcome.
-func RunJobUpdate(ctx core.Context, store CloudReadStore, alias string, params JobUpdateParams, deps CloudDependencies) (PlatformJob, error) {
+func RunJobUpdate(ctx core.Context, store config.CloudReadStore, alias string, params JobUpdateParams, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
 	if strings.TrimSpace(params.JobID) == "" {
-		return PlatformJob{}, fmt.Errorf("job id is required")
+		return platformclient.PlatformJob{}, fmt.Errorf("job id is required")
 	}
 	status, err := NormalizeJobStatus(params.Status)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
 	// RUNNING is accepted here and means exactly one thing: the planned job
 	// this names has begun. The platform refuses it for any job that is
 	// already running (a no-op) or already finished, so the transition table
 	// stays in one place rather than being restated as a local guess about a
 	// status this layer cannot read.
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID, jobUpdateTraceDetails(params)...)
+	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID, jobUpdateTraceDetails(params)...)
 	if ctx.DryRun {
-		return PlatformJob{}, nil
+		return platformclient.PlatformJob{}, nil
 	}
-	return client.UpdateJob(context.Background(), params.JobID, PlatformUpdateJobParams{
+	return client.UpdateJob(context.Background(), params.JobID, platformclient.PlatformUpdateJobParams{
 		Status:     status,
 		Summary:    strings.TrimSpace(params.Summary),
 		LocalJobID: strings.TrimSpace(params.LocalJobID),
@@ -283,17 +286,17 @@ func RunJobUpdate(ctx core.Context, store CloudReadStore, alias string, params J
 }
 
 // RunJobShow fetches one job by id.
-func RunJobShow(ctx core.Context, store CloudReadStore, alias, jobID string, deps CloudDependencies) (PlatformJob, error) {
+func RunJobShow(ctx core.Context, store config.CloudReadStore, alias, jobID string, deps cloud.CloudDependencies) (platformclient.PlatformJob, error) {
 	if strings.TrimSpace(jobID) == "" {
-		return PlatformJob{}, fmt.Errorf("job id is required")
+		return platformclient.PlatformJob{}, fmt.Errorf("job id is required")
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformJob{}, err
+		return platformclient.PlatformJob{}, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/jobs/"+jobID)
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/jobs/"+jobID)
 	if ctx.DryRun {
-		return PlatformJob{}, nil
+		return platformclient.PlatformJob{}, nil
 	}
 	return client.GetJob(context.Background(), jobID)
 }
@@ -311,7 +314,7 @@ func normalizeActorKind(actorKind string) (string, error) {
 	}
 }
 
-func jobFilterTraceDetails(filter PlatformJobFilter) []string {
+func jobFilterTraceDetails(filter platformclient.PlatformJobFilter) []string {
 	var details []string
 	for _, field := range []struct{ name, value string }{
 		{"status", filter.Status},

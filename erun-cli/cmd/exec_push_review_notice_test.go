@@ -13,6 +13,9 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // The push itself is stubbed at the git layer so the whole command body runs:
@@ -58,7 +61,7 @@ func execPushNoticeStoreWithAlias(apiURL string) execPushNoticeStore {
 
 // execPushNoticeDependencies carries the cached access token the notice
 // authenticates with, so the lookup reaches the test server without a login.
-func execPushNoticeDependencies(t *testing.T) common.CloudDependencies {
+func execPushNoticeDependencies(t *testing.T) cloud.CloudDependencies {
 	t.Helper()
 	cached, err := json.Marshal(struct {
 		AccessToken string    `json:"accessToken"`
@@ -67,7 +70,7 @@ func execPushNoticeDependencies(t *testing.T) common.CloudDependencies {
 	if err != nil {
 		t.Fatalf("encode cached access token: %v", err)
 	}
-	return common.CloudDependencies{CloudSecretStore: execPushNoticeSecrets{
+	return cloud.CloudDependencies{CloudSecretStore: execPushNoticeSecrets{
 		secrets: map[string]string{"erun/access/" + execPushNoticeAlias: string(cached)},
 	}}
 }
@@ -75,8 +78,8 @@ func execPushNoticeDependencies(t *testing.T) common.CloudDependencies {
 // execPushNoticePushDependencies is the stubbed push: the tree is on the
 // requested branch, and the push and its read-back report that same branch, so
 // the command body reaches the notice with a real result.
-func execPushNoticePushDependencies(branch string) common.PushWorkingTreeBranchDependencies {
-	return common.PushWorkingTreeBranchDependencies{
+func execPushNoticePushDependencies(branch string) gitx.PushWorkingTreeBranchDependencies {
+	return gitx.PushWorkingTreeBranchDependencies{
 		CurrentBranch: func(core.Context, string) (string, error) { return branch, nil },
 		CurrentCommit: func(core.Context, string) (string, error) { return "0123456789abcdef", nil },
 		RunGit:        func(string, io.Writer, io.Writer, ...string) error { return nil },
@@ -104,7 +107,7 @@ func execPushNoticeContext(out *bytes.Buffer) core.Context {
 // success with a nil error, and the warning must reach stderr.
 func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]common.PlatformReview{})
+		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
 	}))
 	defer srv.Close()
 
@@ -131,7 +134,7 @@ func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 // its own success line.
 func TestExecPushStaysSilentWhenTheBranchHasAReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]common.PlatformReview{
+		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
 			{ReviewID: "r1", SourceBranch: "feature/2204-queued", Status: "READY"},
 		})
 	}))
@@ -164,7 +167,7 @@ func TestExecPushIgnoresAMissingPlatformAlias(t *testing.T) {
 		execPushNoticeContext(out),
 		execPushNoticeFinder(t.TempDir()),
 		execPushNoticeStore{},
-		common.CloudDependencies{},
+		cloud.CloudDependencies{},
 		execPushNoticePushDependencies("feature/2204-orphan"),
 		"feature/2204-orphan",
 		"origin",

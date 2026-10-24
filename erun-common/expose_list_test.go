@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -43,7 +44,7 @@ func installReadNamingKubectl(t *testing.T, resource string) {
 // the name its own output has always carried.
 func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 	installReadNamingKubectl(t, "ingress")
-	req := ShellLaunchParams{Tenant: "frs", Environment: "dev", Namespace: "frs-dev"}
+	req := config.ShellLaunchParams{Tenant: "frs", Environment: "dev", Namespace: "frs-dev"}
 
 	_, err := ListExposedServices(req)
 	if err == nil {

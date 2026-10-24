@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // Sources a gateway credential can come from, as reported to the catalog.
@@ -61,7 +62,7 @@ func (a *App) SaveGatewayCredential(token string) (uiGatewayCredentialStatus, er
 	if err != nil {
 		return uiGatewayCredentialStatus{}, err
 	}
-	store, err := eruncommon.DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		return uiGatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -79,7 +80,7 @@ func (a *App) ClearGatewayCredential() (uiGatewayCredentialStatus, error) {
 	if err != nil {
 		return uiGatewayCredentialStatus{}, err
 	}
-	store, err := eruncommon.DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		return uiGatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -135,7 +136,7 @@ func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) uiGatewayCrede
 // a store that is absent or unreadable: this feeds a status line, and a broken
 // store must not stop the catalog opening.
 func savedGatewayCredential(ref string) (string, bool) {
-	store, err := eruncommon.DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		return "", false
 	}

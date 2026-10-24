@@ -108,7 +108,7 @@ func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environm
 	if envConfig := resolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
 		fallback = envConfig.RuntimeDindPod
 	}
-	return NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
+	return config.NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
 }
 
 // dindPodResourcesPreferEnv overrides each field of fallback with its
@@ -122,13 +122,13 @@ func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environm
 func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.RuntimePodResources {
 	resources := fallback
 	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
-		if _, err := ParseKubernetesCPUToMilli(cpu); err == nil {
+		if _, err := config.ParseKubernetesCPUToMilli(cpu); err == nil {
 			resources.CPU = cpu
 		}
 	}
 	if memoryMiB := strings.TrimSpace(os.Getenv(DindMemoryLimitMiBEnvVar)); memoryMiB != "" {
 		memory := memoryMiB + "Mi"
-		if _, err := ParseKubernetesMemoryToMi(memory); err == nil {
+		if _, err := config.ParseKubernetesMemoryToMi(memory); err == nil {
 			resources.Memory = memory
 		}
 	}
@@ -143,14 +143,14 @@ func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.Runti
 // RuntimePodResources) yields an empty string, which applyDindResourceBuildArgs
 // leaves off the docker command entirely rather than passing a bad literal.
 func dindResourceBuildArgValues(resources config.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
-	if milli, err := ParseKubernetesCPUToMilli(resources.CPU); err == nil {
+	if milli, err := config.ParseKubernetesCPUToMilli(resources.CPU); err == nil {
 		cores := milli / 1000
 		if cores < 1 {
 			cores = 1
 		}
 		cpuLimit = strconv.FormatInt(cores, 10)
 	}
-	if mi, err := ParseKubernetesMemoryToMi(resources.Memory); err == nil {
+	if mi, err := config.ParseKubernetesMemoryToMi(resources.Memory); err == nil {
 		memoryLimitMiB = strconv.FormatInt(mi, 10)
 	}
 	return cpuLimit, memoryLimitMiB

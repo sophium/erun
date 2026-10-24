@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ai_session_status.go is the desktop's read of the structured AI-session
@@ -58,7 +58,7 @@ const aiSessionStatusMarker = "erun-ai-sessions"
 // own tab is decided per tab, at use (aiSessionReadingForTab).
 type aiSessionReading struct {
 	observedAt time.Time
-	sessions   []eruncommon.AISessionStatus
+	sessions   []model.AISessionStatus
 }
 
 // aiSessionStatusScript asks the pod's own erun for the environment's resolved
@@ -79,7 +79,7 @@ func aiSessionStatusScript(selection uiSelection) string {
 // output. A block that is missing, or that does not hold a JSON array, reports
 // ok=false: a failed read is evidence of nothing, and must not be mistaken for
 // a reading that says no session is working.
-func parseAISessionStatuses(probe string) ([]eruncommon.AISessionStatus, bool) {
+func parseAISessionStatuses(probe string) ([]model.AISessionStatus, bool) {
 	block, ok := markedBlock(probe, aiSessionStatusMarker)
 	if !ok {
 		return nil, false
@@ -91,7 +91,7 @@ func parseAISessionStatuses(probe string) ([]eruncommon.AISessionStatus, bool) {
 	if start < 0 || end < start {
 		return nil, false
 	}
-	var statuses []eruncommon.AISessionStatus
+	var statuses []model.AISessionStatus
 	if err := json.Unmarshal([]byte(block[start:end+1]), &statuses); err != nil {
 		return nil, false
 	}
@@ -171,7 +171,7 @@ func (a *App) readAISessionStatusOnce(selection uiSelection) {
 }
 
 // recordAISessionReading stores one environment's resolved reading.
-func (a *App) recordAISessionReading(selection uiSelection, sessions []eruncommon.AISessionStatus) {
+func (a *App) recordAISessionReading(selection uiSelection, sessions []model.AISessionStatus) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.aiSessionReadings == nil {
@@ -232,7 +232,7 @@ func aiSessionReadingForTab(reading aiSessionReading, startedAt time.Time) (busy
 			continue
 		}
 		reported = true
-		if status.State == eruncommon.AISessionStateBusy {
+		if status.State == model.AISessionStateBusy {
 			busy = true
 		}
 	}

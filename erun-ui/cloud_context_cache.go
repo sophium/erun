@@ -4,8 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // Balances how fast the idle widget and respawn gate see truth
@@ -43,7 +44,7 @@ func (a *App) cloudContextStatus(name string) string {
 		return ""
 	}
 	if time.Since(entry.confirmedAt) > cloudContextStatusTTL {
-		return eruncommon.CloudContextStatusUnknown
+		return cloud.CloudContextStatusUnknown
 	}
 	return entry.status
 }
@@ -54,7 +55,7 @@ func (a *App) cloudContextStatus(name string) string {
 // observation is stale, the Unknown downgrade is honoured, so an AWS outage
 // that outlasts the grace window can't keep serving a status that may no
 // longer be true.
-func (a *App) applyCloudContextStatusesToCache(statuses []eruncommon.CloudContextStatus) {
+func (a *App) applyCloudContextStatusesToCache(statuses []config.CloudContextStatus) {
 	if len(statuses) == 0 {
 		return
 	}
@@ -72,7 +73,7 @@ func (a *App) applyCloudContextStatusesToCache(statuses []eruncommon.CloudContex
 		if newStatus == "" {
 			continue
 		}
-		if newStatus == eruncommon.CloudContextStatusUnknown {
+		if newStatus == cloud.CloudContextStatusUnknown {
 			if entry, ok := a.cloudContextStatuses[name]; ok && time.Since(entry.confirmedAt) <= cloudContextStatusTTL {
 				continue
 			}
@@ -148,7 +149,7 @@ func (a *App) refreshCloudContextStatusesOnce() {
 	if a.deps.store == nil {
 		return
 	}
-	statuses, err := eruncommon.RefreshCloudContextStatuses(core.Context{}, a.deps.store, a.deps.cloudContextDeps)
+	statuses, err := cloud.RefreshCloudContextStatuses(core.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return
 	}

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // writeGitStub points ERUN_GIT_BIN at a script that prints stderr and exits
@@ -29,7 +31,7 @@ func writeGitStub(t *testing.T, stderr string, exitCode int) {
 // "%w" wrap renders.
 func TestGitStagedFilesIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
-	_, err := gitStagedFiles(testTraceContext(false), t.TempDir())
+	_, err := gitx.GitStagedFiles(testTraceContext(false), t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}
@@ -40,7 +42,7 @@ func TestGitStagedFilesIncludesGitStderr(t *testing.T) {
 
 func TestGitChangedWorkingTreeFilesIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
-	_, err := gitChangedWorkingTreeFiles(testTraceContext(false), t.TempDir())
+	_, err := gitx.GitChangedWorkingTreeFiles(testTraceContext(false), t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

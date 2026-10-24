@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -242,7 +243,7 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner openK
 	if podName == "" {
 		return "", false
 	}
-	if config.CurrentExecutionMode(kubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryDockerBuildContainerMemoryLimit(podName, containerName)
 	}
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)
@@ -255,7 +256,7 @@ func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runne
 		return "", false
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runner(kubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
+	if err := runner(kube.KubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return "", false
 	}
 	var pod dockerBuildPodSpecDiagnostic
@@ -276,7 +277,7 @@ func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runne
 // defaultDockerBuildContainerMemoryLimit, resolving the same pod via
 // k8s.io/client-go instead of shelling out to kubectl.
 func libraryDockerBuildContainerMemoryLimit(podName, containerName string) (limit string, found bool) {
-	pod, err := libraryGetPod(podName)
+	pod, err := kube.LibraryGetPod(podName)
 	if err != nil {
 		return "", false
 	}

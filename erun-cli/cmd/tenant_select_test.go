@@ -9,6 +9,7 @@ import (
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
 
@@ -97,13 +98,13 @@ func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
 	if got := internal.ExitCodeFor(tagged); got != tenantSelectionUnavailableExitCode {
 		t.Fatalf("exit code %d, want %d", got, tenantSelectionUnavailableExitCode)
 	}
-	if errors.Is(tagged, common.ErrPlatformAliasUnusable) {
+	if errors.Is(tagged, cloud.ErrPlatformAliasUnusable) {
 		t.Fatal("a tenant refusal must not report the platform-alias condition")
 	}
 
-	aliasErr := fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one: %w", common.ErrPlatformAliasUnusable)
+	aliasErr := fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one: %w", cloud.ErrPlatformAliasUnusable)
 	passed := bootstrapInitExitError(aliasErr)
-	if !errors.Is(passed, common.ErrPlatformAliasUnusable) {
+	if !errors.Is(passed, cloud.ErrPlatformAliasUnusable) {
 		t.Fatal("an unresolvable platform alias must keep its own sentinel to report 127")
 	}
 	if errors.Is(passed, config.ErrNotInGitRepository) {

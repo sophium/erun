@@ -13,6 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
@@ -25,7 +27,7 @@ import (
 // host running the suite.
 func newAttachTestRuntime(t *testing.T) RuntimeConfig {
 	t.Helper()
-	if err := os.MkdirAll(eruncommon.RemoteAppSessionSocketDir, 0o700); err != nil {
+	if err := os.MkdirAll(activity.RemoteAppSessionSocketDir, 0o700); err != nil {
 		t.Fatalf("create session socket dir: %v", err)
 	}
 	return RuntimeConfig{Context: RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
@@ -218,7 +220,7 @@ func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
 // offered", and no dtach socket ever created for the denied session.
 func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityRead))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityRead))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", token)
@@ -244,7 +246,7 @@ func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 // upgrade-time gate for a caller carrying no bearer token at all.
 func TestAttachRefusesUnauthenticatedConnectionAtUpgrade(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	issuer, _ := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, _ := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", "")
@@ -267,7 +269,7 @@ func TestAttachRefusesUnauthenticatedConnectionAtUpgrade(t *testing.T) {
 // before closing.
 func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "golden", token)
@@ -301,10 +303,10 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 // value" property this file's own doc comment calls out.
 func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	if err := os.RemoveAll(eruncommon.RemoteAppSessionSocketDir); err != nil {
+	if err := os.RemoveAll(activity.RemoteAppSessionSocketDir); err != nil {
 		t.Fatalf("simulating a pod that has never run a session: %v", err)
 	}
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "fresh-pod", token)
@@ -330,7 +332,7 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 // dropped rather than applied.
 func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "resize", token)
@@ -353,7 +355,7 @@ func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 // scheme (never the token) per RFC 6455.
 func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttachViaSubprotocol(server.URL, "browser", token)
@@ -392,7 +394,7 @@ func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
 		t.Skip("takeover resolves the session master through /proc, which this platform does not have")
 	}
 	runtime := newAttachTestRuntime(t)
-	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	connA, respA, err := dialAttach(server.URL, "shared", token)

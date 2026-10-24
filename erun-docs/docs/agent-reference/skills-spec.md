@@ -571,7 +571,8 @@ gaps remain distinct.
    A successful record is never examined.
 2. It matches that text case-insensitively against these signatures, any one of
    which is sufficient: `failed to resolve source metadata`,
-   `failed to fetch oauth token`, `tls handshake timeout`, `wait for reaper`,
+   `failed to fetch oauth token`, `tls handshake timeout`, `esockettimedout`
+   (yarn's package download timing out mid-install), `wait for reaper`,
    and `reaper:`. The last two are a loaded Docker daemon failing a test
    stage's Testcontainers startup before any test ran. A bare
    `failed to create network` is not a signature: a test that creates its own

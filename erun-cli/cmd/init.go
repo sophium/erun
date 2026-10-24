@@ -10,6 +10,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
 
@@ -391,7 +392,7 @@ func listKubernetesContexts() ([]string, error) {
 }
 
 func ensureKubernetesNamespace(contextName, namespace string) error {
-	return common.EnsureKubernetesNamespace(contextName, namespace)
+	return kube.EnsureKubernetesNamespace(contextName, namespace)
 }
 
 func preferCurrentKubernetesContext(contexts []string, current string) []string {

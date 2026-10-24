@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 type UpgradeInput struct {
@@ -30,7 +31,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				VersionOverride: strings.TrimSpace(input.Version),
 				Force:           input.Force,
 			}
-			plan, err := eruncommon.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, eruncommon.UpgradeVersionsResolverForStore(runtime.Store, eruncommon.ResolveRuntimeImageRegistryVersions))
+			plan, err := eruncommon.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, eruncommon.UpgradeVersionsResolverForStore(runtime.Store, registry.ResolveRuntimeImageRegistryVersions))
 			if err != nil {
 				return err
 			}

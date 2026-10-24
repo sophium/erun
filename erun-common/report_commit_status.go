@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // A required GitHub status check has nothing to require until something
@@ -135,7 +136,7 @@ func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps 
 
 	ctx.Trace(fmt.Sprintf(
 		"github: POST %srepos/%s/%s/statuses/%s (state=%s, context=%s, description=%q)",
-		githubAPIBaseURL, owner, repo, commit, params.State, statusContext, params.Description,
+		registry.GithubAPIBaseURL, owner, repo, commit, params.State, statusContext, params.Description,
 	))
 	result := ReportCommitStatusResult{Owner: owner, Repo: repo, Commit: commit, State: string(params.State), Context: statusContext}
 	if ctx.DryRun {
@@ -172,7 +173,7 @@ type commitStatusRequestBody struct {
 }
 
 func postGitHubCommitStatus(ctx context.Context, client *http.Client, token, owner, repo, commit string, body []byte) error {
-	url := fmt.Sprintf("%srepos/%s/%s/statuses/%s", githubAPIBaseURL, owner, repo, commit)
+	url := fmt.Sprintf("%srepos/%s/%s/statuses/%s", registry.GithubAPIBaseURL, owner, repo, commit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build github commit status request: %w", err)
@@ -199,10 +200,10 @@ func postGitHubCommitStatus(ctx context.Context, client *http.Client, token, own
 // REST API, mirroring resolveGHCRBasicAuth's gh-then-env-var precedence
 // without the ghcr-specific basic-auth wrapping.
 func resolveGitHubAPIToken(owner string) (string, bool) {
-	if token, ok := resolveGHCRTokenViaGH(owner); ok {
+	if token, ok := registry.ResolveGHCRTokenViaGH(owner); ok {
 		return token, true
 	}
-	return ghcrTokenFromEnv()
+	return registry.GhcrTokenFromEnv()
 }
 
 // parseGitHubOwnerRepo extracts owner/repo from a github.com remote URL in

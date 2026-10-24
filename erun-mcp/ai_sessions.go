@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 type AISessionsInput struct {
@@ -18,9 +19,9 @@ type AISessionsInput struct {
 // cannot be misread as answering for a different target than the caller
 // intended.
 type AISessionsResult struct {
-	Tenant      string                       `json:"tenant"`
-	Environment string                       `json:"environment"`
-	Sessions    []eruncommon.AISessionStatus `json:"sessions"`
+	Tenant      string                  `json:"tenant"`
+	Environment string                  `json:"environment"`
+	Sessions    []model.AISessionStatus `json:"sessions"`
 }
 
 // aiSessionsTool is the read side of the structured AI-session status model:
@@ -35,13 +36,13 @@ func aiSessionsTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 			return nil, AISessionsResult{}, err
 		}
 		if input.Session != "" {
-			status, err := eruncommon.LoadAISessionStatus(tenant, environment, input.Session)
+			status, err := activity.LoadAISessionStatus(tenant, environment, input.Session)
 			if err != nil {
 				return nil, AISessionsResult{}, err
 			}
-			return nil, AISessionsResult{Tenant: tenant, Environment: environment, Sessions: []eruncommon.AISessionStatus{status}}, nil
+			return nil, AISessionsResult{Tenant: tenant, Environment: environment, Sessions: []model.AISessionStatus{status}}, nil
 		}
-		statuses, err := eruncommon.LoadAISessionStatuses(tenant, environment)
+		statuses, err := activity.LoadAISessionStatuses(tenant, environment)
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}

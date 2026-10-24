@@ -229,7 +229,7 @@ type RuntimeSizingParams struct {
 	// over the warning it just produced. Nil for callers that only have retained
 	// history (`erun list`), which is the honest answer for a host that never
 	// took a reading of this environment.
-	Live *RuntimeUsage
+	Live *config.RuntimeUsage
 }
 
 // RecommendRuntimeSizing derives an environment's standing recommendation from
@@ -287,7 +287,7 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 		MemoryLimitBytes:         latest.Memory.LimitBytes,
 		ObservedPeakMemoryBytes:  peak,
 		ObservedOOMKills:         oomKills,
-		CPUQuotaMilli:            runtimeQuotaMilli(latest.CPU.QuotaCores),
+		CPUQuotaMilli:            config.RuntimeQuotaMilli(latest.CPU.QuotaCores),
 		ObservedPeakCPUMilli:     history.ObservedPeakCPUMilli,
 		ObservedPeriods:          periods,
 		ObservedThrottledPeriods: throttled,
@@ -310,7 +310,7 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 // and the newest retained sample otherwise. Reports false only when there is
 // nothing observed at all, which is the one case erun answers with silence
 // rather than a guess.
-func runtimeSizingLatestReading(history RuntimeUsageHistory, live *RuntimeUsage) (RuntimeUsage, bool) {
+func runtimeSizingLatestReading(history RuntimeUsageHistory, live *config.RuntimeUsage) (config.RuntimeUsage, bool) {
 	if live != nil && live.HasCounters() {
 		return *live, true
 	}
@@ -324,7 +324,7 @@ func runtimeSizingLatestReading(history RuntimeUsageHistory, live *RuntimeUsage)
 // memory.current, and the warning thresholds read the same two figures, so
 // dropping this one would let an alarm fire on evidence the recommendation
 // refused to look at.
-func runtimeLivePeakMemoryBytes(usage RuntimeUsage) int64 {
+func runtimeLivePeakMemoryBytes(usage config.RuntimeUsage) int64 {
 	return max(usage.Memory.PeakBytes, usage.Memory.CurrentBytes)
 }
 
@@ -333,7 +333,7 @@ func runtimeLivePeakMemoryBytes(usage RuntimeUsage) int64 {
 // the two can never reach different conclusions from the same evidence, and
 // the figure it tests against is the same one the memory warning fires on.
 func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
-	verdict := RuntimeSizingVerdict{Resource: "memory", Current: formatBytesAsMi(limit)}
+	verdict := RuntimeSizingVerdict{Resource: "memory", Current: config.FormatBytesAsMi(limit)}
 	if oomKills > 0 {
 		// A kill is evidence of harm, and one is enough. The observed peak is
 		// also the wrong basis after a kill: the allocation that triggered it
@@ -343,7 +343,7 @@ func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.Names
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
 		verdict.Suggested = suggested
-		verdict.Reason = fmt.Sprintf("%d oom kill(s) at %s%s", oomKills, formatBytesAsMi(limit), bounded)
+		verdict.Reason = fmt.Sprintf("%d oom kill(s) at %s%s", oomKills, config.FormatBytesAsMi(limit), bounded)
 		return verdict, true
 	}
 	if float64(peak) < float64(limit)*runtimeSizingRaiseMemoryPercent/100 {
@@ -353,11 +353,11 @@ func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.Names
 	verdict.Action = RuntimeSizingRaise
 	verdict.Confidence = RuntimeSizingConfidenceHigh
 	verdict.Suggested = suggested
-	verdict.Reason = fmt.Sprintf("peak %s of %s (%s) is within the raise margin%s", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), bounded)
+	verdict.Reason = fmt.Sprintf("peak %s of %s (%s) is within the raise margin%s", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), bounded)
 	return verdict, true
 }
 
-func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, peak, oomKills int64, ceiling config.NamespaceResourceQuota) RuntimeSizingVerdict {
+func recommendRuntimeMemory(history RuntimeUsageHistory, latest config.RuntimeUsage, peak, oomKills int64, ceiling config.NamespaceResourceQuota) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "memory"}
 	limit := latest.Memory.LimitBytes
 	if limit <= 0 {
@@ -365,7 +365,7 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, pe
 		verdict.Reason = "memory.max reports no limit, so there is nothing to size against"
 		return verdict
 	}
-	verdict.Current = formatBytesAsMi(limit)
+	verdict.Current = config.FormatBytesAsMi(limit)
 
 	if raise, ok := runtimeMemoryRaiseVerdict(limit, peak, oomKills, ceiling); ok {
 		return raise
@@ -373,39 +373,39 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, pe
 
 	if reason, ok := runtimeSizingShrinkWindowShortfall(history); !ok {
 		verdict.Action = RuntimeSizingUnknown
-		verdict.Reason = fmt.Sprintf("peak %s of %s (%s), but %s", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), reason)
+		verdict.Reason = fmt.Sprintf("peak %s of %s (%s), but %s", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), reason)
 		return verdict
 	}
 
 	suggested := scaleBytesToMi(peak, runtimeSizingMemoryHeadroom)
 	if suggested >= limit {
 		verdict.Action = RuntimeSizingHold
-		verdict.Reason = fmt.Sprintf("peak %s of %s (%s) leaves no room to shrink at %gx headroom", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
+		verdict.Reason = fmt.Sprintf("peak %s of %s (%s) leaves no room to shrink at %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
 		return verdict
 	}
 	verdict.Action = RuntimeSizingLower
 	// Low, always. A quiet window is an argument from silence: it says erun saw
 	// no harm, not that none is possible.
 	verdict.Confidence = RuntimeSizingConfidenceLow
-	verdict.Suggested = formatBytesAsMi(suggested)
-	verdict.Reason = fmt.Sprintf("peak %s of %s (%s), no oom kills, keeping %gx headroom", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
+	verdict.Suggested = config.FormatBytesAsMi(suggested)
+	verdict.Reason = fmt.Sprintf("peak %s of %s (%s), no oom kills, keeping %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
 	return verdict
 }
 
-func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, observedPeriods, observedThrottled int64) RuntimeSizingVerdict {
+func recommendRuntimeCPU(history RuntimeUsageHistory, latest config.RuntimeUsage, observedPeriods, observedThrottled int64) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "cpu"}
-	quota := runtimeQuotaMilli(latest.CPU.QuotaCores)
+	quota := config.RuntimeQuotaMilli(latest.CPU.QuotaCores)
 	if quota <= 0 {
 		verdict.Action = RuntimeSizingUnknown
 		verdict.Reason = "cpu.max reports no quota, so there is nothing to size against"
 		return verdict
 	}
-	verdict.Current = FormatKubernetesCPUFromMilli(quota)
+	verdict.Current = config.FormatKubernetesCPUFromMilli(quota)
 
 	if runtimeThrottleIsMaterial(observedThrottled, observedPeriods) {
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
-		verdict.Suggested = FormatKubernetesCPUFromMilli(scaleMilliToWholeCores(quota, runtimeSizingCPURaiseMultiple))
+		verdict.Suggested = config.FormatKubernetesCPUFromMilli(config.ScaleMilliToWholeCores(quota, runtimeSizingCPURaiseMultiple))
 		verdict.Reason = runtimeThrottleLabel(observedThrottled, observedPeriods)
 		return verdict
 	}
@@ -436,8 +436,8 @@ func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, obser
 		return verdict
 	}
 
-	suggested := scaleMilliToWholeCores(history.ObservedPeakCPUMilli, runtimeSizingCPUHeadroom)
-	peakLabel := fmt.Sprintf("busiest interval %s of %s", FormatKubernetesCPUFromMilli(history.ObservedPeakCPUMilli), FormatKubernetesCPUFromMilli(quota))
+	suggested := config.ScaleMilliToWholeCores(history.ObservedPeakCPUMilli, runtimeSizingCPUHeadroom)
+	peakLabel := fmt.Sprintf("busiest interval %s of %s", config.FormatKubernetesCPUFromMilli(history.ObservedPeakCPUMilli), config.FormatKubernetesCPUFromMilli(quota))
 	if suggested >= quota {
 		verdict.Action = RuntimeSizingHold
 		verdict.Reason = fmt.Sprintf("%s, %s", peakLabel, throttleLabel)
@@ -445,7 +445,7 @@ func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, obser
 	}
 	verdict.Action = RuntimeSizingLower
 	verdict.Confidence = RuntimeSizingConfidenceLow
-	verdict.Suggested = FormatKubernetesCPUFromMilli(suggested)
+	verdict.Suggested = config.FormatKubernetesCPUFromMilli(suggested)
 	verdict.Reason = fmt.Sprintf("%s, %s, keeping %gx headroom", peakLabel, throttleLabel, runtimeSizingCPUHeadroom)
 	return verdict
 }
@@ -471,22 +471,22 @@ func runtimeSizingShrinkWindowShortfall(history RuntimeUsageHistory) (string, bo
 // This is a bound, not the knob: raising the quota is a separate decision from
 // resizing the pod.
 func boundRuntimeMemorySuggestion(suggested int64, ceiling config.NamespaceResourceQuota) (string, string) {
-	quotaMi, err := ParseKubernetesMemoryToMi(ceiling.Memory)
+	quotaMi, err := config.ParseKubernetesMemoryToMi(ceiling.Memory)
 	if err != nil {
-		return formatBytesAsMi(suggested), ""
+		return config.FormatBytesAsMi(suggested), ""
 	}
-	dindMi, err := ParseKubernetesMemoryToMi(DefaultRuntimeDindMemory)
+	dindMi, err := config.ParseKubernetesMemoryToMi(config.DefaultRuntimeDindMemory)
 	if err != nil {
-		return formatBytesAsMi(suggested), ""
+		return config.FormatBytesAsMi(suggested), ""
 	}
 	const mi = 1024 * 1024
 	available := (quotaMi - dindMi) * mi
 	if available <= 0 || suggested <= available {
-		return formatBytesAsMi(suggested), ""
+		return config.FormatBytesAsMi(suggested), ""
 	}
 	graduation := int64(runtimeSizingMemoryGraduationMi) * mi
-	note := fmt.Sprintf("; bounded by the %s namespace quota less the dind sidecar's %s", ceiling.Memory, DefaultRuntimeDindMemory)
-	return formatBytesAsMi(available - available%graduation), note
+	note := fmt.Sprintf("; bounded by the %s namespace quota less the dind sidecar's %s", ceiling.Memory, config.DefaultRuntimeDindMemory)
+	return config.FormatBytesAsMi(available - available%graduation), note
 }
 
 // scaleBytesToMi multiplies a byte figure and rounds it up to a round number of
@@ -501,23 +501,6 @@ func scaleBytesToMi(bytes int64, multiple float64) int64 {
 		steps = 1
 	}
 	return steps * graduation
-}
-
-// scaleMilliToWholeCores multiplies a millicore figure and rounds up to a whole
-// core. Every environment in the fleet is sized in whole cores, and a
-// fractional suggestion derived from sampled intervals claims a precision the
-// samples do not have.
-func scaleMilliToWholeCores(milli int64, multiple float64) int64 {
-	scaled := int64(math.Ceil(float64(milli) * multiple))
-	cores := (scaled + 999) / 1000
-	if cores < 1 {
-		cores = 1
-	}
-	return cores * 1000
-}
-
-func formatBytesAsMi(bytes int64) string {
-	return fmt.Sprintf("%dMi", (bytes+1024*1024-1)/(1024*1024))
 }
 
 // runtimeThrottleLabel words the throttle ratio every CPU verdict is an
@@ -545,18 +528,11 @@ func formatPercent(part, whole int64) string {
 	return fmt.Sprintf("%.0f%%", float64(part)/float64(whole)*100)
 }
 
-// runtimeQuotaMilli converts RuntimeCPUUsage's cores-based quota into the
-// millicore unit every sizing figure and NamespaceResourceQuota comparison in
-// this file uses.
-func runtimeQuotaMilli(quotaCores float64) int64 {
-	return int64(math.Round(quotaCores * 1000))
-}
-
 // runtimeUsageUnavailable collects the latest reading's per-resource
 // unavailability into the flat list RuntimeSizingEvidence reports, since
 // RuntimeUsage names each gap on its own CPU/Memory reading rather than in one
 // shared list.
-func runtimeUsageUnavailable(latest RuntimeUsage) []string {
+func runtimeUsageUnavailable(latest config.RuntimeUsage) []string {
 	var unavailable []string
 	if latest.Memory.Unavailable != "" {
 		unavailable = append(unavailable, latest.Memory.Unavailable)

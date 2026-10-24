@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // The desktop writes into the job store — Investigate starts a job there — and
@@ -149,8 +150,8 @@ func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, b
 	if a.deps.canReachMCPEndpoint(mcpPort) {
 		return result, true, nil
 	}
-	if kind := a.classifyMCPUnreachable(mcpPort); kind == eruncommon.LocalMCPStaleForward {
-		return config.OpenResult{}, false, wrapMCPUnreachableErrorWithKind(kind, errors.New(eruncommon.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
+	if kind := a.classifyMCPUnreachable(mcpPort); kind == mcp.LocalMCPStaleForward {
+		return config.OpenResult{}, false, wrapMCPUnreachableErrorWithKind(kind, errors.New(mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
 	}
 	return result, false, nil
 }

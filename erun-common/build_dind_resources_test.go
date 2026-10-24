@@ -104,7 +104,7 @@ func TestResolveDockerBuildDindPodResourcesFallsBackToDefaultsWhenNeitherEnvNorC
 
 	dir := t.TempDir()
 	got := resolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
-	want := config.RuntimePodResources{CPU: DefaultRuntimeDindCPU, Memory: DefaultRuntimeDindMemory}
+	want := config.RuntimePodResources{CPU: config.DefaultRuntimeDindCPU, Memory: config.DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected the hardcoded defaults, got %+v want %+v", got, want)
 	}
@@ -137,7 +137,7 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t 
 
 	dir := t.TempDir()
 	got := resolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
-	want := config.RuntimePodResources{CPU: "8", Memory: DefaultRuntimeDindMemory}
+	want := config.RuntimePodResources{CPU: "8", Memory: config.DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected valid CPU env var and default memory, got %+v want %+v", got, want)
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // previewAdvertisedInSchema reads the property out of the schema a client
@@ -49,7 +49,7 @@ func previewAdvertisedInDescription(tool *mcp.Tool) bool {
 // check -- the failure mode a surface-wide test has when the session returns an
 // empty list.
 func TestPreviewIsAdvertisedExactlyWhereItIsAccepted(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
 	if len(tools) == 0 {
 		t.Fatal("no tools listed; the rest of this test would pass vacuously")
@@ -151,7 +151,7 @@ func TestAdvertisePreviewRefusesAFalseClaim(t *testing.T) {
 // `doctor --sync-config` was run against a live environment because its
 // description gave no hint that a preview existed.
 func TestDestructiveToolsAdvertisePreview(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	byName := map[string]*mcp.Tool{}
 	for _, tool := range listTools(t, session) {
 		byName[tool.Name] = tool

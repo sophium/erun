@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 const (
@@ -85,7 +86,7 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	// Defense in depth: even if a Cloudflare alias somehow landed in the scalar,
 	// the strict provider-type gate keeps the AWS-only credential push from
 	// trying to export temporary credentials from a token-based provider.
-	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
+	provider, err := cloud.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
 	if err != nil || provider.Provider != config.CloudProviderAWS {
 		return "", config.OpenResult{}, false
 	}
@@ -153,7 +154,7 @@ func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSele
 		if err := a.waitForMCPReady(ctx, mcpPort); err != nil {
 			return
 		}
-		creds, err := eruncommon.ExportCloudProviderCredentials(core.Context{}, a.deps.store, alias, a.deps.cloudDeps)
+		creds, err := cloud.ExportCloudProviderCredentials(core.Context{}, a.deps.store, alias, a.deps.cloudDeps)
 		if err != nil {
 			a.surfaceCredentialRefreshFailure(selection, fmt.Errorf("export host credentials: %w", err), &notifiedFailure)
 			if !sleepWithCancel(ctx, credentialRefreshBackoff) {

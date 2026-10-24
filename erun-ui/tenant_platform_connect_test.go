@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // erunTestPlatformAPIURL is the address the Connect card pre-fills; the alias
@@ -35,19 +36,19 @@ func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubU
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		cloudDeps: eruncommon.CloudDependencies{
-			FetchPlatformInfo: func(_ core.Context, apiURL string) (eruncommon.PlatformInfo, error) {
+		cloudDeps: cloud.CloudDependencies{
+			FetchPlatformInfo: func(_ core.Context, apiURL string) (platformclient.PlatformInfo, error) {
 				if apiURL != erunTestPlatformAPIURL {
 					t.Fatalf("platform discovery went to %q, want %q", apiURL, erunTestPlatformAPIURL)
 				}
-				return eruncommon.PlatformInfo{
+				return platformclient.PlatformInfo{
 					Issuer:      "https://auth.erunpaas.com",
 					APIURL:      apiURL,
 					CLIClientID: "cli-client-1",
 				}, nil
 			},
-			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
-				return eruncommon.OIDCDiscovery{}, nil
+			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+				return cloud.OIDCDiscovery{}, nil
 			},
 		},
 	})

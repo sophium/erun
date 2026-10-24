@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // review.go exposes `erun review`'s operations as MCP tools over the same
@@ -28,9 +29,9 @@ type ReviewListInput struct {
 }
 
 type ReviewListResult struct {
-	Preview bool                        `json:"preview"`
-	Reviews []eruncommon.PlatformReview `json:"reviews,omitempty"`
-	Trace   []string                    `json:"trace,omitempty"`
+	Preview bool                            `json:"preview"`
+	Reviews []platformclient.PlatformReview `json:"reviews,omitempty"`
+	Trace   []string                        `json:"trace,omitempty"`
 }
 
 func reviewListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
@@ -88,9 +89,9 @@ type ReviewCreateInput struct {
 }
 
 type ReviewResult struct {
-	Preview bool                      `json:"preview"`
-	Review  eruncommon.PlatformReview `json:"review,omitempty"`
-	Trace   []string                  `json:"trace,omitempty"`
+	Preview bool                          `json:"preview"`
+	Review  platformclient.PlatformReview `json:"review,omitempty"`
+	Trace   []string                      `json:"trace,omitempty"`
 }
 
 func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCreateInput) (*mcp.CallToolResult, ReviewResult, error) {
@@ -101,7 +102,7 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_create"
-		review, err := eruncommon.RunReviewCreate(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateReviewParams{
+		review, err := eruncommon.RunReviewCreate(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateReviewParams{
 			Repository: input.Repository, Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
 			IssueRef: input.IssueRef,
 		}, cloudDependencies())
@@ -129,9 +130,9 @@ type ReviewCommentInput struct {
 }
 
 type ReviewCommentResult struct {
-	Preview bool                       `json:"preview"`
-	Comment eruncommon.PlatformComment `json:"comment,omitempty"`
-	Trace   []string                   `json:"trace,omitempty"`
+	Preview bool                           `json:"preview"`
+	Comment platformclient.PlatformComment `json:"comment,omitempty"`
+	Trace   []string                       `json:"trace,omitempty"`
 }
 
 func reviewCommentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
@@ -195,9 +196,9 @@ type ReviewRecordBuildInput struct {
 }
 
 type ReviewRecordBuildResult struct {
-	Preview bool                     `json:"preview"`
-	Build   eruncommon.PlatformBuild `json:"build,omitempty"`
-	Trace   []string                 `json:"trace,omitempty"`
+	Preview bool                         `json:"preview"`
+	Build   platformclient.PlatformBuild `json:"build,omitempty"`
+	Trace   []string                     `json:"trace,omitempty"`
 }
 
 // reviewRecordBuildTool is the only way an erun client transitions a review
@@ -235,9 +236,9 @@ type ReviewReportMergedInput struct {
 }
 
 type ReviewReportMergedResult struct {
-	Preview bool                      `json:"preview"`
-	Review  eruncommon.PlatformReview `json:"review,omitempty"`
-	Trace   []string                  `json:"trace,omitempty"`
+	Preview bool                          `json:"preview"`
+	Review  platformclient.PlatformReview `json:"review,omitempty"`
+	Trace   []string                      `json:"trace,omitempty"`
 }
 
 // reviewReportMergedTool is for the environment a review's merge queue
@@ -332,9 +333,9 @@ type ReviewReviewersListInput struct {
 }
 
 type ReviewReviewersListResult struct {
-	Preview   bool                          `json:"preview"`
-	Reviewers []eruncommon.PlatformReviewer `json:"reviewers,omitempty"`
-	Trace     []string                      `json:"trace,omitempty"`
+	Preview   bool                              `json:"preview"`
+	Reviewers []platformclient.PlatformReviewer `json:"reviewers,omitempty"`
+	Trace     []string                          `json:"trace,omitempty"`
 }
 
 func reviewReviewersListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
@@ -360,9 +361,9 @@ type ReviewReviewerAddInput struct {
 }
 
 type ReviewReviewerResult struct {
-	Preview  bool                        `json:"preview"`
-	Reviewer eruncommon.PlatformReviewer `json:"reviewer,omitempty"`
-	Trace    []string                    `json:"trace,omitempty"`
+	Preview  bool                            `json:"preview"`
+	Reviewer platformclient.PlatformReviewer `json:"reviewer,omitempty"`
+	Trace    []string                        `json:"trace,omitempty"`
 }
 
 func reviewReviewerAddTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
@@ -421,7 +422,7 @@ func reviewMergeQueueListTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_list"
-		reviews, err := eruncommon.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+		reviews, err := eruncommon.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, cloudDependencies())
 		if err != nil {
@@ -445,7 +446,7 @@ func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *m
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_advance"
-		review, err := eruncommon.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+		review, err := eruncommon.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, cloudDependencies())
 		if err != nil {
@@ -470,7 +471,7 @@ func reviewMergeQueueOverrideAdvanceTool(runtime RuntimeConfig) func(context.Con
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_override-advance"
-		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, input.Reason, cloudDependencies())
 		if err != nil {

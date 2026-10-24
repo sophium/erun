@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // The lease tools are the MCP half of the activity lease. An orchestrator that
@@ -37,10 +37,10 @@ type ActivityLeaseTakeInput struct {
 
 // ActivityLeaseResult reports the lease state after the call.
 type ActivityLeaseResult struct {
-	Tenant      string                                `json:"tenant"`
-	Environment string                                `json:"environment"`
-	Lease       *eruncommon.EnvironmentActivityLease  `json:"lease,omitempty"`
-	Held        []eruncommon.EnvironmentActivityLease `json:"held"`
+	Tenant      string                              `json:"tenant"`
+	Environment string                              `json:"environment"`
+	Lease       *activity.EnvironmentActivityLease  `json:"lease,omitempty"`
+	Held        []activity.EnvironmentActivityLease `json:"held"`
 	// Released is set only by activity_lease_release: true when a held claim
 	// actually existed under the given id (and scope, for an exclusive claim)
 	// and this call removed it, false when there was nothing there to remove.
@@ -62,7 +62,7 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if id == "" {
 			id = strings.TrimSpace(input.Name)
 		}
-		params := eruncommon.TakeEnvironmentActivityLeaseParams{
+		params := activity.TakeEnvironmentActivityLeaseParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Name:        input.Name,
@@ -74,7 +74,7 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 			// Tenant and User come from the resolved auth identity, never
 			// from caller input, so a lease cannot be taken out in someone
 			// else's name.
-			Holder: eruncommon.EnvironmentActivityLeaseHolder{
+			Holder: activity.EnvironmentActivityLeaseHolder{
 				Orchestrator: input.Orchestrator,
 				Tenant:       identity.Tenant,
 				User:         identity.User,
@@ -88,14 +88,14 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 			// is running detached work, that work's own resident process is
 			// indistinguishable from an operator's, and gating renewal on it
 			// would make the job refuse itself.
-			status, statusErr := eruncommon.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
+			status, statusErr := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 			if statusErr == nil {
-				if reason, present := eruncommon.EnvironmentOperatorPresenceReason(status); present {
-					return nil, ActivityLeaseResult{}, &eruncommon.EnvironmentOperatorPresentError{Reason: reason}
+				if reason, present := activity.EnvironmentOperatorPresenceReason(status); present {
+					return nil, ActivityLeaseResult{}, &activity.EnvironmentOperatorPresentError{Reason: reason}
 				}
 			}
 		}
-		lease, err := eruncommon.TakeEnvironmentActivityLease(params)
+		lease, err := activity.TakeEnvironmentActivityLease(params)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
@@ -115,13 +115,13 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 // the raw value directly is how erun#1652 happened: a lease id needing
 // sanitisation (a space, a slash, a colon) never matched its stored form, so
 // every renewal misread as a fresh claim.
-func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params eruncommon.TakeEnvironmentActivityLeaseParams) bool {
-	id, err := eruncommon.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
+func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params activity.TakeEnvironmentActivityLeaseParams) bool {
+	id, err := activity.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
 	if err != nil {
 		return false
 	}
-	scope := eruncommon.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
-	held, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	scope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
+	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return false
 	}
@@ -154,19 +154,19 @@ func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		if strings.TrimSpace(input.ID) == "" {
 			return nil, ActivityLeaseResult{}, fmt.Errorf("lease id is required")
 		}
-		var outcome eruncommon.EnvironmentActivityLeaseReleaseOutcome
+		var outcome activity.EnvironmentActivityLeaseReleaseOutcome
 		if input.Exclusive {
-			outcome, err = eruncommon.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
+			outcome, err = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
 			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
 		} else {
-			outcome, err = eruncommon.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
+			outcome, err = activity.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
 			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
 		}
-		released := outcome == eruncommon.EnvironmentActivityLeaseReleased
+		released := outcome == activity.EnvironmentActivityLeaseReleased
 		return activityLeaseResult(tenant, environment, nil, &released)
 	}
 }
@@ -174,13 +174,13 @@ func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.
 // activityLeaseResult always returns what is still held, so a caller sees the
 // environment's whole claim set rather than only the lease it just moved.
 // released is non-nil only for a release call; take and list pass nil.
-func activityLeaseResult(tenant, environment string, lease *eruncommon.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-	held, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+func activityLeaseResult(tenant, environment string, lease *activity.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, ActivityLeaseResult{}, err
 	}
 	if held == nil {
-		held = []eruncommon.EnvironmentActivityLease{}
+		held = []activity.EnvironmentActivityLease{}
 	}
 	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held, Released: released}, nil
 }

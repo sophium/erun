@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // uiRuntimeChartPlan is what a deploy at the chosen version would install for the
@@ -92,11 +93,11 @@ func (a *App) probedRuntimeChartPlan(tenant, environment, version string) uiRunt
 		registry = config.DefaultContainerRegistry
 	}
 	repo := func(chart string) string {
-		return eruncommon.PublishedDevopsChartOCIRepo(registry) + "/" + chart
+		return helm.PublishedDevopsChartOCIRepo(registry) + "/" + chart
 	}
 
 	unknown := false
-	if tenantChart := eruncommon.RuntimeReleaseName(tenant); tenantChart != eruncommon.DevopsComponentName {
+	if tenantChart := config.RuntimeReleaseName(tenant); tenantChart != config.DevopsComponentName {
 		published, known := a.probePublishedChart(tenant, environment, version, tenantChart)
 		if published {
 			return uiRuntimeChartPlan{Reference: repo(tenantChart), Version: version, Chart: tenantChart, Source: "tenant"}
@@ -104,7 +105,7 @@ func (a *App) probedRuntimeChartPlan(tenant, environment, version string) uiRunt
 		unknown = !known
 	}
 
-	canonical := eruncommon.DevopsComponentName
+	canonical := config.DevopsComponentName
 	plan := uiRuntimeChartPlan{Reference: repo(canonical), Version: version, Chart: canonical, Source: "canonical"}
 	published, known := a.probePublishedChart(tenant, environment, version, canonical)
 	switch {

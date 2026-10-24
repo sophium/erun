@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // Helm's "Successfully packaged chart …" is progress, not data: on erun's
@@ -22,10 +23,10 @@ func TestHelmProgressStaysOffStdout(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for name, run := range map[string]func(core.Context, commandSpec) error{
-		"runHelmCommand": runHelmCommand,
-		"runHelmCommandCapturingOutput": func(ctx core.Context, spec commandSpec) error {
-			out, err := runHelmCommandCapturingOutput(ctx, spec)
+	for name, run := range map[string]func(core.Context, helm.CommandSpec) error{
+		"runHelmCommand": helm.RunHelmCommand,
+		"runHelmCommandCapturingOutput": func(ctx core.Context, spec helm.CommandSpec) error {
+			out, err := helm.RunHelmCommandCapturingOutput(ctx, spec)
 			if !strings.Contains(out, "Successfully packaged chart") {
 				t.Errorf("captured output lost helm's stdout: %q", out)
 			}
@@ -38,7 +39,7 @@ func TestHelmProgressStaysOffStdout(t *testing.T) {
 			var stdout syncBuffer
 			var stderr syncBuffer
 			ctx := core.Context{Stdout: &stdout, Stderr: &stderr}
-			if err := run(ctx, commandSpec{Name: "helm", Args: []string{"package", "chart"}}); err != nil {
+			if err := run(ctx, helm.CommandSpec{Name: "helm", Args: []string{"package", "chart"}}); err != nil {
 				t.Fatalf("helm: %v", err)
 			}
 			if out := stdout.snapshot(); out != "" {

@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // The sidebar lets an environment's own answer stop a row spinning, which makes
@@ -41,14 +42,14 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
 		t.Fatalf("SaveEnvConfig: %v", err)
 	}
-	path, err := eruncommon.PortForwardStatePath("mcp", tenant, environment)
+	path, err := kube.PortForwardStatePath("mcp", tenant, environment)
 	if err != nil {
 		t.Fatalf("PortForwardStatePath: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	data, err := json.Marshal(eruncommon.PortForwardState{
+	data, err := json.Marshal(kube.PortForwardState{
 		Tenant: tenant, Environment: environment, LocalPort: port,
 	})
 	if err != nil {
@@ -62,7 +63,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 func observeWith(
 	t *testing.T,
 	canConnect bool,
-	load func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error),
+	load func(context.Context, string, string) (activity.EnvironmentIdleStatus, error),
 ) environmentActivityState {
 	t.Helper()
 	seedMCPForward(t, "acme", "dev", 17500)
@@ -76,8 +77,8 @@ func observeWith(
 }
 
 func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
-	got := observeWith(t, true, func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-		return eruncommon.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+	got := observeWith(t, true, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+		return activity.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 	})
 	if !got.reachable {
 		t.Fatal("a port that accepts connections is still reachable")
@@ -93,9 +94,9 @@ func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
 }
 
 func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
-	got := observeWith(t, true, func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-		return eruncommon.EnvironmentIdleStatus{
-			Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+	got := observeWith(t, true, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+		return activity.EnvironmentIdleStatus{
+			Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		}, nil
 	})
 	if !got.reachable || !got.observed {
@@ -112,9 +113,9 @@ func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 // distinction between an environment that had a forward and one that never did
 // — belongs to environment_forward_repair_test.go.
 func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
-	got := observeWith(t, false, func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
+	got := observeWith(t, false, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
 		t.Fatal("the idle question must not be asked when the port does not answer")
-		return eruncommon.EnvironmentIdleStatus{}, nil
+		return activity.EnvironmentIdleStatus{}, nil
 	})
 	if got.reachable || got.observed || got.busy {
 		t.Fatalf("an unreachable environment reports nothing, got %+v", got)
@@ -160,11 +161,11 @@ func observeViaPodWith(
 // session is holding busy right now, must read as busy — not as unreachable.
 func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
-		status := eruncommon.EnvironmentIdleStatus{
-			Leases: []eruncommon.EnvironmentActivityLease{
+		status := activity.EnvironmentIdleStatus{
+			Leases: []activity.EnvironmentActivityLease{
 				{ID: "job-fix-1570", Name: "job-fix-1570", ExpiresAt: time.Now().Add(time.Hour)},
 			},
-			Markers: []eruncommon.EnvironmentIdleMarker{{Name: "lease", Idle: false}},
+			Markers: []activity.EnvironmentIdleMarker{{Name: "lease", Idle: false}},
 		}
 		data, err := json.Marshal(status)
 		if err != nil {
@@ -187,8 +188,8 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 // pod is reachable and genuinely has nothing running.
 func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
-		data, err := json.Marshal(eruncommon.EnvironmentIdleStatus{
-			Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+		data, err := json.Marshal(activity.EnvironmentIdleStatus{
+			Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		})
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
