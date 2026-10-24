@@ -48,6 +48,9 @@ vendors:
   k8s-io-client-go:
     in: ["k8s.io/client-go", "k8s.io/client-go/**"]
 
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
 components:
   cmd-eapi:
     in: "cmd/eapi"

@@ -24,14 +24,15 @@ vendors:
   github-com-wailsapp-wails-v2:
     in: ["github.com/wailsapp/wails/v2", "github.com/wailsapp/wails/v2/**"]
 
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
 exclude:
   - playwright/fixtures/winstub
 
 components:
   headlessserver:
     in: "headlessserver"
-  playwright-node_modules-flatted-golang-pkg-flatted:
-    in: "playwright/node_modules/flatted/golang/pkg/flatted"
   root:
     in: "."
 

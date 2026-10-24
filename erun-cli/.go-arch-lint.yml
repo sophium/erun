@@ -18,6 +18,9 @@ vendors:
   golang-org-x-term:
     in: ["golang.org/x/term", "golang.org/x/term/**"]
 
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
 components:
   cmd:
     in: "cmd"

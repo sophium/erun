@@ -26,6 +26,9 @@ vendors:
   github-com-sophium-erun-erun-common:
     in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
 
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
 components:
   cmd-emcp:
     in: "cmd/emcp"

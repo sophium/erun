@@ -30,6 +30,9 @@ vendors:
   sigs-k8s-io-yaml:
     in: ["sigs.k8s.io/yaml", "sigs.k8s.io/yaml/**"]
 
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
 components:
   base-config:
     in: "base/config"
