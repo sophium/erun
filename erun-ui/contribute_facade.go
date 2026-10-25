@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"time"
@@ -74,6 +75,9 @@ func (a *App) newContributeService() *contribute.Service {
 		WrapMCPUnreachable: wrapMCPUnreachableError,
 		IsMCPDialFailure:   isMCPDialFailure,
 		CloneERun: func(ctx context.Context, endpoint, bearer string) error {
+			if a.deps.cloneERun == nil {
+				return errors.New("contribute clone is not configured")
+			}
 			return a.deps.cloneERun(ctx, endpoint, bearer)
 		},
 		StatePath: a.deps.contributeStatePath,
