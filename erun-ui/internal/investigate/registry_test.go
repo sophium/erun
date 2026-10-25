@@ -13,7 +13,7 @@ import (
 
 	"github.com/adrg/xdg"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -504,7 +504,7 @@ func stagedReports(t *testing.T, dir string) []string {
 
 func activityLeaseIDs(t *testing.T, tenant, environment string) []string {
 	t.Helper()
-	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivityLeases failed: %v", err)
 	}

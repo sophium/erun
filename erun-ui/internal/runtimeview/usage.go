@@ -13,9 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -52,7 +52,7 @@ func ReadUsageViaKubectl(parent context.Context, store config.OpenStore, selecti
 	if err != nil {
 		return Usage{}, err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
@@ -73,7 +73,7 @@ func quietContext() core.Context {
 }
 
 // erun-common's RunRuntimeContainerCommand has no timeout; a UI probe needs one.
-func runtimeUsageRunner(ctx context.Context) seam.RuntimeContainerCommandRunnerFunc {
+func runtimeUsageRunner(ctx context.Context) runtimepod.RuntimeContainerCommandRunnerFunc {
 	return func(req config.ShellLaunchParams, container, script string) (model.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
 		if kubernetesContext := strings.TrimSpace(req.KubernetesContext); kubernetesContext != "" {

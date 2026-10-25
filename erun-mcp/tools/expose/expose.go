@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
@@ -53,7 +53,7 @@ func ExposeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 		projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		exposeStore, ok := any(runtime.Store).(seam.ExposeStore)
+		exposeStore, ok := any(runtime.Store).(envstore.ExposeStore)
 		if !ok {
 			exposeStore = config.ConfigStore{}
 		}

@@ -7,14 +7,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 )
 
 // seedExclusiveClaim takes a claim through the store's own defaults, not a direct file write.
 func seedExclusiveClaim(t *testing.T, tenant, environment, id, name, scope string) {
 	t.Helper()
-	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	if _, err := activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant: tenant, Environment: environment, Name: name, ID: id,
 		Exclusive: true, Scope: scope, Now: time.Now(),
 		Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
@@ -43,8 +43,8 @@ func TestGateMergeGuardIgnoresAClaimOnAnUnrelatedNamedScope(t *testing.T) {
 // Holding the worktree claim does not entitle working under another holder's environment claim.
 func TestGateMergeGuardRefusesADifferentHoldersEnvironmentClaimUnderTheCallersOwnWorktreeClaim(t *testing.T) {
 	inPodGuardEnv(t, "erun", "code1")
-	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", activity.DefaultEnvironmentActivityLeaseScope)
-	seedExclusiveClaim(t, "erun", "code1", "other-gate", "another gate", activity.EnvironmentActivityLeaseScopeEnvironment)
+	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", activitylease.DefaultEnvironmentActivityLeaseScope)
+	seedExclusiveClaim(t, "erun", "code1", "other-gate", "another gate", activitylease.EnvironmentActivityLeaseScopeEnvironment)
 
 	err := jobexclusive.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "merge-queue")
 	if err == nil {

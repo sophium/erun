@@ -9,7 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 )
 
@@ -45,7 +45,7 @@ func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) model.CloudProvide
 		t.Fatal(err)
 	}
 	writeAssetFile(t, boot.platformAliasEntryPath(), entry)
-	writeAssetFile(t, filepath.Join(boot.platformAliasDir, platformalias.PlatformAliasSecretFileKey), cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
+	writeAssetFile(t, filepath.Join(boot.platformAliasDir, platformalias.PlatformAliasSecretFileKey), secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef))
 	writeAssetFile(t, filepath.Join(boot.platformAliasDir, platformalias.PlatformAliasSecretTokenKey), "refresh-token-value")
 	return provider
 }
@@ -78,7 +78,7 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 	if _, found := configpkg.FindCloudProvider(root.CloudProviders, provider.Alias); !found {
 		t.Fatalf("the platform alias should be seeded: %+v", root.CloudProviders)
 	}
-	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
+	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef))
 	info, err := os.Stat(token)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("the token should be written 0600 at the shipped name: %v %v", info, err)
@@ -89,7 +89,7 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 func TestRuntimeBootKeepsAPlatformAliasAndTokenThePodAlreadyHolds(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev"})
 	provider := writePlatformAliasSecret(t, boot)
-	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
+	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef))
 	writeAssetFile(t, token, "the pod's own newer token")
 	own := provider
 	own.Username = "pod-login"

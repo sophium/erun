@@ -8,8 +8,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -57,7 +59,7 @@ type ContextActionResult struct {
 
 func ContextListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextListInput) (*mcp.CallToolResult, ContextListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextListInput) (*mcp.CallToolResult, ContextListResult, error) {
-		contexts, err := cloud.ListCloudContextStatuses(runtime.Store)
+		contexts, err := cloudcontext.ListCloudContextStatuses(runtime.Store)
 		if err != nil {
 			return nil, ContextListResult{}, err
 		}
@@ -72,7 +74,7 @@ func ContextInitTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mc
 		}
 		traceOutput := strings.Builder{}
 		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := cloud.InitCloudContext(ctx, runtime.Store, model.InitCloudContextParams{
+		status, err := contextinit.InitCloudContext(ctx, runtime.Store, model.InitCloudContextParams{
 			Name:               input.Name,
 			CloudProviderAlias: input.CloudProviderAlias,
 			Region:             input.Region,
@@ -82,7 +84,7 @@ func ContextInitTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mc
 			SubnetID:           input.SubnetID,
 			SecurityGroupID:    input.SecurityGroupID,
 			KeyName:            input.KeyName,
-		}, cloud.CloudContextDependencies{})
+		}, cloudcontext.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}
@@ -91,7 +93,7 @@ func ContextInitTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mc
 }
 
 func ContextStopTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
-	return contextPowerTool(runtime, cloud.StopCloudContext)
+	return contextPowerTool(runtime, contextpower.StopCloudContext)
 }
 
 func ContextStartTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextStartInput) (*mcp.CallToolResult, ContextActionResult, error) {
@@ -101,7 +103,7 @@ func ContextStartTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *m
 		}
 		traceOutput := strings.Builder{}
 		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := cloud.StartCloudContext(ctx, runtime.Store, model.CloudContextParams{Name: input.Name, Force: input.Force}, cloud.CloudContextDependencies{})
+		status, err := contextpower.StartCloudContext(ctx, runtime.Store, model.CloudContextParams{Name: input.Name, Force: input.Force}, cloudcontext.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}
@@ -109,14 +111,14 @@ func ContextStartTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *m
 	}
 }
 
-func contextPowerTool(runtime runtimecfg.RuntimeConfig, run func(core.Context, seam.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
+func contextPowerTool(runtime runtimecfg.RuntimeConfig, run func(core.Context, cloudstore.CloudContextStore, model.CloudContextParams, cloudcontext.CloudContextDependencies) (model.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
 			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")
 		}
 		traceOutput := strings.Builder{}
 		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := run(ctx, runtime.Store, model.CloudContextParams{Name: input.Name}, cloud.CloudContextDependencies{})
+		status, err := run(ctx, runtime.Store, model.CloudContextParams{Name: input.Name}, cloudcontext.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}

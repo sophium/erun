@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 )
 
@@ -35,7 +36,7 @@ func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config
 	return f.envs, nil
 }
 
-func storeWithDindConfig(t *testing.T, projectRoot string, resources model.RuntimePodResources) seam.DockerStore {
+func storeWithDindConfig(t *testing.T, projectRoot string, resources model.RuntimePodResources) buildtarget.DockerStore {
 	t.Helper()
 	return fakeDockerStoreForDindResources{
 		tenant: model.TenantConfig{Name: "acme"},
@@ -112,7 +113,7 @@ func TestApplyDindResourceBuildArgsUsesEnvVarsInPod(t *testing.T) {
 		t.Fatalf("write dockerfile: %v", err)
 	}
 
-	build := &seam.DockerBuildSpec{DockerfilePath: dockerfilePath}
+	build := &imagebuild.DockerBuildSpec{DockerfilePath: dockerfilePath}
 	dockerbuild.ApplyDindResourceBuildArgs(config.ConfigStore{}, dir, "dev", build)
 
 	if build.DindCPULimit != "8" {

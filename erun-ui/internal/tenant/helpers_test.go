@@ -10,7 +10,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 )
 
 // newTestService fills every seam a test leaves unset with an inert stand-in;
@@ -21,7 +22,7 @@ func newTestService(t *testing.T, d Deps) *Service {
 		d.Store = stubStore{}
 	}
 	if d.Cloud.CloudSecretStore == nil {
-		d.Cloud.CloudSecretStore = cloud.NewFileCloudSecretStore(t.TempDir())
+		d.Cloud.CloudSecretStore = secretstore.NewFileCloudSecretStore(t.TempDir())
 	}
 	if d.Context == nil {
 		d.Context = context.Background
@@ -43,7 +44,7 @@ func newTestService(t *testing.T, d Deps) *Service {
 
 // configuredERunAliases mirrors the desktop's filter over the root config.
 func configuredERunAliases(store configpkg.CloudReadStore) ([]string, error) {
-	providers, err := cloud.ListCloudProviders(store)
+	providers, err := providerconfig.ListCloudProviders(store)
 	if err != nil {
 		return nil, err
 	}

@@ -6,7 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -19,7 +19,7 @@ func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis m
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Git push access")
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	status, err := gitx.InspectGitPushAccess(ctx, nil, req, result.RepoPath)
 	if err != nil {
 		if ctx.DryRun {

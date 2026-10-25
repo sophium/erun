@@ -8,7 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -258,7 +258,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 		},
 	})
 	defer closeTestService(app)
-	setCloudContextStatus(t, "managed-cloud", cloud.CloudContextStatusStopped)
+	setCloudContextStatus(t, "managed-cloud", cloudcontext.CloudContextStatusStopped)
 
 	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
@@ -320,7 +320,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		},
 	})
 	defer closeTestService(app)
-	setCloudContextStatus(t, "managed-cloud", cloud.CloudContextStatusStopped)
+	setCloudContextStatus(t, "managed-cloud", cloudcontext.CloudContextStatusStopped)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24, false)

@@ -8,7 +8,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 )
 
@@ -48,7 +48,7 @@ func parseOrchestratorLaunchSettingFlag(setting, expected, value string) (string
 }
 
 // SetOrchestratorGateway toggles gateway use; enabling it with no catalog is refused.
-func SetOrchestratorGateway(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorGateway(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "gateway",
 		usage:   "--gateway <on|off>",
@@ -57,7 +57,7 @@ func SetOrchestratorGateway(ctx core.Context, store seam.OrchestratorAliasStore,
 }
 
 // SetOrchestratorModel sets the launch model, refusing one the gateway cannot drive.
-func SetOrchestratorModel(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorModel(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
 	model := strings.TrimSpace(params.Model)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "model",
@@ -67,7 +67,7 @@ func SetOrchestratorModel(ctx core.Context, store seam.OrchestratorAliasStore, p
 }
 
 // SetOrchestratorEffort sets the effort an orchestrator launches at.
-func SetOrchestratorEffort(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorEffort(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) (configpkg.OrchestratorConfig, error) {
 	effort := strings.TrimSpace(params.Effort)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "effort",
@@ -103,7 +103,7 @@ func orchestratorLaunchSettingRemedy(err error, orchestratorID string) string {
 
 // setOrchestratorLaunchSetting validates the whole resulting orchestrator, since one
 // setting can invalidate another.
-func setOrchestratorLaunchSetting(ctx core.Context, store seam.OrchestratorAliasStore, rawID string, write orchestratorLaunchSettingWrite) (configpkg.OrchestratorConfig, error) {
+func setOrchestratorLaunchSetting(ctx core.Context, store envstore.OrchestratorAliasStore, rawID string, write orchestratorLaunchSettingWrite) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}

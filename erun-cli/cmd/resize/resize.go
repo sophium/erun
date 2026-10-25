@@ -11,13 +11,16 @@ import (
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/lifecycle/resize"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, deployHelmChart seam.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
+func NewResizeCmd(store deploytarget.DeployStore, saveEnvConfig deploytarget.EnvConfigSaver, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{
@@ -105,7 +108,7 @@ func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, res
 	probeCtx.DryRun = false
 	return func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error) {
 		if envcall.EnvironmentTargetsItself() {
-			return activity.LoadEnvironmentActivityLeases(tenant, environment, now)
+			return activitylease.LoadEnvironmentActivityLeases(tenant, environment, now)
 		}
 		leases, _, err := envcall.ListLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
 		return leases, err

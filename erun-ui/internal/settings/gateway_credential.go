@@ -6,7 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/ai"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 )
 
 const (
@@ -47,7 +47,7 @@ func (s *Service) SaveGatewayCredential(token string) (GatewayCredentialStatus, 
 	if err != nil {
 		return GatewayCredentialStatus{}, err
 	}
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		return GatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -63,7 +63,7 @@ func (s *Service) ClearGatewayCredential() (GatewayCredentialStatus, error) {
 	if err != nil {
 		return GatewayCredentialStatus{}, err
 	}
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		return GatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -108,7 +108,7 @@ func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) GatewayCredent
 // savedGatewayCredential reports "none" for an unreadable store so a broken
 // store cannot stop the catalog opening.
 func savedGatewayCredential(ref string) (string, bool) {
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		return "", false
 	}

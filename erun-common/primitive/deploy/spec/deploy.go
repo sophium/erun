@@ -6,7 +6,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/published"
 )
@@ -17,7 +17,7 @@ type deployKubernetesContextResolver interface {
 
 // applyRuntimeChartOverride installs the operator-named runtime chart. erun publishes the chart on
 // its own line, so a tenant-versioned image may have no chart at its version.
-func applyRuntimeChartOverride(ctx core.Context, target model.DeployTarget, spec *seam.DeploySpec) {
+func applyRuntimeChartOverride(ctx core.Context, target model.DeployTarget, spec *helmdeploy.DeploySpec) {
 	override := strings.TrimSpace(target.RuntimeChartOverride)
 	if override == "" || spec == nil {
 		return

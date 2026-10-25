@@ -8,7 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
 	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
@@ -51,7 +52,7 @@ func ActivityLeaseTakeTool(runtime runtimecfg.RuntimeConfig) func(context.Contex
 		if id == "" {
 			id = strings.TrimSpace(input.Name)
 		}
-		params := activity.TakeEnvironmentActivityLeaseParams{
+		params := activitylease.TakeEnvironmentActivityLeaseParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Name:        input.Name,
@@ -70,14 +71,14 @@ func ActivityLeaseTakeTool(runtime runtimecfg.RuntimeConfig) func(context.Contex
 		if input.Exclusive && !exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment, params) {
 			// Renewing one's own claim skips the operator-presence gate, or a running job
 			// would refuse itself.
-			status, statusErr := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
+			status, statusErr := idlestatus.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 			if statusErr == nil {
-				if reason, present := activity.EnvironmentOperatorPresenceReason(status); present {
+				if reason, present := idlestatus.EnvironmentOperatorPresenceReason(status); present {
 					return nil, ActivityLeaseResult{}, &model.EnvironmentOperatorPresentError{Reason: reason}
 				}
 			}
 		}
-		lease, err := activity.TakeEnvironmentActivityLease(params)
+		lease, err := activitylease.TakeEnvironmentActivityLease(params)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
@@ -89,13 +90,13 @@ func ActivityLeaseTakeTool(runtime runtimecfg.RuntimeConfig) func(context.Contex
 // renews the holder's existing claim; when it cannot tell, the presence gate
 // still applies. params.ID is still unsanitized, so it is normalized the way the
 // store does before comparing.
-func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params activity.TakeEnvironmentActivityLeaseParams) bool {
-	id, err := activity.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
+func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params activitylease.TakeEnvironmentActivityLeaseParams) bool {
+	id, err := activitylease.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
 	if err != nil {
 		return false
 	}
-	scope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
-	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	scope := activitylease.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
+	held, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return false
 	}
@@ -128,12 +129,12 @@ func ActivityLeaseReleaseTool(runtime runtimecfg.RuntimeConfig) func(context.Con
 		}
 		var outcome model.EnvironmentActivityLeaseReleaseOutcome
 		if input.Exclusive {
-			outcome, err = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
+			outcome, err = activitylease.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
 			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
 		} else {
-			outcome, err = activity.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
+			outcome, err = activitylease.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
 			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
@@ -145,7 +146,7 @@ func ActivityLeaseReleaseTool(runtime runtimecfg.RuntimeConfig) func(context.Con
 
 // activityLeaseResult returns every claim still held; released is nil except on release.
 func activityLeaseResult(tenant, environment string, lease *model.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	held, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, ActivityLeaseResult{}, err
 	}

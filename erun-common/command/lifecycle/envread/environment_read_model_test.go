@@ -6,7 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 )
 
 // An unobserved power state must read as Unknown, never Stopped or Idle.
@@ -21,11 +21,11 @@ func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T
 		},
 		{
 			name: "managed cloud with a pending (mid-transition) power state",
-			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusPending},
+			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloudcontext.CloudContextStatusPending},
 		},
 		{
 			name: "managed cloud with an explicitly unknown power state",
-			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusUnknown},
+			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloudcontext.CloudContextStatusUnknown},
 		},
 		{
 			name: "non-managed with nothing observed at all",
@@ -46,14 +46,14 @@ func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T
 
 func TestResolveEnvironmentLifecycleStateManagedCloudPowerState(t *testing.T) {
 	stopped := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
-		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusStopped,
+		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloudcontext.CloudContextStatusStopped,
 	})
 	if stopped != modelpkg.EnvironmentLifecycleStopped {
 		t.Fatalf("want stopped, got %s", stopped)
 	}
 
 	running := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
-		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusRunning,
+		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloudcontext.CloudContextStatusRunning,
 	})
 	if running != modelpkg.EnvironmentLifecycleRunning {
 		t.Fatalf("want running, got %s", running)

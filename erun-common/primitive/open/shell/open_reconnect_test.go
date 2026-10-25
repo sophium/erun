@@ -6,14 +6,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
 // `pkill -f erun-app` must not match any session's dtach command line.
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
-		activity.RemoteAppSessionSocketDir,
+		remotesession.RemoteAppSessionSocketDir,
 		appsession.RemoteAppSessionSocketPath("erun", "local", "open-0"),
 		appsession.RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}

@@ -9,8 +9,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open/podwait"
 	"github.com/sophium/erun/erun-common/primitive/open/sshdsetup"
@@ -28,7 +28,7 @@ const (
 	sshdRemoteExecRetryDelay  = 5 * time.Second
 )
 
-func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteCommand seam.RemoteCommandRunnerFunc) (string, error) {
+func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteCommand runtimepod.RemoteCommandRunnerFunc) (string, error) {
 	publicKeyPath, publicKey, err := ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
 		if !ctx.DryRun {
@@ -38,7 +38,7 @@ func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteComm
 		publicKeyPath = "<no-public-key>"
 		publicKey = "<placeholder-public-key>"
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	script := sshdsetup.BuildRemoteAuthorizedKeysSyncScript(publicKey)
 	for attempt := 1; attempt <= sshdRemoteExecMaxAttempts; attempt++ {
 		output, err := kube.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)

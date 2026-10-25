@@ -8,7 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 // InjectedRuntimeConfig is the config the chart-injected ERUN_* vars describe.
@@ -39,7 +39,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
-		kubernetesContext = cloud.InClusterKubernetesContext
+		kubernetesContext = providerconfig.InClusterKubernetesContext
 	}
 	provider := get("ERUN_CLOUD_PROVIDER")
 	alias := get("ERUN_CLOUD_PROVIDER_ALIAS")

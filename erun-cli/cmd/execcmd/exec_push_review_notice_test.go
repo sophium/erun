@@ -13,7 +13,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
@@ -78,7 +78,7 @@ func execPushNoticePushDependencies(branch string) gitx.PushWorkingTreeBranchDep
 	}
 }
 
-func execPushNoticeFinder(projectRoot string) seam.ProjectFinderFunc {
+func execPushNoticeFinder(projectRoot string) projectroot.ProjectFinderFunc {
 	return func() (string, string, error) { return "tenant", projectRoot, nil }
 }
 

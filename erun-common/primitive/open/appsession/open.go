@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 )
 
 const (
@@ -60,7 +60,7 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 		"attach_id=\"$$-$(date +%s)\"",
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
-	lines = append(lines, activity.RemoteAppSessionMasterScanLines(socket)...)
+	lines = append(lines, remotesession.RemoteAppSessionMasterScanLines(socket)...)
 	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
 		fmt.Sprintf("dtach -A \"%s\" -r %s %s || shell_status=$?", socket, redraw, launchCommand),
@@ -70,14 +70,14 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 
 // RemoteAppSessionSocketPath returns the dtach socket path for a session.
 func RemoteAppSessionSocketPath(tenant, environment, id string) string {
-	return fmt.Sprintf("%s/%s-%s-%s.dtach", activity.RemoteAppSessionSocketDir, core.SanitizeForFilename(tenant), core.SanitizeForFilename(environment), core.SanitizeForFilename(id))
+	return fmt.Sprintf("%s/%s-%s-%s.dtach", remotesession.RemoteAppSessionSocketDir, core.SanitizeForFilename(tenant), core.SanitizeForFilename(environment), core.SanitizeForFilename(id))
 }
 
 // RemoteAppSessionEndScript permanently ends a session; only an explicit tab
 // close runs it.
 func RemoteAppSessionEndScript(tenant, environment, id string) string {
 	socket := RemoteAppSessionSocketPath(tenant, environment, id)
-	lines := activity.RemoteAppSessionMasterScanLines(socket)
+	lines := remotesession.RemoteAppSessionMasterScanLines(socket)
 	lines = append(lines,
 		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",
 		fmt.Sprintf("rm -f \"%s\" \"%s\"", socket, strings.TrimSuffix(socket, ".dtach")+".owner"),

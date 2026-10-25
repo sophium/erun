@@ -1,11 +1,12 @@
 package helmrun
 
 import (
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, deploy seam.HelmChartDeployerFunc) seam.HelmChartDeployerFunc {
+func WrapHelmChartDeployerWithNamespaceEnsure(ensure kubeapi.NamespaceEnsurerFunc, deploy helmdeploy.HelmChartDeployerFunc) helmdeploy.HelmChartDeployerFunc {
 	if deploy == nil {
 		deploy = DeployHelmChart
 	}
@@ -13,7 +14,7 @@ func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, 
 		return deploy
 	}
 
-	return func(params seam.HelmDeployParams) error {
+	return func(params helmdeploy.HelmDeployParams) error {
 		if err := ensure(params.KubernetesContext, params.Namespace); err != nil {
 			return err
 		}

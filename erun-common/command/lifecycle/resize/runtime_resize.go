@@ -8,9 +8,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/deploy/run"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
@@ -201,14 +204,14 @@ type RuntimeResizeOccupancyError struct {
 }
 
 func (e *RuntimeResizeOccupancyError) Error() string {
-	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", activity.FormatLeaseHolders(e.Holders))
+	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", activitylease.FormatLeaseHolders(e.Holders))
 }
 
 // load must read the environment's own lease store: a host-side CLI reading its local
 // filesystem always sees zero leases. The caller's own exclusive lease guards concurrent resizes.
 func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error), tenant, environment string, now time.Time, override bool) ([]model.EnvironmentActivityLease, error) {
 	if load == nil {
-		load = activity.LoadEnvironmentActivityLeases
+		load = activitylease.LoadEnvironmentActivityLeases
 	}
 	leases, err := load(tenant, environment, now)
 	if err != nil {
@@ -222,13 +225,13 @@ func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.
 
 // RuntimeResizeDependencies reuses the composition `erun deploy` injects.
 type RuntimeResizeDependencies struct {
-	Store                          seam.DeployStore
-	SaveEnvConfig                  seam.EnvConfigSaver
-	FindProjectRoot                seam.ProjectFinderFunc
-	ResolveDockerBuildContext      seam.BuildContextResolverFunc
-	ResolveKubernetesDeployContext seam.DeployContextResolverFunc
-	Now                            seam.NowFunc
-	DeployHelmChart                seam.HelmChartDeployerFunc
+	Store                          deploytarget.DeployStore
+	SaveEnvConfig                  deploytarget.EnvConfigSaver
+	FindProjectRoot                projectroot.ProjectFinderFunc
+	ResolveDockerBuildContext      buildtarget.BuildContextResolverFunc
+	ResolveKubernetesDeployContext deploytarget.DeployContextResolverFunc
+	Now                            buildtarget.NowFunc
+	DeployHelmChart                helmdeploy.HelmChartDeployerFunc
 	// LoadActivityLeases nil reads the local store, correct only inside the environment's pod.
 	LoadActivityLeases func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error)
 }
@@ -255,7 +258,7 @@ func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment st
 	if len(leases) == 0 {
 		return
 	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), activity.FormatLeaseHolders(leases)))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), activitylease.FormatLeaseHolders(leases)))
 }
 
 func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant, environment string, target config.OpenResult, plan model.RuntimeResizePlan) error {
@@ -323,14 +326,14 @@ func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params m
 		return model.RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil
 	}
 
-	lease, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	lease, err := activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant: tenant, Environment: environment, Name: "resize", Exclusive: true, Holder: params.Holder, Now: now,
 	})
 	if err != nil {
 		return model.RuntimeResizeResult{}, fmt.Errorf("resize: %w", err)
 	}
 	defer func() {
-		_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
+		_, _ = activitylease.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
 	}()
 
 	if err := applyRuntimeResize(ctx, deps, tenant, environment, target, plan); err != nil {

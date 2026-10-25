@@ -13,7 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestop"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +65,7 @@ func newActivityTouchCmd() *cobra.Command {
 					{Address: clientAddress, Bytes: clientBytes},
 				}
 			}
-			return activity.RecordEnvironmentActivity(params)
+			return records.RecordEnvironmentActivity(params)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -126,12 +128,12 @@ func runActivityStopReady(cmd *cobra.Command, store config.OpenStore, tenant, en
 	if err != nil {
 		return err
 	}
-	result, err := activity.MaybeArmOrFireIdleStop(model.MaybeArmOrFireIdleStopParams{
+	result, err := idlestop.MaybeArmOrFireIdleStop(model.MaybeArmOrFireIdleStopParams{
 		Tenant:           tenant,
 		Environment:      environment,
 		Status:           status,
 		CloudContextName: cloudContextName,
-		ReasonSummary:    activity.IdleStopReasonSummary(status),
+		ReasonSummary:    idlestop.IdleStopReasonSummary(status),
 		Now:              time.Now(),
 	})
 	if err != nil {
@@ -153,12 +155,12 @@ func emitStopReadyJSON(stdout io.Writer, status model.EnvironmentIdleStatus, res
 		Action:           result.Action,
 		SecondsRemaining: result.SecondsRemaining,
 		GraceSeconds:     status.GracePeriodSeconds,
-		ReasonSummary:    activity.IdleStopReasonSummary(status),
+		ReasonSummary:    idlestop.IdleStopReasonSummary(status),
 	}
 	if !result.State.Since.IsZero() {
 		payload.PendingSince = result.State.Since.UTC().Format(time.RFC3339)
 	}
-	if result.Action == activity.IdleStopActionFire {
+	if result.Action == idlestop.IdleStopActionFire {
 		state := result.State
 		payload.PendingState = &state
 	}
@@ -168,11 +170,11 @@ func emitStopReadyJSON(stdout io.Writer, status model.EnvironmentIdleStatus, res
 
 func stopReadyExitForAction(status model.EnvironmentIdleStatus, result model.MaybeArmOrFireIdleStopResult) error {
 	switch result.Action {
-	case activity.IdleStopActionFire:
+	case idlestop.IdleStopActionFire:
 		return nil
-	case activity.IdleStopActionArm:
+	case idlestop.IdleStopActionArm:
 		return fmt.Errorf("auto-stop armed: %d seconds of grace before forced stop", result.SecondsRemaining)
-	case activity.IdleStopActionWait:
+	case idlestop.IdleStopActionWait:
 		return fmt.Errorf("auto-stop pending: %d seconds remaining in grace", result.SecondsRemaining)
 	default:
 		if strings.TrimSpace(status.StopBlockedReason) != "" {
@@ -207,7 +209,7 @@ func newActivityCancelStopPendingCmd() *cobra.Command {
 			if err := validateActivityTarget(tenant, environment); err != nil {
 				return err
 			}
-			return activity.ClearEnvironmentStopPending(tenant, environment)
+			return idlestop.ClearEnvironmentStopPending(tenant, environment)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -250,11 +252,11 @@ func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, clou
 		return err
 	}
 	entry := buildStopHistoryEntry(time.Now().UTC(), source, reason, cloudContextName, pending, havePending)
-	if err := activity.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
+	if err := idlestop.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
 		return err
 	}
 	// Cleared after persisting so the next stop-ready arms a fresh grace window.
-	return activity.ClearEnvironmentStopPending(tenant, environment)
+	return idlestop.ClearEnvironmentStopPending(tenant, environment)
 }
 
 // Stdin wins because Fire clears the pending file; ok=false is normal for a manual stop.
@@ -276,7 +278,7 @@ func loadPendingForRecord(stdin io.Reader, stateStdin bool, tenant, environment 
 		}
 		return *payload.PendingState, true, nil
 	}
-	pending, ok, err := activity.LoadEnvironmentStopPending(tenant, environment)
+	pending, ok, err := idlestop.LoadEnvironmentStopPending(tenant, environment)
 	if err != nil {
 		return model.EnvironmentStopPending{}, false, err
 	}
@@ -317,7 +319,7 @@ func buildStopHistoryEntry(now time.Time, source, reason, cloudContextName strin
 func normalizeStopHistorySource(source string) string {
 	source = strings.TrimSpace(source)
 	switch source {
-	case activity.StopHistorySourcePodMonitor, activity.StopHistorySourceHostManual:
+	case idlestop.StopHistorySourcePodMonitor, idlestop.StopHistorySourceHostManual:
 		return source
 	default:
 		return ""
@@ -346,7 +348,7 @@ func resolveActivityStatus(store config.OpenStore, tenant, environment string) (
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return model.EnvironmentIdleStatus{}, err
 	}
-	return activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
+	return idlestatus.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 }
 
 func writeActivityStatus(ctx core.Context, status model.EnvironmentIdleStatus) error {

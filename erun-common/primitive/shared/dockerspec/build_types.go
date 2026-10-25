@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -24,14 +24,14 @@ type BuildExecutionSpec struct {
 	Release       *model.ReleaseSpec
 	Script        *ScriptSpec
 	LinuxPackages []model.LinuxPackageSpec
-	DockerBuilds  []seam.DockerBuildSpec
+	DockerBuilds  []imagebuild.DockerBuildSpec
 	DockerPushes  []model.DockerPushSpec
 	// ComponentCharts are build sources independent of images.
 	ComponentCharts []helm.HelmChartPublishSpec
 }
 
 type DockerPushExecutionSpec struct {
-	Builds          []seam.DockerBuildSpec
+	Builds          []imagebuild.DockerBuildSpec
 	Pushes          []model.DockerPushSpec
 	ComponentCharts []helm.HelmChartPublishSpec
 }

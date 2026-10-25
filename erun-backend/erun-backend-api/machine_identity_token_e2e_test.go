@@ -23,6 +23,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 )
 
 // Everything on erun's side is production code; only the tenant IdP is a double.
@@ -222,7 +224,7 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 	issuer.expectCredential(f.identity.ClientID, f.identity.ClientSecret)
 
 	const secretRef = "erun/clientsecret/" + machineIdentityTokenAlias
-	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
+	secrets := secretstore.NewFileCloudSecretStore(t.TempDir())
 	mustNoErr(t, secrets.SaveCloudSecret(secretRef, f.identity.ClientSecret), "save the provisioned client secret")
 
 	store := staticCloudReadStore{config: configpkg.ERunConfig{CloudProviders: []modelpkg.CloudProviderConfig{{
@@ -235,7 +237,7 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 			ClientSecretRef: secretRef,
 		},
 	}}}}
-	token, err := cloud.CloudProviderBearerToken(
+	token, err := providertoken.CloudProviderBearerToken(
 		core.Context{},
 		store,
 		modelpkg.CloudBearerParams{Alias: machineIdentityTokenAlias},

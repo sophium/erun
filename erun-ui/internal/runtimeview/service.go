@@ -7,12 +7,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type Deps struct {
-	Store seampkg.ListStore
+	Store envstore.ListStore
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context func() context.Context
 	Emit    uimodel.Emitter

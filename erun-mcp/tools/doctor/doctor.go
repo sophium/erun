@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
@@ -172,7 +173,7 @@ func runDoctorTenantEnvActions(runtime runtimecfg.RuntimeConfig, input DoctorInp
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(target)
+	req := shelllaunch.ShellLaunchParamsFromResult(target)
 	diagnosis, err := writeDoctorDeployDiagnosis(runCtx, req)
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/build/classify"
 )
@@ -34,7 +35,7 @@ func RunReviewList(ctx core.Context, store config.CloudReadStore, alias string, 
 	if err := validateReviewListParams(params); err != nil {
 		return nil, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -80,9 +81,9 @@ func traceReviewList(ctx core.Context, provider model.CloudProviderConfig, filte
 		details = append(details, "reviewerUserId=<caller>")
 	}
 	if params.Mine || params.WaitingOnMe {
-		cloud.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
+		platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", details...)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", details...)
 }
 
 func resolveReviewListCallerFilters(client *platformclient.PlatformClient, params model.ReviewListParams, filter *platformclient.PlatformReviewFilter) error {
@@ -104,13 +105,13 @@ func resolveReviewListCallerFilters(client *platformclient.PlatformClient, param
 
 // RunReviewShow fetches one review together with its comments and builds.
 func RunReviewShow(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (model.ReviewDetail, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.ReviewDetail{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/builds")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/builds")
 	if ctx.DryRun {
 		return model.ReviewDetail{}, nil
 	}
@@ -158,12 +159,12 @@ func threadRootCommentID(comments []model.PlatformComment, commentID string) (st
 
 // runReviewCommentStatus refuses a reply id: only a thread root is addressable.
 func runReviewCommentStatus(ctx core.Context, store config.CloudReadStore, alias, reviewID, commentID, status string, deps cloud.CloudDependencies) (model.PlatformComment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformComment{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/comments/"+commentID+"/status", "status="+status)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/comments/"+commentID+"/status", "status="+status)
 	if ctx.DryRun {
 		return model.PlatformComment{}, nil
 	}
@@ -195,7 +196,7 @@ func RunReviewCreate(ctx core.Context, store config.CloudReadStore, alias string
 		return model.PlatformReview{}, err
 	}
 	params.Repository = repository
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
@@ -208,7 +209,7 @@ func RunReviewCreate(ctx core.Context, store config.CloudReadStore, alias string
 	if strings.TrimSpace(params.IssueRef) != "" {
 		details = append(details, "issueRef="+strings.TrimSpace(params.IssueRef))
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews", details...)
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}
@@ -217,7 +218,7 @@ func RunReviewCreate(ctx core.Context, store config.CloudReadStore, alias string
 
 // RunReviewComment posts a comment (or a reply) on a review.
 func RunReviewComment(ctx core.Context, store config.CloudReadStore, alias string, params model.ReviewCommentParams, deps cloud.CloudDependencies) (model.PlatformComment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformComment{}, err
 	}
@@ -229,7 +230,7 @@ func RunReviewComment(ctx core.Context, store config.CloudReadStore, alias strin
 	if strings.TrimSpace(params.ParentCommentID) != "" {
 		details = append(details, "replyTo="+params.ParentCommentID)
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/comments", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/comments", details...)
 	if ctx.DryRun {
 		return model.PlatformComment{}, nil
 	}
@@ -244,11 +245,11 @@ func RunReviewComment(ctx core.Context, store config.CloudReadStore, alias strin
 
 // RunReviewClose closes a review.
 func RunReviewClose(ctx core.Context, store config.CloudReadStore, alias, reviewID string, deps cloud.CloudDependencies) (model.PlatformReview, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=CLOSED")
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=CLOSED")
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}
@@ -264,7 +265,7 @@ func RunReviewRecordBuild(ctx core.Context, store config.CloudReadStore, alias s
 	if err := classify.EnsureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
 		return model.PlatformBuild{}, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformBuild{}, err
 	}
@@ -276,7 +277,7 @@ func RunReviewRecordBuild(ctx core.Context, store config.CloudReadStore, alias s
 	if strings.TrimSpace(params.FailureDetail) != "" {
 		details = append(details, "failureDetail="+params.FailureDetail)
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/builds", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/builds", details...)
 	if ctx.DryRun {
 		return model.PlatformBuild{}, nil
 	}
@@ -297,7 +298,7 @@ func RunReviewReportMerged(ctx core.Context, store config.CloudReadStore, alias,
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(remoteURL) == "" {
 		return model.PlatformReview{}, fmt.Errorf("review id and remote url are required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
@@ -306,7 +307,7 @@ func RunReviewReportMerged(ctx core.Context, store config.CloudReadStore, alias,
 		details = append(details, "buildId="+buildID)
 	}
 	details = append(details, "remoteUrl="+remoteURL)
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", details...)
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", details...)
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}
@@ -324,12 +325,12 @@ func RunReviewRequeue(ctx core.Context, store config.CloudReadStore, alias, revi
 	if strings.TrimSpace(reviewID) == "" {
 		return model.PlatformReview{}, fmt.Errorf("review id is required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=READY")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=READY")
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}
@@ -348,11 +349,11 @@ func RunReviewReviewersList(ctx core.Context, store config.CloudReadStore, alias
 	if strings.TrimSpace(reviewID) == "" {
 		return nil, fmt.Errorf("review id is required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/reviewers")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/reviewers")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -379,12 +380,12 @@ func RunReviewReviewerAdd(ctx core.Context, store config.CloudReadStore, alias, 
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
 		return model.PlatformReviewer{}, fmt.Errorf("review id and user id are required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReviewer{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/users")
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+reviewID+"/reviewers", "userId="+userID)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/users")
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+reviewID+"/reviewers", "userId="+userID)
 	if ctx.DryRun {
 		return model.PlatformReviewer{}, nil
 	}
@@ -399,11 +400,11 @@ func RunReviewReviewerRemove(ctx core.Context, store config.CloudReadStore, alia
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("review id and user id are required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return err
 	}
-	cloud.TracePlatformCall(ctx, provider, "DELETE", "/v1/reviews/"+reviewID+"/reviewers/"+userID)
+	platformapi.TracePlatformCall(ctx, provider, "DELETE", "/v1/reviews/"+reviewID+"/reviewers/"+userID)
 	if ctx.DryRun {
 		return nil
 	}
@@ -447,11 +448,11 @@ func RunReviewMergeQueueList(ctx core.Context, store config.CloudReadStore, alia
 	if err != nil {
 		return nil, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", mergeQueueTraceDetails(params)...)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -465,11 +466,11 @@ func RunReviewMergeQueueAdvance(ctx core.Context, store config.CloudReadStore, a
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", mergeQueueTraceDetails(params)...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}
@@ -486,12 +487,12 @@ func RunReviewMergeQueueOverrideAdvance(ctx core.Context, store config.CloudRead
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformReview{}, err
 	}
 	details := append(mergeQueueTraceDetails(params), "reason="+reason)
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", details...)
 	if ctx.DryRun {
 		return model.PlatformReview{}, nil
 	}

@@ -8,7 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 )
 
 var (
@@ -44,7 +45,7 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 
 // ApplyDindResourceBuildArgs passes the sidecar's limits because a RUN step's
 // cgroup is a sibling of the sidecar's and cannot read them itself.
-func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment string, build *seam.DockerBuildSpec) {
+func ApplyDindResourceBuildArgs(store buildtarget.DockerStore, projectRoot, environment string, build *imagebuild.DockerBuildSpec) {
 	needsCPU := dockerfileConsumesDindCPULimit(build.DockerfilePath)
 	needsMemory := dockerfileConsumesDindMemoryLimit(build.DockerfilePath)
 	if !needsCPU && !needsMemory {
@@ -65,7 +66,7 @@ func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment
 // ResolveDockerBuildDindPodResources prefers the downward-API vars per field,
 // then the config store, then the normalized defaults — never the host node's
 // capacity.
-func ResolveDockerBuildDindPodResources(store seam.DockerStore, projectRoot, environment string) model.RuntimePodResources {
+func ResolveDockerBuildDindPodResources(store buildtarget.DockerStore, projectRoot, environment string) model.RuntimePodResources {
 	fallback := model.RuntimePodResources{}
 	if envConfig := ResolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
 		fallback = envConfig.RuntimeDindPod

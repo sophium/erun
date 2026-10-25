@@ -7,10 +7,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -49,9 +50,9 @@ func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state mod
 		return model.EnvironmentLifecycleUnknown, true
 	}
 	switch in.CloudContextStatus {
-	case cloud.CloudContextStatusStopped:
+	case cloudcontext.CloudContextStatusStopped:
 		return model.EnvironmentLifecycleStopped, true
-	case cloud.CloudContextStatusRunning:
+	case cloudcontext.CloudContextStatusRunning:
 		return "", false
 	default:
 		return model.EnvironmentLifecycleUnknown, true
@@ -118,7 +119,7 @@ func AssembleEnvironmentReadModel(tenant string, environment list.ListEnvironmen
 }
 
 // ResolveEnvironmentDetail returns ResolveListResult's entry for one tenant/environment.
-func ResolveEnvironmentDetail(store seam.ListStore, tenant, environment string) (list.ListEnvironmentResult, error) {
+func ResolveEnvironmentDetail(store envstore.ListStore, tenant, environment string) (list.ListEnvironmentResult, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
@@ -141,7 +142,7 @@ func ResolveEnvironmentDetail(store seam.ListStore, tenant, environment string) 
 }
 
 // ResolveEnvironmentReadModel never refreshes live power state, and diagnoses only outside dry-run.
-func ResolveEnvironmentReadModel(ctx core.Context, store seam.ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
+func ResolveEnvironmentReadModel(ctx core.Context, store envstore.ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {
@@ -153,7 +154,7 @@ func ResolveEnvironmentReadModel(ctx core.Context, store seam.ListStore, tenant,
 		return EnvironmentReadModel{}, err
 	}
 
-	idleStatus, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, now)
+	idleStatus, err := idlestatus.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, now)
 	if err != nil {
 		return EnvironmentReadModel{}, err
 	}
@@ -175,7 +176,7 @@ func ResolveEnvironmentReadModel(ctx core.Context, store seam.ListStore, tenant,
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
-		request := cloud.ShellLaunchParamsFromResult(openResult)
+		request := shelllaunch.ShellLaunchParamsFromResult(openResult)
 		diagnosis := deploydiagnosis.RunDeployDiagnosis(ctx, request)
 		resolved := ResolveEnvironmentHealth(rootConfig, diagnosis)
 		health = &resolved

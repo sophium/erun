@@ -7,7 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 )
 
 func testPlatformAliasProvider() model.CloudProviderConfig {
@@ -18,9 +18,9 @@ func testPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
 		},
 	}
 }

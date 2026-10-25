@@ -11,7 +11,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/aisession"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +70,7 @@ func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 			if err != nil {
 				t.Fatalf("hook %s: %v", binding.ToolEvent, err)
 			}
-			status, err := activity.LoadAISessionStatus("team", "dev", sessionID)
+			status, err := aisession.LoadAISessionStatus("team", "dev", sessionID)
 			if err != nil {
 				t.Fatalf("load status: %v", err)
 			}

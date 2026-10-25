@@ -5,13 +5,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
-func HelmDeployCommand(d seam.HelmDeploySpec) helm.CommandSpec {
+func HelmDeployCommand(d helmdeploy.HelmDeploySpec) helm.CommandSpec {
 	args := []string{
 		"upgrade",
 		"--install",

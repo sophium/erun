@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 )
 
 // nil capabilities means the platform reports none.
@@ -63,7 +64,7 @@ func testERunPlatformAliasApp(t *testing.T, apiURL string) *Service {
 
 func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]model.TenantConfig) *Service {
 	t.Helper()
-	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
+	secrets := secretstore.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)

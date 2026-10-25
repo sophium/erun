@@ -1,0 +1,140 @@
+# Split infra/cloud into per-concern packages so an importer names only the concerns it
+# calls and an edit to one concern rebuilds only the packages that use that concern.
+infra/cloud/clouddefaults infra/cloud/cloud_aws_sdk*.go
+infra/cloud/clouddefaults infra/cloud/cloud_dependencies_defaults.go
+infra/cloud/clouddefaults infra/cloud/cloud_erun_oidc*.go
+infra/cloud/clouddefaults infra/cloud/control_plane_version_drift.go
+infra/cloud/clouddefaults infra/cloud/suite_main_test.go
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare_test.go
+infra/cloud/cloudflare infra/cloud/cloud_cloudflare.go
+infra/cloud/cloudcontext infra/cloud/cloud_context.go
+infra/cloud/cloudcontext infra/cloud/cloud_context_store.go
+infra/cloud/cloudcontext infra/cloud/deploy.go
+infra/cloud/contextinstance infra/cloud/cloud_context_iam.go
+infra/cloud/contextinstance infra/cloud/cloud_context_kubeconfig*.go
+infra/cloud/contextinit infra/cloud/cloud_context_init.go
+infra/cloud/contextpower infra/cloud/cloud_context_power*.go
+infra/cloud/contextpower infra/cloud/cloud_context_stop_protection.go
+infra/cloud/contextpower infra/cloud/cloud_context_in_cluster_test.go
+infra/cloud/contextrecover infra/cloud/cloud_context_recover.go
+infra/cloud/providerlifecycle infra/cloud/cloud_provider_lifecycle.go
+infra/cloud/providerlifecycle infra/cloud/cloud_erun.go
+infra/cloud/providerlifecycle infra/cloud/cloud_erun_test.go
+infra/cloud/providerlifecycle infra/cloud/cloud_erun_login_test.go
+infra/cloud/providerlifecycle infra/cloud/cloud_login_force_test.go
+infra/cloud/providertoken infra/cloud/cloud_list_empty_shape_test.go
+infra/cloud/hostcreds infra/cloud/cloud_host_credentials*.go
+infra/cloud/runtimewait infra/cloud/open.go
+infra/cloud/runtimewait infra/cloud/doctor.go
+infra/cloud/platformapi infra/cloud/expose_platform_dns.go
+infra/cloud/providerconfig infra/cloud/platform_commands.go
+infra/cloud/providerconfig infra/cloud/cloud.go
+# The CloudDependencies contract and the types its seams carry stay in infra/cloud.
+infra/cloud infra/cloud/cloud.go:CloudDependencies
+infra/cloud infra/cloud/cloud.go:DefaultCloudDependencies
+infra/cloud infra/cloud/cloud.go:AWSIdentity
+infra/cloud infra/cloud/cloud.go:AWSProfileConfig
+infra/cloud infra/cloud/cloud.go:CloudProviderCredentials
+infra/cloud infra/cloud/cloud_cloudflare.go:CloudflareTokenInfo
+infra/cloud infra/cloud/cloud_cloudflare.go:CloudflareAccount
+infra/cloud infra/cloud/cloud_erun_oidc.go:OIDCDiscovery
+infra/cloud infra/cloud/cloud_erun_oidc.go:ERunDeviceAuthorization
+infra/cloud infra/cloud/cloud_erun_oidc.go:ERunTokens
+# The file secret store DefaultCloudDependencies wires in.
+infra/cloud/secretstore infra/cloud/cloud_cloudflare.go:FileCloudSecretStore
+infra/cloud/secretstore infra/cloud/cloud_cloudflare.go:NewFileCloudSecretStore
+infra/cloud/secretstore infra/cloud/cloud_cloudflare.go:CloudSecretStoreDirName
+infra/cloud/secretstore infra/cloud/cloud_cloudflare.go:DefaultCloudSecretStore
+infra/cloud/secretstore infra/cloud/cloud_cloudflare.go:CloudSecretFileName
+infra/cloud/secretstore infra/cloud/cloud_cloudflare_test.go:TestFileCloudSecretStoreRoundTrip
+# Command output capture, shared by the default AWS runners and the cloud-context runners.
+infra/cloud/cmdcapture infra/cloud/cloud_dependencies_defaults.go:captureWriter
+infra/cloud/cmdcapture infra/cloud/cloud_dependencies_defaults.go:commandErrorMessage
+# Default seam implementations: the Cloudflare API client joins the AWS and erun OIDC ones.
+infra/cloud/clouddefaults infra/cloud/cloud.go:normalizeCloudBearerAudience
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareAPIBaseURLEnv
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:defaultCloudflareAPIBaseURL
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareTokenVerifyPath
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareAccountsPath
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareZonesPath
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareAPIBaseURL
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:defaultVerifyCloudflareToken
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:verifyCloudflareTokenAt
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:defaultListCloudflareAccounts
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:resolveCloudflareAccountsViaZones
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:cloudflareZone
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:distinctCloudflareZoneAccounts
+infra/cloud/clouddefaults infra/cloud/cloud_cloudflare.go:listCloudflareAccountsAt
+infra/cloud/clouddefaults infra/cloud/cloud_erun.go:writeERunLoginPrompt
+# Provider tokens: status, bearer tokens, exported credentials and the erun access-token cache.
+infra/cloud/providertoken infra/cloud/cloud.go:ErrCloudProviderNoOIDC
+infra/cloud/providertoken infra/cloud/cloud.go:CloudBearerToken
+infra/cloud/providertoken infra/cloud/cloud.go:CloudProviderTokenStatus
+infra/cloud/providertoken infra/cloud/cloud.go:ListCloudProviderStatuses
+infra/cloud/providertoken infra/cloud/cloud.go:issuerFromJWT
+infra/cloud/providertoken infra/cloud/cloud_cloudflare.go:cloudflareCloudProviderTokenStatus
+infra/cloud/providertoken infra/cloud/cloud_dependencies_defaults.go:isAWSOutboundWebIdentityFederationDisabled
+infra/cloud/providertoken infra/cloud/cloud_provider_lifecycle.go:CloudProviderBearerToken
+infra/cloud/providertoken infra/cloud/cloud_provider_lifecycle.go:awsCloudProviderBearerToken
+infra/cloud/providertoken infra/cloud/cloud_provider_lifecycle.go:awsBearerTokenWithOIDCRetry
+infra/cloud/providertoken infra/cloud/cloud_provider_lifecycle.go:ExportCloudProviderCredentials
+infra/cloud/providertoken infra/cloud/cloud_erun.go:HostedPlatformAPIURL
+infra/cloud/providertoken infra/cloud/cloud_erun.go:erunCloudProviderBearerToken
+infra/cloud/providertoken infra/cloud/cloud_erun.go:erunCloudProviderTokenStatus
+infra/cloud/providertoken infra/cloud/cloud_erun.go:ResolveERunAccessToken
+infra/cloud/providertoken infra/cloud/cloud_erun.go:clientCredentialsERunAccessToken
+infra/cloud/providertoken infra/cloud/cloud_erun.go:refreshERunAccessToken
+infra/cloud/providertoken infra/cloud/cloud_erun.go:ErunRefreshTokenRef
+infra/cloud/providertoken infra/cloud/cloud_erun.go:ErunAccessTokenCacheRef
+infra/cloud/providertoken infra/cloud/cloud_erun.go:erunAccessTokenExpiryLeeway
+infra/cloud/providertoken infra/cloud/cloud_erun.go:ErunAccessTokenCache
+infra/cloud/providertoken infra/cloud/cloud_erun.go:loadCachedERunAccessToken
+infra/cloud/providertoken infra/cloud/cloud_erun.go:SaveCachedERunAccessToken
+infra/cloud/providertoken infra/cloud/cloud_erun_test.go:TestERunCloudProviderBearerTokenRequiresConfiguration
+infra/cloud/providertoken infra/cloud/cloud_erun_test.go:TestERunCloudProviderTokenStatusReflectsResolution
+infra/cloud/providertoken infra/cloud/cloud_erun_test.go:TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout
+infra/cloud/providertoken infra/cloud/cloud_erun_test.go:TestResolveERunAccessTokenFailsClearlyWithoutRefreshToken
+# Provider lifecycle: init, login and logout, with the erun login flow.
+infra/cloud/providerlifecycle infra/cloud/cloud.go:ERunLoginFlowAuto
+infra/cloud/providerlifecycle infra/cloud/cloud.go:ERunLoginFlowDevice
+infra/cloud/providerlifecycle infra/cloud/cloud.go:ERunLoginFlowAuthCode
+infra/cloud/providerlifecycle infra/cloud/cloud.go:NormalizeERunLoginFlow
+infra/cloud/providerlifecycle infra/cloud/cloud_cloudflare.go:deleteCloudflareToken
+infra/cloud/providerlifecycle infra/cloud/cloud_dependencies_defaults.go:generatedAWSProfileName
+infra/cloud/providerlifecycle infra/cloud/cloud_erun_oidc.go:erunLoginScope
+# Provider config resolves aliases without credentials; the in-cluster kube-context name
+# sits beside it because the alias readers name it too.
+infra/cloud/providerconfig infra/cloud/cloud_context_power.go:InClusterKubernetesContext
+infra/cloud/cloudcontext infra/cloud/cloud_context_power.go:IsInClusterCloudContext
+infra/cloud/cloudcontext infra/cloud/cloud_context_in_cluster_test.go:TestIsInClusterCloudContextDistinguishesPowerManagedContexts
+infra/cloud/providerconfig infra/cloud/cloud_cloudflare_test.go:TestResolvedCloudAliasesFoldsLegacyScalarAndMap
+infra/cloud/providerconfig infra/cloud/cloud_cloudflare_test.go:TestResolveTenantCloudProviderIssuersSkipsCloudflare
+infra/cloud/providerconfig infra/cloud/cloud_erun_test.go:TestERunProviderSupportsOIDCIssuerAggregation
+infra/cloud/platformapi infra/cloud/platform_commands.go:NewPlatformClientForAlias
+infra/cloud/platformapi infra/cloud/platform_commands.go:TracePlatformCall
+# Cloud context: live instance state belongs with power, naming and validation with init.
+infra/cloud/contextpower infra/cloud/cloud_context.go:RefreshCloudContextList
+infra/cloud/contextpower infra/cloud/cloud_context.go:RefreshCloudContextStatuses
+infra/cloud/contextpower infra/cloud/cloud_context.go:cloudContextRefreshKey
+infra/cloud/contextpower infra/cloud/cloud_context.go:refreshCloudContextStatusesFromAWS
+infra/cloud/contextpower infra/cloud/cloud_context.go:groupCloudContextRefreshIndices
+infra/cloud/contextpower infra/cloud/cloud_context.go:refreshCloudContextRefreshGroup
+infra/cloud/contextpower infra/cloud/cloud_context.go:applyCloudContextRefreshState
+infra/cloud/contextpower infra/cloud/cloud_context.go:markCloudContextsRefreshUnknown
+infra/cloud/contextpower infra/cloud/cloud_context.go:newCloudContextRefreshFailure
+infra/cloud/contextpower infra/cloud/cloud_context.go:describeCloudContextInstanceStates
+infra/cloud/contextpower infra/cloud/cloud_context.go:parseCloudContextInstanceStates
+infra/cloud/contextpower infra/cloud/cloud_context.go:cloudContextStatusFromAWSInstanceState
+infra/cloud/contextpower infra/cloud/cloud_list_empty_shape_test.go:TestCloudContextListResultCarriesAnEmptyArray
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:validCloudContextInstanceType
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:validCloudContextDiskSize
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:validCloudContextRegion
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:generatedCloudContextName
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:nextCloudContextName
+infra/cloud/contextinit infra/cloud/cloud_context_store.go:sanitizeCloudContextName
+# The launch parameters a shell is opened with, apart from the runtime wait.
+infra/cloud/shelllaunch infra/cloud/open.go:ShellLaunchParamsFromResult
+# An environment's AWS region is read from its cloud context.
+infra/cloud/cloudcontext infra/cloud/cloud_host_credentials.go:ResolveEnvironmentAWSRegion
+infra/cloud/cloudcontext infra/cloud/cloud_host_credentials.go:awsRegionFromContainerRegistries
+infra/cloud/cloudcontext infra/cloud/cloud_host_credentials.go:awsRegionFromECRHost

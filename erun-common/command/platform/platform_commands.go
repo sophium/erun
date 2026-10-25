@@ -11,16 +11,17 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // RunPlatformWhoami resolves the caller's identity.
 func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (model.PlatformWhoami, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformWhoami{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/whoami")
 	if ctx.DryRun {
 		return model.PlatformWhoami{}, nil
 	}
@@ -30,11 +31,11 @@ func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias s
 // RunPlatformVersion reports the build serving the platform API. It is
 // unauthenticated so it works before a token can be minted or with stale credentials.
 func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (model.PlatformInfo, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformInfo{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/platform")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/platform")
 	if ctx.DryRun {
 		return model.PlatformInfo{}, nil
 	}
@@ -43,11 +44,11 @@ func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias 
 
 // RunPlatformCreateTenant registers a tenant; requires an operations-tenant caller.
 func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateTenantParams, deps cloud.CloudDependencies) (model.PlatformTenant, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformTenant{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/tenants",
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/tenants",
 		"name="+params.Name, "type="+params.Type, "issuer="+params.Issuer)
 	if ctx.DryRun {
 		return model.PlatformTenant{}, nil
@@ -57,11 +58,11 @@ func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, a
 
 // RunPlatformCreateOrg creates an org on the platform IdP; requires an operations-tenant caller.
 func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateOrgParams, deps cloud.CloudDependencies) (model.PlatformOrg, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformOrg{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/identity/orgs", "name="+params.Name)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/identity/orgs", "name="+params.Name)
 	if ctx.DryRun {
 		return model.PlatformOrg{}, nil
 	}
@@ -71,7 +72,7 @@ func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alia
 // RunPlatformRepairTenantIssuerOrgMapping fixes a tenant with an unresolvable (issuer, org)
 // mapping; requires an operations-tenant caller.
 func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformRepairTenantIssuerOrgMappingParams, deps cloud.CloudDependencies) (model.PlatformTenantIssuer, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformTenantIssuer{}, err
 	}
@@ -79,7 +80,7 @@ func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.C
 	if strings.TrimSpace(params.TenantID) != "" {
 		details = append(details, "tenantId="+params.TenantID)
 	}
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/tenant-issuers", details...)
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/tenant-issuers", details...)
 	if ctx.DryRun {
 		return model.PlatformTenantIssuer{}, nil
 	}
@@ -88,11 +89,11 @@ func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.C
 
 // RunPlatformListTenants lists tenants visible to the caller.
 func RunPlatformListTenants(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformTenant, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/tenants")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/tenants")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -101,7 +102,7 @@ func RunPlatformListTenants(ctx core.Context, store configpkg.CloudReadStore, al
 
 // RunPlatformCreateUser enrolls a user.
 func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateUserParams, deps cloud.CloudDependencies) (model.PlatformUser, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformUser{}, err
 	}
@@ -109,7 +110,7 @@ func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, ali
 	if len(params.RoleIDs) > 0 {
 		details = append(details, "roleIds="+strings.Join(params.RoleIDs, ","))
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/users", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/users", details...)
 	if ctx.DryRun {
 		return model.PlatformUser{}, nil
 	}
@@ -118,11 +119,11 @@ func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, ali
 
 // RunPlatformListRoles lists the caller's tenant's roles and permissions.
 func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformRole, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/roles")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/roles")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -131,12 +132,12 @@ func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alia
 
 // RunPlatformGrantUserRole grants one role to an enrolled user.
 func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformGrantUserRoleParams, deps cloud.CloudDependencies) error {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return err
 	}
 	path := "/v1/users/" + url.PathEscape(params.UserID) + "/roles"
-	cloud.TracePlatformCall(ctx, provider, "POST", path, "roleId="+params.RoleID)
+	platformapi.TracePlatformCall(ctx, provider, "POST", path, "roleId="+params.RoleID)
 	if ctx.DryRun {
 		return nil
 	}
@@ -145,7 +146,7 @@ func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, 
 
 // RunPlatformListUsers lists the target tenant's users.
 func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformListUsersParams, deps cloud.CloudDependencies) ([]model.PlatformUser, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alia
 	if strings.TrimSpace(params.TenantID) != "" {
 		path += "?tenantId=" + params.TenantID
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", path)
+	platformapi.TracePlatformCall(ctx, provider, "GET", path)
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -162,11 +163,11 @@ func RunPlatformListUsers(ctx core.Context, store configpkg.CloudReadStore, alia
 
 // RunPlatformListEnvironments lists the caller's tenant's environments.
 func RunPlatformListEnvironments(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformEnvironment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -175,11 +176,11 @@ func RunPlatformListEnvironments(ctx core.Context, store configpkg.CloudReadStor
 
 // RunPlatformGetEnvironment fetches one environment by id.
 func RunPlatformGetEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformEnvironment{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
 	if ctx.DryRun {
 		return model.PlatformEnvironment{}, nil
 	}
@@ -195,7 +196,7 @@ func RunPlatformRegisterEnvironment(ctx core.Context, store configpkg.CloudReadS
 // RunPlatformRegisterEnvironmentWithDefinition registers an environment and uploads a
 // local definition. The marker is recorded only after the upload succeeds.
 func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateEnvironmentParams, local *model.EnvDefinitionAdoptParams, deps cloud.CloudDependencies) (model.PlatformEnvironment, EnvDefinitionPushResult, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformEnvironment{}, EnvDefinitionPushResult{}, err
 	}
@@ -205,7 +206,7 @@ func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store config
 	tracePlatformRegistration(ctx, provider, params)
 	if local != nil {
 		ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s definition revision %d", local.Tenant, local.Environment, provider.ERun.APIURL, 1))
-		cloud.TracePlatformCall(ctx, provider, "PUT", "/v1/environments/<adopted>/definition",
+		platformapi.TracePlatformCall(ctx, provider, "PUT", "/v1/environments/<adopted>/definition",
 			"revision=1", "fields="+strings.Join(populatedPortableFieldsForLocal(*local), ","))
 	}
 	if ctx.DryRun {
@@ -263,7 +264,7 @@ func tracePlatformRegistration(ctx core.Context, provider model.CloudProviderCon
 	if strings.TrimSpace(params.TenantID) != "" {
 		details = append(details, "tenantId="+params.TenantID)
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments", details...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/environments", details...)
 }
 
 // populatedPortableFieldsForLocal reports nothing for an unreadable local environment:
@@ -278,7 +279,7 @@ func populatedPortableFieldsForLocal(local model.EnvDefinitionAdoptParams) []str
 
 // RunPlatformPushEnvDefinition uploads a local environment's portable settings to its hosted row.
 func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.EnvDefinitionPushParams, deps cloud.CloudDependencies) (EnvDefinitionPushResult, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return EnvDefinitionPushResult{}, err
 	}
@@ -293,8 +294,8 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s", params.Tenant, params.Environment, marker.Describe()))
 
 	portable := configpkg.PopulatedPortableEnvConfigFields(config)
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+marker.EnvironmentID)
-	cloud.TracePlatformCall(ctx, provider, "PUT", "/v1/environments/"+marker.EnvironmentID+"/definition",
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+marker.EnvironmentID)
+	platformapi.TracePlatformCall(ctx, provider, "PUT", "/v1/environments/"+marker.EnvironmentID+"/definition",
 		"revision="+fmt.Sprintf("%d", marker.DefinitionRevision+1),
 		"fields="+strings.Join(portable, ","))
 	if ctx.DryRun {
@@ -306,7 +307,7 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 // RunPlatformPullEnvDefinition pulls the stored definition into a local environment.
 // A nil confirm refuses a two-sided edit with the diff instead of overwriting.
 func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(configpkg.EnvDefinitionPlan) (bool, error), deps cloud.CloudDependencies) (EnvDefinitionPullResult, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return EnvDefinitionPullResult{}, err
 	}
@@ -324,7 +325,7 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 				params.Tenant, params.Environment)
 		}
 		ctx.Trace(fmt.Sprintf("definition: creating local environment %s/%s from platform row %s", params.Tenant, params.Environment, environmentID))
-		cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
+		platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
 	} else {
 		marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 		if !ok {
@@ -332,9 +333,9 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 		}
 		environmentID = marker.EnvironmentID
 		ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s", params.Tenant, params.Environment, marker.Describe()))
-		cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
+		platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID+"/definition")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID+"/definition")
 	ctx.Trace("definition: only portable fields are written; host-owned and platform-owned fields are left alone")
 
 	if ctx.DryRun {
@@ -345,11 +346,11 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 
 // RunPlatformDeployEnvironment starts a server-side deploy of a registered environment.
 func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, params model.PlatformDeployEnvironmentParams, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformEnvironment{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/deploy", "version="+params.Version)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/deploy", "version="+params.Version)
 	if ctx.DryRun {
 		return model.PlatformEnvironment{}, nil
 	}
@@ -358,11 +359,11 @@ func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadSto
 
 // RunPlatformStopEnvironment scales a runtime environment to zero.
 func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformEnvironment{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/stop")
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/environments/"+environmentID+"/stop")
 	if ctx.DryRun {
 		return model.PlatformEnvironment{}, nil
 	}
@@ -371,11 +372,11 @@ func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore
 
 // RunPlatformDeleteEnvironment starts an asynchronous teardown; the result reflects the claim.
 func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (model.PlatformEnvironment, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformEnvironment{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "DELETE", "/v1/environments/"+environmentID)
+	platformapi.TracePlatformCall(ctx, provider, "DELETE", "/v1/environments/"+environmentID)
 	if ctx.DryRun {
 		return model.PlatformEnvironment{}, nil
 	}
@@ -384,11 +385,11 @@ func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadSto
 
 // RunPlatformListContexts lists the caller's tenant's cloud contexts.
 func RunPlatformListContexts(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]model.PlatformContext, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/contexts")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/contexts")
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -397,11 +398,11 @@ func RunPlatformListContexts(ctx core.Context, store configpkg.CloudReadStore, a
 
 // RunPlatformGetContext fetches one cloud context by id.
 func RunPlatformGetContext(ctx core.Context, store configpkg.CloudReadStore, alias, contextID string, deps cloud.CloudDependencies) (model.PlatformContext, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformContext{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/contexts/"+contextID)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/contexts/"+contextID)
 	if ctx.DryRun {
 		return model.PlatformContext{}, nil
 	}
@@ -411,11 +412,11 @@ func RunPlatformGetContext(ctx core.Context, store configpkg.CloudReadStore, ali
 // RunPlatformCreateContext registers a cloud context. params.Preview is a server-side dry
 // run; ctx.DryRun skips the network call.
 func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformCreateContextParams, deps cloud.CloudDependencies) (model.PlatformCreateContextResult, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformCreateContextResult{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/contexts",
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/contexts",
 		"name="+params.Name, "alias="+params.CloudProviderAlias, "region="+params.Region, fmt.Sprintf("preview=%t", params.Preview))
 	if ctx.DryRun {
 		return model.PlatformCreateContextResult{}, nil
@@ -425,11 +426,11 @@ func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, 
 
 // RunPlatformProvision returns the ordered provisioning plan without executing it.
 func RunPlatformProvision(ctx core.Context, store configpkg.CloudReadStore, alias string, params model.PlatformProvisionParams, deps cloud.CloudDependencies) (model.PlatformProvisionResult, error) {
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformProvisionResult{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/provision", "env="+params.Environment.Name, "type="+params.Environment.Type)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/provision", "env="+params.Environment.Name, "type="+params.Environment.Type)
 	if ctx.DryRun {
 		return model.PlatformProvisionResult{}, nil
 	}

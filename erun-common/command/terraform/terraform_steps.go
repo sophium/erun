@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/operatorprompt"
 )
 
 // terraformLockPlatforms match erun's deploy targets so one committed lock
@@ -19,7 +19,7 @@ type terraformStep struct {
 	confirm bool
 }
 
-func executeTerraformSteps(ctx core.Context, result model.TerraformResult, steps []terraformStep, confirm seam.TerraformConfirmFunc, rfc2136Secret string) error {
+func executeTerraformSteps(ctx core.Context, result model.TerraformResult, steps []terraformStep, confirm operatorprompt.TerraformConfirmFunc, rfc2136Secret string) error {
 	if err := os.MkdirAll(result.WorkDir, 0o755); err != nil {
 		return fmt.Errorf("creating terraform state dir %s: %w", result.WorkDir, err)
 	}

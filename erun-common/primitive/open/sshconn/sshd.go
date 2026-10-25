@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
@@ -20,7 +20,7 @@ const (
 )
 
 func SSHConnectionInfoForResult(result config.OpenResult) model.SSHConnectionInfo {
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	return model.SSHConnectionInfo{
 		User:           DefaultSSHUser,
 		Host:           "127.0.0.1",

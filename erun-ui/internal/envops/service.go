@@ -13,7 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
@@ -26,7 +27,7 @@ import (
 
 // Store is the slice of the desktop's config store the operations read and write.
 type Store interface {
-	seampkg.ListStore
+	envstore.ListStore
 	SaveEnvConfig(string, config.EnvConfig) error
 }
 
@@ -45,7 +46,7 @@ type ReviewPolicy struct {
 type Deps struct {
 	Store           Store
 	Cloud           cloud.CloudDependencies
-	FindProjectRoot seampkg.ProjectFinderFunc
+	FindProjectRoot projectroot.ProjectFinderFunc
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context func() context.Context
 	// Started reports whether startup has run. Before it (and in unit tests) the

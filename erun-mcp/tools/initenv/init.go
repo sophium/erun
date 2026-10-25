@@ -9,9 +9,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/command/setup"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-mcp/tools/shared/buildinfo"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -80,9 +81,9 @@ func initToolExecute(runtime runtimecfg.RuntimeConfig, input InitInput) (func(bo
 		traceOutput := new(bytes.Buffer)
 		traceSink := toolio.MirrorToJobLog(traceOutput, log)
 		ctx := toolio.RuntimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
-		ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
+		ctx.KubernetesContextPreflight = contextpower.CloudContextPreflight(runtime.Store, cloudcontext.CloudContextDependencies{})
 
-		params := seam.BootstrapInitParams{
+		params := bootstrap.BootstrapInitParams{
 			Tenant:                   tenant,
 			SelectedTenant:           strings.TrimSpace(input.SelectedTenant),
 			InitializeCurrentProject: input.InitializeCurrentProject,
@@ -117,7 +118,7 @@ func initToolExecute(runtime runtimecfg.RuntimeConfig, input InitInput) (func(bo
 		if envType := config.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
 			params.Type = envType
 			// Derived from RemoteWorktree so host reports false.
-			params.Remote = (seam.BootstrapInitParams{Type: envType}).RemoteWorktree()
+			params.Remote = (bootstrap.BootstrapInitParams{Type: envType}).RemoteWorktree()
 		} else {
 			params.Remote = input.Remote
 		}

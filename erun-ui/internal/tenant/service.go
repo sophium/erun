@@ -8,13 +8,13 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // Store is the slice of the desktop's config store the platform calls read and write.
 type Store interface {
-	seam.CloudStore
+	cloudstore.CloudStore
 	LoadTenantConfig(string) (model.TenantConfig, string, error)
 	SaveTenantConfig(model.TenantConfig) error
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -27,13 +27,13 @@ func quietOutputsContext() core.Context {
 
 // ListAgentOutputsViaRuntime is the production ListAgentOutputs seam.
 func ListAgentOutputsViaRuntime(result config.OpenResult, params model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error) {
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	return jobs.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 // DownloadAgentOutputViaRuntime is the production DownloadAgentOutput seam.
 func DownloadAgentOutputViaRuntime(result config.OpenResult, params model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error) {
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	return jobs.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 

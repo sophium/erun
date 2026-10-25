@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
@@ -98,7 +98,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
-	other = reconcileEnvironmentJob(jobsDir, other, now, activity.ProcessAlive, hostname)
+	other = reconcileEnvironmentJob(jobsDir, other, now, activitylease.ProcessAlive, hostname)
 	if other.Finished() {
 		return "", false
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -24,7 +25,7 @@ const pushReviewNoticeTimeout = 15 * time.Second
 // branch as its sourceBranch; it never fails the caller. Reviews are named
 // after the squash message, so only sourceBranch identifies the branch.
 func WarnPushedBranchWithoutReview(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params model.PushedBranchReviewNoticeParams) {
-	if !cloud.HasAnyErunPlatformAlias(store) {
+	if !platformapi.HasAnyErunPlatformAlias(store) {
 		return
 	}
 	branch := strings.TrimSpace(params.Branch)
@@ -40,13 +41,13 @@ func WarnPushedBranchWithoutReview(ctx core.Context, store config.CloudReadStore
 		ctx.Trace("push review notice skipped: " + branch + " is the remote's default branch, which originates work rather than targeting it")
 		return
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("push review notice skipped: " + err.Error())
 		return
 	}
 	filter := platformclient.PlatformReviewFilter{SourceBranch: branch}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", platformclient.ReviewFilterTraceDetails(filter)...)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/reviews", platformclient.ReviewFilterTraceDetails(filter)...)
 	if ctx.DryRun {
 		return
 	}

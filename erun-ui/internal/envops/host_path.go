@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -125,7 +125,7 @@ func (s *Service) ResolveEnvironmentHostPath(selection uimodel.Selection, podPat
 			"no matching file has synced to this environment's outputs yet",
 		), nil
 	}
-	podRoot := runtimeref.RemoteShellWorktreePath(cloud.ShellLaunchParamsFromResult(result))
+	podRoot := runtimeref.RemoteShellWorktreePath(shelllaunch.ShellLaunchParamsFromResult(result))
 	if rel, ok := relUnderPodDir(cleanPodPath, podRoot); ok {
 		return resolveHostMirrorPath(
 			"mirror",

@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/primitive/deploy/defaultchart"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
@@ -38,27 +38,27 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParam
 	return r.deployRuntime(execution)
 }
 
-func (r *resolvedOpenRunner) resolveRuntimeExecution() (seam.DeploySpec, error) {
+func (r *resolvedOpenRunner) resolveRuntimeExecution() (helmdeploy.DeploySpec, error) {
 	// Older envs pin Chart.yaml to the unpublished "1.0.0" placeholder.
 	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
 	if appVersion == "" {
 		appVersion = shared.CurrentBuildInfo().Version
 	}
 	if err := defaultchart.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	execution, err = applyRuntimeDeployImageOverride(r.ctx, r.result, execution, r.options.RuntimeImage)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
 }
 
-func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution seam.DeploySpec) (bool, error) {
+func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution helmdeploy.DeploySpec) (bool, error) {
 	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
@@ -85,7 +85,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 	return !deployed, nil
 }
 
-func (r *resolvedOpenRunner) deployRuntime(execution seam.DeploySpec) error {
+func (r *resolvedOpenRunner) deployRuntime(execution helmdeploy.DeploySpec) error {
 	if r.options.VSCode || r.options.IntelliJ {
 		if r.ctx.DryRun {
 			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun deploy %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
@@ -101,10 +101,10 @@ func (r *resolvedOpenRunner) deployRuntime(execution seam.DeploySpec) error {
 		return err
 	}
 	// The shared writer also persists RuntimeImage and heals to the running version on a cached no-op.
-	return runtimeversion.PersistRuntimeVersionFromDeploySpecs(r.ctx, []seam.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
+	return runtimeversion.PersistRuntimeVersionFromDeploySpecs(r.ctx, []helmdeploy.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
-func (r *resolvedOpenRunner) openHelmDeployer(execution seam.DeploySpec) seam.HelmChartDeployerFunc {
+func (r *resolvedOpenRunner) openHelmDeployer(execution helmdeploy.DeploySpec) helmdeploy.HelmChartDeployerFunc {
 	return helmrecovery.WrapHelmDeployWithReleaseRecovery(
 		r.promptRunner,
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
@@ -206,11 +206,11 @@ func sshdExpectationForDeployment(result config.OpenResult) *bool {
 	return &expected
 }
 
-func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart seam.HelmChartDeployerFunc) seam.HelmChartDeployerFunc {
+func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart helmdeploy.HelmChartDeployerFunc) helmdeploy.HelmChartDeployerFunc {
 	if deployHelmChart == nil {
 		return nil
 	}
-	return func(params seam.HelmDeployParams) error {
+	return func(params helmdeploy.HelmDeployParams) error {
 		return runWithSpinner(
 			ctx,
 			" deploying "+releaseName+" with helm",
@@ -223,7 +223,7 @@ func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployH
 }
 
 // applyRuntimeDeployImageOverride is ignored for repo-local charts, which own their image refs.
-func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution seam.DeploySpec, runtimeImage string) (seam.DeploySpec, error) {
+func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution helmdeploy.DeploySpec, runtimeImage string) (helmdeploy.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
 		return execution, nil
@@ -235,7 +235,7 @@ func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult,
 	return published.ResolvePublishedDevopsDeploySpec(ctx, result, "")
 }
 
-func applyRuntimeDeployVersionOverride(execution seam.DeploySpec, versionOverride string) seam.DeploySpec {
+func applyRuntimeDeployVersionOverride(execution helmdeploy.DeploySpec, versionOverride string) helmdeploy.DeploySpec {
 	versionOverride = strings.TrimSpace(versionOverride)
 	if versionOverride == "" {
 		return execution

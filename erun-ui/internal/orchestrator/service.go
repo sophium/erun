@@ -13,14 +13,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	orchcmd "github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Store is the slice of the desktop's config store the orchestrator concern reads and writes.
 type Store interface {
-	seampkg.ListStore
+	envstore.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
 }

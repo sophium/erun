@@ -6,7 +6,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 )
 
 // Balances status freshness against describe-instances cost for many contexts.
@@ -35,7 +36,7 @@ func (s *Service) Status(name string) string {
 		return ""
 	}
 	if s.now().Sub(entry.confirmedAt) > StatusTTL {
-		return cloud.CloudContextStatusUnknown
+		return cloudcontext.CloudContextStatusUnknown
 	}
 	return entry.status
 }
@@ -57,7 +58,7 @@ func (s *Service) ApplyStatuses(statuses []model.CloudContextStatus) {
 		if newStatus == "" {
 			continue
 		}
-		if newStatus == cloud.CloudContextStatusUnknown {
+		if newStatus == cloudcontext.CloudContextStatusUnknown {
 			if entry, ok := s.statuses[name]; ok && s.now().Sub(entry.confirmedAt) <= StatusTTL {
 				continue
 			}
@@ -126,7 +127,7 @@ func (s *Service) runPoller(stop <-chan struct{}) {
 }
 
 func (s *Service) refreshOnce() {
-	statuses, err := cloud.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
+	statuses, err := contextpower.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
 	if err != nil {
 		return
 	}

@@ -15,26 +15,26 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/build/order"
 )
 
 // FROM edges are read off disk, so the graph under test must be real files.
-func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) seam.DockerBuildSpec {
+func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) imagebuild.DockerBuildSpec {
 	t.Helper()
 	path := filepath.Join(dir, "Dockerfile."+strings.ReplaceAll(tag, "/", "_"))
 	body := "FROM " + from + "\nRUN true\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write dockerfile: %v", err)
 	}
-	return seam.DockerBuildSpec{Image: model.DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
+	return imagebuild.DockerBuildSpec{Image: model.DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
 }
 
 func dependencyContext(stdout, stderr io.Writer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard), Stdout: stdout, Stderr: stderr}
 }
 
-func resolveTestDependencies(t *testing.T, builds []seam.DockerBuildSpec) ([]seam.DockerBuildSpec, map[string][]string) {
+func resolveTestDependencies(t *testing.T, builds []imagebuild.DockerBuildSpec) ([]imagebuild.DockerBuildSpec, map[string][]string) {
 	t.Helper()
 	ordered := order.OrderedDockerBuildSpecs(builds)
 	dependencies, err := buildDependencies(ordered)
@@ -47,7 +47,7 @@ func resolveTestDependencies(t *testing.T, builds []seam.DockerBuildSpec) ([]sea
 // erun-backend-api is held open; erun-devops, which only FROMs erun-ubuntu, must start anyway.
 func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
 		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
 		buildSpecFromDockerfile(t, dir, "erun-backend-api", "debian:bookworm"),
@@ -61,7 +61,7 @@ func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.
 	release := func() { releaseOnce.Do(func() { close(releaseSlow) }) }
 	defer release()
 
-	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		switch strings.TrimSpace(spec.Image.Tag) {
 		case "erun-backend-api":
 			close(slowStarted)
@@ -97,7 +97,7 @@ func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.
 
 func TestRunBuildDependenciesNeverStartsAnImageBeforeItsBases(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
 		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
 		buildSpecFromDockerfile(t, dir, "erun-backend-api", "debian:bookworm"),
@@ -114,7 +114,7 @@ func TestRunBuildDependenciesNeverStartsAnImageBeforeItsBases(t *testing.T) {
 
 	baseStarted := make(chan struct{})
 	otherDone := make(chan struct{})
-	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		tag := strings.TrimSpace(spec.Image.Tag)
 		record(tag + ":start")
 		switch tag {
@@ -151,7 +151,7 @@ func TestRunBuildDependenciesNeverStartsAnImageBeforeItsBases(t *testing.T) {
 
 func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "slow", "debian:bookworm"),
 		buildSpecFromDockerfile(t, dir, "fast", "debian:bookworm"),
 	}
@@ -160,7 +160,7 @@ func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *t
 	// The first image finishes last, so flushing on completion would reverse them.
 	var released sync.WaitGroup
 	released.Add(1)
-	build := func(spec seam.DockerBuildSpec, stdout, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, stdout, _ io.Writer) error {
 		if strings.TrimSpace(spec.Image.Tag) == "fast" {
 			_, _ = fmt.Fprintln(stdout, "building fast")
 			released.Done()
@@ -184,7 +184,7 @@ func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *t
 // erun-devops (third) finishes while erun-backend-api (second) runs; the stream keeps build order.
 func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
 		buildSpecFromDockerfile(t, dir, "erun-backend-api", "debian:bookworm"),
 		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
@@ -195,7 +195,7 @@ func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing
 	}
 
 	devopsDone := make(chan struct{})
-	build := func(spec seam.DockerBuildSpec, stdout, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, stdout, _ io.Writer) error {
 		tag := strings.TrimSpace(spec.Image.Tag)
 		_, _ = fmt.Fprintln(stdout, tag)
 		if tag == "erun-devops" {
@@ -221,13 +221,13 @@ func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing
 
 func TestRunBuildDependenciesReportsTheFirstFailureInBuildOrder(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "first", "debian:bookworm"),
 		buildSpecFromDockerfile(t, dir, "second", "debian:bookworm"),
 	}
 	ordered, dependencies := resolveTestDependencies(t, builds)
 
-	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		return errors.New(strings.TrimSpace(spec.Image.Tag) + " failed")
 	}
 	ctx := dependencyContext(io.Discard, io.Discard)
@@ -239,14 +239,14 @@ func TestRunBuildDependenciesReportsTheFirstFailureInBuildOrder(t *testing.T) {
 
 func TestRunBuildDependenciesSkipsDependentsOfAFailedBase(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
 		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
 	}
 	ordered, dependencies := resolveTestDependencies(t, builds)
 
 	var dependentRan atomic.Bool
-	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		if strings.TrimSpace(spec.Image.Tag) == "erun-devops" {
 			dependentRan.Store(true)
 			return nil
@@ -265,7 +265,7 @@ func TestRunBuildDependenciesSkipsDependentsOfAFailedBase(t *testing.T) {
 
 func TestRunBuildDependenciesNeverExceedsItsBound(t *testing.T) {
 	dir := t.TempDir()
-	builds := []seam.DockerBuildSpec{
+	builds := []imagebuild.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "base", "debian:bookworm"),
 		buildSpecFromDockerfile(t, dir, "dependent", "base"),
 	}
@@ -275,7 +275,7 @@ func TestRunBuildDependenciesNeverExceedsItsBound(t *testing.T) {
 	ordered, dependencies := resolveTestDependencies(t, builds)
 
 	var running, peak atomic.Int64
-	build := func(seam.DockerBuildSpec, io.Writer, io.Writer) error {
+	build := func(imagebuild.DockerBuildSpec, io.Writer, io.Writer) error {
 		current := running.Add(1)
 		for {
 			seen := peak.Load()

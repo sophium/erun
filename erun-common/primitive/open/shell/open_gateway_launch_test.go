@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
@@ -66,7 +66,7 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve open: %v", err)
 			}
-			req := cloud.ShellLaunchParamsFromResult(result)
+			req := shelllaunch.ShellLaunchParamsFromResult(result)
 			req.AI = true
 			body := strings.Join(RemoteSessionLauncherBody(req, "/tmp/bashrc"), "\n")
 

@@ -8,8 +8,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -31,7 +32,7 @@ stringData:
 // ApplyGatewayCredentialsSecret delivers the gateway credential, keeping it out of argv,
 // traces, and helm values. A missing credential errors rather than leave the chart
 // pointing at a missing Secret.
-func ApplyGatewayCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
+func ApplyGatewayCredentialsSecret(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
 	// Resolved like the chart values, so the Secret exists exactly when the env reads it.
 	gateway := config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
 	if !gateway.Configured() {
@@ -53,7 +54,7 @@ func ApplyGatewayCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploy
 
 // PruneGatewayCredentialsSecret removes the credential after a runtime rollout
 // without the gateway; it runs after rollout because the old pod still references it.
-func PruneGatewayCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
+func PruneGatewayCredentialsSecret(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
 	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
@@ -84,7 +85,7 @@ var deleteGatewayCredentialsSecret = func(args []string) error {
 // gatewayCredentialForDeploy prefers the saved credential, falling back to this
 // machine's Claude Code key for the same gateway.
 func gatewayCredentialForDeploy(gateway *config.OpenRouterConfig) (string, error) {
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -99,7 +100,7 @@ func ResolveGatewayCredential(gateway *config.OpenRouterConfig) (string, error) 
 
 // ResolveGatewayCredentialFromStore reuses the host key only when the host already
 // points at baseURL, since a credential is issued for one service.
-func ResolveGatewayCredentialFromStore(store seam.CloudSecretStore, ref, baseURL string) (string, error) {
+func ResolveGatewayCredentialFromStore(store cloudstore.CloudSecretStore, ref, baseURL string) (string, error) {
 	saved, loadErr := store.LoadCloudSecret(ref)
 	switch {
 	case loadErr == nil && strings.TrimSpace(saved) != "":

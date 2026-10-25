@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
@@ -21,7 +21,7 @@ var (
 )
 
 // WorkspaceSyncLocalPath prefers the configured path, then the project root, then a host-local worktree.
-func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) string {
+func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot projectroot.ProjectFinderFunc) string {
 	if localPath := strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath); localPath != "" {
 		return localPath
 	}
@@ -37,7 +37,7 @@ func WorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot seam.Proje
 }
 
 // ResolveWorkspaceSyncParams resolves an environment to its pass or the precondition it fails.
-func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) (WorkspaceSyncParams, error) {
+func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot projectroot.ProjectFinderFunc) (WorkspaceSyncParams, error) {
 	if !result.RemoteRepo() {
 		return WorkspaceSyncParams{}, ErrWorkspaceSyncNotRemoteAgent
 	}

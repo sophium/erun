@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/spf13/cobra"
 )
 
@@ -205,7 +205,7 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	if bytes <= r.idleTrafficBytes {
 		return
 	}
-	_ = activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
+	_ = records.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant:        r.tenant,
 		Environment:   r.environment,
 		Kind:          config.ActivityKindSSH,

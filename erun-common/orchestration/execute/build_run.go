@@ -4,7 +4,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	deployrun "github.com/sophium/erun/erun-common/orchestration/deploy"
@@ -19,7 +21,7 @@ import (
 )
 
 // RunBuildExecution runs a plain `erun build`; outcome reporting is best-effort and store may be nil.
-func RunBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
+func RunBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runScript imagebuild.BuildScriptRunnerFunc, build imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := buildrunner.TraceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -27,7 +29,7 @@ func RunBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec
 }
 
 // RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart.
-func RunBuildExecutionAndDeploy(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deploy seam.HelmChartDeployerFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
+func RunBuildExecutionAndDeploy(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []helmdeploy.DeploySpec, runScript imagebuild.BuildScriptRunnerFunc, build imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deploy helmdeploy.HelmChartDeployerFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := buildrunner.TraceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -66,21 +68,21 @@ func buildExecutionProjectRootAndEnvironment(execution dockerspec.BuildExecution
 }
 
 // RunReleaseExecution runs a standalone `erun release` under the `==> Releasing` umbrella.
-func RunReleaseExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runGit seam.GitCommandRunnerFunc, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) (err error) {
+func RunReleaseExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, runGit gitcmd.GitCommandRunnerFunc, runScript imagebuild.BuildScriptRunnerFunc, build imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc) (err error) {
 	ctx, finish := release.TraceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
 // runBuildExecution refuses a plan with no work: exiting zero would report untested as green.
-func runBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, runGit seam.GitCommandRunnerFunc, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deploy seam.HelmChartDeployerFunc) error {
+func runBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []helmdeploy.DeploySpec, runGit gitcmd.GitCommandRunnerFunc, runScript imagebuild.BuildScriptRunnerFunc, build imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deploy helmdeploy.HelmChartDeployerFunc) error {
 	if !buildrun.BuildExecutionPlansWork(execution) {
 		return spec.NewEmptyBuildPlanError("the resolved plan has nothing to build or test")
 	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }
 
-func runResolvedBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, runGit seam.GitCommandRunnerFunc, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deploy seam.HelmChartDeployerFunc) error {
+func runResolvedBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []helmdeploy.DeploySpec, runGit gitcmd.GitCommandRunnerFunc, runScript imagebuild.BuildScriptRunnerFunc, build imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deploy helmdeploy.HelmChartDeployerFunc) error {
 	if execution.Release != nil {
 		// The release wraps build+push so images and charts exist before the tag is pushed.
 		publisher := releaserun.NewReleasePublisher(execution, deploySpecs, runScript, build, push)

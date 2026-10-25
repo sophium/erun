@@ -10,7 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -115,7 +115,7 @@ func (s *Service) ListOrchestratorLaunchChoices() (LaunchChoices, error) {
 
 // ConfiguredERunAliases is the single filter for erun platform aliases.
 func (s *Service) ConfiguredERunAliases() ([]string, error) {
-	providers, err := cloud.ListCloudProviders(s.d.Store)
+	providers, err := providerconfig.ListCloudProviders(s.d.Store)
 	if err != nil {
 		return nil, err
 	}

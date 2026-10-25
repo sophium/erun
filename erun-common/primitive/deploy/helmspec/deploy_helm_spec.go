@@ -9,34 +9,35 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
-func NewHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (seam.HelmDeploySpec, error) {
+func NewHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (helmdeploy.HelmDeploySpec, error) {
 	valuesFilePath, err := resolveKubernetesDeployValuesFile(deployContext.ChartPath, target.Environment)
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 	return NewHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
 }
 
-func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (seam.HelmDeploySpec, error) {
+func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (helmdeploy.HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
 	ports := configpkg.LocalPortsForResult(target)
 
 	// Validated here so a bad marker list fails at deploy time, not in-pod.
 	containerRegistries, err := configpkg.DeployTargetContainerRegistries(target)
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 
 	rolloutTimeout, err := target.EnvConfig.Deploy.Resolve()
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 
 	// helm won't pass --sets into subchart scope, so command() prefixes them with
@@ -45,7 +46,7 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 	if chartref.DeployContextOwnsRuntimeChart(deployContext, target.Tenant) && !chartref.IsOCIChartReference(deployContext.ChartPath) {
 		subchartKey, err = helm.HelmChartRuntimeSubchartKey(deployContext.ChartPath)
 		if err != nil {
-			return seam.HelmDeploySpec{}, err
+			return helmdeploy.HelmDeploySpec{}, err
 		}
 	}
 
@@ -58,7 +59,7 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		insecureRegistry = strings.TrimSpace(target.ClusterPullRegistry)
 	}
 
-	return seam.HelmDeploySpec{
+	return helmdeploy.HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
 		ValuesFilePath:      valuesFilePath,
@@ -127,7 +128,7 @@ func ResolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	return projectConfig.Platform.Resolve()
 }
 
-func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
+func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *helmdeploy.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -142,7 +143,7 @@ func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg
 	deployInput.CloudInstanceID = status.InstanceID
 }
 
-func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
+func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *helmdeploy.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -164,12 +165,12 @@ func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 	}
 	// Without a region every AWS call in the pod would need one by hand.
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == configpkg.CloudProviderAWS {
-		deployInput.CloudRegion = cloud.ResolveEnvironmentAWSRegion(store, env)
+		deployInput.CloudRegion = cloudcontext.ResolveEnvironmentAWSRegion(store, env)
 	}
 }
 
 func resolveCloudProviderForAlias(store configpkg.CloudReadStore, alias, current string) string {
-	if provider, err := cloud.ResolveCloudProvider(store, alias); err == nil {
+	if provider, err := providerconfig.ResolveCloudProvider(store, alias); err == nil {
 		return provider.Provider
 	}
 	if provider := cloudProviderFromAlias(alias); provider != "" {

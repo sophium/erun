@@ -10,8 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -56,7 +56,7 @@ type EnvVersionsResolver func(ctx core.Context, tenant string, env config.EnvCon
 
 // UpgradeVersionsResolverForStore builds the Upgrade-all resolver. It always queries the canonical
 // image too: tenant images are rebuilt FROM it, and ghcr 403s private and missing repos alike.
-func UpgradeVersionsResolverForStore(_ seam.DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
+func UpgradeVersionsResolverForStore(_ deploytarget.DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
 	return func(_ core.Context, tenant string, env config.EnvConfig) ([]SourcedRuntimeVersions, error) {
 		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
 			if forcedError != "" {
@@ -123,16 +123,16 @@ func upgradeDiscoveryRegistries(env config.EnvConfig) []string {
 }
 
 // ResolveUpgradePlanForStore resolves the Upgrade-all plan, tracing every decision for --dry-run.
-func ResolveUpgradePlanForStore(ctx core.Context, store seam.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func ResolveUpgradePlanForStore(ctx core.Context, store deploytarget.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, ctx.Trace)
 }
 
 // BuildUpgradePlan is the untraced plan resolver for in-process callers.
-func BuildUpgradePlan(store seam.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func BuildUpgradePlan(store deploytarget.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, nil)
 }
 
-func buildUpgradePlan(store seam.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
+func buildUpgradePlan(store deploytarget.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
 	traceln := func(msg string) {
 		if trace != nil {
 			trace(msg)
@@ -185,7 +185,7 @@ func normalizeUpgradeScope(target model.UpgradeTarget) (upgradeScope, error) {
 }
 
 // A gate environment that is not found must fail the plan.
-func collectUpgradePlanItems(store seam.DeployStore, tenants []model.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]model.UpgradePlanItem, bool, error) {
+func collectUpgradePlanItems(store deploytarget.DeployStore, tenants []model.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]model.UpgradePlanItem, bool, error) {
 	items := make([]model.UpgradePlanItem, 0)
 	gateFound := scope.gateEnvironment == ""
 	for _, tenant := range tenants {
@@ -364,18 +364,18 @@ type UpgradeOccupancyError struct {
 
 func (e *UpgradeOccupancyError) Error() string {
 	return fmt.Sprintf("%s/%s is held by %s -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes",
-		e.Tenant, e.Environment, activity.FormatLeaseHolders(e.Holders))
+		e.Tenant, e.Environment, activitylease.FormatLeaseHolders(e.Holders))
 }
 
 // LeaseGuardedUpgradeDeployer refuses held environments unless override (traced), and holds an
 // exclusive lease during the deploy so concurrent upgrades cannot race.
-func LeaseGuardedUpgradeDeployer(deploy seam.UpgradeItemDeployer, override bool, holder model.EnvironmentActivityLeaseHolder, now func() time.Time) seam.UpgradeItemDeployer {
+func LeaseGuardedUpgradeDeployer(deploy deploytarget.UpgradeItemDeployer, override bool, holder model.EnvironmentActivityLeaseHolder, now func() time.Time) deploytarget.UpgradeItemDeployer {
 	if now == nil {
 		now = time.Now
 	}
 	return func(ctx core.Context, item model.UpgradePlanItem) error {
 		nowValue := now()
-		leases, err := activity.LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
+		leases, err := activitylease.LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
 		if err != nil {
 			return fmt.Errorf("upgrade: %s/%s: reading activity leases: %w", item.Tenant, item.Environment, err)
 		}
@@ -383,21 +383,21 @@ func LeaseGuardedUpgradeDeployer(deploy seam.UpgradeItemDeployer, override bool,
 			if !override {
 				return &UpgradeOccupancyError{Tenant: item.Tenant, Environment: item.Environment, Holders: leases}
 			}
-			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), activity.FormatLeaseHolders(leases)))
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), activitylease.FormatLeaseHolders(leases)))
 		}
 		// Dry-run shows the refusal but must not take the lease.
 		if ctx.DryRun {
 			return deploy(ctx, item)
 		}
 
-		lease, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+		lease, err := activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 			Tenant: item.Tenant, Environment: item.Environment, Name: "upgrade", Exclusive: true, Holder: holder, Now: nowValue,
 		})
 		if err != nil {
 			return fmt.Errorf("upgrade: %s/%s: %w", item.Tenant, item.Environment, err)
 		}
 		defer func() {
-			_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
+			_, _ = activitylease.ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
 		}()
 
 		return deploy(ctx, item)
@@ -420,7 +420,7 @@ type UpgradeResult struct {
 }
 
 // RunUpgradePlan deploys every lagging member, continuing past per-env failures.
-func RunUpgradePlan(ctx core.Context, plan UpgradePlan, deploy seam.UpgradeItemDeployer) UpgradeResult {
+func RunUpgradePlan(ctx core.Context, plan UpgradePlan, deploy deploytarget.UpgradeItemDeployer) UpgradeResult {
 	result := UpgradeResult{Plan: plan}
 	for _, item := range plan.Items {
 		if strings.TrimSpace(item.Target) == "" {

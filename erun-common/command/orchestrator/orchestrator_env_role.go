@@ -7,7 +7,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 )
 
 // OrchestratorEnvRoleNone is the CLI token for undeclaring a role, since "" means "no flag given".
@@ -29,7 +29,7 @@ func ParseOrchestratorEnvRoleFlag(value string) (model.OrchestratorEnvRole, erro
 
 // SetOrchestratorEnvRole sets the role of an already-linked environment, re-checking
 // OrchestratorEnvRoleAllowed exactly as the desktop does. Invalid persisted pairings still load.
-func SetOrchestratorEnvRole(ctx core.Context, store seam.OrchestratorRoleStore, params model.SetOrchestratorEnvRoleParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorEnvRole(ctx core.Context, store envstore.OrchestratorRoleStore, params model.SetOrchestratorEnvRoleParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}

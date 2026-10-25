@@ -8,17 +8,17 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func HasProjectBuildScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (bool, error) {
+func HasProjectBuildScript(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (bool, error) {
 	script, err := resolveProjectBuildScript(findProjectRoot, target)
 	return script != nil, err
 }
 
-func resolveProjectBuildScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
+func resolveProjectBuildScript(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
 	script, err := ResolveProjectRootBuildScript(findProjectRoot, target)
 	if err != nil || script != nil {
 		return script, err
@@ -27,7 +27,7 @@ func resolveProjectBuildScript(findProjectRoot seam.ProjectFinderFunc, target mo
 }
 
 // ResolveProjectRootBuildScript returns the project root's build.sh, or nil.
-func ResolveProjectRootBuildScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
+func ResolveProjectRootBuildScript(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
 	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
 	if err != nil || !ok {
 		return nil, err
@@ -40,7 +40,7 @@ func ResolveProjectRootBuildScript(findProjectRoot seam.ProjectFinderFunc, targe
 }
 
 // ResolveNestedProjectBuildScript returns the first build.sh below the project root, or nil.
-func ResolveNestedProjectBuildScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
+func ResolveNestedProjectBuildScript(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (*dockerspec.ScriptSpec, error) {
 	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
 	if err != nil || !ok {
 		return nil, err
@@ -52,7 +52,7 @@ func ResolveNestedProjectBuildScript(findProjectRoot seam.ProjectFinderFunc, tar
 	return &script, nil
 }
 
-func buildScriptDiscoveryRoot(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (string, bool, error) {
+func buildScriptDiscoveryRoot(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (string, bool, error) {
 	if target.DisableBuildScriptDiscovery {
 		return "", false, nil
 	}

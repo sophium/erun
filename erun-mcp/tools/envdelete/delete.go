@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
@@ -39,7 +39,7 @@ func DeleteTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 			return nil, jobenvelope.JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
 		}
 
-		deleteStore, ok := any(runtime.Store).(seam.DeleteStore)
+		deleteStore, ok := any(runtime.Store).(envstore.DeleteStore)
 		if !ok {
 			deleteStore = config.ConfigStore{}
 		}

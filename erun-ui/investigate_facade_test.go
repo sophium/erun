@@ -11,7 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/investigate"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
@@ -131,7 +131,7 @@ func TestInvestigationPastItsLifetimeBoundStopsItsOrchestratorSession(t *testing
 	harness.reachLifetimeBound()
 
 	assertNoSessions(t, harness.app, "after the lifetime bound")
-	leases, err := activity.LoadEnvironmentActivityLeases("frs", "dev", time.Now())
+	leases, err := activitylease.LoadEnvironmentActivityLeases("frs", "dev", time.Now())
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivityLeases failed: %v", err)
 	}

@@ -12,16 +12,17 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Store is the slice of the desktop's config store the settings read and write.
 type Store interface {
-	seampkg.ListStore
+	envstore.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
@@ -38,7 +39,7 @@ type CloudStatusCache interface {
 type Deps struct {
 	Store       Store
 	Cloud       cloud.CloudDependencies
-	ContextDeps cloud.CloudContextDependencies
+	ContextDeps cloudcontext.CloudContextDependencies
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context       func() context.Context
 	Emit          uimodel.Emitter

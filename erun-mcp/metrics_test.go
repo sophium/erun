@@ -14,7 +14,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/sophium/erun/erun-common/base/config"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
@@ -85,7 +85,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 		t.Fatalf("erun_terminal_input_seconds_since_last = %v before any activity, want 0", got)
 	}
 
-	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
+	if err := records.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH,
 		Now: time.Now().Add(-5 * time.Second),
 	}); err != nil {
@@ -106,19 +106,19 @@ func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
 	now := time.Now()
-	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
+	if err := records.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(ssh) failed: %v", err)
 	}
-	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
+	if err := records.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI, Now: now.Add(-2 * time.Second),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(cli) failed: %v", err)
 	}
 
 	status := modelpkg.EnvironmentIdleStatus{}
-	activity, err := activitypkg.LoadEnvironmentActivity("acme", "dev")
+	activity, err := records.LoadEnvironmentActivity("acme", "dev")
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivity failed: %v", err)
 	}

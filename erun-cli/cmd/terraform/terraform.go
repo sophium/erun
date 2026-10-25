@@ -10,12 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/operatorprompt"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/terraform"
 	"github.com/spf13/cobra"
 )
 
-func NewTerraformCmd(store seam.TerraformStore, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func NewTerraformCmd(store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
@@ -63,7 +65,7 @@ func NewTerraformCmd(store seam.TerraformStore, findProjectRoot seam.ProjectFind
 	return cmd
 }
 
-func newTerraformOperationCmd(store seam.TerraformStore, findProjectRoot seam.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
+func newTerraformOperationCmd(store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
 	var tenantFlag, environmentFlag, confirmEnvironment string
 	cmd := &cobra.Command{
 		Use:          use,
@@ -85,7 +87,7 @@ func newTerraformOperationCmd(store seam.TerraformStore, findProjectRoot seam.Pr
 	return cmd
 }
 
-func runTerraformCommand(ctx core.Context, store seam.TerraformStore, findProjectRoot seam.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}
@@ -144,7 +146,7 @@ func terraformArgOrFlag(flag string, args []string, index int) string {
 }
 
 // terraformConfirmer confirms only apply/destroy; init and plan never mutate state.
-func terraformConfirmer(op model.TerraformOperation, confirmEnvironment string) seam.TerraformConfirmFunc {
+func terraformConfirmer(op model.TerraformOperation, confirmEnvironment string) operatorprompt.TerraformConfirmFunc {
 	if op != model.TerraformApply && op != model.TerraformDestroy {
 		return nil
 	}

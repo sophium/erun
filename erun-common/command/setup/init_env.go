@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
+	"github.com/sophium/erun/erun-common/infra/activity/managedcloud"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
 )
@@ -133,7 +133,7 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 	return nil
 }
 
-func initDeployConfig(params seam.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
+func initDeployConfig(params bootstrap.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
 	components, given := initComponentsOverride(params)
 	if !given {
 		return configpkg.EnvironmentDeployConfig{}
@@ -143,7 +143,7 @@ func initDeployConfig(params seam.BootstrapInitParams) configpkg.EnvironmentDepl
 
 // initComponentsOverride distinguishes an explicitly empty --components, which
 // clears a saved selection, from an omitted flag.
-func initComponentsOverride(params seam.BootstrapInitParams) ([]string, bool) {
+func initComponentsOverride(params bootstrap.BootstrapInitParams) ([]string, bool) {
 	if params.Components == nil {
 		return nil, false
 	}
@@ -157,7 +157,7 @@ func describeComponentsSetting(components []string) string {
 	return strings.Join(components, ",")
 }
 
-func seedInitContainerRegistries(params seam.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
+func seedInitContainerRegistries(params bootstrap.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
 	if params.ClusterRegistry != nil {
 		return configpkg.ClusterContainerRegistries(*params.ClusterRegistry)
 	}
@@ -194,7 +194,7 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 	if err != nil {
 		return "", "", false, err
 	}
-	managedCloud, err := activity.ManagedCloudEnvironment(s.runner.Store, configpkg.EnvConfig{
+	managedCloud, err := managedcloud.ManagedCloudEnvironment(s.runner.Store, configpkg.EnvConfig{
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		Type:               s.params.ResolvedType(),

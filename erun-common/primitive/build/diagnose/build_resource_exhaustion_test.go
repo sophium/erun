@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 )
 
 var errBoom = errors.New("boom")
 
 var errExitedNormally = errors.New("exit status 2")
 
-func fakePodJSONRunner(stdout string, err error) seam.OpenKubectlRunnerFunc {
+func fakePodJSONRunner(stdout string, err error) kubeapi.OpenKubectlRunnerFunc {
 	return func(args []string, out, errOut io.Writer) error {
 		if err != nil {
 			return err

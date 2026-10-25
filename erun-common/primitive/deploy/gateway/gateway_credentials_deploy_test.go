@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
@@ -14,7 +14,7 @@ const testGatewayURL = "https://openrouter.ai/api"
 
 func TestResolveGatewayCredentialTrimsWhatItDelivers(t *testing.T) {
 	// A pasted token's trailing newline would be rejected by the gateway.
-	store := cloud.NewFileCloudSecretStore(t.TempDir())
+	store := secretstore.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "  sk-or-v1-abc\n"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 	no := false
-	spec := seam.HelmDeploySpec{
+	spec := helmdeploy.HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
 		Claude:      config.EnvironmentClaudeConfig{UseGateway: &no},

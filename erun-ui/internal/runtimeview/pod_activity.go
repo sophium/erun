@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -81,7 +81,7 @@ func (s *Service) ProbeRuntimeActivity(selection uimodel.Selection) (Activity, e
 	ctx, cancel := context.WithTimeout(s.d.Context(), runtimeActivityTimeout)
 	defer cancel()
 	output, err := s.d.ExecRuntimePod(ctx, selection,
-		activitypkg.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
+		remotesession.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
 	if err != nil {
 		return Activity{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeActivityTimeout, err, func(e error) string { return e.Error() }))
 	}
@@ -96,7 +96,7 @@ func runtimeProcessSnapshotScript() string {
 }
 
 func runtimeActivityFromProbe(selection uimodel.Selection, output string) Activity {
-	heartbeats := activitypkg.ParseRemoteAppSessionHeartbeats(output)
+	heartbeats := remotesession.ParseRemoteAppSessionHeartbeats(output)
 	sessions := make([]Session, 0, len(heartbeats))
 	for _, heartbeat := range heartbeats {
 		sessions = append(sessions, Session{
@@ -111,7 +111,7 @@ func runtimeActivityFromProbe(selection uimodel.Selection, output string) Activi
 		Environment:     selection.Environment,
 		Available:       true,
 		Sessions:        sessions,
-		SessionsRunning: activitypkg.RunningRemoteAppSessions(heartbeats),
+		SessionsRunning: remotesession.RunningRemoteAppSessions(heartbeats),
 		Processes:       groups,
 		MemoryHeldMiB:   totalMi,
 		MemoryHeld:      formatMebibytes(totalMi),

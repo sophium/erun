@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/cmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/internal"
 )
 
@@ -61,7 +61,7 @@ func runERun() int {
 
 // exitCodeFor resolves the exit code for an already-reported failure, defaulting to 1.
 func exitCodeFor(err error) int {
-	if errors.Is(err, cloud.ErrPlatformAliasUnusable) {
+	if errors.Is(err, providerconfig.ErrPlatformAliasUnusable) {
 		return platformAliasUnusableExitCode
 	}
 	return internal.ExitCodeFor(err)

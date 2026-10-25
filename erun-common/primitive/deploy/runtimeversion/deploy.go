@@ -7,13 +7,14 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 )
 
 // PersistRuntimeVersionFromDeploySpecs writes the deployed runtime version and registry to the env
 // config. A SkipHelm version was never pushed, so it heals to the release's running version instead.
-func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []seam.DeploySpec, save seam.EnvConfigSaver, resolveDeployedVersion seam.HelmReleaseVersionResolverFunc) error {
+func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []helmdeploy.DeploySpec, save deploytarget.EnvConfigSaver, resolveDeployedVersion helmdeploy.HelmReleaseVersionResolverFunc) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
 	}
@@ -43,7 +44,7 @@ func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []seam.DeployS
 }
 
 // An empty result means unknown; the caller then leaves the persisted version alone.
-func resolveRunningRuntimeVersion(ctx core.Context, spec seam.DeploySpec, resolveDeployedVersion seam.HelmReleaseVersionResolverFunc) string {
+func resolveRunningRuntimeVersion(ctx core.Context, spec helmdeploy.DeploySpec, resolveDeployedVersion helmdeploy.HelmReleaseVersionResolverFunc) string {
 	if resolveDeployedVersion == nil {
 		return ""
 	}
@@ -57,7 +58,7 @@ func resolveRunningRuntimeVersion(ctx core.Context, spec seam.DeploySpec, resolv
 
 // RuntimeRegistryForDeploySpec returns the registry a deploy memoizes. A runtime chart search only
 // fills or confirms the memo, never overriding `erun init --runtime-registry`.
-func RuntimeRegistryForDeploySpec(spec seam.DeploySpec) string {
+func RuntimeRegistryForDeploySpec(spec helmdeploy.DeploySpec) string {
 	chartRegistry := strings.TrimSpace(spec.Deploy.RuntimeChartRegistry)
 	if chartRegistry == "" {
 		return strings.TrimSpace(spec.Deploy.ContainerRegistry)
@@ -78,7 +79,7 @@ func runtimeDeployMemoUnchanged(envConfig configpkg.EnvConfig, version, registry
 		(runtimeChart == "" || strings.TrimSpace(envConfig.RuntimeChart) == runtimeChart)
 }
 
-func persistRuntimeVersionIfChanged(spec seam.DeploySpec, version string, save seam.EnvConfigSaver) error {
+func persistRuntimeVersionIfChanged(spec helmdeploy.DeploySpec, version string, save deploytarget.EnvConfigSaver) error {
 	registry := RuntimeRegistryForDeploySpec(spec)
 	// The opt-out's clear is recorded only once the unauthenticated release rolled out.
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)

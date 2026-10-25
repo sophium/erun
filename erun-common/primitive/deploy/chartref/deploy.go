@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
-func ResolvedChartVersion(d seam.HelmDeploySpec) string {
+func ResolvedChartVersion(d helmdeploy.HelmDeploySpec) string {
 	if version := strings.TrimSpace(d.ChartVersion); version != "" {
 		return version
 	}
@@ -48,7 +48,7 @@ func SplitChartReferenceVersion(raw string) (string, string) {
 	return raw[:cut+1] + last[:sep], last[sep+1:]
 }
 
-func SpecDeploysRuntimeChart(spec seam.DeploySpec) bool {
+func SpecDeploysRuntimeChart(spec helmdeploy.DeploySpec) bool {
 	tenant := strings.TrimSpace(spec.Target.Tenant)
 	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == configpkg.RuntimeReleaseName(tenant)
 }

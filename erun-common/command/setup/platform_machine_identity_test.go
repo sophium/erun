@@ -14,8 +14,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -47,9 +49,9 @@ func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdenti
 }
 
 // machineIdentityDeps stubs login and OIDC discovery.
-func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, seam.CloudSecretStore) {
+func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, cloudstore.CloudSecretStore) {
 	t.Helper()
-	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
+	store := secretstore.NewFileCloudSecretStore(filepath.Join(t.TempDir(), secretstore.CloudSecretStoreDirName))
 	deps := cloud.CloudDependencies{
 		CloudSecretStore: store,
 		FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
@@ -62,7 +64,7 @@ func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clien
 			return exchange(clientID, clientSecret)
 		},
 	}
-	if err := store.SaveCloudSecret(cloud.ErunRefreshTokenRef(testPlatformAliasProvider().Alias), "host-session"); err != nil {
+	if err := store.SaveCloudSecret(providertoken.ErunRefreshTokenRef(testPlatformAliasProvider().Alias), "host-session"); err != nil {
 		t.Fatalf("seed host session: %v", err)
 	}
 	return deps, store

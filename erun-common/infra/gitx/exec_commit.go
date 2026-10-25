@@ -10,14 +10,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
 )
 
 // CommitWorkingTreeDependencies lets tests replace the git plumbing.
 type CommitWorkingTreeDependencies struct {
-	CurrentBranch seam.GitValueResolverFunc
-	CurrentCommit seam.GitValueResolverFunc
-	RunGit        seam.GitCommandRunnerFunc
+	CurrentBranch gitcmd.GitValueResolverFunc
+	CurrentCommit gitcmd.GitValueResolverFunc
+	RunGit        gitcmd.GitCommandRunnerFunc
 	StagedFiles   func(core.Context, string) ([]string, error)
 	ChangedFiles  func(core.Context, string) ([]string, error)
 }

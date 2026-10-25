@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/hostcreds"
 )
 
 // reportHostCredentials reports whether the env's injected, temporary AWS credentials
@@ -19,7 +19,7 @@ func reportHostCredentials(ctx core.Context, store config.ConfigStore, result co
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Host AWS credentials")
 	}
-	status, err := cloud.InspectHostAWSCredentials(ctx, nil, store, result)
+	status, err := hostcreds.InspectHostAWSCredentials(ctx, nil, store, result)
 	if err != nil {
 		if ctx.DryRun {
 			return nil

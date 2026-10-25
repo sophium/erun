@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 )
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
@@ -166,7 +167,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             cloud.DefaultCloudContextRegion,
+				Region:             cloudcontext.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
 				KubernetesContext:  "cluster-prod",
 			},
@@ -175,7 +176,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	var awsCalls []string
 	svc := newTestService(Deps{
 		Store: fakeStore{config: rootConfig},
-		ContextDeps: cloud.CloudContextDependencies{
+		ContextDeps: cloudcontext.CloudContextDependencies{
 			RunAWS: func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 				awsCalls = append(awsCalls, strings.Join(args, " "))
 				return "i-test\tstopped\n", nil
@@ -187,13 +188,13 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCloudContextStatuses failed: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].Status != cloud.CloudContextStatusStopped {
+	if len(statuses) != 1 || statuses[0].Status != cloudcontext.CloudContextStatusStopped {
 		t.Fatalf("expected stale running status to be replaced with live stopped, got %+v", statuses)
 	}
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
 		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
 	}
-	if got := svc.d.CloudStatuses.Status("team-context"); got != cloud.CloudContextStatusStopped {
+	if got := svc.d.CloudStatuses.Status("team-context"); got != cloudcontext.CloudContextStatusStopped {
 		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
 	}
 }

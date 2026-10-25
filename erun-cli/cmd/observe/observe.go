@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +77,7 @@ func runObserveCommand(ctx core.Context, resolveOpen envscope.OpenResolver, para
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	observed, err := observe.RunObservation(ctx, req, model.ObserveParams{Secrets: checks})
 	if err != nil {
 		return err

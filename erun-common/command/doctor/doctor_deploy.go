@@ -8,8 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	recoverypkg "github.com/sophium/erun/erun-common/primitive/deploy/recovery"
 )
 
@@ -60,14 +60,14 @@ func helmRollbackArgs(req config.ShellLaunchParams) []string {
 	if strings.TrimSpace(req.KubernetesContext) != "" {
 		args = append(args, "--kube-context", req.KubernetesContext)
 	}
-	return append(args, "--wait", "--timeout", cloud.DefaultShellLaunchWaitTimeout)
+	return append(args, "--wait", "--timeout", runtimewait.DefaultShellLaunchWaitTimeout)
 }
 
 // RunDeployRecovery runs the helm recovery; dry-run does not mutate the cluster.
 func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action model.DeployRecoveryAction) (string, error) {
 	switch action {
 	case model.DeployRecoveryClearPendingHelm:
-		recovery := seam.HelmReleaseRecoveryParams{
+		recovery := helmdeploy.HelmReleaseRecoveryParams{
 			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),

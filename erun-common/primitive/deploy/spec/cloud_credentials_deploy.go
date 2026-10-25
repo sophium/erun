@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 func cloudflareSecretName(releaseName string) string {
@@ -13,7 +13,7 @@ func cloudflareSecretName(releaseName string) string {
 }
 
 // applyCloudflareDeployMetadata fills Cloudflare deploy fields; the Secret is applied at execution.
-func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *seam.HelmDeploySpec) {
+func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *helmdeploy.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -21,7 +21,7 @@ func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvCo
 	if alias == "" {
 		return
 	}
-	provider, err := cloud.ResolveCloudProvider(store, alias)
+	provider, err := providerconfig.ResolveCloudProvider(store, alias)
 	if err != nil || provider.Provider != config.CloudProviderCloudflare || provider.Cloudflare == nil {
 		return
 	}

@@ -8,7 +8,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
 )
@@ -50,10 +51,10 @@ func writeRuntimeBootRootConfig(configHome string, injected cloudconfig.Injected
 	}
 	root.DefaultTenant = injected.Tenant
 	for _, provider := range injected.Providers {
-		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
+		root.CloudProviders = providerconfig.UpsertCloudProvider(root.CloudProviders, provider)
 	}
 	for _, context := range injected.Contexts {
-		root.CloudContexts = cloud.UpsertCloudContext(root.CloudContexts, context)
+		root.CloudContexts = cloudcontext.UpsertCloudContext(root.CloudContexts, context)
 	}
 	return writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(configHome), root)
 }

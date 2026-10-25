@@ -8,8 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
@@ -228,7 +228,7 @@ func formatDockerStoreBytes(bytes uint64) string {
 	}
 }
 
-func runDoctorDockerSteps(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerSteps(ctx core.Context, runner runtimepod.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}
@@ -249,7 +249,7 @@ func runDoctorDockerSteps(ctx core.Context, runner seam.RuntimeContainerCommandR
 	result, err := runner(req, daemon.Container, script)
 	if err != nil {
 		return DoctorDockerResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr},
-			cloud.NormalizeDoctorKubectlError(req, result.Stderr, err)
+			runtimewait.NormalizeDoctorKubectlError(req, result.Stderr, err)
 	}
 	stdout, readings := splitDoctorDockerReadings(result.Stdout)
 	return DoctorDockerResult{Daemon: daemon, Stdout: stdout, Stderr: result.Stderr, Readings: readings}, nil

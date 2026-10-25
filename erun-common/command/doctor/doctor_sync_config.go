@@ -9,7 +9,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
@@ -210,10 +211,10 @@ func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected cl
 		rootConfig.DefaultTenant = injected.Tenant
 	}
 	for _, provider := range injected.Providers {
-		rootConfig.CloudProviders = cloud.UpsertCloudProvider(rootConfig.CloudProviders, provider)
+		rootConfig.CloudProviders = providerconfig.UpsertCloudProvider(rootConfig.CloudProviders, provider)
 	}
 	for _, context := range injected.Contexts {
-		rootConfig.CloudContexts = cloud.UpsertCloudContext(rootConfig.CloudContexts, context)
+		rootConfig.CloudContexts = cloudcontext.UpsertCloudContext(rootConfig.CloudContexts, context)
 	}
 	if !ctx.DryRun {
 		_ = configpkg.WriteRootConfigBackupIfDue(rootPath, configpkg.TimeNow)

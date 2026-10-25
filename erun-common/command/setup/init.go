@@ -12,7 +12,12 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmrun"
 	"github.com/sophium/erun/erun-common/primitive/open/podwait"
@@ -63,8 +68,8 @@ type BootstrapInitResult struct {
 }
 
 type BootstrapInitDependencies struct {
-	Store           seam.BootstrapStore
-	FindProjectRoot seam.ProjectFinderFunc
+	Store           envstore.BootstrapStore
+	FindProjectRoot projectroot.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
 	// TenantSelectionUnavailable means nobody can be asked: a single tenant is
@@ -75,12 +80,12 @@ type BootstrapInitDependencies struct {
 	PromptContainerRegistry    PromptValueFunc
 	PromptRemoteRepositoryURL  PromptValueFunc
 	PromptCodeCommitSSHKeyID   PromptValueFunc
-	EnsureKubernetesNamespace  seam.NamespaceEnsurerFunc
-	LoadProjectConfig          seam.ProjectConfigLoaderFunc
+	EnsureKubernetesNamespace  kubeapi.NamespaceEnsurerFunc
+	LoadProjectConfig          projectroot.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
-	WaitForRemoteRuntime       seam.RemoteRuntimeWaitFunc
-	RunRemoteCommand           seam.RemoteCommandRunnerFunc
-	DeployHelmChart            seam.HelmChartDeployerFunc
+	WaitForRemoteRuntime       runtimepod.RemoteRuntimeWaitFunc
+	RunRemoteCommand           runtimepod.RemoteCommandRunnerFunc
+	DeployHelmChart            helmdeploy.HelmChartDeployerFunc
 	Sleep                      core.SleepFunc
 	// ProbeHostedRegistry defaults to a real probe when unset.
 	ProbeHostedRegistry HostedRegistryProbeFunc
@@ -97,7 +102,7 @@ type BootstrapRunner struct {
 
 type bootstrapRunState struct {
 	runner                BootstrapRunner
-	params                seam.BootstrapInitParams
+	params                bootstrap.BootstrapInitParams
 	result                BootstrapInitResult
 	detected              projectContext
 	tenants               []model.TenantConfig
@@ -114,14 +119,14 @@ type bootstrapRunState struct {
 	envConfigChanged      bool
 }
 
-func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params seam.BootstrapInitParams) (BootstrapInitResult, error) {
+func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params bootstrap.BootstrapInitParams) (BootstrapInitResult, error) {
 	return BootstrapRunner{
 		BootstrapInitDependencies: deps,
 		Context:                   deps.Context,
 	}.run(params)
 }
 
-func (s BootstrapRunner) run(params seam.BootstrapInitParams) (BootstrapInitResult, error) {
+func (s BootstrapRunner) run(params bootstrap.BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
 	state := bootstrapRunState{
 		runner: s,
@@ -352,7 +357,7 @@ func remoteHostConfigLabel(tenant, envName string) string {
 	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
 }
 
-func normalizeBootstrapParams(params seam.BootstrapInitParams) seam.BootstrapInitParams {
+func normalizeBootstrapParams(params bootstrap.BootstrapInitParams) bootstrap.BootstrapInitParams {
 	params.Tenant = strings.TrimSpace(params.Tenant)
 	params.SelectedTenant = strings.TrimSpace(params.SelectedTenant)
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
@@ -420,7 +425,7 @@ func (s BootstrapRunner) withLoggerDefaults() BootstrapRunner {
 	return s
 }
 
-func (s BootstrapRunner) confirmTenant(params seam.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
+func (s BootstrapRunner) confirmTenant(params bootstrap.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
 	if params.AutoApprove {
 		return true, nil
 	}
@@ -433,7 +438,7 @@ func (s BootstrapRunner) confirmTenant(params seam.BootstrapInitParams, tenant, 
 	})
 }
 
-func (s BootstrapRunner) confirmEnvironment(params seam.BootstrapInitParams, tenant, envName string) error {
+func (s BootstrapRunner) confirmEnvironment(params bootstrap.BootstrapInitParams, tenant, envName string) error {
 	if params.AutoApprove {
 		return nil
 	}
@@ -467,7 +472,7 @@ func (s BootstrapRunner) confirm(interaction model.BootstrapInitInteraction) (bo
 	return confirmed, nil
 }
 
-func saveEnvConfig(store seam.BootstrapStore, tenant string, config configpkg.EnvConfig) error {
+func saveEnvConfig(store envstore.BootstrapStore, tenant string, config configpkg.EnvConfig) error {
 	stored := config
 	if !stored.RemoteWorktree() {
 		stored.ContainerRegistries = nil

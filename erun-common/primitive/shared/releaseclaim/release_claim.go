@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -34,7 +34,7 @@ func releaseVersionClaimID(version string, pid int) string {
 
 // TakeReleaseVersionClaim takes the version's exclusive lease; separate so it can be tested with a fake clock.
 func TakeReleaseVersionClaim(tenant, environment, version string, holder model.EnvironmentActivityLeaseHolder, pid int, now time.Time) (model.EnvironmentActivityLease, error) {
-	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	return activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "release " + strings.TrimSpace(version),
@@ -50,7 +50,7 @@ func TakeReleaseVersionClaim(tenant, environment, version string, holder model.E
 
 // ReleaseVersionClaimRefusalError names the version and holder for an operator-facing refusal.
 func ReleaseVersionClaimRefusalError(version string, err error) error {
-	var conflict *activity.EnvironmentActivityLeaseConflictError
+	var conflict *activitylease.EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
 		return err
 	}
@@ -116,7 +116,7 @@ func ClaimReleaseVersion(ctx core.Context, spec model.ReleaseSpec, env func(stri
 	return func() {
 		close(stop)
 		stopped.Wait()
-		_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		_, _ = activitylease.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		releaseRepoClaimIfHeld(ctx, spec, repo)
 	}, nil
 }
@@ -124,7 +124,7 @@ func ClaimReleaseVersion(ctx core.Context, spec model.ReleaseSpec, env func(stri
 // EnvironmentHasLiveReleaseHolder reports whether any holder has a live local claim on version.
 // Reading reclaims dead holders; an unreadable store reports present.
 func EnvironmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
-	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
+	held, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
 		return false, err
 	}

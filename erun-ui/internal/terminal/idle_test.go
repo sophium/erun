@@ -8,7 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -359,7 +359,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		},
 	})
 	defer closeTestService(app)
-	setCloudContextStatus(t, "managed-cloud", cloud.CloudContextStatusRunning)
+	setCloudContextStatus(t, "managed-cloud", cloudcontext.CloudContextStatusRunning)
 
 	key := uimodel.SelectionKey(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	app.mu.Lock()
@@ -403,7 +403,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	}
 	app := newTestService(Deps{Store: store})
 	defer closeTestService(app)
-	setCloudContextStatus(t, "managed-cloud", cloud.CloudContextStatusRunning)
+	setCloudContextStatus(t, "managed-cloud", cloudcontext.CloudContextStatusRunning)
 
 	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
@@ -415,8 +415,8 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
-	if ui.CloudContextStatus != cloud.CloudContextStatusRunning {
-		t.Fatalf("expected CloudContextStatus=%q, got %q", cloud.CloudContextStatusRunning, ui.CloudContextStatus)
+	if ui.CloudContextStatus != cloudcontext.CloudContextStatusRunning {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", cloudcontext.CloudContextStatusRunning, ui.CloudContextStatus)
 	}
 	if ui.StopError != "" {
 		t.Fatalf("expected StopError to be cleared when context is running, got %q", ui.StopError)
@@ -447,7 +447,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	}
 	app := newTestService(Deps{Store: store})
 	defer closeTestService(app)
-	setCloudContextStatus(t, "managed-cloud", cloud.CloudContextStatusStopped)
+	setCloudContextStatus(t, "managed-cloud", cloudcontext.CloudContextStatusStopped)
 
 	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
@@ -459,8 +459,8 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
-	if ui.CloudContextStatus != cloud.CloudContextStatusStopped {
-		t.Fatalf("expected CloudContextStatus=%q, got %q", cloud.CloudContextStatusStopped, ui.CloudContextStatus)
+	if ui.CloudContextStatus != cloudcontext.CloudContextStatusStopped {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", cloudcontext.CloudContextStatusStopped, ui.CloudContextStatus)
 	}
 	if ui.StopError == "" {
 		t.Fatal("expected StopError to be preserved when context is stopped")

@@ -13,13 +13,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Store is the slice of the desktop's config store the activity concern reads.
 type Store interface {
-	seampkg.ListStore
+	envstore.ListStore
 }
 
 // Terminal session kinds, as the terminal names them; the locks, the trace and
@@ -67,7 +68,7 @@ type Sessions interface {
 
 type Deps struct {
 	Store           Store
-	FindProjectRoot seampkg.ProjectFinderFunc
+	FindProjectRoot projectroot.ProjectFinderFunc
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context func() context.Context
 	// Started reports whether startup has run. Before it (and in unit tests) a

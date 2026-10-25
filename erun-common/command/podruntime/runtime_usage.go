@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
@@ -47,7 +47,7 @@ const (
 // RunRuntimeUsage execs the reading script into the runtime container, and into the
 // erun-dind sidecar when present. The sidecar read and the pod-spec requests read fail
 // soft so the runtime reading is never lost.
-func RunRuntimeUsage(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner runtimepod.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)

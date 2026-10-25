@@ -7,12 +7,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func ResolveDockerImageReferenceForProject(ctx core.Context, now seam.NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (model.DockerImageReference, error) {
+func ResolveDockerImageReferenceForProject(ctx core.Context, now buildtarget.NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (model.DockerImageReference, error) {
 	registry, insecure, err := ResolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
 		return model.DockerImageReference{}, err
@@ -47,7 +48,7 @@ func ResolveDockerImageReferenceForProject(ctx core.Context, now seam.NowFunc, p
 
 // resolveDockerImageVersion mints a snapshot unless an override or a
 // version-from-build-dir file pins the version.
-func resolveDockerImageVersion(now seam.NowFunc, projectRoot, buildDir, versionOverride, selectedComponent string) (string, string, bool, string, error) {
+func resolveDockerImageVersion(now buildtarget.NowFunc, projectRoot, buildDir, versionOverride, selectedComponent string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := buildversion.ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent)
 	if err != nil {
 		return "", "", false, "", err
@@ -66,26 +67,26 @@ func resolveDockerImageVersion(now seam.NowFunc, projectRoot, buildDir, versionO
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
-func NewDockerBuildSpec(ctx core.Context, store seam.DockerStore, now seam.NowFunc, projectRoot, environment string, buildContext model.DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (seam.DockerBuildSpec, error) {
+func NewDockerBuildSpec(ctx core.Context, store buildtarget.DockerStore, now buildtarget.NowFunc, projectRoot, environment string, buildContext model.DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (imagebuild.DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = dockerspec.DockerBuildContextAtDir(buildContext.Dir)
 		if err != nil {
-			return seam.DockerBuildSpec{}, err
+			return imagebuild.DockerBuildSpec{}, err
 		}
 	}
 
 	if err := dockerspec.CheckImageDockerfile(buildContext.DockerfilePath); err != nil {
-		return seam.DockerBuildSpec{}, err
+		return imagebuild.DockerBuildSpec{}, err
 	}
 
 	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot, selectedComponent)
 	if err != nil {
-		return seam.DockerBuildSpec{}, err
+		return imagebuild.DockerBuildSpec{}, err
 	}
 	imageRef, err := ResolveDockerImageReferenceForProject(ctx, now, projectRoot, environment, buildContext.Dir, versionOverride, selectedComponent)
 	if err != nil {
-		return seam.DockerBuildSpec{}, err
+		return imagebuild.DockerBuildSpec{}, err
 	}
 
 	// "1.0.51" alone would falsely claim a release.
@@ -95,10 +96,10 @@ func NewDockerBuildSpec(ctx core.Context, store seam.DockerStore, now seam.NowFu
 
 	platforms, err := ResolveDockerBuildPlatforms(ctx, projectRoot, environment, platformOverride)
 	if err != nil {
-		return seam.DockerBuildSpec{}, err
+		return imagebuild.DockerBuildSpec{}, err
 	}
 
-	build := seam.DockerBuildSpec{
+	build := imagebuild.DockerBuildSpec{
 		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
@@ -106,7 +107,7 @@ func NewDockerBuildSpec(ctx core.Context, store seam.DockerStore, now seam.NowFu
 	}
 	ApplyDindResourceBuildArgs(store, projectRoot, environment, &build)
 	if err := dockerspec.ApplyDockerSecrets(ctx, projectRoot, environment, &build); err != nil {
-		return seam.DockerBuildSpec{}, err
+		return imagebuild.DockerBuildSpec{}, err
 	}
 	build.CgroupParent = core.BuildContainerCPUCapCgroupParent()
 	return build, nil

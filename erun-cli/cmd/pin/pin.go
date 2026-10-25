@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/lifecycle/pin"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
@@ -19,7 +19,7 @@ import (
 
 // NewPinCmd re-pins every recorded erun version for an environment. It only edits
 // sources; terraform apply and deploy stay separate steps.
-func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectroot.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
 	target := model.OpenParams{}
@@ -102,7 +102,7 @@ func orNone(value string) string {
 	return value
 }
 
-func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot seam.ProjectFinderFunc) error {
+func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectroot.ProjectFinderFunc) error {
 	projectRoot, viaCwdFallback, err := resolvePinProjectRoot(result, listEnvConfigs, findProjectRoot)
 	if err != nil {
 		return err
@@ -211,7 +211,7 @@ func resolvePinRegistryVersions(ctx context.Context) (model.RuntimeRegistryVersi
 
 // resolvePinProjectRoot prefers the env's own repo, then a sibling env of the same tenant,
 // then the cwd; viaCwdFallback reports the last case so the plan can say it is unverified.
-func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot seam.ProjectFinderFunc) (string, bool, error) {
+func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot projectroot.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
 		return path, false, nil
 	}

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -161,7 +161,7 @@ func (a *App) ChooseWorkspaceSyncLocalFolder(selection uimodel.Selection, curren
 	})
 }
 
-func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot seam.ProjectFinderFunc) string {
+func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot projectroot.ProjectFinderFunc) string {
 	if findProjectRoot == nil {
 		return ""
 	}

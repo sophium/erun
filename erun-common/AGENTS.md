@@ -38,8 +38,8 @@ new code goes into the layer it belongs to:
 
 ```
 erun-common/
-  base/          model/ core/ config/ seam/
-  infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
+  base/          model/ core/ config/ seam/<concern>/
+  infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/<concern>/ activity/<concern>/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
   primitive/     shared/<concern>/ build/<concern>/ deploy/<concern>/ open/<concern>/ push/ release/
   orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
   command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/<concern>/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
@@ -53,8 +53,8 @@ import only the erun packages its row names:
 | `base/model` | no other erun package |
 | `base/core` | `base/model` |
 | `base/config` | `base/model`, `base/core` |
-| `base/seam` | `base/model`, `base/core`, `base/config` |
-| `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
+| `base/seam/*` | `base/model`, `base/core`, `base/config`, sibling seams |
+| `infra/*` | `base/*` and, for cloud and activity, their own `<concern>` subpackages; another `infra/*` only where its depguard rule names it |
 | `primitive/shared/*` | `base/*`, `infra/*`, other `primitive/shared/*` |
 | `primitive/*` | `base/*`, `infra/*`, `primitive/shared/*`, and for build, deploy and open their own `<concern>` siblings; never another primitive |
 | `orchestration/build`, `/deploy`, `/clusterread`, `/diagnosis` | `base/*`, `infra/*`, `primitive/*` |

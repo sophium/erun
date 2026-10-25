@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -20,12 +20,12 @@ func (s *Service) ListRemoteAppSessions(selection uimodel.Selection) []string {
 	ctx, cancel := context.WithTimeout(s.d.Context(), 5*time.Second)
 	defer cancel()
 	output, err := s.d.ExecRuntimePod(ctx, selection,
-		activity.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
+		remotesession.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
 	if err != nil {
 		return nil
 	}
 	var ids []string
-	for _, heartbeat := range activity.ParseRemoteAppSessionHeartbeats(output) {
+	for _, heartbeat := range remotesession.ParseRemoteAppSessionHeartbeats(output) {
 		if heartbeat.Running() {
 			ids = append(ids, heartbeat.ID)
 		}

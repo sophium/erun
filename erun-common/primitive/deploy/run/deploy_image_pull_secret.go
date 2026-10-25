@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
@@ -29,7 +29,7 @@ stringData:
 // refreshImagePullSecrets re-mints the named pull Secrets before every rollout,
 // since ECR tokens expire after twelve hours. Only resolved hosts are overlaid;
 // an unresolved host keeps its existing entry.
-func refreshImagePullSecrets(ctx core.Context, deployInput seam.HelmDeploySpec) error {
+func refreshImagePullSecrets(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
 	if len(deployInput.ImagePullSecrets) == 0 {
 		return nil
 	}
@@ -40,7 +40,7 @@ func refreshImagePullSecrets(ctx core.Context, deployInput seam.HelmDeploySpec) 
 	return applyImagePullSecrets(ctx, deployInput, credentials)
 }
 
-func resolveImagePullSecretCredentials(ctx core.Context, deployInput seam.HelmDeploySpec) map[string]registry.RegistryBasicAuth {
+func resolveImagePullSecretCredentials(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) map[string]registry.RegistryBasicAuth {
 	hosts := imagePullSecretRegistryHosts(deployInput)
 	credentials := make(map[string]registry.RegistryBasicAuth, len(hosts))
 	var unresolved []string
@@ -68,7 +68,7 @@ func mergeImagePullSecretAuths(existing map[string]config.DockerConfigJSONAuthEn
 	return merged
 }
 
-func applyImagePullSecrets(ctx core.Context, deployInput seam.HelmDeploySpec, credentials map[string]registry.RegistryBasicAuth) error {
+func applyImagePullSecrets(ctx core.Context, deployInput helmdeploy.HelmDeploySpec, credentials map[string]registry.RegistryBasicAuth) error {
 	applyArgs := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
 		name = strings.TrimSpace(name)
@@ -101,7 +101,7 @@ func applyImagePullSecrets(ctx core.Context, deployInput seam.HelmDeploySpec, cr
 
 // imagePullSecretRegistryHosts includes imageOverrides' registries, which can
 // differ from containerRegistry.
-func imagePullSecretRegistryHosts(deployInput seam.HelmDeploySpec) []string {
+func imagePullSecretRegistryHosts(deployInput helmdeploy.HelmDeploySpec) []string {
 	seen := make(map[string]struct{}, 2)
 	hosts := make([]string, 0, 2)
 	add := func(namespace string) {

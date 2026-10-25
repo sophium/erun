@@ -7,7 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
@@ -21,9 +22,9 @@ func withStubRuntime(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
 		cfg.Store = config.ConfigStore{}
 	}
 	cfg.BuildScriptRunner = func(string, string, []string, io.Reader, io.Writer, io.Writer) error { return errSeamNotWired }
-	cfg.BuildDockerImage = func(seam.DockerBuildSpec, io.Writer, io.Writer) error { return errSeamNotWired }
+	cfg.BuildDockerImage = func(imagebuild.DockerBuildSpec, io.Writer, io.Writer) error { return errSeamNotWired }
 	cfg.PushDockerImage = func(string, int, io.Writer, io.Writer) error { return errSeamNotWired }
-	cfg.DeployHelmChart = func(seam.HelmDeployParams) error { return errSeamNotWired }
+	cfg.DeployHelmChart = func(helmdeploy.HelmDeployParams) error { return errSeamNotWired }
 	cfg.EnsureKubernetesNamespace = func(string, string) error { return errSeamNotWired }
 	cfg.DeleteKubernetesNamespace = func(string, string) error { return errSeamNotWired }
 	cfg.WaitForRemoteRuntime = func(config.ShellLaunchParams) error { return errSeamNotWired }

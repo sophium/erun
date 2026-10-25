@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -94,7 +94,7 @@ func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecor
 		once.Do(func() { close(done) })
 		// Wait for any in-flight renewal so it cannot outlive the release.
 		stopped.Wait()
-		_, _ = activity.ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
+		_, _ = activitylease.ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
 		if exclusive {
 			_ = releaseEnvironmentJobExclusivityClaim(tenant, environment, job.ID)
 		}
@@ -124,7 +124,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 	if !force && name == h.leaseName && time.Since(h.renewedAt) < h.leaseInterval() {
 		return
 	}
-	_, _ = activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	_, _ = activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      h.tenant,
 		Environment: h.environment,
 		Name:        name,
@@ -144,7 +144,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job jobstate.EnvironmentJob, name str
 	if !h.exclusive {
 		return
 	}
-	_, _ = activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	_, _ = activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      h.tenant,
 		Environment: h.environment,
 		Name:        name,
@@ -152,7 +152,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job jobstate.EnvironmentJob, name str
 		PID:         job.PID,
 		TTL:         h.ttl,
 		Exclusive:   true,
-		Scope:       activity.EnvironmentActivityLeaseScopeEnvironment,
+		Scope:       activitylease.EnvironmentActivityLeaseScopeEnvironment,
 		Holder:      environmentJobHolder(h.tenant),
 	})
 }

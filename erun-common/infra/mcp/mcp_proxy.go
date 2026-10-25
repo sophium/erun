@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 )
 
 // Stdio side of the MCP edge. Clients cannot refresh a configured header, so the relay
@@ -19,7 +19,7 @@ const jsonRPCInternalError = -32603
 
 type MCPStdioProxyParams struct {
 	Endpoint      string
-	MintToken     seam.MCPTokenMinter
+	MintToken     runtimepod.MCPTokenMinter
 	ClientVersion string
 	In            io.Reader
 	Out           io.Writer

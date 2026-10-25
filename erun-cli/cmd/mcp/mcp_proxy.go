@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
@@ -108,7 +108,7 @@ func inputsUploadLocalTool(resolveOpen envscope.OpenResolver, params model.OpenP
 			if err != nil {
 				return "", err
 			}
-			req := cloud.ShellLaunchParamsFromResult(result)
+			req := shelllaunch.ShellLaunchParamsFromResult(result)
 			var trace bytes.Buffer
 			toolCtx := core.Context{
 				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),

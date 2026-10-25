@@ -4,12 +4,12 @@ import (
 	"github.com/sophium/erun/cmd/shared/portfwd"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 // NoticeStaleRuntimePortForwards warns when a rollout left local port-forwards bound to the
 // replaced pod. deploy does not own forwards, so it names the repair rather than restarting them.
-func NoticeStaleRuntimePortForwards(ctx core.Context, specs []seam.DeploySpec) {
+func NoticeStaleRuntimePortForwards(ctx core.Context, specs []helmdeploy.DeploySpec) {
 	if ctx.DryRun {
 		return
 	}

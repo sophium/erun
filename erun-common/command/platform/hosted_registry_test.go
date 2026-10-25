@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/command/setup"
 )
 
@@ -56,7 +56,7 @@ func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 			}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(seam.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(bootstrap.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err == nil {
 		t.Fatalf("expected --erun-registry to refuse an unreachable registry, got %q", registry)
 	}
@@ -76,7 +76,7 @@ func TestErunRegistryAcceptedWhenAvailable(t *testing.T) {
 			return setup.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: true}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(seam.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(bootstrap.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err != nil {
 		t.Fatalf("an available registry must be accepted: %v", err)
 	}

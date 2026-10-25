@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 	"github.com/sophium/erun/erun-common/primitive/shared/releaseclaim"
@@ -29,7 +29,7 @@ const releasePushRebaseAttempts = 2
 
 // ensureReleaseBaseBranchUnmoved refuses a release whose base branch moved since sync-remote,
 // before the build spends. An unreadable remote lets the release proceed.
-func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCommandRunnerFunc) error {
+func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec model.ReleaseSpec, runGit gitcmd.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	if branch == "" {
 		return nil
@@ -56,7 +56,7 @@ func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec model.ReleaseSpec, ru
 
 // releaseBaseBranchAhead counts commits origin/<branch> has that the release lacks, reading
 // the remote itself rather than a tracking ref.
-func releaseBaseBranchAhead(projectRoot, branch string, runGit seam.GitCommandRunnerFunc) (int, bool) {
+func releaseBaseBranchAhead(projectRoot, branch string, runGit gitcmd.GitCommandRunnerFunc) (int, bool) {
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
 		return 0, false
 	}
@@ -95,7 +95,7 @@ func isGitPushArgs(args []string) bool {
 
 // RunReleaseBranchPush pushes the generated commits, rebasing onto a moved base branch and
 // retrying (bounded), since the tag is already public by now.
-func RunReleaseBranchPush(ctx core.Context, spec model.ReleaseSpec, command model.ReleaseCommandSpec, runGit seam.GitCommandRunnerFunc) error {
+func RunReleaseBranchPush(ctx core.Context, spec model.ReleaseSpec, command model.ReleaseCommandSpec, runGit gitcmd.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
 	err := runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
@@ -121,7 +121,7 @@ func RunReleaseBranchPush(ctx core.Context, spec model.ReleaseSpec, command mode
 
 // runReleasePush runs a push that a ruleset can protect, reporting GitHub's bypass notice.
 // The caller owns output so a retry reports the attempt that carried the notice.
-func runReleasePush(ctx core.Context, dir string, runGit seam.GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
+func runReleasePush(ctx core.Context, dir string, runGit gitcmd.GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
 	err := runGit(dir, ctx.Stdout, releaseclaim.ReleasePushStderrWriter(ctx, output), args...)
 	gitx.ReportRulesetBypassFromPushArgs(ctx, args, output.String())
 	return err
@@ -229,7 +229,7 @@ func ReleaseRepointFailedRecovery(spec model.ReleaseSpec) string {
 
 // repointReleaseTagIfRebased force-moves the release tag onto its replayed commit after a
 // rebase; an annotated tag update is never a fast-forward.
-func repointReleaseTagIfRebased(ctx core.Context, spec model.ReleaseSpec, projectRoot string, runGit seam.GitCommandRunnerFunc) error {
+func repointReleaseTagIfRebased(ctx core.Context, spec model.ReleaseSpec, projectRoot string, runGit gitcmd.GitCommandRunnerFunc) error {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
 		return nil
@@ -276,7 +276,7 @@ func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (s
 }
 
 // moveReleaseTagOnto re-creates tag at newCommit with its original annotation and force-pushes it.
-func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit seam.GitCommandRunnerFunc, tag, newCommit string) error {
+func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit gitcmd.GitCommandRunnerFunc, tag, newCommit string) error {
 	message, err := GitTagAnnotationSubject(projectRoot, tag)
 	if err != nil {
 		return err
@@ -356,7 +356,7 @@ func releaseBranchPushArgs(spec model.ReleaseSpec, command model.ReleaseCommandS
 }
 
 // rebaseReleaseOntoRemoteBranch aborts a rebase that cannot apply and returns its output on the error.
-func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string, runGit seam.GitCommandRunnerFunc) error {
+func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string, runGit gitcmd.GitCommandRunnerFunc) error {
 	ctx.TraceCommand(projectRoot, "git", "fetch", "origin", branch)
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
 		return err

@@ -9,6 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/clouddefaults"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
@@ -47,7 +51,7 @@ func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStor
 	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply machine identity secret " + name + " (identity " + provisioned.subject + ", client secret redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
-	manifest := platformalias.RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
+	manifest := platformalias.RenderPlatformAliasSecret(name, namespace, entry, secretstore.CloudSecretFileName(ref), provisioned.clientSecret)
 	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "machine identity secret", manifest, args); err != nil {
 		return "", false, err
 	}
@@ -58,7 +62,7 @@ func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStor
 // resolveMachineIdentity proves the credential mints a token before anything is
 // written: an unusable identity is worse than the delegated session it replaces.
 func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, environment string, deps cloud.CloudDependencies) (provisionedMachineIdentity, bool, error) {
-	deps = cloud.NormalizeCloudDependencies(deps)
+	deps = clouddefaults.NormalizeCloudDependencies(deps)
 	client, host, ok, err := machineIdentityPlatformClient(ctx, store, deps)
 	if err != nil || !ok {
 		return provisionedMachineIdentity{}, false, err
@@ -97,7 +101,7 @@ func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore
 		// Silent, like the delegated path: its fallback already reports this.
 		return nil, model.CloudProviderConfig{}, false, nil
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, provider.Alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, provider.Alias, deps)
 	if err != nil {
 		return nil, model.CloudProviderConfig{}, false, err
 	}
@@ -105,7 +109,7 @@ func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore
 }
 
 func fetchMachineIdentity(ctx core.Context, client *platformclient.PlatformClient, environment string) (platformclient.PlatformMachineIdentity, bool) {
-	environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
+	environmentID, err := platformapi.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 	if err != nil {
 		ctx.Trace("machine identity: " + err.Error() + "; leaving the environment's platform identity as it is")
 		return platformclient.PlatformMachineIdentity{}, false
@@ -132,7 +136,7 @@ func machineIdentityProviderConfig(host model.CloudProviderConfig, identity plat
 		ClientID:        strings.TrimSpace(identity.ClientID),
 		ClientSecretRef: machineIdentityClientSecretRef(host.Alias),
 	}
-	return cloud.NormalizeCloudProviderConfig(provider)
+	return providerconfig.NormalizeCloudProviderConfig(provider)
 }
 
 func machineIdentityCredentialAccepted(ctx core.Context, identity platformclient.PlatformMachineIdentity, deps cloud.CloudDependencies, environment string) bool {

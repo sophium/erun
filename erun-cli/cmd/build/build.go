@@ -13,7 +13,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
@@ -36,7 +40,7 @@ var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version
 
 var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
 
-func NewBuildCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, runBuildScript seam.BuildScriptRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
+func NewBuildCmd(store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, runBuildScript imagebuild.BuildScriptRunnerFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push imagebuild.DockerPushFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var jobs int
 	cmd := &cobra.Command{
@@ -83,16 +87,16 @@ func NewBuildCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc,
 	return cmd
 }
 
-func runBuildCommand(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget, runBuildScript seam.BuildScriptRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildCommand(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget, runBuildScript imagebuild.BuildScriptRunnerFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push imagebuild.DockerPushFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
-	buildWithRetry := func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
+	buildWithRetry := func(buildInput imagebuild.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
 			ctx,
 			buildInput,
-			func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
+			func(buildInput imagebuild.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
 					return dockerimage.DockerImageBuilder(buildInput, stdout, stderr)
 				}
@@ -116,12 +120,12 @@ func runBuildCommand(ctx core.Context, store seam.DockerStore, findProjectRoot s
 	return ctx.WriteResult(buildrun.NewBuildResult(execution))
 }
 
-func runBuildAndDeploy(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget, execution dockerspec.BuildExecutionSpec, runBuildScript seam.BuildScriptRunnerFunc, buildWithRetry seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildAndDeploy(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget, execution dockerspec.BuildExecutionSpec, runBuildScript imagebuild.BuildScriptRunnerFunc, buildWithRetry imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	if buildrun.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
 
-	buildDeployStore, ok := any(store).(seam.BuildDeployStore)
+	buildDeployStore, ok := any(store).(deploytarget.BuildDeployStore)
 	if !ok {
 		return errors.New("store does not support deploy resolution")
 	}
@@ -134,7 +138,7 @@ func runBuildAndDeploy(ctx core.Context, store seam.DockerStore, findProjectRoot
 	return execute.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps)
 }
 
-func NewPushCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push seam.DockerPushFunc) *cobra.Command {
+func NewPushCmd(store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push imagebuild.DockerPushFunc) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -168,12 +172,12 @@ func NewPushCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, 
 	return cmd
 }
 
-func pushBuildWithRetry(ctx core.Context, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) seam.DockerImageBuilderFunc {
-	return func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
+func pushBuildWithRetry(ctx core.Context, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) imagebuild.DockerImageBuilderFunc {
+	return func(buildInput imagebuild.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
 			ctx,
 			buildInput,
-			func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
+			func(buildInput imagebuild.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
 					return dockerimage.DockerImageBuilder(buildInput, stdout, stderr)
 				}
@@ -188,7 +192,7 @@ func pushBuildWithRetry(ctx core.Context, buildDockerImage seam.DockerImageBuild
 }
 
 // NewRootPushCmd keeps --build orchestration here so push stays a pure primitive.
-func NewRootPushCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, runBuildScript seam.BuildScriptRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push seam.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
+func NewRootPushCmd(store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, runBuildScript imagebuild.BuildScriptRunnerFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push imagebuild.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -253,7 +257,7 @@ func NewRootPushCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFu
 	return cmd
 }
 
-func runPushBuildStep(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target *model.DockerCommandTarget, runBuildScript seam.BuildScriptRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push seam.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runPushBuildStep(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, target *model.DockerCommandTarget, runBuildScript imagebuild.BuildScriptRunnerFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, push imagebuild.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
@@ -270,7 +274,7 @@ func runPushBuildStep(ctx core.Context, store seam.DockerStore, findProjectRoot 
 	return nil
 }
 
-func RunDockerPushWithRetry(ctx core.Context, pushInput model.DockerPushSpec, push seam.DockerPushFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) error {
+func RunDockerPushWithRetry(ctx core.Context, pushInput model.DockerPushSpec, push imagebuild.DockerPushFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner) error {
 	err := push(ctx, pushInput)
 	if err == nil {
 		return nil
@@ -305,7 +309,7 @@ func RunDockerPushWithRetry(ctx core.Context, pushInput model.DockerPushSpec, pu
 	return push(ctx, pushInput)
 }
 
-func runDockerBuildWithRetry(ctx core.Context, buildInput seam.DockerBuildSpec, build seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, stdout, stderr io.Writer) error {
+func runDockerBuildWithRetry(ctx core.Context, buildInput imagebuild.DockerBuildSpec, build imagebuild.DockerImageBuilderFunc, loginToDockerRegistry imagebuild.DockerRegistryLoginFunc, selectRunner promptpkg.SelectRunner, stdout, stderr io.Writer) error {
 	err := build(buildInput, stdout, stderr)
 	if err == nil {
 		return nil

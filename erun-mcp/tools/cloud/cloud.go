@@ -9,6 +9,9 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudflare"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerlifecycle"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -89,7 +92,7 @@ type CloudSetResult struct {
 
 func CloudListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
-		statuses, err := cloud.ListCloudProviderStatuses(runtime.Store, clouddeps.CloudDependencies())
+		statuses, err := providertoken.ListCloudProviderStatuses(runtime.Store, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudListResult{}, err
 		}
@@ -124,11 +127,11 @@ func CloudInitAWSTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *m
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := cloud.InitAWSCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
+		provider, err := providerlifecycle.InitAWSCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
+		status := providertoken.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -150,11 +153,11 @@ func CloudInitCloudflareTool(runtime runtimecfg.RuntimeConfig) func(context.Cont
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := cloud.InitCloudflareCloudProvider(ctx, runtime.Store, params, clouddeps.CloudDependencies())
+		provider, err := cloudflare.InitCloudflareCloudProvider(ctx, runtime.Store, params, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := cloud.CloudProviderTokenStatus(provider, clouddeps.CloudDependencies())
+		status := providertoken.CloudProviderTokenStatus(provider, clouddeps.CloudDependencies())
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -172,11 +175,11 @@ func CloudInitERunTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
-		provider, err := cloud.InitERunCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
+		provider, err := providerlifecycle.InitERunCloudProvider(ctx, runtime.Store, params, cloud.CloudDependencies{})
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
-		status := cloud.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
+		status := providertoken.CloudProviderTokenStatus(provider, cloud.CloudDependencies{})
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: toolio.NormalizeTraceLines(traceOutput.String())}, nil
 	}
 }
@@ -192,7 +195,7 @@ func CloudLoginTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, model.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, clouddeps.CloudDependencies())
+		status, err := providerlifecycle.LoginCloudProviderAlias(ctx, runtime.Store, model.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, clouddeps.CloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
@@ -221,7 +224,7 @@ func CloudOIDCTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.
 				},
 			}, nil
 		}
-		status, _, err := cloud.SetupCloudProviderOIDC(ctx, runtime.Store, model.CloudBearerParams{
+		status, _, err := providerlifecycle.SetupCloudProviderOIDC(ctx, runtime.Store, model.CloudBearerParams{
 			Alias:    alias,
 			Audience: input.Audience,
 		}, cloud.CloudDependencies{})
@@ -240,7 +243,7 @@ func CloudSetTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.C
 		}
 		traceOutput := strings.Builder{}
 		ctx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, model.SetEnvironmentCloudAliasParams{
+		config, err := providerlifecycle.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, model.SetEnvironmentCloudAliasParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Alias:       input.Alias,

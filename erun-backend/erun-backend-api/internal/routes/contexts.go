@@ -14,7 +14,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
 )
 
 type ContextRepository interface {
@@ -215,7 +216,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 		DiskSizeGB:         bootstrap.diskSizeGB,
 	}
 	// In DryRun the default runners only trace argv.
-	if _, err := cloud.InitCloudContext(ctx, store, params, cloud.CloudContextDependencies{}); err != nil {
+	if _, err := contextinit.InitCloudContext(ctx, store, params, cloudcontext.CloudContextDependencies{}); err != nil {
 		return nil, err
 	}
 	return splitTraceLines(trace.String()), nil

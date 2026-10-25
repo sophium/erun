@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-func HelmReleaseRecoveryCommand(p seam.HelmReleaseRecoveryParams) helm.CommandSpec {
+func HelmReleaseRecoveryCommand(p helmdeploy.HelmReleaseRecoveryParams) helm.CommandSpec {
 	args := []string{}
 	if p.Verbosity >= core.VerbosityDebug {
 		args = append(args, "--v=4")
@@ -80,11 +80,11 @@ func (e *HelmReleasePendingOperationError) Unwrap() error {
 	return e.Err
 }
 
-func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) seam.HelmReleaseRecoveryParams {
+func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) helmdeploy.HelmReleaseRecoveryParams {
 	if e == nil {
-		return seam.HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
+		return helmdeploy.HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
 	}
-	return seam.HelmReleaseRecoveryParams{
+	return helmdeploy.HelmReleaseRecoveryParams{
 		ReleaseName:       e.ReleaseName,
 		Namespace:         e.Namespace,
 		KubernetesContext: e.KubernetesContext,

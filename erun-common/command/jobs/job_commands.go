@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -96,12 +97,12 @@ func RunJobList(ctx core.Context, store config.CloudReadStore, alias string, par
 		return nil, err
 	}
 	params.Status = status
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
 	filter := platformclient.PlatformJobFilter(params)
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/jobs", jobFilterTraceDetails(filter)...)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/jobs", jobFilterTraceDetails(filter)...)
 	if ctx.DryRun {
 		return nil, nil
 	}
@@ -114,7 +115,7 @@ func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, pa
 	if err != nil {
 		return model.PlatformJob{}, err
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformJob{}, err
 	}
@@ -122,7 +123,7 @@ func RunJobClaim(ctx core.Context, store config.CloudReadStore, alias string, pa
 	if err != nil {
 		return model.PlatformJob{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobClaimTraceDetails(params)...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobClaimTraceDetails(params)...)
 	if ctx.DryRun {
 		return model.PlatformJob{}, nil
 	}
@@ -204,11 +205,11 @@ func RunJobUpdate(ctx core.Context, store config.CloudReadStore, alias string, p
 	}
 	// RUNNING means a planned job has begun; the platform owns the transition
 	// table and refuses it otherwise.
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformJob{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID, jobUpdateTraceDetails(params)...)
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID, jobUpdateTraceDetails(params)...)
 	if ctx.DryRun {
 		return model.PlatformJob{}, nil
 	}
@@ -223,11 +224,11 @@ func RunJobShow(ctx core.Context, store config.CloudReadStore, alias, jobID stri
 	if strings.TrimSpace(jobID) == "" {
 		return model.PlatformJob{}, fmt.Errorf("job id is required")
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.PlatformJob{}, err
 	}
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/jobs/"+jobID)
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/jobs/"+jobID)
 	if ctx.DryRun {
 		return model.PlatformJob{}, nil
 	}

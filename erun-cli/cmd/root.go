@@ -53,8 +53,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -89,15 +91,15 @@ func Execute() error {
 type rootDependencies struct {
 	configStore               config.ConfigStore
 	store                     rootStore
-	deployHelmChart           seam.HelmChartDeployerFunc
-	recoveringDeployHelmChart seam.HelmChartDeployerFunc
-	runInit                   func(core.Context, seam.BootstrapInitParams) error
+	deployHelmChart           helmdeploy.HelmChartDeployerFunc
+	recoveringDeployHelmChart helmdeploy.HelmChartDeployerFunc
+	runInit                   func(core.Context, bootstrap.BootstrapInitParams) error
 	runInitForArgs            func(core.Context, []string) error
 	runInitForOpen            func(core.Context, model.OpenParams) error
-	dockerRegistryLogin       seam.DockerRegistryLoginFunc
-	push                      seam.DockerPushFunc
+	dockerRegistryLogin       imagebuild.DockerRegistryLoginFunc
+	push                      imagebuild.DockerPushFunc
 	resolveOpen               func(model.OpenParams) (config.OpenResult, error)
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (helmdeploy.DeploySpec, error)
 	activateMCP               portfwd.MCPForwarder
 	activateAPI               portfwd.APIForwarder
 	activateSSHD              sshdlink.SSHDActivator
@@ -135,7 +137,7 @@ func (d rootDependencies) resolveOpenResult(params model.OpenParams) (config.Ope
 	return resolve.ResolveOpen(d.store, params)
 }
 
-func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (seam.DeploySpec, error) {
+func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (helmdeploy.DeploySpec, error) {
 	return resolveRuntimeDeploySpecForOpen(ctx, d.store, config.FindProjectRoot, dockerspec.ResolveDockerBuildContext, kubecheck.ResolveKubernetesDeployContext, time.Now, shared.CurrentBuildInfo(), target, allowLocalBuilds)
 }
 
@@ -189,14 +191,14 @@ func (d rootDependencies) commands() []*cobra.Command {
 		execcmd.NewExecCmd(config.FindProjectRoot, gitx.GitCommandRunner, nil, d.resolveOpen, d.configStore, cloudcli.CloudDependencies()),
 		cloudpkg.NewCloudCmd(d.configStore, promptpkg.RunPrompt, runSelect, cloudcli.CloudDependencies()),
 		orchestrator.NewOrchestratorCmd(d.configStore),
-		kubecontext.NewContextCmd(d.configStore, promptpkg.RunPrompt, runSelect, cloud.CloudContextDependencies{}),
+		kubecontext.NewContextCmd(d.configStore, promptpkg.RunPrompt, runSelect, cloudcontext.CloudContextDependencies{}),
 		platform.NewPlatformCmd(d.configStore, promptpkg.RunPrompt, cloudcli.CloudDependencies()),
 		review.NewReviewCmd(d.configStore, cloudcli.CloudDependencies()),
 		jobs.NewJobsCmd(d.configStore, cloudcli.CloudDependencies()),
 		list.NewListCmd(d.configStore, config.FindProjectRoot),
 		outputs.NewOutputsCmd(d.resolveOpen),
 		inputs.NewInputsCmd(d.resolveOpen),
-		doctor.NewDoctorCmd(d.resolveOpen, d.configStore, cloudcli.CloudDependencies(), cloud.CloudContextDependencies{}, promptpkg.RunPrompt),
+		doctor.NewDoctorCmd(d.resolveOpen, d.configStore, cloudcli.CloudDependencies(), cloudcontext.CloudContextDependencies{}, promptpkg.RunPrompt),
 		observe.NewObserveCmd(d.resolveOpen),
 		services.NewServicesCmd(d.resolveOpen),
 		usage.NewUsageCmd(d.resolveOpen),

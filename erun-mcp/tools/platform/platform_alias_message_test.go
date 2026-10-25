@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
@@ -23,7 +23,7 @@ func mcpAliasMessageFor(t *testing.T, providers ...model.CloudProviderConfig) st
 }
 
 func erunTypeProvider(alias string) model.CloudProviderConfig {
-	return cloud.NormalizeCloudProviderConfig(model.CloudProviderConfig{
+	return providerconfig.NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:    alias,
 		Provider: config.CloudProviderERun,
 		ERun:     &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},

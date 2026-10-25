@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -35,7 +35,7 @@ func ObserveTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 		if err != nil {
 			return nil, model.ObserveResult{}, err
 		}
-		req := cloud.ShellLaunchParamsFromResult(target)
+		req := shelllaunch.ShellLaunchParamsFromResult(target)
 		runCtx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		result, err := observe.RunObservation(runCtx, req, model.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
 		if err != nil {

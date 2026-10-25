@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/spf13/cobra"
 )
@@ -173,7 +173,7 @@ func newJobStartCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(jobspkg.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", jobspkg.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
-	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
+	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activitylease.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim the environment for this job's lifetime; while it is held, every other job start here is refused and told which job holds it")
 	clicmd.AddDryRunFlag(cmd)
@@ -269,7 +269,7 @@ func newJobAttachCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
 	cmd.Flags().IntVar(&pid, "pid", 0, "Process in the environment to track; the job resolves against this pid and nothing else")
 	cmd.Flags().StringVar(&logPath, "log", "", "File in the environment the work is already writing its output to, so job output can serve it")
-	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL; re-attach to renew")
+	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activitylease.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL; re-attach to renew")
 	clicmd.AddDryRunFlag(cmd)
 	return cmd
 }
@@ -354,7 +354,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agent, "agent", "", "AI tool the command runs, so its event stream is folded into progress")
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", jobspkg.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
-	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
+	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activitylease.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "This job holds the environment's exclusivity claim, already taken by the start; renew it while the work runs and release it on the way out")
 	cmd.Flags().StringVar(&startedByJobID, "started-by-job-id", "", "Explicit override for the job this work records as its parent, for a start forwarded through a channel (the MCP edge) that cannot carry ERUN_JOB_ID inheritance itself")

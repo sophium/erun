@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -62,7 +62,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloudcontext.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
@@ -123,7 +123,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloudcontext.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
@@ -171,7 +171,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloudcontext.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StopCloudContext("managed-cloud"); err == nil {

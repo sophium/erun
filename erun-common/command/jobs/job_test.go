@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
 // fakeKubectlPodRunner returns a canned `kubectl get pod -o json` response or failure.
-func fakeKubectlPodRunner(t *testing.T, stdout string, err error) seam.OpenKubectlRunnerFunc {
+func fakeKubectlPodRunner(t *testing.T, stdout string, err error) kubeapi.OpenKubectlRunnerFunc {
 	t.Helper()
 	return func(args []string, out, errOut io.Writer) error {
 		if err != nil {

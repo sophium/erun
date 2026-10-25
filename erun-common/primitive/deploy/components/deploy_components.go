@@ -8,7 +8,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	planpkg "github.com/sophium/erun/erun-common/primitive/deploy/plan"
 	targetpkg "github.com/sophium/erun/erun-common/primitive/deploy/target"
@@ -203,7 +205,7 @@ func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 
 // ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
 // The version, not the env's source, decides which charts exist. It never builds or pushes.
-func ResolveDeployableComponents(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
+func ResolveDeployableComponents(store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = targetpkg.FreezeNow(now)
 

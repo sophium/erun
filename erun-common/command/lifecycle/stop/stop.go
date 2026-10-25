@@ -8,8 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy/components"
 )
@@ -202,10 +202,10 @@ func traceAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) []str
 }
 
 // Read-only, so it also runs under --dry-run.
-func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]activity.RemoteAppSessionHeartbeat, error) {
+func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]remotesession.RemoteAppSessionHeartbeat, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "exec", "deployment/"+target.ReleaseName, "--", "/bin/sh", "-lc",
-		activity.RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
+		remotesession.RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
 
 	ctx.TraceCommand("", "kubectl", args...)
 	output, err := core.Command("kubectl", args...).Output()
@@ -215,7 +215,7 @@ func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]act
 		}
 		return nil, err
 	}
-	return activity.ParseRemoteAppSessionHeartbeats(string(output)), nil
+	return remotesession.ParseRemoteAppSessionHeartbeats(string(output)), nil
 }
 
 // ClearEnvironmentStopIntent clears the recorded stop without touching the cluster; `open --deploy`
@@ -363,13 +363,13 @@ func scaleRuntimeDeployment(ctx core.Context, target RuntimeScaleTarget, replica
 // WaitRuntimeAvailable blocks until the runtime Deployment reports Available.
 func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	args := kubectlRuntimeTargetArgs(target)
-	args = append(args, "wait", "--for=condition=Available", "--timeout", cloud.DefaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
+	args = append(args, "wait", "--for=condition=Available", "--timeout", runtimewait.DefaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
 	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, cloud.DefaultShellLaunchWaitTimeout)
+		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, runtimewait.DefaultShellLaunchWaitTimeout)
 	}
 	return core.RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }

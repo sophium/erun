@@ -13,7 +13,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -180,7 +180,7 @@ func linkedCloudContextFromStore(store Store, env configpkg.EnvConfig) (model.Cl
 	if kubernetesContext == "" {
 		return model.CloudContextStatus{}, false, nil
 	}
-	statuses, err := cloud.ListCloudContextStatuses(store)
+	statuses, err := cloudcontext.ListCloudContextStatuses(store)
 	if err != nil {
 		return model.CloudContextStatus{}, false, err
 	}

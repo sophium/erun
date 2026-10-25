@@ -10,6 +10,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerlifecycle"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -19,7 +25,7 @@ func (s *Service) LoadERunConfig() (ERunConfig, error) {
 		return ERunConfig{}, err
 	}
 	ui := s.erunConfigToUI(config)
-	statuses, err := cloud.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
+	statuses, err := contextpower.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
 	if err != nil {
 		return ERunConfig{}, err
 	}
@@ -52,7 +58,7 @@ func (s *Service) SaveERunConfig(config ERunConfig) (ERunConfig, error) {
 }
 
 func (s *Service) LoadCloudProviderStatuses() ([]CloudProviderStatus, error) {
-	statuses, err := cloud.ListCloudProviderStatuses(s.d.Store, s.d.Cloud)
+	statuses, err := providertoken.ListCloudProviderStatuses(s.d.Store, s.d.Cloud)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +66,7 @@ func (s *Service) LoadCloudProviderStatuses() ([]CloudProviderStatus, error) {
 }
 
 func (s *Service) LoadCloudContextStatuses() ([]CloudContextStatus, error) {
-	statuses, err := cloud.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
+	statuses, err := contextpower.RefreshCloudContextStatuses(core.Context{}, s.d.Store, s.d.ContextDeps)
 	if err != nil {
 		return nil, err
 	}
@@ -69,14 +75,14 @@ func (s *Service) LoadCloudContextStatuses() ([]CloudContextStatus, error) {
 }
 
 func (s *Service) InitCloudContext(input CloudContextInitInput) (CloudContextStatus, error) {
-	status, err := cloud.InitCloudContext(core.Context{}, s.d.Store, model.InitCloudContextParams{
+	status, err := contextinit.InitCloudContext(core.Context{}, s.d.Store, model.InitCloudContextParams{
 		Name:               strings.TrimSpace(input.Name),
 		CloudProviderAlias: strings.TrimSpace(input.CloudProviderAlias),
 		Region:             strings.TrimSpace(input.Region),
 		InstanceType:       strings.TrimSpace(input.InstanceType),
 		DiskType:           strings.TrimSpace(input.DiskType),
 		DiskSizeGB:         input.DiskSizeGB,
-	}, cloud.CloudContextDependencies{})
+	}, cloudcontext.CloudContextDependencies{})
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -101,7 +107,7 @@ func (s *Service) StopCloudContext(name string) (CloudContextStatus, error) {
 }
 
 func (s *Service) StartCloudContext(name string) (CloudContextStatus, error) {
-	status, err := cloud.StartCloudContext(core.Context{}, s.d.Store, model.CloudContextParams{Name: name}, s.d.ContextDeps)
+	status, err := contextpower.StartCloudContext(core.Context{}, s.d.Store, model.CloudContextParams{Name: name}, s.d.ContextDeps)
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -113,7 +119,7 @@ func (s *Service) StartCloudContext(name string) (CloudContextStatus, error) {
 
 // DisableCloudContextApiStop turns on AWS stop protection.
 func (s *Service) DisableCloudContextApiStop(name string) (CloudContextStatus, error) {
-	status, err := cloud.SetCloudContextStopProtection(core.Context{}, s.d.Store, model.CloudContextStopProtectionParams{
+	status, err := contextpower.SetCloudContextStopProtection(core.Context{}, s.d.Store, model.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: true,
 	}, s.d.ContextDeps)
@@ -125,7 +131,7 @@ func (s *Service) DisableCloudContextApiStop(name string) (CloudContextStatus, e
 
 // EnableCloudContextApiStop turns AWS stop protection off.
 func (s *Service) EnableCloudContextApiStop(name string) (CloudContextStatus, error) {
-	status, err := cloud.SetCloudContextStopProtection(core.Context{}, s.d.Store, model.CloudContextStopProtectionParams{
+	status, err := contextpower.SetCloudContextStopProtection(core.Context{}, s.d.Store, model.CloudContextStopProtectionParams{
 		Name:    name,
 		Enabled: false,
 	}, s.d.ContextDeps)
@@ -137,7 +143,7 @@ func (s *Service) EnableCloudContextApiStop(name string) (CloudContextStatus, er
 
 // DescribeCloudContextApiStop reads stop protection on demand; the bulk refresh skips it.
 func (s *Service) DescribeCloudContextApiStop(name string) (CloudContextStatus, error) {
-	status, err := cloud.DescribeCloudContextStopProtection(core.Context{}, s.d.Store, name, s.d.ContextDeps)
+	status, err := contextpower.DescribeCloudContextStopProtection(core.Context{}, s.d.Store, name, s.d.ContextDeps)
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -145,7 +151,7 @@ func (s *Service) DescribeCloudContextApiStop(name string) (CloudContextStatus, 
 }
 
 func (s *Service) SaveAWSCloudProviderAlias(input AWSCloudAliasInput) (CloudProviderStatus, error) {
-	provider, err := cloud.SaveCloudProviderConfig(s.d.Store, model.CloudProviderConfig{
+	provider, err := providerconfig.SaveCloudProviderConfig(s.d.Store, model.CloudProviderConfig{
 		Alias:         strings.TrimSpace(input.Alias),
 		Provider:      configpkg.CloudProviderAWS,
 		Username:      strings.TrimSpace(input.Username),
@@ -158,25 +164,25 @@ func (s *Service) SaveAWSCloudProviderAlias(input AWSCloudAliasInput) (CloudProv
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
-	return CloudProviderStatusToUI(cloud.CloudProviderTokenStatus(provider, s.d.Cloud)), nil
+	return CloudProviderStatusToUI(providertoken.CloudProviderTokenStatus(provider, s.d.Cloud)), nil
 }
 
 func (s *Service) InitAWSCloudProvider(input AWSCloudAliasInput) (CloudProviderStatus, error) {
 	if strings.TrimSpace(input.Username) != "" || strings.TrimSpace(input.AccountID) != "" {
 		return s.SaveAWSCloudProviderAlias(input)
 	}
-	provider, err := cloud.InitAWSCloudProvider(core.Context{}, s.d.Store, model.InitAWSCloudProviderParams{
+	provider, err := providerlifecycle.InitAWSCloudProvider(core.Context{}, s.d.Store, model.InitAWSCloudProviderParams{
 		Profile:       strings.TrimSpace(input.Profile),
 		OIDCIssuerURL: strings.TrimSpace(input.OIDCIssuerURL),
 	}, s.d.Cloud)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
-	return CloudProviderStatusToUI(cloud.CloudProviderTokenStatus(provider, s.d.Cloud)), nil
+	return CloudProviderStatusToUI(providertoken.CloudProviderTokenStatus(provider, s.d.Cloud)), nil
 }
 
 func (s *Service) LoginCloudProvider(alias string) (CloudProviderStatus, error) {
-	status, err := cloud.LoginCloudProviderAlias(s.desktopCloudLoginContext(), s.d.Store, s.desktopCloudLoginParams(alias), s.d.Cloud)
+	status, err := providerlifecycle.LoginCloudProviderAlias(s.desktopCloudLoginContext(), s.d.Store, s.desktopCloudLoginParams(alias), s.d.Cloud)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -186,7 +192,7 @@ func (s *Service) LoginCloudProvider(alias string) (CloudProviderStatus, error) 
 // desktopCloudLoginParams forces auth code + PKCE: the desktop has no surface to show
 // a device-grant code, so auto's device-first ordering looked inert.
 func (s *Service) desktopCloudLoginParams(alias string) model.CloudLoginParams {
-	return model.CloudLoginParams{Alias: alias, Flow: cloud.ERunLoginFlowAuthCode}
+	return model.CloudLoginParams{Alias: alias, Flow: providerlifecycle.ERunLoginFlowAuthCode}
 }
 
 // desktopCloudLoginContext sends the login's instructions to the message center instead of a nil Stdout.
@@ -206,7 +212,7 @@ func (w desktopLoginPromptWriter) Write(p []byte) (int, error) {
 }
 
 func (s *Service) LogoutCloudProvider(alias string) (CloudProviderStatus, error) {
-	status, err := cloud.LogoutCloudProviderAlias(core.Context{}, s.d.Store, model.CloudLoginParams{Alias: alias}, s.d.Cloud)
+	status, err := providerlifecycle.LogoutCloudProviderAlias(core.Context{}, s.d.Store, model.CloudLoginParams{Alias: alias}, s.d.Cloud)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -218,7 +224,7 @@ func (s *Service) LogoutCloudProvider(alias string) (CloudProviderStatus, error)
 func (s *Service) SwitchCloudProviderIdentity(alias string) (CloudProviderStatus, error) {
 	params := s.desktopCloudLoginParams(alias)
 	params.Force = true
-	status, err := cloud.LoginCloudProviderAlias(s.desktopCloudLoginContext(), s.d.Store, params, s.d.Cloud)
+	status, err := providerlifecycle.LoginCloudProviderAlias(s.desktopCloudLoginContext(), s.d.Store, params, s.d.Cloud)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -226,7 +232,7 @@ func (s *Service) SwitchCloudProviderIdentity(alias string) (CloudProviderStatus
 }
 
 func (s *Service) SetupCloudProviderOIDC(alias string) (CloudProviderStatus, error) {
-	status, _, err := cloud.SetupCloudProviderOIDC(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: alias}, s.d.Cloud)
+	status, _, err := providerlifecycle.SetupCloudProviderOIDC(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: alias}, s.d.Cloud)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -234,11 +240,11 @@ func (s *Service) SetupCloudProviderOIDC(alias string) (CloudProviderStatus, err
 }
 
 func (s *Service) GetCloudProviderBearerToken(alias string) (CloudProviderBearerToken, error) {
-	token, err := cloud.CloudProviderBearerToken(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: strings.TrimSpace(alias)}, s.d.Cloud)
+	token, err := providertoken.CloudProviderBearerToken(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: strings.TrimSpace(alias)}, s.d.Cloud)
 	if err != nil {
 		return CloudProviderBearerToken{}, err
 	}
-	provider, err := cloud.ResolveCloudProvider(s.d.Store, token.Alias)
+	provider, err := providerconfig.ResolveCloudProvider(s.d.Store, token.Alias)
 	if err != nil {
 		return CloudProviderBearerToken{}, err
 	}
@@ -246,7 +252,7 @@ func (s *Service) GetCloudProviderBearerToken(alias string) (CloudProviderBearer
 		Alias:    token.Alias,
 		Issuer:   token.Issuer,
 		Token:    token.Token,
-		Provider: CloudProviderStatusToUI(cloud.CloudProviderTokenStatus(provider, s.d.Cloud)),
+		Provider: CloudProviderStatusToUI(providertoken.CloudProviderTokenStatus(provider, s.d.Cloud)),
 	}, nil
 }
 
@@ -274,7 +280,7 @@ func (s *Service) SaveTenantConfig(config TenantConfig) (TenantConfig, error) {
 		return TenantConfig{}, err
 	}
 	updated := tenantConfigFromUI(config, existing)
-	if _, err := cloud.ResolveTenantCloudProviderIssuers(s.d.Store, updated); err != nil {
+	if _, err := providerconfig.ResolveTenantCloudProviderIssuers(s.d.Store, updated); err != nil {
 		return TenantConfig{}, err
 	}
 	if err := s.d.Store.SaveTenantConfig(updated); err != nil {
@@ -381,7 +387,7 @@ func tenantConfigFromUI(config TenantConfig, existing model.TenantConfig) model.
 func (s *Service) statusesForCloudProviders(providers []model.CloudProviderConfig) []model.CloudProviderStatus {
 	statuses := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
-		statuses = append(statuses, cloud.CloudProviderTokenStatus(provider, s.d.Cloud))
+		statuses = append(statuses, providertoken.CloudProviderTokenStatus(provider, s.d.Cloud))
 	}
 	return statuses
 }
@@ -401,20 +407,20 @@ func CloudProviderStatusToUI(status model.CloudProviderStatus) CloudProviderStat
 		Username:      strings.TrimSpace(status.Username),
 		AccountID:     strings.TrimSpace(status.AccountID),
 		Profile:       strings.TrimSpace(status.Profile),
-		OIDCIssuerURL: cloud.CloudProviderOIDCIssuerURL(status.CloudProviderConfig),
+		OIDCIssuerURL: providerconfig.CloudProviderOIDCIssuerURL(status.CloudProviderConfig),
 		Status:        strings.TrimSpace(status.Status),
 		Message:       strings.TrimSpace(status.Message),
 	}
 }
 
 func statusesForCloudProvidersFromStore(store configpkg.CloudReadStore, deps cloud.CloudDependencies) []model.CloudProviderStatus {
-	providers, err := cloud.ListCloudProviders(store)
+	providers, err := providerconfig.ListCloudProviders(store)
 	if err != nil {
 		return nil
 	}
 	statuses := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
-		statuses = append(statuses, cloud.CloudProviderTokenStatus(provider, deps))
+		statuses = append(statuses, providertoken.CloudProviderTokenStatus(provider, deps))
 	}
 	return statuses
 }

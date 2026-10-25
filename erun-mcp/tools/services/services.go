@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -33,7 +33,7 @@ func ServicesTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.C
 			return nil, model.EnvironmentServiceList{}, err
 		}
 		runCtx := toolio.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		result, err := expose.RunListEnvironmentServices(runCtx, cloud.ShellLaunchParamsFromResult(target))
+		result, err := expose.RunListEnvironmentServices(runCtx, shelllaunch.ShellLaunchParamsFromResult(target))
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err
 		}

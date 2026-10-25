@@ -10,8 +10,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-common/primitive/open/podwait"
@@ -122,7 +122,7 @@ func PreviewShellLaunch(req configpkg.ShellLaunchParams) (ShellLaunchPreview, er
 
 	return ShellLaunchPreview{
 		SeedArgs: seedArgs,
-		WaitArgs: cloud.KubectlDeploymentWaitArgs(req),
+		WaitArgs: runtimewait.KubectlDeploymentWaitArgs(req),
 		ExecArgs: kubectlExecArgs(req, script),
 		Script:   script,
 	}, nil
@@ -247,7 +247,7 @@ func remoteShellLaunchLines(req configpkg.ShellLaunchParams, bashrcPath, markerD
 		redraw = "winch"
 	}
 	lines := []string{
-		fmt.Sprintf("mkdir -p \"%s\"", activity.RemoteAppSessionSocketDir),
+		fmt.Sprintf("mkdir -p \"%s\"", remotesession.RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
 	}
 	return append(lines, appsession.RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)

@@ -13,7 +13,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 // HelmReleaseConcurrentDeployError reports an in-flight deploy of the same
@@ -125,11 +125,11 @@ const helmDeploySingleFlightMaxAge = 15 * time.Minute
 
 // AcquireHelmDeploySingleFlight claims the release for a deploy. Dry-run never
 // touches the filesystem and returns a nil handle.
-func AcquireHelmDeploySingleFlight(ctx core.Context, deploy seam.HelmDeploySpec) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func AcquireHelmDeploySingleFlight(ctx core.Context, deploy helmdeploy.HelmDeploySpec) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	return acquireHelmDeploySingleFlight(ctx, deploy, helmDeploySingleFlightDeps{})
 }
 
-func acquireHelmDeploySingleFlight(ctx core.Context, deploy seam.HelmDeploySpec, deps helmDeploySingleFlightDeps) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func acquireHelmDeploySingleFlight(ctx core.Context, deploy helmdeploy.HelmDeploySpec, deps helmDeploySingleFlightDeps) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	deps = deps.resolved()
 	releaseKey := helmDeployReleaseKey(deploy)
 	paramsHash := helmDeployParamsHash(deploy)
@@ -228,7 +228,7 @@ func decideInflightMarkerFate(deps helmDeploySingleFlightDeps, existing deployIn
 	return inflightMarkerFateConcurrent
 }
 
-func concurrentDeployError(deploy seam.HelmDeploySpec, existing deployInflightRecord) *HelmReleaseConcurrentDeployError {
+func concurrentDeployError(deploy helmdeploy.HelmDeploySpec, existing deployInflightRecord) *HelmReleaseConcurrentDeployError {
 	return &HelmReleaseConcurrentDeployError{
 		ReleaseName:       deploy.ReleaseName,
 		Namespace:         deploy.Namespace,
@@ -243,7 +243,7 @@ func concurrentDeployError(deploy seam.HelmDeploySpec, existing deployInflightRe
 
 // reconcileExistingInflightMarker returns true when it reclaimed the marker and
 // the create should be retried.
-func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlightDeps, deploy seam.HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
+func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlightDeps, deploy helmdeploy.HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
 	existing, readErr := readInflightRecord(path)
 	if readErr != nil {
 		ctx.Trace("dedup: replacing unreadable in-flight marker (" + readErr.Error() + ")")
@@ -273,7 +273,7 @@ func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlig
 	return false, HelmDeploySingleFlightProceed, concurrentDeployError(deploy, existing)
 }
 
-func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy seam.HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy helmdeploy.HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	existing, readErr := readInflightRecord(path)
 	if errors.Is(readErr, os.ErrNotExist) {
 		ctx.Trace(fmt.Sprintf("dedup: ready (release=%s, hash=%s)", releaseKey, paramsHash))
@@ -298,7 +298,7 @@ func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy seam.HelmDeploy
 	return HelmDeploySingleFlightProceed, nil, concurrentDeployError(deploy, existing)
 }
 
-func helmDeployReleaseKey(deploy seam.HelmDeploySpec) string {
+func helmDeployReleaseKey(deploy helmdeploy.HelmDeploySpec) string {
 	parts := []string{deploy.KubernetesContext, deploy.Namespace, deploy.ReleaseName}
 	for i, p := range parts {
 		parts[i] = core.SanitizeForFilename(p)
@@ -306,7 +306,7 @@ func helmDeployReleaseKey(deploy seam.HelmDeploySpec) string {
 	return strings.Join(parts, "-")
 }
 
-func helmDeployParamsHash(deploy seam.HelmDeploySpec) string {
+func helmDeployParamsHash(deploy helmdeploy.HelmDeploySpec) string {
 	cmd := HelmDeployCommand(deploy)
 	h := sha256.New()
 	h.Write([]byte(cmd.Name))

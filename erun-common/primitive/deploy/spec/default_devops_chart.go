@@ -5,12 +5,15 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/published"
 )
 
-func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target config.OpenResult, allowLocalBuilds bool) (seam.DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target config.OpenResult, allowLocalBuilds bool) (helmdeploy.DeploySpec, error) {
 	// Before any --runtime-image override, a RuntimeImage here is a persisted memo, not this invocation's choice.
 	if target.RemoteRepo() {
 		return published.ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
@@ -23,7 +26,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, find
 			return spec, nil
 		}
 		if !isHelmChartNotFoundForComponent(err) {
-			return seam.DeploySpec{}, err
+			return helmdeploy.DeploySpec{}, err
 		}
 	}
 

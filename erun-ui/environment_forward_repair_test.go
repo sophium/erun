@@ -16,7 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
@@ -135,7 +135,7 @@ func forwardRepairTestApp(
 				return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 			}
 			return model.EnvironmentIdleStatus{
-				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+				Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
 		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
@@ -145,7 +145,7 @@ func forwardRepairTestApp(
 		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
 		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			data, err := json.Marshal(model.EnvironmentIdleStatus{
-				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+				Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 			})
 			if err != nil {
 				return "", err

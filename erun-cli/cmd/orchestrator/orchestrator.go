@@ -7,14 +7,14 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/spf13/cobra"
 )
 
 // NewOrchestratorCmd groups the CLI writers for orchestrator definitions, mirroring the desktop's Edit dialog.
-func NewOrchestratorCmd(store seam.OrchestratorRoleStore) *cobra.Command {
+func NewOrchestratorCmd(store envstore.OrchestratorRoleStore) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "orchestrator",
 		Short: "Manage host-side AI orchestrator definitions",
@@ -30,7 +30,7 @@ func NewOrchestratorCmd(store seam.OrchestratorRoleStore) *cobra.Command {
 const orchestratorLaunchSettingStorage = "Stored on the orchestrator's entry in config.yaml and read " +
 	"back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted."
 
-func newOrchestratorSetGatewayCmd(store seam.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetGatewayCmd(store envstore.OrchestratorAliasStore) *cobra.Command {
 	var gateway string
 	cmd := &cobra.Command{
 		Use:   "set-gateway ORCHESTRATOR_ID",
@@ -65,7 +65,7 @@ func newOrchestratorSetGatewayCmd(store seam.OrchestratorAliasStore) *cobra.Comm
 	return cmd
 }
 
-func runOrchestratorSetGatewayCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) error {
+func runOrchestratorSetGatewayCommand(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) error {
 	if _, err := orchestrator.SetOrchestratorGateway(ctx, store, params); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func runOrchestratorSetGatewayCommand(ctx core.Context, store seam.OrchestratorA
 	return err
 }
 
-func newOrchestratorSetModelCmd(store seam.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetModelCmd(store envstore.OrchestratorAliasStore) *cobra.Command {
 	var model string
 	cmd := &cobra.Command{
 		Use:   "set-model ORCHESTRATOR_ID",
@@ -117,7 +117,7 @@ func newOrchestratorSetModelCmd(store seam.OrchestratorAliasStore) *cobra.Comman
 	return cmd
 }
 
-func runOrchestratorSetModelCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) error {
+func runOrchestratorSetModelCommand(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) error {
 	if _, err := orchestrator.SetOrchestratorModel(ctx, store, params); err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func runOrchestratorSetModelCommand(ctx core.Context, store seam.OrchestratorAli
 	return err
 }
 
-func newOrchestratorSetEffortCmd(store seam.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetEffortCmd(store envstore.OrchestratorAliasStore) *cobra.Command {
 	var effort string
 	levels := strings.Join(ai.ClaudeEffortLevels(), ", ")
 	cmd := &cobra.Command{
@@ -163,7 +163,7 @@ func newOrchestratorSetEffortCmd(store seam.OrchestratorAliasStore) *cobra.Comma
 	return cmd
 }
 
-func runOrchestratorSetEffortCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) error {
+func runOrchestratorSetEffortCommand(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) error {
 	if _, err := orchestrator.SetOrchestratorEffort(ctx, store, params); err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func orchestratorLaunchSettingLabel(value string) string {
 	return value
 }
 
-func newOrchestratorSetAliasCmd(store seam.OrchestratorAliasStore) *cobra.Command {
+func newOrchestratorSetAliasCmd(store envstore.OrchestratorAliasStore) *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
 		Use:   "set-alias ORCHESTRATOR_ID",
@@ -220,7 +220,7 @@ func newOrchestratorSetAliasCmd(store seam.OrchestratorAliasStore) *cobra.Comman
 	return cmd
 }
 
-func runOrchestratorSetAliasCommand(ctx core.Context, store seam.OrchestratorAliasStore, params modelpkg.SetOrchestratorAliasParams) error {
+func runOrchestratorSetAliasCommand(ctx core.Context, store envstore.OrchestratorAliasStore, params modelpkg.SetOrchestratorAliasParams) error {
 	if _, err := orchestrator.SetOrchestratorAlias(ctx, store, params); err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func runOrchestratorSetAliasCommand(ctx core.Context, store seam.OrchestratorAli
 	return err
 }
 
-func newOrchestratorSetRoleCmd(store seam.OrchestratorRoleStore) *cobra.Command {
+func newOrchestratorSetRoleCmd(store envstore.OrchestratorRoleStore) *cobra.Command {
 	var role string
 	cmd := &cobra.Command{
 		Use:   "set-role ORCHESTRATOR_ID TENANT ENVIRONMENT",
@@ -278,7 +278,7 @@ func newOrchestratorSetRoleCmd(store seam.OrchestratorRoleStore) *cobra.Command 
 	return cmd
 }
 
-func runOrchestratorSetRoleCommand(ctx core.Context, store seam.OrchestratorRoleStore, params modelpkg.SetOrchestratorEnvRoleParams) error {
+func runOrchestratorSetRoleCommand(ctx core.Context, store envstore.OrchestratorRoleStore, params modelpkg.SetOrchestratorEnvRoleParams) error {
 	if _, err := orchestrator.SetOrchestratorEnvRole(ctx, store, params); err != nil {
 		return err
 	}

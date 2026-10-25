@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 	"gopkg.in/yaml.v3"
 )
@@ -130,7 +130,7 @@ func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSuperv
 		if _, found := config.FindCloudProvider(root.CloudProviders, provider.Alias); found {
 			continue
 		}
-		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
+		root.CloudProviders = providerconfig.UpsertCloudProvider(root.CloudProviders, provider)
 		changed = true
 	}
 	if changed {

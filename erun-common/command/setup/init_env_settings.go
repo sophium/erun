@@ -7,7 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/managedcloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
 )
 
@@ -221,7 +221,7 @@ func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) err
 		s.envConfig.CloudProviderAlias = cloudProviderAlias
 		s.envConfigChanged = true
 	}
-	managedCloud, err := activity.ManagedCloudEnvironment(s.runner.Store, s.envConfig)
+	managedCloud, err := managedcloud.ManagedCloudEnvironment(s.runner.Store, s.envConfig)
 	if err != nil {
 		return err
 	}

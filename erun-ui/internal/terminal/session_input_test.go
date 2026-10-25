@@ -7,7 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -22,7 +22,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             cloud.DefaultCloudContextRegion,
+				Region:             cloudcontext.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
 				InstanceType:       configpkg.DefaultCloudContextInstanceType,
 				DiskType:           configpkg.DefaultCloudContextDiskType,

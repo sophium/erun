@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/internal"
 )
 
@@ -19,7 +19,7 @@ func TestExitCodeForKeepsTheOutcomesDistinct(t *testing.T) {
 		t.Fatalf("ordinary failure exit %d, want 1", got)
 	}
 
-	aliasErr := fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one: %w", cloud.ErrPlatformAliasUnusable)
+	aliasErr := fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one: %w", providerconfig.ErrPlatformAliasUnusable)
 	if got := exitCodeFor(aliasErr); got != platformAliasUnusableExitCode {
 		t.Fatalf("unresolvable alias exit %d, want %d", got, platformAliasUnusableExitCode)
 	}

@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -26,7 +26,7 @@ stringData:
 }
 
 // applyCloudflareCredentialsSecret keeps the token out of argv, the trace, and helm values.
-func applyCloudflareCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
+func applyCloudflareCredentialsSecret(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
 	}
@@ -39,7 +39,7 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput seam.HelmDep
 	if strings.TrimSpace(deployInput.CloudflareTokenRef) == "" {
 		return fmt.Errorf("deploy %s: cloudflare alias has no token reference", deployInput.ReleaseName)
 	}
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		return fmt.Errorf("resolve cloud secret store: %w", err)
 	}

@@ -8,8 +8,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
@@ -17,7 +17,7 @@ import (
 // deploying host's own config is what gets read.
 func signedInDefaultHostStore(t *testing.T, provider model.CloudProviderConfig) {
 	t.Helper()
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: configpkg.RuntimeReleaseName("team"),
@@ -61,7 +61,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	for _, want := range []string{
 		"name: team-devops-platform-alias",
 		"alias: " + provider.Alias,
-		cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef),
+		secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef),
 		"refresh-token-value",
 	} {
 		if !strings.Contains(manifest, want) {
@@ -90,7 +90,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
 		ReleaseName:             configpkg.RuntimeReleaseName("team"),

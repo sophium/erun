@@ -10,7 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 )
 
 var (
@@ -43,7 +43,7 @@ func LoadOpenDefaultTenant(store configpkg.OpenStore) (string, error) {
 	return toolConfig.DefaultTenant, nil
 }
 
-func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot seam.ProjectFinderFunc, params model.OpenParams) (configpkg.OpenResult, error) {
+func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc, params model.OpenParams) (configpkg.OpenResult, error) {
 	if store == nil {
 		return configpkg.OpenResult{}, fmt.Errorf("store is required")
 	}
@@ -113,7 +113,7 @@ func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
 	return fmt.Sprintf("%s — pass a tenant explicitly with `%s --tenant <name>`, %s", cause, command, setState)
 }
 
-func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot seam.ProjectFinderFunc, params model.OpenParams) (string, error) {
+func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc, params model.OpenParams) (string, error) {
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
 		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
@@ -221,7 +221,7 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig configpk
 	return nil
 }
 
-func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot seam.ProjectFinderFunc) (string, bool, error) {
+func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc) (string, bool, error) {
 	tenantLister, ok := store.(interface {
 		ListTenantConfigs() ([]model.TenantConfig, error)
 	})

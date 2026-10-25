@@ -8,7 +8,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
 	specpkg "github.com/sophium/erun/erun-common/primitive/build/spec"
@@ -18,13 +20,13 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func DockerPushExecutionSpecFromSpecs(builds []seam.DockerBuildSpec, pushes []model.DockerPushSpec) dockerspec.DockerPushExecutionSpec {
+func DockerPushExecutionSpecFromSpecs(builds []imagebuild.DockerBuildSpec, pushes []model.DockerPushSpec) dockerspec.DockerPushExecutionSpec {
 	return dockerspec.DockerPushExecutionSpec{Builds: builds, Pushes: pushes}
 }
 
 // resolveComponentChartSpecs resolves a publish spec for every chart under k8s/,
 // whether or not a same-named image exists.
-func resolveComponentChartSpecs(builds []seam.DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
+func resolveComponentChartSpecs(builds []imagebuild.DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
 	version := push.ComponentChartPublishVersion(builds)
 	registry, projectRoot := componentChartRegistryAndRoot(builds)
 	if version == "" || registry == "" || projectRoot == "" {
@@ -46,7 +48,7 @@ func resolveComponentChartSpecs(builds []seam.DockerBuildSpec) ([]helm.HelmChart
 	return specs, nil
 }
 
-func componentChartRegistryAndRoot(builds []seam.DockerBuildSpec) (registry, projectRoot string) {
+func componentChartRegistryAndRoot(builds []imagebuild.DockerBuildSpec) (registry, projectRoot string) {
 	for _, build := range builds {
 		if registry == "" {
 			registry = strings.TrimSpace(build.Image.Registry)
@@ -65,7 +67,7 @@ func publishDockerTarget(target model.DockerCommandTarget) model.DockerCommandTa
 	return target
 }
 
-func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushExecutionSpec, error) {
+func ResolveDockerPushExecution(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
@@ -74,7 +76,7 @@ func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findPr
 		return dockerspec.DockerPushExecutionSpec{}, err
 	}
 
-	builds := make([]seam.DockerBuildSpec, 0, len(buildContexts))
+	builds := make([]imagebuild.DockerBuildSpec, 0, len(buildContexts))
 	pushes := make([]model.DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		// A multi-arch image has no arch-less tag to `docker push`, so the build publishes it.
@@ -100,7 +102,7 @@ func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findPr
 	return dockerspec.DockerPushExecutionSpec{Builds: builds, Pushes: pushes, ComponentCharts: charts}, nil
 }
 
-func ResolveDockerPushSpec(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (model.DockerPushSpec, *seam.DockerBuildSpec, error) {
+func ResolveDockerPushSpec(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget) (model.DockerPushSpec, *imagebuild.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
@@ -117,7 +119,7 @@ func ResolveDockerPushSpec(ctx core.Context, store seam.DockerStore, findProject
 		return model.DockerPushSpec{}, nil, err
 	}
 	resolvedBuild.Push = true
-	incremental, err := fingerprint.ApplyIncrementalToDockerBuilds(ctx, []seam.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+	incremental, err := fingerprint.ApplyIncrementalToDockerBuilds(ctx, []imagebuild.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
 	if err != nil {
 		return model.DockerPushSpec{}, nil, err
 	}

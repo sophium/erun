@@ -9,7 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -89,7 +89,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(seam.HelmDeployParams) error {
+		DeployHelmChart: func(helmdeploy.HelmDeployParams) error {
 			return nil
 		},
 		WaitForRemoteRuntime: func(configpkg.ShellLaunchParams) error {
@@ -130,7 +130,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(params seam.HelmDeployParams) error {
+		DeployHelmChart: func(params helmdeploy.HelmDeployParams) error {
 			deployedVersion = params.Version
 			return nil
 		},

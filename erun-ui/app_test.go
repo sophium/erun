@@ -12,7 +12,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
@@ -42,8 +42,8 @@ type stubUIStore struct {
 	listTenantsErr error
 }
 
-func testCloudContextDeps(actions *[]string) cloud.CloudContextDependencies {
-	return cloud.CloudContextDependencies{
+func testCloudContextDeps(actions *[]string) cloudcontext.CloudContextDependencies {
+	return cloudcontext.CloudContextDependencies{
 		RunAWS: func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 			*actions = append(*actions, "aws "+strings.Join(args, " "))
 			if strings.Join(args, " ") == "ec2 describe-instances --instance-ids i-test --query Reservations[0].Instances[0].PublicIpAddress --output text" {

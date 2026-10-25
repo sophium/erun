@@ -12,8 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -311,11 +312,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.environmentUsageHistoryPath = runtimeview.DefaultUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
-		deps.recordActivity = activity.RecordEnvironmentActivity
+		deps.recordActivity = records.RecordEnvironmentActivity
 	}
 	if deps.stopCloudContext == nil {
 		deps.stopCloudContext = func(_ context.Context, name string) (model.CloudContextStatus, error) {
-			return cloud.StopCloudContext(core.Context{}, deps.store, model.CloudContextParams{Name: name}, deps.cloudContextDeps)
+			return contextpower.StopCloudContext(core.Context{}, deps.store, model.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
 	return deps

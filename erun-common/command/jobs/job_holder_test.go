@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 )
 
 // A job's plain presence lease must record its initiator, not an unnamed holder.
@@ -30,7 +30,7 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	_, stop := startEnvironmentJobHeartbeat(tenant, environment, recorder, 15*time.Minute, nil, false)
 	defer stop()
 
-	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		t.Fatalf("load leases: %v", err)
 	}

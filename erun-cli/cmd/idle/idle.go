@@ -14,7 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
 	"github.com/spf13/cobra"
 )
 
@@ -76,7 +76,7 @@ func WriteIdleResult(commandCtx core.Context, status model.EnvironmentIdleStatus
 // resolveEnvironmentIdleStatus reads the local store only inside the asked-about environment.
 func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen envscope.OpenResolver, tenant, environment string) (model.EnvironmentIdleStatus, bool, error) {
 	if envcall.EnvironmentTargetsItself() {
-		status, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
+		status, err := idlestatus.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 		return status, err == nil, err
 	}
 	return envcall.CallEnvironmentTool[model.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
