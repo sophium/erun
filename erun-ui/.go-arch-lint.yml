@@ -33,6 +33,8 @@ exclude:
 components:
   headlessserver:
     in: "headlessserver"
+  internal-cloudctx:
+    in: "internal/cloudctx"
   internal-tenant:
     in: "internal/tenant"
   internal-uimodel:
@@ -41,6 +43,12 @@ components:
     in: "."
 
 deps:
+  internal-cloudctx:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
   internal-tenant:
     mayDependOn:
       - internal-uimodel
@@ -49,6 +57,7 @@ deps:
   root:
     mayDependOn:
       - headlessserver
+      - internal-cloudctx
       - internal-tenant
       - internal-uimodel
     canUse:

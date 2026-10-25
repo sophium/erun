@@ -242,7 +242,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
@@ -303,7 +303,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
@@ -351,7 +351,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StopCloudContext("managed-cloud"); err == nil {

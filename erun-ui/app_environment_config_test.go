@@ -66,7 +66,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 	// Cloud-context Status is not persisted; seed the in-memory cache instead.
-	app.setCloudContextStatusInCache("team-context", cloud.CloudContextStatusStopped)
+	app.cloudContexts.SetStatus("team-context", cloud.CloudContextStatusStopped)
 
 	loaded, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: " frs ", Environment: " prod "})
 	if err != nil {

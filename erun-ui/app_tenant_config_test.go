@@ -207,56 +207,8 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
 		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
 	}
-	if got := app.cloudContextStatus("team-context"); got != cloud.CloudContextStatusStopped {
+	if got := app.cloudContexts.Status("team-context"); got != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
-	}
-}
-
-func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(t *testing.T) {
-	// A transient Unknown must not overwrite a known status; it only fills empty slots.
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	defer app.shutdown(context.Background())
-
-	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
-		{
-			CloudContextConfig: model.CloudContextConfig{Name: "ctx-a"},
-			Status:             cloud.CloudContextStatusRunning,
-		},
-		{
-			CloudContextConfig: model.CloudContextConfig{Name: "ctx-b"},
-			Status:             cloud.CloudContextStatusStopped,
-		},
-	})
-	if got := app.cloudContextStatus("ctx-a"); got != cloud.CloudContextStatusRunning {
-		t.Fatalf("seed running, got %q", got)
-	}
-	if got := app.cloudContextStatus("ctx-b"); got != cloud.CloudContextStatusStopped {
-		t.Fatalf("seed stopped, got %q", got)
-	}
-
-	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
-		{
-			CloudContextConfig: model.CloudContextConfig{Name: "ctx-a"},
-			Status:             cloud.CloudContextStatusUnknown,
-			Message:            "status refresh failed: token expired",
-		},
-		{
-			CloudContextConfig: model.CloudContextConfig{Name: "ctx-b"},
-			Status:             cloud.CloudContextStatusRunning,
-		},
-		{
-			CloudContextConfig: model.CloudContextConfig{Name: "ctx-c"},
-			Status:             cloud.CloudContextStatusUnknown,
-		},
-	})
-	if got := app.cloudContextStatus("ctx-a"); got != cloud.CloudContextStatusRunning {
-		t.Fatalf("transient unknown should not overwrite running, got %q", got)
-	}
-	if got := app.cloudContextStatus("ctx-b"); got != cloud.CloudContextStatusRunning {
-		t.Fatalf("authoritative transition stopped->running should overwrite, got %q", got)
-	}
-	if got := app.cloudContextStatus("ctx-c"); got != cloud.CloudContextStatusUnknown {
-		t.Fatalf("first-observation unknown should populate empty slot, got %q", got)
 	}
 }
 

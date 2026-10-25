@@ -50,7 +50,7 @@ func (a *App) DeleteEnvironment(selection uimodel.Selection, confirmation string
 	if err != nil {
 		return deleteEnvironmentResult{}, err
 	}
-	a.stopCloudCredentialsRefresherForSelection(selection)
+	a.cloudContexts.StopRefresher(selection)
 	a.closeSessionsForSelection(selection)
 	return deleteEnvironmentResult{
 		Tenant:                result.Tenant,

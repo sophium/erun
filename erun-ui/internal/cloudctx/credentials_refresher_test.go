@@ -1,6 +1,8 @@
-package main
+package cloudctx
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,33 +11,29 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, alias string) *App {
+func credentialRefreshTargetService(t *testing.T, envType config.EnvironmentType, alias string) *Service {
 	t.Helper()
 	projectRoot := t.TempDir()
-	return NewApp(erunUIDeps{
-		store: stubUIStore{
-			config: &config.ERunConfig{
-				CloudProviders: []model.CloudProviderConfig{
-					{Alias: "op+123@aws", Provider: config.CloudProviderAWS, Username: "op", AccountID: "123", Profile: "op"},
-					{Alias: "op@cloudflare", Provider: config.CloudProviderCloudflare, Username: "op"},
-				},
-			},
-			tenants: map[string]model.TenantConfig{
-				"team": {Name: "team", DefaultEnvironment: "dev"},
-			},
-			envs: map[string]config.EnvConfig{
-				"team/dev": {
-					Name:               "dev",
-					Type:               envType,
-					LocalRepoPath:      projectRoot,
-					KubernetesContext:  "ctx",
-					CloudProviderAlias: alias,
-				},
+	return newTestService(t, fakeStore{
+		config: config.ERunConfig{
+			CloudProviders: []model.CloudProviderConfig{
+				{Alias: "op+123@aws", Provider: config.CloudProviderAWS, Username: "op", AccountID: "123", Profile: "op"},
+				{Alias: "op@cloudflare", Provider: config.CloudProviderCloudflare, Username: "op"},
 			},
 		},
-		findProjectRoot: func() (string, string, error) { return "team", projectRoot, nil },
-		resolveCLIPath:  func() string { return "/tmp/erun" },
-	})
+		tenants: map[string]model.TenantConfig{
+			"team": {Name: "team", DefaultEnvironment: "dev"},
+		},
+		envs: map[string]config.EnvConfig{
+			"team/dev": {
+				Name:               "dev",
+				Type:               envType,
+				LocalRepoPath:      projectRoot,
+				KubernetesContext:  "ctx",
+				CloudProviderAlias: alias,
+			},
+		},
+	}, nil)
 }
 
 // The chart sets AWS_PROFILE=erun-host for any env with an AWS alias, so the refresher must run for every type.
@@ -46,8 +44,8 @@ func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t 
 		config.EnvironmentTypeRuntime,
 	} {
 		t.Run(string(envType), func(t *testing.T) {
-			app := credentialRefreshTargetApp(t, envType, "op+123@aws")
-			alias, _, ok := app.resolveCloudCredentialsRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"})
+			s := credentialRefreshTargetService(t, envType, "op+123@aws")
+			alias, _, ok := s.resolveRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"})
 			if !ok {
 				t.Fatalf("expected an AWS alias on a %s env to start the refresher", envType)
 			}
@@ -61,8 +59,8 @@ func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t 
 func TestResolveCloudCredentialsRefreshTargetSkipsWithoutAnAWSAlias(t *testing.T) {
 	for name, alias := range map[string]string{"no_alias": "", "cloudflare_alias": "op@cloudflare"} {
 		t.Run(name, func(t *testing.T) {
-			app := credentialRefreshTargetApp(t, config.EnvironmentTypeLocalAgent, alias)
-			if _, _, ok := app.resolveCloudCredentialsRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"}); ok {
+			s := credentialRefreshTargetService(t, config.EnvironmentTypeLocalAgent, alias)
+			if _, _, ok := s.resolveRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"}); ok {
 				t.Fatalf("expected alias %q to leave the refresher stopped", alias)
 			}
 		})
@@ -96,5 +94,38 @@ func TestNextCredentialRefreshDelayUsesBackoffOnExpiredCreds(t *testing.T) {
 func TestNextCredentialRefreshDelayUsesIntervalWhenExpirationUnknown(t *testing.T) {
 	if got := nextCredentialRefreshDelay(time.Time{}); got != credentialRefreshInterval {
 		t.Fatalf("expected default interval when expiration is zero, got %v", got)
+	}
+}
+
+func TestSurfaceRefreshFailureNotifiesTheSelection(t *testing.T) {
+	notify := &notifications{}
+	s := newTestService(t, fakeStore{}, notify)
+	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
+
+	s.surfaceRefreshFailure(selection, errors.New("token expired"), nil)
+
+	got := notify.all()
+	if len(got) != 1 {
+		t.Fatalf("expected one notification, got %+v", got)
+	}
+	if got[0].selection.Tenant != "frs" || got[0].selection.Environment != "dev" {
+		t.Fatalf("unexpected identity: %+v", got[0].selection)
+	}
+	if !strings.Contains(got[0].message, "token expired") {
+		t.Fatalf("message must carry the cause, got %q", got[0].message)
+	}
+}
+
+func TestSurfaceRefreshFailureNotifiesOnlyOnce(t *testing.T) {
+	notify := &notifications{}
+	s := newTestService(t, fakeStore{}, notify)
+	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
+	notified := false
+
+	s.surfaceRefreshFailure(selection, errors.New("token expired"), &notified)
+	s.surfaceRefreshFailure(selection, errors.New("token expired"), &notified)
+
+	if got := notify.all(); len(got) != 1 {
+		t.Fatalf("expected exactly one notification across two calls, got %+v", got)
 	}
 }

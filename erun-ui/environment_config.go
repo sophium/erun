@@ -73,7 +73,7 @@ func (a *App) persistEnvironmentConfig(selection uimodel.Selection, config uiEnv
 		return configpkg.EnvConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.HasAWSCloudAlias())
+	a.cloudContexts.ReconcileRefresher(selection, updated.HasAWSCloudAlias())
 	return updated, nil
 }
 

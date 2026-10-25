@@ -166,7 +166,7 @@ func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string
 		}
 		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
 			status.CloudContextConfig = context
-			status.Status = a.cloudContextStatus(context.Name)
+			status.Status = a.cloudContexts.Status(context.Name)
 			return status, true, nil
 		}
 	}
@@ -188,7 +188,7 @@ func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (model
 		return model.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
-	a.setCloudContextStatusInCache(status.Name, status.Status)
+	a.cloudContexts.SetStatus(status.Name, status.Status)
 	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 	return status, true, nil
 }
@@ -199,6 +199,6 @@ func (a *App) stopCloudContext(name string) (model.CloudContextStatus, error) {
 	if err != nil {
 		return status, err
 	}
-	a.setCloudContextStatusInCache(status.Name, status.Status)
+	a.cloudContexts.SetStatus(status.Name, status.Status)
 	return status, nil
 }

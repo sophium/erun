@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
@@ -16,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-ui/internal/cloudctx"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -138,7 +140,6 @@ type App struct {
 	// skillsSourceReported warns once per run about unresolvable shipped skills.
 	skillsSourceReported      bool
 	agentsSourceReported      bool
-	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
 	activityPollersStop       chan struct{}
@@ -161,11 +162,6 @@ type App struct {
 	contribute            *contributeStore
 	contributeApps        *contributeAppForwards
 
-	// cloudContextStatuses is the live power state; config no longer persists it.
-	cloudContextStatusesMu sync.RWMutex
-	cloudContextStatuses   map[string]cloudContextCacheEntry
-	cloudContextPollerStop chan struct{}
-
 	envNodesMu sync.Mutex
 	envNodes   map[string]uiEnvironmentNodeSnapshot
 
@@ -187,6 +183,8 @@ type App struct {
 	restartControl *restartControlServer
 
 	tenant *tenantsvc.Service
+	// cloudContexts is the live power state; config no longer persists it.
+	cloudContexts *cloudctx.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -238,7 +236,6 @@ func NewApp(deps erunUIDeps) *App {
 		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
 		orchestrators:         make(map[string]*orchestratorSession),
 		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
-		credentialRefreshers:  make(map[string]*cloudCredentialsRefresher),
 		workingIssueCache:     make(map[string]workingIssueCacheEntry),
 		envUsage:              loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
 	}
@@ -266,10 +263,30 @@ func NewApp(deps erunUIDeps) *App {
 		LoadAPILog:            deps.loadAPILog,
 		ConfiguredERunAliases: app.configuredERunAliases,
 	})
+	app.cloudContexts = app.newCloudContextService(time.Now)
 	if app.identity == nil {
 		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}
 	return app
+}
+
+// newCloudContextService takes the cache clock so a test can age entries.
+func (a *App) newCloudContextService(now func() time.Time) *cloudctx.Service {
+	return cloudctx.New(cloudctx.Deps{
+		Store:        a.deps.store,
+		Cloud:        a.deps.cloudDeps,
+		ContextDeps:  a.deps.cloudContextDeps,
+		MCPBearer:    a.mcpBearer,
+		MCPReachable: a.deps.canReachMCPEndpoint,
+		MCPEndpoint:  mcpEndpointForOpenResult,
+		MCPTransport: func(endpoint, bearer string) mcpsdk.Transport {
+			return mcpClientTransport(endpoint, bearer, false)
+		},
+		ClientVersion:        func() string { return currentBuildInfo().Version },
+		NotifyRefreshFailure: a.notifyCredentialRefreshFailure,
+		OnStatusChange:       a.refreshEnvironmentNodeStatuses,
+		Now:                  now,
+	})
 }
 
 // mcpBearer returns "" without an identity; an auth-enabled env then answers 401.
@@ -295,7 +312,7 @@ func (a *App) startup(ctx context.Context) {
 	configureAppIdentity("ERun")
 	observeAppActivation()
 	a.startActivityPollers()
-	a.startCloudContextStatusPoller()
+	a.cloudContexts.Start()
 	a.startConfigWatcher()
 	a.startRestartControl()
 	go a.catchUpHostedDefinitions()
@@ -306,14 +323,15 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	a.stopConfigWatcher()
 	a.stopActivityPollers()
-	a.stopCloudContextStatusPoller()
+	a.cloudContexts.Stop()
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()
+	// The refreshers' own lock is a leaf, so stop them before taking a.mu.
+	a.cloudContexts.StopAllRefreshers()
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()
-	a.stopAllCloudCredentialsRefreshersLocked()
 	a.closeAllSessionsLocked()
 	a.mu.Unlock()
 	// Readers take a.mu on exit, so wait outside the lock.

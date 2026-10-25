@@ -23,7 +23,7 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 	if err != nil {
 		return uiERunConfig{}, err
 	}
-	a.applyCloudContextStatusesToCache(statuses)
+	a.cloudContexts.ApplyStatuses(statuses)
 	ui.CloudContexts = cloudContextStatusesToUI(statuses)
 	return ui, nil
 }
@@ -64,7 +64,7 @@ func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.applyCloudContextStatusesToCache(statuses)
+	a.cloudContexts.ApplyStatuses(statuses)
 	return cloudContextStatusesToUI(statuses), nil
 }
 
@@ -80,7 +80,7 @@ func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextSta
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
-	a.setCloudContextStatusInCache(status.Name, status.Status)
+	a.cloudContexts.SetStatus(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }
 
@@ -94,7 +94,7 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 		a.clearIntentionalStopForCloudContext(name)
 		return uiCloudContextStatus{}, err
 	}
-	a.setCloudContextStatusInCache(status.Name, status.Status)
+	a.cloudContexts.SetStatus(status.Name, status.Status)
 	// Best-effort History entry; the stop already succeeded.
 	a.recordManualStopForCloudContext(ctx, status.Name)
 	return cloudContextStatusToUI(status), nil
@@ -107,7 +107,7 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
 	a.clearIntentionalStopForCloudContext(status.Name)
-	a.setCloudContextStatusInCache(status.Name, status.Status)
+	a.cloudContexts.SetStatus(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }
 
@@ -498,6 +498,10 @@ const notificationActionRestartOrchestrator = "restart-orchestrator"
 
 // notificationActionInstallAndRestartOrchestrator also links the CLI install docs.
 const notificationActionInstallAndRestartOrchestrator = "install-and-restart-orchestrator"
+
+func (a *App) notifyCredentialRefreshFailure(selection uimodel.Selection, message string) {
+	a.emitEnvNotification("error", selection.Tenant, selection.Environment, notificationSourceCredentialRefreshFailed, message, "")
+}
 
 // emitEnvNotification posts an env-scoped notification that emitClearEnvNotification
 // can dismiss by (source, tenant, environment).

@@ -102,7 +102,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uimodel.Selection, s
 	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
 	a.spawnStreamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
-	go a.startCloudCredentialsRefresherForSelection(selection)
+	go a.cloudContexts.StartRefresher(selection)
 
 	// Opening is the deliberate wake for a stopped runtime, so release the stop
 	// latch or the reconnect gate keeps refusing.

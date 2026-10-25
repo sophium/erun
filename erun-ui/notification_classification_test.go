@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -77,12 +76,13 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 	}
 }
 
-func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
+// The cloud service owns the once-per-episode dedup; the classification is the wiring's.
+func TestCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
 	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
 
-	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), nil)
+	app.notifyCredentialRefreshFailure(selection, "Host credential refresh failed for frs/dev: token expired")
 
 	if got := emits.events(uimodel.AppStatusEvent); len(got) != 0 {
 		t.Fatalf("expected no unclassified app-status emit, got %+v", got)
@@ -103,19 +103,5 @@ func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 	}
 	if payload.Source != notificationSourceCredentialRefreshFailed {
 		t.Fatalf("source = %q, want %q", payload.Source, notificationSourceCredentialRefreshFailed)
-	}
-}
-
-func TestSurfaceCredentialRefreshFailureNotifiesOnlyOnce(t *testing.T) {
-	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn()}
-	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
-	notified := false
-
-	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), &notified)
-	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), &notified)
-
-	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 1 {
-		t.Fatalf("expected exactly one notification across two calls, got %+v", got)
 	}
 }

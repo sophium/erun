@@ -1,4 +1,4 @@
-package main
+package cloudctx
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func injectCloudHostCredentialsViaMCP(ctx context.Context, endpoint, bearer string, accessKeyID, secretAccessKey, sessionToken string, expiration time.Time) error {
-	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
+func (s *Service) injectHostCredentials(ctx context.Context, endpoint, bearer string, accessKeyID, secretAccessKey, sessionToken string, expiration time.Time) error {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: s.d.ClientVersion()}, nil)
+	session, err := client.Connect(ctx, s.d.MCPTransport(endpoint, bearer), nil)
 	if err != nil {
 		return err
 	}
@@ -36,9 +36,9 @@ func injectCloudHostCredentialsViaMCP(ctx context.Context, endpoint, bearer stri
 	return nil
 }
 
-func clearCloudHostCredentialsViaMCP(ctx context.Context, endpoint, bearer string) error {
-	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
+func (s *Service) clearHostCredentials(ctx context.Context, endpoint, bearer string) error {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: s.d.ClientVersion()}, nil)
+	session, err := client.Connect(ctx, s.d.MCPTransport(endpoint, bearer), nil)
 	if err != nil {
 		return err
 	}

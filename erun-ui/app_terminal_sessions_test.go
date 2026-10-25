@@ -259,7 +259,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusStopped)
 
 	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
@@ -321,7 +321,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusStopped)
 
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24, false)

@@ -359,7 +359,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
 
 	key := selectionKey(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	app.mu.Lock()
@@ -403,7 +403,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusRunning)
 
 	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
@@ -447,7 +447,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
+	app.cloudContexts.SetStatus("managed-cloud", cloud.CloudContextStatusStopped)
 
 	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {

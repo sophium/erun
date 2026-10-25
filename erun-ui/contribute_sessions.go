@@ -113,7 +113,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
-	go a.startCloudCredentialsRefresherForSelection(selection)
+	go a.cloudContexts.StartRefresher(selection)
 
 	tabName := "ERun contribute tab"
 	if withAI {
