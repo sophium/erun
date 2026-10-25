@@ -3,7 +3,7 @@ package terminal
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -120,7 +120,7 @@ func DeployRuntimeImageOverride(selection uimodel.Selection) string {
 	if idx := strings.IndexAny(repo, ":@"); idx >= 0 {
 		repo = repo[:idx]
 	}
-	if repo == config.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
+	if repo == runtimetarget.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
 		return ""
 	}
 	return image

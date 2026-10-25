@@ -329,14 +329,6 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 	return out
 }
 
-// DefaultContainerRegistries is the seed for a fresh project.
-func DefaultContainerRegistries() ContainerRegistries {
-	return ContainerRegistries{{
-		Registry: DefaultContainerRegistry,
-		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
-	}}
-}
-
 // SingleContainerRegistries seeds a project from one `--container-registry` value.
 func SingleContainerRegistries(registry string) ContainerRegistries {
 	registry = strings.TrimSpace(registry)
@@ -347,29 +339,6 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 		Registry: registry,
 		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
-}
-
-// ClusterContainerRegistries seeds a build+deploy in-cluster registry entry whose
-// addresses resolve per caller (ClusterIP in pod, port-forward on host).
-func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
-	c := cluster.WithDefaults()
-	return ContainerRegistries{{
-		Cluster: &c,
-		Roles:   []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
-	}}
-}
-
-// HostedRegistryHost is erun's hosted registry, authenticated by the tenant's API token.
-const HostedRegistryHost = "registry.erunpaas.com"
-
-// HostedRegistryLoginUsername is ignored by the token endpoint; the tenant comes
-// from the password's issuer.
-const HostedRegistryLoginUsername = "erun"
-
-// HostedRegistryReference returns the tenant's namespace under the hosted registry;
-// the token service clamps scope to it.
-func HostedRegistryReference(tenant string) string {
-	return HostedRegistryHost + "/" + strings.TrimSpace(tenant)
 }
 
 // migrateLegacyContainerRegistry folds a legacy `containerregistry` scalar into
@@ -515,70 +484,4 @@ func (r ContainerRegistries) DistinctRegistries() []string {
 		out = append(out, registry)
 	}
 	return out
-}
-
-// ResolveEnvironmentContainerRegistries returns the configured list, or nil.
-// Reporting must use EffectiveEnvironmentContainerRegistries instead.
-func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
-	if !env.ContainerRegistries.IsZero() {
-		return env.ContainerRegistries
-	}
-	configured, err := configuredContainerRegistries(env.EffectiveLocalRepoPath(), env.Name)
-	if err != nil {
-		return nil
-	}
-	return configured
-}
-
-// EffectiveEnvironmentContainerRegistries is ResolveEnvironmentContainerRegistries
-// with the default seed, so reporting matches what build and deploy use.
-func EffectiveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
-	if configured := ResolveEnvironmentContainerRegistries(env); !configured.IsZero() {
-		return configured
-	}
-	return DefaultContainerRegistries()
-}
-
-// DeployTargetContainerRegistries resolves and validates the list for a deploy target.
-func DeployTargetContainerRegistries(target OpenResult) (ContainerRegistries, error) {
-	if !target.EnvConfig.ContainerRegistries.IsZero() {
-		list := target.EnvConfig.ContainerRegistries
-		if err := list.Validate(); err != nil {
-			return nil, fmt.Errorf("container registries for environment %q: %w", strings.TrimSpace(target.Environment), err)
-		}
-		return list, nil
-	}
-	return EffectiveContainerRegistries(target.RepoPath, target.Environment)
-}
-
-// configuredContainerRegistries returns the project's explicit list for an
-// environment, or nil; display and execution share it.
-func configuredContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
-	if strings.TrimSpace(projectRoot) == "" {
-		return nil, nil
-	}
-	projectConfig, _, err := LoadProjectConfig(projectRoot)
-	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return projectConfig.ContainerRegistriesForEnvironment(environment), nil
-}
-
-// EffectiveContainerRegistries applies the default seed when nothing is configured.
-func EffectiveContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
-	list := DefaultContainerRegistries()
-	configured, err := configuredContainerRegistries(projectRoot, environment)
-	if err != nil {
-		return nil, err
-	}
-	if !configured.IsZero() {
-		list = configured
-	}
-	if err := list.Validate(); err != nil {
-		return nil, fmt.Errorf("container registries for environment %q: %w", strings.TrimSpace(environment), err)
-	}
-	return list, nil
 }

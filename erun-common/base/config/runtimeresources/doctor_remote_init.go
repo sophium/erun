@@ -1,8 +1,10 @@
-package config
+package runtimeresources
 
 import (
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // IsInRuntimeEnvironment reports whether the process runs in an erun pod. Every
@@ -11,8 +13,8 @@ func IsInRuntimeEnvironment(env func(string) string) bool {
 	if env == nil {
 		env = os.Getenv
 	}
-	if envType := EnvironmentType(strings.TrimSpace(env("ERUN_ENV_TYPE"))); envType.IsValid() {
-		return envType != EnvironmentTypeHost
+	if envType := config.EnvironmentType(strings.TrimSpace(env("ERUN_ENV_TYPE"))); envType.IsValid() {
+		return envType != config.EnvironmentTypeHost
 	}
 	return strings.EqualFold(strings.TrimSpace(env("ERUN_REPO_REMOTE")), "true")
 }

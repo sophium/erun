@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
 	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
@@ -196,11 +197,11 @@ const DeployComponentSourcePublished = deployComponentSourcePublished
 // ResolvedRuntimeChartName returns the tenant's <tenant>-devops chart when published, else erun-devops.
 // It only labels the picker; deploy walks runtimeChartCandidates.
 func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
-	chart := config.RuntimeReleaseName(tenant)
-	if chart != config.DevopsComponentName && tenantChartPublished {
+	chart := runtimetarget.RuntimeReleaseName(tenant)
+	if chart != runtimetarget.DevopsComponentName && tenantChartPublished {
 		return chart
 	}
-	return config.DevopsComponentName
+	return runtimetarget.DevopsComponentName
 }
 
 // ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
@@ -214,7 +215,7 @@ func ResolveDeployableComponents(store deploytarget.DeployStore, findProjectRoot
 		return nil, err
 	}
 	tenant := resolvedTarget.Tenant
-	runtimeName := config.RuntimeReleaseName(tenant)
+	runtimeName := runtimetarget.RuntimeReleaseName(tenant)
 
 	selected, _ := ResolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, config.ProjectK8sConfig{})
 	runtimeSelected := DeploySelectionIncludesRuntime(selected, tenant)

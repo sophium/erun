@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -59,8 +60,8 @@ func RunRuntimeContainerCommand(req config.ShellLaunchParams, container, script 
 }
 
 func kubectlContainerExecArgs(req config.ShellLaunchParams, container, script string) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "exec", "-c", strings.TrimSpace(container))
-	args = append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

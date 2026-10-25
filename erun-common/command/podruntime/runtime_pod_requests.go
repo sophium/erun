@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
@@ -15,8 +17,8 @@ type RuntimePodRequestsRunnerFunc func(args []string) ([]byte, error)
 
 // RuntimePodRequestsArgs is exported so an injected runner runs the identical command.
 func RuntimePodRequestsArgs(req config.ShellLaunchParams) []string {
-	args := config.KubectlTargetArgs(req)
-	args = append(args, "get", "pods", "-l", "app="+config.RuntimeReleaseName(req.Tenant), "-o", "json")
+	args := runtimetarget.KubectlTargetArgs(req)
+	args = append(args, "get", "pods", "-l", "app="+runtimetarget.RuntimeReleaseName(req.Tenant), "-o", "json")
 	return args
 }
 
@@ -187,14 +189,14 @@ func kubectlRequestsMax(a, b model.KubernetesRequests) model.KubernetesRequests 
 func kubernetesRequestsFromValues(values map[string]string) (model.KubernetesRequests, error) {
 	requests := model.KubernetesRequests{}
 	if raw := strings.TrimSpace(values["cpu"]); raw != "" {
-		milli, err := config.ParseKubernetesCPUToMilli(raw)
+		milli, err := runtimeresources.ParseKubernetesCPUToMilli(raw)
 		if err != nil {
 			return model.KubernetesRequests{}, fmt.Errorf("cpu request %q: %w", raw, err)
 		}
 		requests.CPUMilli = milli
 	}
 	if raw := strings.TrimSpace(values["memory"]); raw != "" {
-		mib, err := config.ParseKubernetesMemoryToMi(raw)
+		mib, err := runtimeresources.ParseKubernetesMemoryToMi(raw)
 		if err != nil {
 			return model.KubernetesRequests{}, fmt.Errorf("memory request %q: %w", raw, err)
 		}

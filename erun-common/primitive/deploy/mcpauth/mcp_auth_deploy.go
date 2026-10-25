@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -35,7 +36,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // serves the edge. Auth is sticky and disabling it is explicit, so a version bump
 // cannot quietly downgrade a public edge.
 func ApplyMCPAuthToRuntimeSpec(ctx core.Context, target model.DeployTarget, spec *helmdeploy.DeploySpec) error {
-	if spec == nil || spec.Deploy.ReleaseName != config.RuntimeReleaseName(target.Tenant) {
+	if spec == nil || spec.Deploy.ReleaseName != runtimetarget.RuntimeReleaseName(target.Tenant) {
 		return nil
 	}
 	keyPath := resolveMCPAuthKeyPathForDeploy(ctx, target, spec.Target.EnvConfig)
@@ -102,7 +103,7 @@ func GuardMCPAuthDowngrade(ctx core.Context, target model.DeployTarget, deployIn
 	if target.DisableMCPAuth || deployInput.MCPAuthEnabled {
 		return nil
 	}
-	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput.ReleaseName != runtimetarget.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	live, known := readLiveMCPAuth(deployInput)

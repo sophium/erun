@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -76,7 +77,7 @@ func (s *Service) filterDeployComponentsByChartAvailability(tenant, environment,
 		return components
 	}
 
-	runtimeChart := config.RuntimeReleaseName(tenant)
+	runtimeChart := runtimetarget.RuntimeReleaseName(tenant)
 	probe := make([]string, 0, len(components)+1)
 	for _, component := range components {
 		if !component.Runtime {
@@ -84,7 +85,7 @@ func (s *Service) filterDeployComponentsByChartAvailability(tenant, environment,
 		}
 	}
 	// Probe the tenant's runtime chart so the row names <tenant>-devops or the erun-devops fallback.
-	if runtimeChart != config.DevopsComponentName {
+	if runtimeChart != runtimetarget.DevopsComponentName {
 		probe = append(probe, runtimeChart)
 	}
 	available := s.publishedComponentChartAvailability(tenant, environment, version, probe)

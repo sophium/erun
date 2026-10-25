@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
@@ -315,7 +316,7 @@ func checkE2EPreconditions(ctx core.Context, target model.E2ETarget, suites []mo
 		return versionOverride, nil, nil
 	}
 	deployed, err := kubecheck.CheckKubernetesDeployment(ctx, model.KubernetesDeploymentCheckParams{
-		Name:              config.RuntimeReleaseName(target.Tenant),
+		Name:              runtimetarget.RuntimeReleaseName(target.Tenant),
 		Namespace:         target.Namespace,
 		KubernetesContext: target.KubernetesContext,
 	})
@@ -324,7 +325,7 @@ func checkE2EPreconditions(ctx core.Context, target model.E2ETarget, suites []mo
 	}
 	if !deployed {
 		return "", nil, fmt.Errorf("erun e2e: %s/%s "+kubecheck.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
-			target.Tenant, target.Environment, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
+			target.Tenant, target.Environment, runtimetarget.RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
 	}
 
 	var exposed []clusterread.ExposedService
@@ -337,7 +338,7 @@ func checkE2EPreconditions(ctx core.Context, target model.E2ETarget, suites []mo
 	if versionOverride != "" {
 		return versionOverride, exposed, nil
 	}
-	version, err := runtimeversion.ResolveDeployedHelmReleaseVersion(ctx, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
+	version, err := runtimeversion.ResolveDeployedHelmReleaseVersion(ctx, runtimetarget.RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
 	if err != nil {
 		return "", nil, fmt.Errorf("erun e2e: could not resolve the deployed version for %s/%s: %w", target.Tenant, target.Environment, err)
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
+	"github.com/sophium/erun/erun-common/base/config/sshconfig"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
@@ -104,11 +106,11 @@ func removeEnvironmentSSHConfigAlias(ctx core.Context, store envstore.DeleteStor
 		ctx.Trace(fmt.Sprintf("delete: keeping ssh config block Host %s: another environment still derives that alias", alias))
 		return nil
 	}
-	path, err := config.DefaultSSHConfigPath()
+	path, err := sshconfig.DefaultSSHConfigPath()
 	if err != nil {
 		return err
 	}
-	hasBlock, err := config.SSHConfigHasAlias(path, alias)
+	hasBlock, err := sshconfig.SSHConfigHasAlias(path, alias)
 	if err != nil {
 		return fmt.Errorf("read ssh config %s: %w", path, err)
 	}
@@ -121,7 +123,7 @@ func removeEnvironmentSSHConfigAlias(ctx core.Context, store envstore.DeleteStor
 	if ctx.DryRun {
 		return nil
 	}
-	if _, err := config.RemoveSSHConfigAlias(path, alias); err != nil {
+	if _, err := sshconfig.RemoveSSHConfigAlias(path, alias); err != nil {
 		return fmt.Errorf("remove Host %s block from %s: %w", alias, path, err)
 	}
 	return nil
@@ -167,7 +169,7 @@ func deleteEnvironmentResult(tenant, environment string, envConfig config.EnvCon
 }
 
 func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace kubeapi.NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
-	result.Namespace = config.KubernetesNamespaceName(result.Tenant, result.Environment)
+	result.Namespace = runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
 		return fmt.Errorf("delete environment %s/%s: %w", result.Tenant, result.Environment, err)
 	}

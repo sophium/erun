@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/uptrace/bun"
 )
 
@@ -22,7 +22,7 @@ var (
 )
 
 func init() {
-	cpu, memory, storage := config.MinimumRuntimeNamespaceQuota()
+	cpu, memory, storage := runtimeresources.MinimumRuntimeNamespaceQuota()
 	DefaultMaxCPUMillicores = int(cpu)
 	DefaultMaxMemoryMB = int(memory)
 	DefaultMaxStorageGB = int(storage)

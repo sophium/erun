@@ -9,6 +9,8 @@ import (
 
 	"github.com/sophium/erun/cmd/shared/portfwd"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
@@ -22,7 +24,7 @@ func NewAPIForwarder() portfwd.APIForwarder {
 }
 
 func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, error) {
-	localPort := config.APIPortForResult(result)
+	localPort := localports.APIPortForResult(result)
 	statePath, err := apiPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
@@ -32,7 +34,7 @@ func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, erro
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:         runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment),
 		LocalPort:         localPort,
 	}
 
@@ -182,13 +184,13 @@ func kubectlAPIPortForwardArgs(result config.OpenResult, localPort int) []string
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
 	}
-	namespace := config.KubernetesNamespaceName(result.Tenant, result.Environment)
+	namespace := runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
 	// The remote side is the environment's own API service port, which deploy
 	// renders from the same per-env allocation (or the chart default 17033).
-	servicePort := config.APIServicePortForResult(result)
+	servicePort := localports.APIServicePortForResult(result)
 	args = append(args,
 		"port-forward",
 		fmt.Sprintf("service/%s", runtimeref.APIDeploymentName(result.Tenant)),

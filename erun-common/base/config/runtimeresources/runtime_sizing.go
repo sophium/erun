@@ -1,4 +1,4 @@
-package config
+package runtimeresources
 
 import (
 	"fmt"

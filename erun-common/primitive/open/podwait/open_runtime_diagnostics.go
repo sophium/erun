@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 )
@@ -32,7 +33,7 @@ func shellDeploymentFailureDiagnostic(req config.ShellLaunchParams, runner kubea
 		return "Runtime pod diagnostics unavailable: " + err.Error()
 	}
 	if len(pods.Items) == 0 {
-		return fmt.Sprintf("Runtime pod diagnostics: no pods found for selector app=%s in namespace %s.", config.RuntimeReleaseName(req.Tenant), strings.TrimSpace(req.Namespace))
+		return fmt.Sprintf("Runtime pod diagnostics: no pods found for selector app=%s in namespace %s.", runtimetarget.RuntimeReleaseName(req.Tenant), strings.TrimSpace(req.Namespace))
 	}
 
 	sort.SliceStable(pods.Items, func(i, j int) bool {
@@ -94,8 +95,8 @@ func runtimePodConditionTrue(pod model.RuntimePodDiagnostic, conditionType strin
 }
 
 func loadRuntimePodDiagnostics(req config.ShellLaunchParams, runner kubeapi.OpenKubectlRunnerFunc) (runtimePodDiagnosticList, error) {
-	args := config.KubectlTargetArgs(req)
-	args = append(args, "get", "pods", "-l", "app="+config.RuntimeReleaseName(req.Tenant), "-o", "json")
+	args := runtimetarget.KubectlTargetArgs(req)
+	args = append(args, "get", "pods", "-l", "app="+runtimetarget.RuntimeReleaseName(req.Tenant), "-o", "json")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if err := runner(args, &stdout, &stderr); err != nil {
@@ -235,7 +236,7 @@ func formatRuntimePodEvents(req config.ShellLaunchParams, pod model.RuntimePodDi
 }
 
 func loadRuntimePodEvents(req config.ShellLaunchParams, podName string, runner kubeapi.OpenKubectlRunnerFunc) ([]runtimePodEventDiagnostic, error) {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "get", "events", "-o", "json")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

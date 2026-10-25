@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -110,7 +110,7 @@ func RuntimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 	if repoPath != "" {
 		return FirstNonEmpty(strings.TrimSpace(runtime.Tenant), filepath.Base(repoPath)), filepath.Clean(repoPath), nil
 	}
-	return config.FindProjectRootFromDir(workDir)
+	return projectroot.FindProjectRootFromDir(workDir)
 }
 
 func FirstNonEmpty(values ...string) string {

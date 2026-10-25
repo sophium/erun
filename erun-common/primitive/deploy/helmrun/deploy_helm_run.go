@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
@@ -213,7 +213,7 @@ func searchedTenantRuntimeChart(params helmdeploy.HelmDeployParams) string {
 	if len(params.ChartCandidates) == 0 {
 		return ""
 	}
-	if chart := configpkg.RuntimeReleaseName(params.Tenant); chart != configpkg.DevopsComponentName {
+	if chart := runtimetarget.RuntimeReleaseName(params.Tenant); chart != runtimetarget.DevopsComponentName {
 		return chart
 	}
 	return ""

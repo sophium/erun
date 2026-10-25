@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func KubectlRemoteExecArgs(req config.ShellLaunchParams, script string) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "exec")
-	args = append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }
 

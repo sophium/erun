@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -83,7 +85,7 @@ func runtimeUsageRunner(ctx context.Context) runtimepod.RuntimeContainerCommandR
 			args = append(args, "--namespace", namespace)
 		}
 		args = append(args, "exec", "-c", strings.TrimSpace(container),
-			"deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+			"deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		core.HideConsoleWindow(cmd)
 		var stdout, stderr bytes.Buffer
@@ -177,7 +179,7 @@ func uiRuntimeUsageRequestsFromReading(requests *model.RuntimeUsageRequests) *Us
 	}
 	return &UsageRequests{
 		Unavailable: requests.Unavailable,
-		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[config.DevopsComponentName]),
+		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[runtimetarget.DevopsComponentName]),
 	}
 }
 
@@ -188,7 +190,7 @@ func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) Co
 		MemoryBytes: requests.MemoryBytes,
 	}
 	if requests.CPUMilli > 0 {
-		rendered.CPU = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+		rendered.CPU = runtimeresources.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
 	}
 	if requests.MemoryBytes > 0 {
 		rendered.Memory = formatRuntimeUsageBytes(requests.MemoryBytes)

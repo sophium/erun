@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -180,7 +181,7 @@ func resolveSSHDEnvConfig(result config.OpenResult, publicKeyPath string, localP
 		updatedEnv.SSHD.LocalPort = localPort
 	}
 	if updatedEnv.SSHD.LocalPort == 0 {
-		updatedEnv.SSHD.LocalPort = config.SSHLocalPortForResult(result)
+		updatedEnv.SSHD.LocalPort = localports.SSHLocalPortForResult(result)
 	}
 	return updatedEnv, nil
 }

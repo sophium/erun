@@ -328,7 +328,7 @@ func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 }
 
 func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
-	configFilePath, err := projectConfigPath(projectRoot)
+	configFilePath, err := ProjectConfigPath(projectRoot)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 
 func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	config := ProjectConfig{}
-	configFilePath, err := projectConfigPath(projectRoot)
+	configFilePath, err := ProjectConfigPath(projectRoot)
 	if err != nil {
 		return config, "", err
 	}
@@ -365,40 +365,7 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	return config, configFilePath, nil
 }
 
-// FindProjectRoot prefers ERUN_REPO_PATH when it names a directory: a sourceless
-// runtime pod has the release tree there with no .git to walk up to.
-func FindProjectRoot() (string, string, error) {
-	if root := strings.TrimSpace(os.Getenv("ERUN_REPO_PATH")); root != "" {
-		root = filepath.Clean(root)
-		if info, err := os.Stat(root); err == nil && info.IsDir() {
-			return filepath.Base(root), root, nil
-		}
-	}
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", "", err
-	}
-	return FindProjectRootFromDir(dir)
-}
-
-func FindProjectRootFromDir(dir string) (string, string, error) {
-	dir = filepath.Clean(dir)
-	for {
-		gitDir := filepath.Join(dir, ".git")
-		if _, err := os.Stat(gitDir); err == nil {
-			repoName := filepath.Base(dir)
-			return repoName, dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", "", ErrNotInGitRepository
-		}
-		dir = parent
-	}
-}
-
-func projectConfigPath(projectRoot string) (string, error) {
+func ProjectConfigPath(projectRoot string) (string, error) {
 	if projectRoot == "" {
 		return "", ErrNotInGitRepository
 	}

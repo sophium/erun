@@ -11,6 +11,8 @@ import (
 
 	"github.com/sophium/erun/cmd/shared/portfwd"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
@@ -41,7 +43,7 @@ func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (model.SS
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:         runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment),
 		LocalPort:         info.Port,
 	}
 
@@ -194,14 +196,14 @@ func kubectlPortForwardArgs(result config.OpenResult, localPort int) []string {
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
 	}
-	namespace := config.KubernetesNamespaceName(result.Tenant, result.Environment)
+	namespace := runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+config.RuntimeReleaseName(result.Tenant),
-		fmt.Sprintf("%d:%d", localPort, config.SSHLocalPortForResult(result)),
+		"deployment/"+runtimetarget.RuntimeReleaseName(result.Tenant),
+		fmt.Sprintf("%d:%d", localPort, localports.SSHLocalPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args

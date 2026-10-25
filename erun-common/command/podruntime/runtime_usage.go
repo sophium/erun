@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -23,7 +25,7 @@ import (
 
 const (
 	// runtimeUsageContainer is the pod's main container, not the erun-dind sidecar.
-	runtimeUsageContainer = config.DevopsComponentName
+	runtimeUsageContainer = runtimetarget.DevopsComponentName
 
 	// The runtime chart sets HOME to runtimeUsageWatchedMount.
 	runtimeUsageWatchedMount = "/home/erun"
@@ -186,7 +188,7 @@ func parseRuntimeUsage(req config.ShellLaunchParams, output string, interval tim
 	values := parseRuntimeUsageValues(output)
 	usage := model.RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}
 	usage.CPU = runtimeCPUUsageFromValues(values, interval)
-	usage.Memory = config.RuntimeMemoryUsageFromValues(values)
+	usage.Memory = runtimeresources.RuntimeMemoryUsageFromValues(values)
 	usage.Disk = []model.RuntimeDiskUsage{runtimeDiskUsageFromValues(values)}
 	usage.Warnings = runtimeUsageWarnings(usage)
 	return usage
@@ -206,11 +208,11 @@ func parseRuntimeUsageValues(output string) map[string]string {
 
 func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) model.RuntimeCPUUsage {
 	c := model.RuntimeCPUUsage{IntervalSeconds: interval.Seconds()}
-	if !config.RuntimeCgroupV2Available(v) {
+	if !runtimeresources.RuntimeCgroupV2Available(v) {
 		c.Unavailable = "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
 		return c
 	}
-	counters, ok := config.RuntimeCPUCountersFromValues(v)
+	counters, ok := runtimeresources.RuntimeCPUCountersFromValues(v)
 	c.UsageUsec = counters.UsageUsec
 	c.Periods = counters.Periods
 	c.ThrottledPeriods = counters.ThrottledPeriods
@@ -339,6 +341,6 @@ func parseRuntimeDindUsage(output string, interval time.Duration) *model.Runtime
 	values := parseRuntimeUsageValues(output)
 	return &model.RuntimeDindUsage{
 		CPU:    runtimeCPUUsageFromValues(values, interval),
-		Memory: config.RuntimeMemoryUsageFromValues(values),
+		Memory: runtimeresources.RuntimeMemoryUsageFromValues(values),
 	}
 }

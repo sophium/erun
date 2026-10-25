@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,7 +58,7 @@ func ApplySecretManifest(contextName, namespace, description, manifest string, a
 
 // applySecretOnce reports whether the failure was a lost create race.
 func applySecretOnce(contextName, namespace, description, manifest string, args []string) (lostCreateRace bool, err error) {
-	if config.CurrentExecutionMode(kubectlSecretApplyExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kubectlSecretApplyExecutionOperation) == execmode.ExecutionModeLibrary {
 		if err := applySecretViaClientGo(contextName, namespace, manifest); err != nil {
 			return apierrors.IsAlreadyExists(err), fmt.Errorf("kubectl apply %s: %w", description, err)
 		}

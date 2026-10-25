@@ -1,51 +1,52 @@
-package config
+package runtimesync
 
 import (
 	"os"
 	"path/filepath"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
 func RuntimeEnvConfigPath(configHome, tenant, environment string) string {
-	return filepath.Join(configHome, ConfigRoot, tenant, environment, ConfigFile)
+	return filepath.Join(configHome, configpkg.ConfigRoot, tenant, environment, configpkg.ConfigFile)
 }
 
 func RuntimeRootConfigPath(configHome string) string {
-	return filepath.Join(configHome, ConfigRoot, ConfigFile)
+	return filepath.Join(configHome, configpkg.ConfigRoot, configpkg.ConfigFile)
 }
 
-func LoadRuntimeEnvConfigForSync(configHome, tenant, environment string) (EnvConfig, map[string]any, error) {
+func LoadRuntimeEnvConfigForSync(configHome, tenant, environment string) (configpkg.EnvConfig, map[string]any, error) {
 	path := RuntimeEnvConfigPath(configHome, tenant, environment)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return EnvConfig{}, map[string]any{}, nil
+			return configpkg.EnvConfig{}, map[string]any{}, nil
 		}
-		return EnvConfig{}, nil, err
+		return configpkg.EnvConfig{}, nil, err
 	}
-	var config EnvConfig
+	var config configpkg.EnvConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return EnvConfig{}, nil, err
+		return configpkg.EnvConfig{}, nil, err
 	}
 	raw := map[string]any{}
 	_ = yaml.Unmarshal(data, &raw)
 	return config, raw, nil
 }
 
-func LoadRuntimeRootConfigForSync(configHome string) (ERunConfig, bool, error) {
+func LoadRuntimeRootConfigForSync(configHome string) (configpkg.ERunConfig, bool, error) {
 	path := RuntimeRootConfigPath(configHome)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ERunConfig{}, false, nil
+			return configpkg.ERunConfig{}, false, nil
 		}
-		return ERunConfig{}, false, err
+		return configpkg.ERunConfig{}, false, err
 	}
-	var config ERunConfig
+	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return ERunConfig{}, false, err
+		return configpkg.ERunConfig{}, false, err
 	}
 	return config, true, nil
 }

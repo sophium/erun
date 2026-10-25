@@ -1,4 +1,4 @@
-package config
+package containerregistry
 
 // DockerConfigJSONSecretKey is kubectl's dockerconfigjson Secret key.
 const DockerConfigJSONSecretKey = ".dockerconfigjson"

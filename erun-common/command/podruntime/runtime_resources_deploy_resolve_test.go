@@ -3,7 +3,7 @@ package podruntime
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -31,15 +31,15 @@ func TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured(t *testi
 	})
 	env := inPodEnv("remote-agent", "erun", "ux")
 
-	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
+	got := runtimeresources.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
 	if got.Memory != "8192Mi" {
-		t.Fatalf("resolved memory = %q, want the live cgroup limit 8192Mi, not the package default %q", got.Memory, config.DefaultRuntimePodMemory)
+		t.Fatalf("resolved memory = %q, want the live cgroup limit 8192Mi, not the package default %q", got.Memory, runtimeresources.DefaultRuntimePodMemory)
 	}
 	if got.CPU != "4" {
 		t.Fatalf("resolved cpu = %q, want the live cgroup quota 4", got.CPU)
 	}
-	if got.Memory == config.DefaultRuntimePodMemory {
+	if got.Memory == runtimeresources.DefaultRuntimePodMemory {
 		t.Fatal("resolved memory must not be the package default when a live cgroup limit was readable")
 	}
 }
@@ -53,7 +53,7 @@ func TestResolveRuntimePodResourcesForDeployPrefersConfiguredValue(t *testing.T)
 	env := inPodEnv("remote-agent", "erun", "ux")
 
 	configured := model.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
-	got := config.ResolveRuntimePodResourcesForDeploy(configured, "erun", "ux", env, root)
+	got := runtimeresources.ResolveRuntimePodResourcesForDeploy(configured, "erun", "ux", env, root)
 
 	if got != configured {
 		t.Fatalf("resolved = %+v, want the configured value %+v unchanged", got, configured)
@@ -68,7 +68,7 @@ func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOffPod(t *testing.T) {
 	})
 	env := func(string) string { return "" }
 
-	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
+	got := runtimeresources.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
 	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) when not running in a runtime pod", got)
@@ -83,7 +83,7 @@ func TestResolveRuntimePodResourcesForDeployIgnoresCgroupOfOtherEnvironment(t *t
 	})
 	env := inPodEnv("remote-agent", "erun", "build")
 
-	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
+	got := runtimeresources.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
 	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) for a mismatched tenant/environment", got)
@@ -110,7 +110,7 @@ func TestResolveRuntimePodResourcesForDeployRequiresRealPodIdentity(t *testing.T
 		}
 	}
 
-	got := config.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
+	got := runtimeresources.ResolveRuntimePodResourcesForDeploy(model.RuntimePodResources{}, "erun", "ux", env, root)
 
 	if got != (model.RuntimePodResources{}) {
 		t.Fatalf("resolved = %+v, want unchanged (empty) without a real ERUN_ENV_TYPE-carrying pod identity", got)

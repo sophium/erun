@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
@@ -43,7 +44,7 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 }
 
 func isHostedRegistry(registry string) bool {
-	return strings.EqualFold(strings.TrimSpace(registry), config.HostedRegistryHost)
+	return strings.EqualFold(strings.TrimSpace(registry), containerregistry.HostedRegistryHost)
 }
 
 // DockerRegistryLoginWithHostedRegistry logs in to the hosted registry with the operator's
@@ -70,7 +71,7 @@ func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDepe
 	if strings.TrimSpace(token.Token) == "" {
 		return fmt.Errorf("erun cloud provider alias %q returned an empty bearer token", provider.Alias)
 	}
-	loginCmd := core.Command("docker", "login", config.HostedRegistryHost, "-u", config.HostedRegistryLoginUsername, "--password-stdin")
+	loginCmd := core.Command("docker", "login", containerregistry.HostedRegistryHost, "-u", containerregistry.HostedRegistryLoginUsername, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token.Token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr

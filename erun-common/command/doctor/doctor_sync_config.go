@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
@@ -53,13 +54,13 @@ func InspectRuntimeConfigSync(configHome string, env func(string) string) (Confi
 		return inspection, nil
 	}
 
-	onDiskEnv, rawEnv, err := configpkg.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
+	onDiskEnv, rawEnv, err := runtimesync.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
 	if err != nil {
 		return inspection, err
 	}
 	inspection.Drift = append(inspection.Drift, envConfigDrift(injected.Env, onDiskEnv, rawEnv)...)
 
-	rootConfig, _, err := configpkg.LoadRuntimeRootConfigForSync(configHome)
+	rootConfig, _, err := runtimesync.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		return inspection, err
 	}
@@ -120,7 +121,7 @@ func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []
 func rootConfigDrift(injected cloudconfig.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []model.ConfigDriftField {
 	var drift []model.ConfigDriftField
 	for _, provider := range injected.Providers {
-		existing, found := configpkg.FindCloudProvider(onDisk.CloudProviders, provider.Alias)
+		existing, found := runtimesync.FindCloudProvider(onDisk.CloudProviders, provider.Alias)
 		switch {
 		case !found:
 			drift = append(drift, model.ConfigDriftField{Scope: "root", Key: "cloudproviders", Injected: provider.Alias, Kind: model.ConfigDriftMissing})
@@ -184,8 +185,8 @@ func RunRuntimeConfigSync(ctx core.Context, inspection ConfigSyncInspection) err
 	}
 	injected := inspection.Injected
 
-	envPath := configpkg.RuntimeEnvConfigPath(inspection.ConfigHome, injected.Tenant, injected.Environment)
-	onDiskEnv, _, err := configpkg.LoadRuntimeEnvConfigForSync(inspection.ConfigHome, injected.Tenant, injected.Environment)
+	envPath := runtimesync.RuntimeEnvConfigPath(inspection.ConfigHome, injected.Tenant, injected.Environment)
+	onDiskEnv, _, err := runtimesync.LoadRuntimeEnvConfigForSync(inspection.ConfigHome, injected.Tenant, injected.Environment)
 	if err != nil {
 		return err
 	}
@@ -202,8 +203,8 @@ func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected cl
 	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
 		return nil
 	}
-	rootPath := configpkg.RuntimeRootConfigPath(configHome)
-	rootConfig, _, err := configpkg.LoadRuntimeRootConfigForSync(configHome)
+	rootPath := runtimesync.RuntimeRootConfigPath(configHome)
+	rootConfig, _, err := runtimesync.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		return err
 	}

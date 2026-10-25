@@ -8,6 +8,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/kubetoken"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
@@ -107,7 +108,7 @@ func resolveRecoverAdminToken(params model.RecoverCloudContextParams) (string, s
 	if token := strings.TrimSpace(params.AdminToken); token != "" {
 		return token, "input"
 	}
-	token, ok, err := configpkg.LookupKubeContextBearerToken(params.KubernetesContext)
+	token, ok, err := kubetoken.LookupKubeContextBearerToken(params.KubernetesContext)
 	if err != nil || !ok {
 		return "", "none"
 	}

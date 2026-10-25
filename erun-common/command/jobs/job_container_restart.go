@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -20,7 +20,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner kubeapi
 	if podName == "" {
 		return false, "", 0, time.Time{}, false
 	}
-	if config.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryJobSupervisorContainerRestart(podName, containerName)
 	}
 	return defaultJobSupervisorContainerRestart(podName, containerName, runner)

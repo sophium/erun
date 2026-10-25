@@ -4,8 +4,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -154,12 +155,12 @@ func (s *Service) LinkedCloudContextFor(cloudProviderAlias, kubernetesContext st
 	if kubernetesContext == "" {
 		return model.CloudContextStatus{}, false, nil
 	}
-	statuses, err := cloudcontext.ListCloudContextStatuses(s.d.Store)
+	statuses, err := cloudcloudcontext.ListCloudContextStatuses(s.d.Store)
 	if err != nil {
 		return model.CloudContextStatus{}, false, err
 	}
 	for _, status := range statuses {
-		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
+		context := configcloudcontext.NormalizeCloudContextConfig(status.CloudContextConfig)
 		if cloudProviderAlias != "" && strings.TrimSpace(context.CloudProviderAlias) != cloudProviderAlias {
 			continue
 		}

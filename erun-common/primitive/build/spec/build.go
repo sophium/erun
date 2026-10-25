@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
@@ -65,14 +65,14 @@ func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot projectroot.Pr
 
 // projectDeclaresDockerRoot reports whether config declares a non-conventional docker root.
 func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
-	_, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
+	_, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err == nil && ok {
 		return strings.TrimSpace(paths.Docker) != ""
 	}
 	if ok {
 		return false
 	}
-	paths, err = config.LoadProjectPaths(projectRoot)
+	paths, err = projectpaths.LoadProjectPaths(projectRoot)
 	return err == nil && strings.TrimSpace(paths.Docker) != ""
 }
 
@@ -83,9 +83,9 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot projectroot.Pro
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	config.WarnIfProjectConfigGitIgnored(ctx, projectRoot)
+	projectpaths.WarnIfProjectConfigGitIgnored(ctx, projectRoot)
 
-	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, target.Component)
+	name, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, target.Component)
 	if err != nil {
 		ctx.Trace("build: component selection failed: " + err.Error())
 		return
@@ -95,7 +95,7 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot projectroot.Pro
 		ctx.Trace("build: component " + name + " selected (.erun/config.yaml components)")
 		keyPrefix = "components." + name
 	} else {
-		paths, err = config.LoadProjectPaths(projectRoot)
+		paths, err = projectpaths.LoadProjectPaths(projectRoot)
 		if err != nil {
 			return
 		}

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/orchestratorrole"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -106,7 +108,7 @@ func (s *Service) ListOrchestratorAliasChoices() ([]string, error) {
 
 // ListOrchestratorLaunchChoices reads the same catalog save validates against.
 func (s *Service) ListOrchestratorLaunchChoices() (LaunchChoices, error) {
-	catalog, err := configpkg.ResolveOpenRouterConfig(s.d.Store)
+	catalog, err := openrouter.ResolveOpenRouterConfig(s.d.Store)
 	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return LaunchChoices{}, fmt.Errorf("cannot read the gateway catalog from the ERun settings: %w", err)
 	}
@@ -142,7 +144,7 @@ func (s *Service) ListOrchestratorEnvCandidates() ([]EnvCandidate, error) {
 			continue
 		}
 		for _, env := range envs {
-			requiredRole := configpkg.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
+			requiredRole := orchestratorrole.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
 			candidate := EnvCandidate{
 				Tenant:          tenant.Name,
 				Environment:     env.Name,

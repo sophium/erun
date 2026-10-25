@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
@@ -256,7 +257,7 @@ func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, h
 // reconcileSamePodUnknownReason credits a container restart only when it lands
 // at or after the job was last alive.
 func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner kubeapi.OpenKubectlRunnerFunc) (kind, reason string) {
-	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, config.DevopsComponentName, restartRunner)
+	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, runtimetarget.DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
 		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
 		if summary := environmentJobResourceStateSummaryFunc(); summary != "" {
@@ -267,7 +268,7 @@ func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string,
 	if terminatedReason == "" {
 		terminatedReason = "no reason reported"
 	}
-	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, config.DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
+	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, runtimetarget.DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
 }
 
 // environmentJobResourceStateSummaryFunc reports cgroup numbers, never a
@@ -275,7 +276,7 @@ func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string,
 var environmentJobResourceStateSummaryFunc = environmentJobResourceStateSummary
 
 func environmentJobResourceStateSummary() string {
-	usage := config.ReadLocalRuntimeUsage(config.DefaultCgroupRoot)
+	usage := runtimeresources.ReadLocalRuntimeUsage(runtimeresources.DefaultCgroupRoot)
 	var parts []string
 	if usage.Memory.Unavailable == "" && !usage.Memory.Unlimited && usage.Memory.LimitBytes > 0 {
 		part := fmt.Sprintf("memory %.2f/%.2f GiB", gibibytes(usage.Memory.CurrentBytes), gibibytes(usage.Memory.LimitBytes))

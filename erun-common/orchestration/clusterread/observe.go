@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 // ObserveGetArgs builds `kubectl get <resource> [name] -o json`; without name it lists the kind.
 func ObserveGetArgs(req config.ShellLaunchParams, resource string, name ...string) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "get", resource)
 	args = append(args, name...)
 	return append(args, "-o", "json")

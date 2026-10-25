@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/claudedefaults"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
 	"github.com/sophium/erun/erun-common/command/ai"
 )
 
@@ -41,17 +43,17 @@ func claudeConfigFromUI(config ClaudeConfig) configpkg.EnvironmentClaudeConfig {
 }
 
 func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) ClaudeDefaults {
-	minTokens, maxTokens := configpkg.ClaudeMaxOutputTokensRange()
+	minTokens, maxTokens := claudedefaults.ClaudeMaxOutputTokensRange()
 	gatewayModels := gateway.ModelIDs()
 	if gatewayModels == nil {
 		gatewayModels = []string{}
 	}
 	return ClaudeDefaults{
-		UseMantle:  configpkg.DefaultClaudeUseMantle,
-		UseBedrock: configpkg.DefaultClaudeUseBedrock,
+		UseMantle:  claudedefaults.DefaultClaudeUseMantle,
+		UseBedrock: claudedefaults.DefaultClaudeUseBedrock,
 		// The environment's own models; the gateway catalog's set travels separately.
-		Models:          configpkg.DefaultClaudeAvailableModels(),
-		MaxOutputTokens: configpkg.DefaultClaudeMaxOutputTokens,
+		Models:          claudedefaults.DefaultClaudeAvailableModels(),
+		MaxOutputTokens: claudedefaults.DefaultClaudeMaxOutputTokens,
 		KnownModels:     configpkg.KnownClaudeModels(),
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
@@ -68,7 +70,7 @@ func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) ClaudeDefaults {
 // ResolveOpenRouterConfig treats an unreadable root config as no catalog;
 // gateway actions re-resolve it where it matters.
 func (s *Service) ResolveOpenRouterConfig() *configpkg.OpenRouterConfig {
-	gateway, err := configpkg.ResolveOpenRouterConfig(s.d.Store)
+	gateway, err := openrouter.ResolveOpenRouterConfig(s.d.Store)
 	if err != nil {
 		return nil
 	}

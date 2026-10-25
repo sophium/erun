@@ -4,13 +4,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
@@ -50,9 +52,9 @@ func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state mod
 		return model.EnvironmentLifecycleUnknown, true
 	}
 	switch in.CloudContextStatus {
-	case cloudcontext.CloudContextStatusStopped:
+	case cloudcloudcontext.CloudContextStatusStopped:
 		return model.EnvironmentLifecycleStopped, true
-	case cloudcontext.CloudContextStatusRunning:
+	case cloudcloudcontext.CloudContextStatusRunning:
 		return "", false
 	default:
 		return model.EnvironmentLifecycleUnknown, true
@@ -134,7 +136,7 @@ func ResolveEnvironmentDetail(store envstore.ListStore, tenant, environment stri
 		return list.ListEnvironmentResult{}, err
 	}
 	effective, effectiveErr := resolve.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
-	portAllocations, err := config.ResolveAllEnvironmentLocalPorts(store)
+	portAllocations, err := localports.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return list.ListEnvironmentResult{}, err
 	}
@@ -160,7 +162,7 @@ func ResolveEnvironmentReadModel(ctx core.Context, store envstore.ListStore, ten
 	}
 
 	var cloudContext *model.CloudContextStatus
-	if status, ok, err := config.FindCloudContextForKubernetesContext(store, entry.KubernetesContext); err != nil {
+	if status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, entry.KubernetesContext); err != nil {
 		return EnvironmentReadModel{}, err
 	} else if ok {
 		cloudContext = &status
@@ -168,7 +170,7 @@ func ResolveEnvironmentReadModel(ctx core.Context, store envstore.ListStore, ten
 
 	var health *model.EnvironmentHealth
 	if !ctx.DryRun {
-		rootConfig, err := config.InspectRootConfig(store)
+		rootConfig, err := configbackup.InspectRootConfig(store)
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
@@ -105,8 +104,6 @@ func containsTrimmedString(values []string, target string) bool {
 	return false
 }
 
-var ErrEnvironmentNotFound = errors.New("no such environment exists")
-
 type ShellLaunchParams struct {
 	Dir                string
 	Tenant             string
@@ -135,23 +132,4 @@ type ShellLaunchParams struct {
 	// against the live release.
 	RuntimeVersion string
 	RuntimePod     model.RuntimePodResources
-}
-
-func RuntimeReleaseName(tenant string) string {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return DevopsComponentName
-	}
-	return tenant + "-devops"
-}
-
-func KubectlTargetArgs(req ShellLaunchParams) []string {
-	args := make([]string, 0, 4)
-	if strings.TrimSpace(req.KubernetesContext) != "" {
-		args = append(args, "--context", req.KubernetesContext)
-	}
-	if strings.TrimSpace(req.Namespace) != "" {
-		args = append(args, "--namespace", req.Namespace)
-	}
-	return args
 }

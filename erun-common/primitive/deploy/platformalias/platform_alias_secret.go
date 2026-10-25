@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -22,7 +23,7 @@ import (
 
 // PlatformAliasSecretName names the per-environment Secret `erun init` mints from the operator's alias.
 func PlatformAliasSecretName(tenant string) string {
-	return config.RuntimeReleaseName(tenant) + "-platform-alias"
+	return runtimetarget.RuntimeReleaseName(tenant) + "-platform-alias"
 }
 
 // The runtime chart mounts these keys at /etc/erun/platform-alias, where the runtime
@@ -160,7 +161,7 @@ func ProvisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore,
 // identity, so re-provisioning would silently change who the env acts as. Only the
 // several-aliases ambiguity is traced; having nothing to give stays silent.
 func ReconcilePlatformAliasSecret(ctx core.Context, deployInput *helmdeploy.HelmDeploySpec) error {
-	if deployInput == nil || deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput == nil || deployInput.ReleaseName != runtimetarget.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	if strings.TrimSpace(deployInput.PlatformAliasSecretName) != "" {

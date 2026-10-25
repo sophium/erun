@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
@@ -30,7 +33,7 @@ type remoteRepositoryState struct {
 // stand for omitted flags.
 func (s BootstrapRunner) ensureRemoteRepository(params bootstrap.BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (config.ShellLaunchParams, remoteinit.RemoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
-	target.EnvConfig.RuntimePod = config.NormalizeRuntimePodResources(env.RuntimePod)
+	target.EnvConfig.RuntimePod = runtimeresources.NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry redirects chart resolution, so init's own deploy needs it.
 	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(env.RuntimeRegistry)
 	// A private runtime image cannot be pulled on init's own deploy without these.
@@ -151,11 +154,11 @@ func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, e
 }
 
 func (s BootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) model.EnvironmentLocalPorts {
-	portStore, ok := s.Store.(config.EnvironmentPortStore)
+	portStore, ok := s.Store.(localports.EnvironmentPortStore)
 	if !ok {
 		return model.EnvironmentLocalPorts{}
 	}
-	resolved, err := config.ResolveEnvironmentLocalPorts(portStore, tenant, envName)
+	resolved, err := localports.ResolveEnvironmentLocalPorts(portStore, tenant, envName)
 	if err != nil {
 		return model.EnvironmentLocalPorts{}
 	}
@@ -176,7 +179,7 @@ func (s BootstrapRunner) ensureRemoteWorktree(req config.ShellLaunchParams, proj
 
 func (s BootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req config.ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
 	runtimeImage = strings.TrimSpace(runtimeImage)
-	runtimeImageStated := runtimeImage != "" && runtimeImage != config.DevopsComponentName
+	runtimeImageStated := runtimeImage != "" && runtimeImage != runtimetarget.DevopsComponentName
 	if runtimeImageStated {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}

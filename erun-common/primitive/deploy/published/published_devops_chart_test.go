@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -27,7 +28,7 @@ func TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments(t *tes
 	ctx := core.Context{}
 	target := config.OpenResult{Tenant: "erun", EnvConfig: config.EnvConfig{}}
 
-	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", config.DevopsComponentName, "1.0.201", "", false)
+	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", runtimetarget.DevopsComponentName, "1.0.201", "", false)
 
 	if persistImage != "" {
 		t.Fatalf("persistImage = %q, want empty for erun's own environments", persistImage)

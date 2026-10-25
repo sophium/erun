@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 func helmStatusArgs(req config.ShellLaunchParams) []string {
-	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
+	args := []string{"status", runtimetarget.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -22,7 +23,7 @@ func helmStatusArgs(req config.ShellLaunchParams) []string {
 }
 
 func deployDiagnosisPodArgs(req config.ShellLaunchParams) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	return append(args, "get", "pods", "-o", "wide")
 }
 
@@ -40,7 +41,7 @@ func RunDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) model.De
 		AgentCredentials: runtimeAgentCredentialApplicability(req),
 	}
 	if helmErr != nil && !observe.IsHelmReleaseNotFound(helmStatus) {
-		result.HelmReadError = observe.ObserveHelmReadErrorMessage(config.RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
+		result.HelmReadError = observe.ObserveHelmReadErrorMessage(runtimetarget.RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
 		result.ClusterUnreachable = observe.KubernetesAPIServerUnreachableSignal(helmStatus)
 	}
 	if result.ClusterUnreachable {

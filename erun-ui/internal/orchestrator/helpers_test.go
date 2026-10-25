@@ -11,6 +11,8 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
 	"github.com/sophium/erun/erun-common/base/model"
 	orchcmd "github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -74,7 +76,7 @@ func newTestApp(deps testDeps) *testApp {
 		Terminals:    app.terminals,
 		ClaudeAgents: func() AgentCLI { return app.deps.claudeAgents },
 		MCPEndpoint: func(result configpkg.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", configpkg.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer:        func(string, string) string { return "" },
 		ActivitySnapshot: app.runtime.activitySnapshot,
@@ -137,7 +139,7 @@ func (a *testApp) wireProcessSeams(d *Deps) {
 		return a.deps.resolveGatewayCredential(catalog)
 	}
 	d.ResolveOpenRouterConfig = func() *configpkg.OpenRouterConfig {
-		catalog, _ := configpkg.ResolveOpenRouterConfig(a.deps.store)
+		catalog, _ := openrouter.ResolveOpenRouterConfig(a.deps.store)
 		return catalog
 	}
 	d.RunLabelCommand = func(ctx context.Context, dir, name string, args ...string) (string, error) {

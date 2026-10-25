@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
 	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
@@ -22,7 +23,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store deploytarget.DeploySto
 	for _, componentName := range chartref.RuntimeComponentNames(target.Tenant) {
 		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", nil)
 		if err == nil {
-			spec.Deploy.ReleaseName = config.RuntimeReleaseName(target.Tenant)
+			spec.Deploy.ReleaseName = runtimetarget.RuntimeReleaseName(target.Tenant)
 			return spec, nil
 		}
 		if !isHelmChartNotFoundForComponent(err) {

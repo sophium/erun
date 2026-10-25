@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -93,7 +94,7 @@ func shouldInitOpenCommand(err error) bool {
 func ShouldRunInitForOpenCommand(err error) bool {
 	return ShouldInitRootCommand(err) ||
 		errors.Is(err, opentarget.ErrTenantNotFound) ||
-		errors.Is(err, config.ErrEnvironmentNotFound)
+		errors.Is(err, runtimetarget.ErrEnvironmentNotFound)
 }
 
 func ShouldInitRootCommand(err error) bool {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -54,7 +54,7 @@ func (s *Service) ExecCommit(selection uimodel.Selection, input ExecCommitInput)
 		return model.CommitWorkingTreeResult{}, err
 	}
 	ctx := s.d.Context()
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		return model.CommitWorkingTreeResult{}, s.d.WrapMCPUnreachable(
 			s.classifyMCPUnreachable(mcpPort),
@@ -88,7 +88,7 @@ func (s *Service) ExecPush(selection uimodel.Selection, input ExecPushInput) (mo
 		return model.PushWorkingTreeBranchResult{}, err
 	}
 	ctx := s.d.Context()
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		return model.PushWorkingTreeBranchResult{}, s.d.WrapMCPUnreachable(
 			s.classifyMCPUnreachable(mcpPort),

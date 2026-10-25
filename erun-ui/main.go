@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-ui/headlessserver"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/wailsapp/wails/v2"
@@ -82,7 +83,7 @@ func launch(parsed parsedCLIFlags) bool {
 func desktopDeps(headless bool) erunUIDeps {
 	deps := erunUIDeps{
 		store:           config.ConfigStore{},
-		findProjectRoot: config.FindProjectRoot,
+		findProjectRoot: projectroot.FindProjectRoot,
 		resolveCLIPath:  terminal.ResolveCLIExecutable,
 		windowStatePath: defaultAppWindowStatePath(),
 	}

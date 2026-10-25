@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
@@ -20,7 +21,7 @@ func RunObservation(ctx core.Context, req config.ShellLaunchParams, params model
 	ingressArgs := clusterread.ObserveGetArgs(req, "ingress")
 	serviceArgs := clusterread.ObserveGetArgs(req, "service")
 	certArgs := clusterread.ObserveGetArgs(req, "certificates.cert-manager.io")
-	releaseName := config.RuntimeReleaseName(req.Tenant)
+	releaseName := runtimetarget.RuntimeReleaseName(req.Tenant)
 	helmArgs := clusterread.ObserveHelmStatusArgs(req)
 	helmListArgs := clusterread.ObserveHelmListArgs(req, releaseName)
 

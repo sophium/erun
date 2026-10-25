@@ -13,6 +13,8 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -327,7 +329,7 @@ func TestDefinitionWatchTargetForAttributesOnlyAnEnvironmentsOwnConfig(t *testin
 	if err != nil {
 		t.Fatalf("resolve config dir: %v", err)
 	}
-	livePath, err := configpkg.EnvConfigPath(hostedUploadTenant, hostedUploadEnvironment)
+	livePath, err := configbackup.EnvConfigPath(hostedUploadTenant, hostedUploadEnvironment)
 	if err != nil {
 		t.Fatalf("resolve env config path: %v", err)
 	}
@@ -403,7 +405,7 @@ func TestTheDirtyFlagIsStampedOnDisk(t *testing.T) {
 	if reloaded.Hosted.DefinitionDigest == "" {
 		t.Fatalf("the upload recorded no digest:\n%s", raw)
 	}
-	if change := configpkg.HostedDefinitionLocalChangeFor(reloaded); !change.Available || change.Changed {
+	if change := envdefinition.HostedDefinitionLocalChangeFor(reloaded); !change.Available || change.Changed {
 		t.Fatalf("a just-uploaded copy reads as %+v", change)
 	}
 }

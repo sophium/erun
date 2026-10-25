@@ -74,13 +74,23 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: base/config may import only base/core and base/model
+        base-config-concerns:
+          list-mode: lax
+          files: ["**/erun-common/base/config/*/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+            - github.com/sophium/erun/erun-common/base/core
+            - github.com/sophium/erun/erun-common/base/config$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/config/<concern> may import only base/config, base/core and base/model, never another concern
         base-seam:
           list-mode: lax
           files: ["**/erun-common/base/seam/**/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/model
             - github.com/sophium/erun/erun-common/base/core
-            - github.com/sophium/erun/erun-common/base/config
+            - github.com/sophium/erun/erun-common/base/config$
             - github.com/sophium/erun/erun-common/base/seam/
           deny:
             - pkg: github.com/sophium/erun/erun-common

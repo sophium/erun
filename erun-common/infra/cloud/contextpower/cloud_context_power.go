@@ -7,19 +7,20 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/infra/activity/workinghours"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/cloud/contextinstance"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
-func StopCloudContext(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcontext.CloudContextDependencies) (model.CloudContextStatus, error) {
-	deps = cloudcontext.NormalizeCloudContextDependencies(deps)
+func StopCloudContext(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcloudcontext.CloudContextDependencies) (model.CloudContextStatus, error) {
+	deps = cloudcloudcontext.NormalizeCloudContextDependencies(deps)
 	ctx.Trace("cloud-context stop: " + strings.TrimSpace(params.Name))
-	status, err := changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", cloudcontext.CloudContextStatusStopped)
+	status, err := changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", cloudcloudcontext.CloudContextStatusStopped)
 	switch {
 	case err == nil:
 	case isAWSIncorrectInstanceStateError(err):
@@ -44,7 +45,7 @@ func StopCloudContext(ctx core.Context, store cloudstore.CloudContextStore, para
 }
 
 func resolveCloudContextStatusForName(store cloudstore.CloudContextStore, name string) (model.CloudContextStatus, error) {
-	config, ok, err := cloudcontext.FindCloudContext(store, name)
+	config, ok, err := cloudcloudcontext.FindCloudContext(store, name)
 	if err != nil {
 		return model.CloudContextStatus{}, err
 	}
@@ -52,8 +53,8 @@ func resolveCloudContextStatusForName(store cloudstore.CloudContextStore, name s
 		return model.CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(name))
 	}
 	return model.CloudContextStatus{
-		CloudContextConfig: configpkg.NormalizeCloudContextConfig(config),
-		Status:             cloudcontext.CloudContextStatusStopped,
+		CloudContextConfig: configcloudcontext.NormalizeCloudContextConfig(config),
+		Status:             cloudcloudcontext.CloudContextStatusStopped,
 	}, nil
 }
 
@@ -103,8 +104,8 @@ func classifyCloudContextPowerError(awsAction string, config model.CloudContextC
 	return err
 }
 
-func StartCloudContext(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcontext.CloudContextDependencies) (model.CloudContextStatus, error) {
-	deps = cloudcontext.NormalizeCloudContextDependencies(deps)
+func StartCloudContext(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcloudcontext.CloudContextDependencies) (model.CloudContextStatus, error) {
+	deps = cloudcloudcontext.NormalizeCloudContextDependencies(deps)
 	ctx.Trace(fmt.Sprintf("cloud-context start: name=%s force=%v", strings.TrimSpace(params.Name), params.Force))
 	if err := enforceCloudContextStartWorkingHoursGate(ctx, store, params, deps); err != nil {
 		return model.CloudContextStatus{}, err
@@ -112,7 +113,7 @@ func StartCloudContext(ctx core.Context, store cloudstore.CloudContextStore, par
 	if err := ensureCloudContextHostStopProfileAssociation(ctx, store, params, deps); err != nil {
 		ctx.Trace("skipping cloud context host-stop profile association: " + err.Error())
 	}
-	status, err := changeCloudContextPowerState(ctx, store, params, deps, "start-instances", cloudcontext.CloudContextStatusRunning)
+	status, err := changeCloudContextPowerState(ctx, store, params, deps, "start-instances", cloudcloudcontext.CloudContextStatusRunning)
 	if err != nil {
 		status, err = recoverCloudContextStartFromTransitionalState(ctx, store, params, deps, err)
 		if err != nil {
@@ -122,8 +123,8 @@ func StartCloudContext(ctx core.Context, store cloudstore.CloudContextStore, par
 	return finalizeStartedCloudContext(ctx, store, deps, status)
 }
 
-func finalizeStartedCloudContext(ctx core.Context, store cloudstore.CloudContextStore, deps cloudcontext.CloudContextDependencies, status model.CloudContextStatus) (model.CloudContextStatus, error) {
-	deps = cloudcontext.NormalizeCloudContextDependencies(deps)
+func finalizeStartedCloudContext(ctx core.Context, store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies, status model.CloudContextStatus) (model.CloudContextStatus, error) {
+	deps = cloudcloudcontext.NormalizeCloudContextDependencies(deps)
 	provider, err := providerconfig.ResolveCloudProvider(store, status.CloudProviderAlias)
 	if err != nil {
 		return model.CloudContextStatus{}, err
@@ -143,18 +144,18 @@ func finalizeStartedCloudContext(ctx core.Context, store cloudstore.CloudContext
 	if ctx.DryRun {
 		return status, nil
 	}
-	if err := cloudcontext.SaveCloudContextConfig(store, status.CloudContextConfig); err != nil {
+	if err := cloudcloudcontext.SaveCloudContextConfig(store, status.CloudContextConfig); err != nil {
 		return model.CloudContextStatus{}, err
 	}
 	return status, nil
 }
 
-func enforceCloudContextStartWorkingHoursGate(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcontext.CloudContextDependencies) error {
+func enforceCloudContextStartWorkingHoursGate(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcloudcontext.CloudContextDependencies) error {
 	if params.Force {
 		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
 		return nil
 	}
-	lookup, ok := store.(cloudcontext.CloudContextEnvLookup)
+	lookup, ok := store.(cloudcloudcontext.CloudContextEnvLookup)
 	if !ok {
 		return nil
 	}
@@ -173,7 +174,7 @@ func enforceCloudContextStartWorkingHoursGate(ctx core.Context, store cloudstore
 
 // recoverCloudContextStartFromTransitionalState retries a start rejected because the
 // instance is still stopping; start-instances only accepts stopped instances.
-func recoverCloudContextStartFromTransitionalState(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcontext.CloudContextDependencies, startErr error) (model.CloudContextStatus, error) {
+func recoverCloudContextStartFromTransitionalState(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcloudcontext.CloudContextDependencies, startErr error) (model.CloudContextStatus, error) {
 	if !isAWSIncorrectInstanceStateError(startErr) {
 		return model.CloudContextStatus{}, startErr
 	}
@@ -189,10 +190,10 @@ func recoverCloudContextStartFromTransitionalState(ctx core.Context, store cloud
 	if _, werr := deps.RunAWS(ctx, provider, recovered.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", recovered.InstanceID}); werr != nil {
 		return model.CloudContextStatus{}, werr
 	}
-	return changeCloudContextPowerState(ctx, store, params, deps, "start-instances", cloudcontext.CloudContextStatusRunning)
+	return changeCloudContextPowerState(ctx, store, params, deps, "start-instances", cloudcloudcontext.CloudContextStatusRunning)
 }
 
-func refreshSingleCloudContextStatus(ctx core.Context, store configpkg.CloudReadStore, deps cloudcontext.CloudContextDependencies, seed model.CloudContextStatus) (model.CloudContextStatus, error) {
+func refreshSingleCloudContextStatus(ctx core.Context, store configpkg.CloudReadStore, deps cloudcloudcontext.CloudContextDependencies, seed model.CloudContextStatus) (model.CloudContextStatus, error) {
 	statuses, err := RefreshCloudContextStatuses(ctx, store, deps)
 	if err != nil {
 		return model.CloudContextStatus{}, err
@@ -207,8 +208,8 @@ func refreshSingleCloudContextStatus(ctx core.Context, store configpkg.CloudRead
 }
 
 // ensureCloudContextRunningForPreflight powers on the matched context; in-cluster contexts need nothing.
-func ensureCloudContextRunningForPreflight(ctx core.Context, store cloudstore.CloudContextStore, deps cloudcontext.CloudContextDependencies, status model.CloudContextStatus) error {
-	if cloudcontext.IsInClusterCloudContext(status.CloudContextConfig) {
+func ensureCloudContextRunningForPreflight(ctx core.Context, store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies, status model.CloudContextStatus) error {
+	if cloudcloudcontext.IsInClusterCloudContext(status.CloudContextConfig) {
 		return nil
 	}
 	// Preflight runs at most once per context per CLI run, so a live describe is affordable.
@@ -216,14 +217,14 @@ func ensureCloudContextRunningForPreflight(ctx core.Context, store cloudstore.Cl
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(live.Status) == cloudcontext.CloudContextStatusRunning {
+	if strings.TrimSpace(live.Status) == cloudcloudcontext.CloudContextStatusRunning {
 		return nil
 	}
 	_, err = StartCloudContext(ctx, store, model.CloudContextParams{Name: status.Name}, deps)
 	return err
 }
 
-func CloudContextPreflight(store cloudstore.CloudContextStore, deps cloudcontext.CloudContextDependencies) core.KubernetesContextPreflightFunc {
+func CloudContextPreflight(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) core.KubernetesContextPreflightFunc {
 	var mu sync.Mutex
 	started := make(map[string]struct{})
 	return func(ctx core.Context, kubernetesContext string) error {
@@ -239,7 +240,7 @@ func CloudContextPreflight(store cloudstore.CloudContextStore, deps cloudcontext
 		}
 		mu.Unlock()
 
-		status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, kubernetesContext)
+		status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, kubernetesContext)
 		if err != nil || !ok {
 			return err
 		}
@@ -259,7 +260,7 @@ func CloudContextPreflight(store cloudstore.CloudContextStore, deps cloudcontext
 
 // cloudContextStartBlockedByWorkingHours returns a reason only when every attached
 // environment is outside its working hours.
-func cloudContextStartBlockedByWorkingHours(store configpkg.CloudReadStore, lookup cloudcontext.CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
+func cloudContextStartBlockedByWorkingHours(store configpkg.CloudReadStore, lookup cloudcloudcontext.CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
 	kubeContext, ok, err := resolveCloudContextWorkingHoursKubeContext(store, contextName)
 	if err != nil || !ok {
 		return "", err
@@ -296,7 +297,7 @@ func resolveCloudContextWorkingHoursKubeContext(store configpkg.CloudReadStore, 
 	if contextName == "" {
 		return "", false, nil
 	}
-	config, ok, err := cloudcontext.FindCloudContext(store, contextName)
+	config, ok, err := cloudcloudcontext.FindCloudContext(store, contextName)
 	if err != nil {
 		return "", false, err
 	}
@@ -339,12 +340,12 @@ func evaluateTenantWorkingHoursGate(tenant model.TenantConfig, envs []configpkg.
 }
 
 // changeCloudContextPowerState returns the new Status without persisting it.
-func changeCloudContextPowerState(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcontext.CloudContextDependencies, awsAction, status string) (model.CloudContextStatus, error) {
+func changeCloudContextPowerState(ctx core.Context, store cloudstore.CloudContextStore, params model.CloudContextParams, deps cloudcloudcontext.CloudContextDependencies, awsAction, status string) (model.CloudContextStatus, error) {
 	if store == nil {
 		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
-	deps = cloudcontext.NormalizeCloudContextDependencies(deps)
-	config, ok, err := cloudcontext.FindCloudContext(store, params.Name)
+	deps = cloudcloudcontext.NormalizeCloudContextDependencies(deps)
+	config, ok, err := cloudcloudcontext.FindCloudContext(store, params.Name)
 	if err != nil {
 		return model.CloudContextStatus{}, err
 	}
@@ -361,5 +362,5 @@ func changeCloudContextPowerState(ctx core.Context, store cloudstore.CloudContex
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", awsAction, "--instance-ids", config.InstanceID}); err != nil {
 		return model.CloudContextStatus{}, classifyCloudContextPowerError(awsAction, config, err)
 	}
-	return model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
+	return model.CloudContextStatus{CloudContextConfig: configcloudcontext.NormalizeCloudContextConfig(config), Status: status}, nil
 }

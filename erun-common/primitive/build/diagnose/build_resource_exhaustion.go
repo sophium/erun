@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
@@ -172,7 +172,7 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner kubea
 	if podName == "" {
 		return "", false
 	}
-	if config.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return LibraryDockerBuildContainerMemoryLimit(podName, containerName)
 	}
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)

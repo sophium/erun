@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 type TenantRepository interface {
@@ -147,7 +147,7 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 	name := strings.TrimSpace(body.Name)
 	issuer := strings.TrimSpace(body.Issuer)
 	// The runtime namespace is <tenant>-<env>, so a hyphenated tenant would allow cross-tenant namespace collisions.
-	if err := config.ValidateTenantName(name); err != nil {
+	if err := runtimetarget.ValidateTenantName(name); err != nil {
 		return repository.CreateTenantParams{}, http.StatusBadRequest, err.Error()
 	}
 	if issuer == "" {

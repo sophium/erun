@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
 )
 
 func ManagedCloudEnvironment(store configpkg.CloudReadStore, env configpkg.EnvConfig) (bool, error) {
@@ -13,7 +14,7 @@ func ManagedCloudEnvironment(store configpkg.CloudReadStore, env configpkg.EnvCo
 	if !env.RemoteWorktree() {
 		return false, nil
 	}
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := cloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return false, err
 	}

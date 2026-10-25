@@ -13,6 +13,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
@@ -20,7 +21,7 @@ import (
 )
 
 func SaveCloudContextConfig(store cloudstore.CloudContextStore, context model.CloudContextConfig) error {
-	context = configpkg.NormalizeCloudContextConfig(context)
+	context = cloudcontext.NormalizeCloudContextConfig(context)
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
 		config = configpkg.ERunConfig{}
@@ -36,7 +37,7 @@ func FindCloudContext(store configpkg.CloudReadStore, name string) (model.CloudC
 	if name == "" {
 		return model.CloudContextConfig{}, false, fmt.Errorf("cloud context name is required")
 	}
-	contexts, err := configpkg.ListCloudContexts(store)
+	contexts, err := cloudcontext.ListCloudContexts(store)
 	if err != nil {
 		return model.CloudContextConfig{}, false, err
 	}
@@ -49,11 +50,11 @@ func FindCloudContext(store configpkg.CloudReadStore, name string) (model.CloudC
 }
 
 func UpsertCloudContext(contexts []model.CloudContextConfig, context model.CloudContextConfig) []model.CloudContextConfig {
-	context = configpkg.NormalizeCloudContextConfig(context)
+	context = cloudcontext.NormalizeCloudContextConfig(context)
 	updated := false
 	result := make([]model.CloudContextConfig, 0, len(contexts)+1)
 	for _, existing := range contexts {
-		existing = configpkg.NormalizeCloudContextConfig(existing)
+		existing = cloudcontext.NormalizeCloudContextConfig(existing)
 		if existing.Name == "" {
 			continue
 		}

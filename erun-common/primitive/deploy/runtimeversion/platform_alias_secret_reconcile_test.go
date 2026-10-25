@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -42,7 +43,7 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 		Deploy: helmdeploy.HelmDeploySpec{
 			Tenant:               "team",
 			Environment:          "dev",
-			ReleaseName:          configpkg.RuntimeReleaseName("team"),
+			ReleaseName:          runtimetarget.RuntimeReleaseName("team"),
 			Namespace:            "team-dev",
 			Version:              "1.0.0",
 			ResolvedRuntimeImage: "registry.example/test/team-devops:1.0.0",

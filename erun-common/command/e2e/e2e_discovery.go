@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
@@ -137,7 +138,7 @@ func refuseHostRunPlaywrightSuites(projectRoot string) error {
 
 // A configured paths.e2e must exist rather than silently falling back to convention.
 func resolveE2EDir(projectRoot, override string) (string, error) {
-	if dir := config.ResolveProjectPath(projectRoot, override); dir != "" {
+	if dir := projectpaths.ResolveProjectPath(projectRoot, override); dir != "" {
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
 			return "", fmt.Errorf("configured e2e path %q (.erun/config.yaml paths.e2e) is not a directory: expected one subdirectory per suite, each holding a Dockerfile with an `e2e` stage", strings.TrimSpace(override))

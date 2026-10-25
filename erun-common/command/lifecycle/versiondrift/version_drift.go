@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
@@ -142,10 +143,10 @@ func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env list.Lis
 	req := config.ShellLaunchParams{
 		Tenant:            tenant,
 		Environment:       env.Name,
-		Namespace:         config.KubernetesNamespaceName(tenant, env.Name),
+		Namespace:         runtimetarget.KubernetesNamespaceName(tenant, env.Name),
 		KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 	}
-	releaseName := config.RuntimeReleaseName(tenant)
+	releaseName := runtimetarget.RuntimeReleaseName(tenant)
 	statusArgs := clusterread.ObserveHelmStatusArgs(req)
 	listArgs := clusterread.ObserveHelmListArgs(req, releaseName)
 	ctx.Trace("list: " + tenant + "/" + env.Name + "'s runtime version is not recorded locally -- checking its deployed release live")

@@ -1,8 +1,6 @@
 package config
 
 import (
-	"errors"
-	"path/filepath"
 	"strings"
 )
 
@@ -35,33 +33,4 @@ func (c ProjectPathsConfig) IsZero() bool {
 		strings.TrimSpace(c.Version) == "" &&
 		strings.TrimSpace(c.E2E) == "" &&
 		strings.TrimSpace(c.Playwright) == ""
-}
-
-// ResolveProjectPath returns "" for an empty override, else joins a relative path
-// to projectRoot.
-func ResolveProjectPath(projectRoot, override string) string {
-	override = strings.TrimSpace(override)
-	if override == "" {
-		return ""
-	}
-	if filepath.IsAbs(override) {
-		return filepath.Clean(override)
-	}
-	return filepath.Join(filepath.Clean(strings.TrimSpace(projectRoot)), override)
-}
-
-// LoadProjectPaths reads path overrides; an uninitialized project has none, a
-// corrupt config is an error.
-func LoadProjectPaths(projectRoot string) (ProjectPathsConfig, error) {
-	if strings.TrimSpace(projectRoot) == "" {
-		return ProjectPathsConfig{}, nil
-	}
-	config, _, err := LoadProjectConfig(projectRoot)
-	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return ProjectPathsConfig{}, nil
-		}
-		return ProjectPathsConfig{}, err
-	}
-	return config.Paths, nil
 }

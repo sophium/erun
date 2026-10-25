@@ -9,6 +9,8 @@ import (
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/awssso"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -27,7 +29,7 @@ func rootConfigSkipsInspection(inspection model.RootConfigInspection, options do
 }
 
 func runRootConfigDoctor(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions) (bool, error) {
-	inspection, err := config.InspectRootConfig(configStore)
+	inspection, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return false, err
 	}
@@ -67,7 +69,7 @@ func runRootConfigRestoreSelector(ctx core.Context, configStore config.ConfigSto
 	if !restored {
 		return inspection, false, nil
 	}
-	refreshed, err := config.InspectRootConfig(configStore)
+	refreshed, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return inspection, true, err
 	}
@@ -204,7 +206,7 @@ func runRootConfigRepairOrphans(ctx core.Context, configStore config.ConfigStore
 	if err != nil {
 		return restored || repaired, err
 	}
-	refreshed, refreshErr := config.InspectRootConfig(configStore)
+	refreshed, refreshErr := configbackup.InspectRootConfig(configStore)
 	if refreshErr != nil {
 		return restored || repaired, refreshErr
 	}
@@ -220,7 +222,7 @@ func runRootConfigRepairRestore(ctx core.Context, configStore config.ConfigStore
 	if err != nil || !restored {
 		return inspection, false, err
 	}
-	refreshed, err := config.InspectRootConfig(configStore)
+	refreshed, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return inspection, true, err
 	}
@@ -369,7 +371,7 @@ func runRootConfigRestore(ctx core.Context, livePath string, backup model.Config
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry-run: would restore root config from %s\n", backup.Path)
 		return true, err
 	}
-	if err := config.RestoreRootConfigFromBackup(backup.Path, livePath); err != nil {
+	if err := configbackup.RestoreRootConfigFromBackup(backup.Path, livePath); err != nil {
 		return false, err
 	}
 	_, err := fmt.Fprintf(ctx.Stdout, "Restored root config from %s\n", backup.Path)
@@ -436,7 +438,7 @@ func buildOrphanRepairParams(ctx core.Context, orphan model.OrphanedAlias) (mode
 		AccountID: orphan.AccountID,
 		Region:    preferredRegionForOrphan(orphan),
 	}
-	profile, ok, err := config.LookupAWSSSOProfileByAccountID(orphan.AccountID)
+	profile, ok, err := awssso.LookupAWSSSOProfileByAccountID(orphan.AccountID)
 	if err != nil {
 		w.Linef("Note: could not scan ~/.aws/config for SSO defaults: %v", err)
 		writeSSOLookupHelp(w, orphan)
@@ -454,7 +456,7 @@ func buildOrphanRepairParams(ctx core.Context, orphan model.OrphanedAlias) (mode
 	return params, w.Err()
 }
 
-func applyOrphanRepairProfile(w *lineWriter, params *model.InitAWSCloudProviderParams, profile config.AWSSSOProfile) {
+func applyOrphanRepairProfile(w *lineWriter, params *model.InitAWSCloudProviderParams, profile awssso.AWSSSOProfile) {
 	w.Linef("Found existing AWS SSO profile %q in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.", profile.Profile)
 	if profile.SSOStartURL != "" {
 		params.SSOStartURL = profile.SSOStartURL

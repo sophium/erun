@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -53,7 +54,7 @@ func DeployRecoveryActionDescription(action model.DeployRecoveryAction) string {
 
 func helmRollbackArgs(req config.ShellLaunchParams) []string {
 	// With no revision, helm rolls back to the previous release.
-	args := []string{"rollback", config.RuntimeReleaseName(req.Tenant)}
+	args := []string{"rollback", runtimetarget.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -68,7 +69,7 @@ func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action mo
 	switch action {
 	case model.DeployRecoveryClearPendingHelm:
 		recovery := helmdeploy.HelmReleaseRecoveryParams{
-			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
+			ReleaseName:       runtimetarget.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),
 			Verbosity:         ctx.Verbosity,

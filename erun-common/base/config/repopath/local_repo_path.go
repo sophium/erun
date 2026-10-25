@@ -1,15 +1,17 @@
-package config
+package repopath
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // HostRepoPathRequirement names why envType needs a host directory, shared by every refusal.
-func HostRepoPathRequirement(envType EnvironmentType) string {
-	if envType == EnvironmentTypeHost {
+func HostRepoPathRequirement(envType config.EnvironmentType) string {
+	if envType == config.EnvironmentTypeHost {
 		return "it needs a host directory to use — run init from the project directory or pass --project-root"
 	}
 	return "it needs a host repo path to mount — run init from the project directory or pass --project-root"
@@ -17,12 +19,12 @@ func HostRepoPathRequirement(envType EnvironmentType) string {
 
 // RequiresHostRepoPath reports whether envType's repo path must exist on this
 // machine: local-agent mounts it and host is it; remote and runtime use a PVC.
-func RequiresHostRepoPath(envType EnvironmentType) bool {
-	return envType == EnvironmentTypeLocalAgent || envType == EnvironmentTypeHost
+func RequiresHostRepoPath(envType config.EnvironmentType) bool {
+	return envType == config.EnvironmentTypeLocalAgent || envType == config.EnvironmentTypeHost
 }
 
 // ValidateEnvRepoPath validates the path only for types that require a host path.
-func ValidateEnvRepoPath(envType EnvironmentType, path string) error {
+func ValidateEnvRepoPath(envType config.EnvironmentType, path string) error {
 	if !RequiresHostRepoPath(envType) {
 		return nil
 	}
@@ -31,7 +33,7 @@ func ValidateEnvRepoPath(envType EnvironmentType, path string) error {
 
 // ValidateHostRepoPath requires an existing absolute directory, so a bad path is
 // refused at edit time rather than failing later as a mount or deploy error.
-func ValidateHostRepoPath(envType EnvironmentType, path string) error {
+func ValidateHostRepoPath(envType config.EnvironmentType, path string) error {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return fmt.Errorf("cannot use an empty repository path: %s", HostRepoPathRequirement(envType))

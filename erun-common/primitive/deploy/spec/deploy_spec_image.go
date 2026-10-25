@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
@@ -128,7 +130,7 @@ func configureDeployInputMetadata(store deploytarget.DeployStore, target configp
 	}
 	deployInput.ManagedCloud = managedCloud
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
-	gateway, err := configpkg.ResolveOpenRouterConfig(store)
+	gateway, err := openrouter.ResolveOpenRouterConfig(store)
 	if err != nil {
 		return err
 	}
@@ -168,7 +170,7 @@ func resolveDeploySpecForCurrentDockerBuild(store deploytarget.DeployStore, targ
 	deployInput.ImageOverrides = map[string]string{
 		build.Image.ImageName: build.Image.Tag,
 	}
-	if build.Image.ImageName == configpkg.DevopsComponentName {
+	if build.Image.ImageName == runtimetarget.DevopsComponentName {
 		deployInput.ResolvedRuntimeImage = build.Image.Tag
 		// Persist the bare name so later deploys read back the line this build chose.
 		if name := configpkg.RuntimeImageComponentName(build.Image.Tag); name != "" {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -156,7 +157,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -198,7 +199,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -238,7 +239,7 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             configpkg.RuntimeReleaseName("team"),
+		ReleaseName:             runtimetarget.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -273,7 +274,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             configpkg.RuntimeReleaseName("team"),
+		ReleaseName:             runtimetarget.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -304,7 +305,7 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer

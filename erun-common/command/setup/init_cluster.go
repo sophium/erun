@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 )
@@ -71,10 +74,10 @@ func (s BootstrapRunner) ResolveContainerRegistry(params bootstrap.BootstrapInit
 // resolveHostedRegistry probes reachability so an unpushable choice is refused
 // at selection time.
 func (s BootstrapRunner) resolveHostedRegistry(tenant string) (string, error) {
-	reference := configpkg.HostedRegistryReference(tenant)
+	reference := containerregistry.HostedRegistryReference(tenant)
 	// A dry-run does not probe, and says so, rather than imply the choice works.
 	if s.Context.DryRun {
-		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + configpkg.HostedRegistryHost + " and refuses the choice if it is not reachable")
+		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + containerregistry.HostedRegistryHost + " and refuses the choice if it is not reachable")
 		return reference, nil
 	}
 	if status := s.probeHostedRegistry(); !status.Available {
@@ -124,7 +127,7 @@ func (s BootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 		return current, nil
 	}
 
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(s.Store, kubernetesContext)
+	status, ok, err := cloudcontext.FindCloudContextForKubernetesContext(s.Store, kubernetesContext)
 	if err != nil || !ok {
 		return current, err
 	}
@@ -152,7 +155,7 @@ func (s BootstrapRunner) saveClusterContainerRegistry(projectRoot, envName strin
 	if err != nil {
 		return err
 	}
-	desired := configpkg.ClusterContainerRegistries(cluster)
+	desired := containerregistry.ClusterContainerRegistries(cluster)
 	if projectConfig.ContainerRegistriesForEnvironment(envName).Equal(desired) {
 		return nil
 	}
@@ -202,7 +205,7 @@ func (s BootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 		return err
 	}
 
-	namespace := configpkg.KubernetesNamespaceName(tenant, envName)
+	namespace := runtimetarget.KubernetesNamespaceName(tenant, envName)
 	if namespace == "" {
 		return fmt.Errorf("kubernetes namespace name is empty for tenant %q and environment %q", tenant, envName)
 	}

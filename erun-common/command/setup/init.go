@@ -10,13 +10,16 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
-	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmrun"
@@ -69,7 +72,7 @@ type BootstrapInitResult struct {
 
 type BootstrapInitDependencies struct {
 	Store           envstore.BootstrapStore
-	FindProjectRoot projectroot.ProjectFinderFunc
+	FindProjectRoot seamprojectroot.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
 	// TenantSelectionUnavailable means nobody can be asked: a single tenant is
@@ -81,7 +84,7 @@ type BootstrapInitDependencies struct {
 	PromptRemoteRepositoryURL  PromptValueFunc
 	PromptCodeCommitSSHKeyID   PromptValueFunc
 	EnsureKubernetesNamespace  kubeapi.NamespaceEnsurerFunc
-	LoadProjectConfig          projectroot.ProjectConfigLoaderFunc
+	LoadProjectConfig          seamprojectroot.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
 	WaitForRemoteRuntime       runtimepod.RemoteRuntimeWaitFunc
 	RunRemoteCommand           runtimepod.RemoteCommandRunnerFunc
@@ -139,10 +142,10 @@ func (s BootstrapRunner) run(params bootstrap.BootstrapInitParams) (BootstrapIni
 }
 
 func (s *bootstrapRunState) run() error {
-	if err := configpkg.ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
+	if err := runtimeresources.ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
 		return err
 	}
-	if err := configpkg.ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
+	if err := runtimeresources.ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
 		return err
 	}
 	if err := s.validateRemoteParams(); err != nil {
@@ -264,7 +267,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
 	}
-	s.runner.Context.Trace("init: runtime deploys use the published " + configpkg.DevopsComponentName + " chart; no devops scaffold is written")
+	s.runner.Context.Trace("init: runtime deploys use the published " + runtimetarget.DevopsComponentName + " chart; no devops scaffold is written")
 	return nil
 }
 
@@ -283,7 +286,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 		s.envConfigChanged = true
 	}
 	if s.params.Bootstrap {
-		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + configpkg.DevopsComponentName + " chart")
+		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + runtimetarget.DevopsComponentName + " chart")
 	}
 	return s.runner.writeRemoteInitMarker(req, model.RemoteInitMarker{
 		Tenant:             s.tenant,
@@ -388,7 +391,7 @@ func (s BootstrapRunner) withStoreDefaults() BootstrapRunner {
 		s.Store = configpkg.ConfigStore{}
 	}
 	if s.FindProjectRoot == nil {
-		s.FindProjectRoot = configpkg.FindProjectRoot
+		s.FindProjectRoot = configprojectroot.FindProjectRoot
 	}
 	if s.GetWorkingDir == nil {
 		s.GetWorkingDir = os.Getwd

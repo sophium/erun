@@ -11,6 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 )
 
 // configWatcherDebounce coalesces erun init's burst of writes into one reload.
@@ -224,7 +225,7 @@ func definitionWatchTargetFor(root, path string) (definitionWatchTarget, bool) {
 		return definitionWatchTarget{}, false
 	}
 	tenant, environment := segments[0], segments[1]
-	expected, err := config.EnvConfigPath(tenant, environment)
+	expected, err := configbackup.EnvConfigPath(tenant, environment)
 	if err != nil || filepath.Clean(expected) != filepath.Clean(path) {
 		return definitionWatchTarget{}, false
 	}

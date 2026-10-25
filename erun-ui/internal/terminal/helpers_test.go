@@ -12,8 +12,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -100,7 +102,7 @@ func inertDeps(d Deps) Deps {
 		CanConnectLocalPort: func(int) bool { return false },
 		CanReachMCPEndpoint: func(int) bool { return true },
 		MCPEndpoint: func(result configpkg.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", configpkg.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer: func(string, string) string { return "" },
 		WrapMCPUnreachable: func(kind mcp.LocalMCPUnreachableKind, err error) error {
@@ -180,12 +182,12 @@ func linkedCloudContextFromStore(store Store, env configpkg.EnvConfig) (model.Cl
 	if kubernetesContext == "" {
 		return model.CloudContextStatus{}, false, nil
 	}
-	statuses, err := cloudcontext.ListCloudContextStatuses(store)
+	statuses, err := cloudcloudcontext.ListCloudContextStatuses(store)
 	if err != nil {
 		return model.CloudContextStatus{}, false, err
 	}
 	for _, status := range statuses {
-		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
+		context := configcloudcontext.NormalizeCloudContextConfig(status.CloudContextConfig)
 		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
 			status.CloudContextConfig = context
 			testCloudStatusesMu.Lock()

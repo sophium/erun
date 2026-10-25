@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
 	"github.com/sophium/erun/erun-common/base/seam/projectroot"
@@ -87,7 +89,7 @@ func resolveConventionDevopsDockerDir(findProjectRoot projectroot.ProjectFinderF
 
 // ResolveComponentAwareDockerDir resolves the docker build root for the selected component or paths.docker override.
 func ResolveComponentAwareDockerDir(projectRoot, selectedComponent string) (string, bool, error) {
-	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, err
 	}
@@ -127,7 +129,7 @@ func detectedProjectRootDevopsDockerDir(findProjectRoot projectroot.ProjectFinde
 	if !ok {
 		return "", false, nil
 	}
-	dockerDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "docker")
+	dockerDir := filepath.Join(projectRoot, runtimetarget.RuntimeReleaseName(tenant), "docker")
 	if ok, err := dockerbuild.IsDockerBuildModuleDir(dockerDir); err != nil {
 		return "", false, err
 	} else if ok {

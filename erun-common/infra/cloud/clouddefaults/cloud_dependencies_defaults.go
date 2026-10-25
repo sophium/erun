@@ -10,6 +10,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -86,28 +87,28 @@ func normalizeAWSCloudDependencies(deps cloud.CloudDependencies) cloud.CloudDepe
 
 // resolveAWSIdentityForExecutionMode picks the subprocess or library implementation per the aws-sts mode.
 func resolveAWSIdentityForExecutionMode() func(core.Context, string) (cloud.AWSIdentity, error) {
-	if configpkg.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryResolveAWSIdentity
 	}
 	return defaultResolveAWSIdentity
 }
 
 func runAWSBearerTokenForExecutionMode() func(core.Context, string, string) (string, error) {
-	if configpkg.CurrentExecutionMode(awsSTSWebIdentityTokenExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(awsSTSWebIdentityTokenExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryRunAWSBearerToken
 	}
 	return defaultRunAWSBearerToken
 }
 
 func runAWSExportCredentialsForExecutionMode() func(core.Context, string) (cloud.CloudProviderCredentials, error) {
-	if configpkg.CurrentExecutionMode(awsExportCredentialsExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(awsExportCredentialsExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryRunAWSExportCredentials
 	}
 	return defaultRunAWSExportCredentials
 }
 
 func checkAWSStatusForExecutionMode() func(core.Context, model.CloudProviderConfig) model.CloudProviderStatus {
-	if configpkg.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryCheckAWSStatus
 	}
 	return DefaultCheckAWSStatus

@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/infra/activity/managedcloud"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
@@ -93,9 +96,9 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		// Without it, a redeploy drops the MCP edge to unauthenticated.
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
 		// A private runtime image cannot start without these.
-		ImagePullSecrets:   configpkg.NormalizeImagePullSecrets(s.params.ImagePullSecrets),
-		RuntimePod:         configpkg.NormalizeRuntimePodResources(s.params.RuntimePod),
-		RuntimeDindPod:     configpkg.NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
+		ImagePullSecrets:   containerregistry.NormalizeImagePullSecrets(s.params.ImagePullSecrets),
+		RuntimePod:         runtimeresources.NormalizeRuntimePodResources(s.params.RuntimePod),
+		RuntimeDindPod:     runtimeresources.NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
 		Deploy:             initDeployConfig(s.params),
@@ -113,7 +116,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 // createHostEnvConfig records only name, type and directory: a host env must
 // never contact a cluster.
 func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
-	if err := configpkg.ValidateHostRepoPath(configpkg.EnvironmentTypeHost, envProjectRoot); err != nil {
+	if err := repopath.ValidateHostRepoPath(configpkg.EnvironmentTypeHost, envProjectRoot); err != nil {
 		return fmt.Errorf("cannot create %s/%s as type %s: %w", s.tenant, s.envName, configpkg.EnvironmentTypeHost, err)
 	}
 	envProjectRoot = strings.TrimSpace(envProjectRoot)
@@ -159,7 +162,7 @@ func describeComponentsSetting(components []string) string {
 
 func seedInitContainerRegistries(params bootstrap.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
 	if params.ClusterRegistry != nil {
-		return configpkg.ClusterContainerRegistries(*params.ClusterRegistry)
+		return containerregistry.ClusterContainerRegistries(*params.ClusterRegistry)
 	}
 	return configpkg.SingleContainerRegistries(registry)
 }

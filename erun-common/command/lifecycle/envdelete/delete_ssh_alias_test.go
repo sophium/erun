@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/sshconfig"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
@@ -65,7 +66,7 @@ func sandboxSSHConfig(t *testing.T) string {
 
 func writeSSHConfigBlock(t *testing.T, path, alias string, port int) {
 	t.Helper()
-	if err := configpkg.UpsertSSHConfig(path, model.SSHHostEntry{
+	if err := sshconfig.UpsertSSHConfig(path, model.SSHHostEntry{
 		Alias:        alias,
 		HostKeyAlias: alias,
 		HostName:     "127.0.0.1",

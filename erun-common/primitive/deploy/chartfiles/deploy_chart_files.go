@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"gopkg.in/yaml.v3"
@@ -161,7 +161,7 @@ func componentChartsK8sDir(projectRoot string) (string, bool, error) {
 	if declared {
 		return declaredDevopsModuleK8sDir(dockerDir)
 	}
-	return dockerbuild.ResolveProjectRootDevopsK8sDir(configpkg.FindProjectRoot, projectRoot)
+	return dockerbuild.ResolveProjectRootDevopsK8sDir(projectroot.FindProjectRoot, projectRoot)
 }
 
 // declaredDevopsModuleK8sDir resolves charts inside the paths.docker-declared module only;

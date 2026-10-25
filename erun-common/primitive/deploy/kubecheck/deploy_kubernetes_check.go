@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
@@ -86,8 +87,8 @@ func KubernetesDeployContextAtDir(dir string) model.KubernetesDeployContext {
 // TraceConfiguredDeployPaths also warns when the project config is gitignored,
 // which voids the override.
 func TraceConfiguredDeployPaths(ctx core.Context, repoPath string) {
-	configpkg.WarnIfProjectConfigGitIgnored(ctx, repoPath)
-	paths, err := configpkg.LoadProjectPaths(repoPath)
+	projectpaths.WarnIfProjectConfigGitIgnored(ctx, repoPath)
+	paths, err := projectpaths.LoadProjectPaths(repoPath)
 	if err != nil {
 		return
 	}
@@ -327,12 +328,12 @@ func matchesExpectedRuntimePod(value, expected model.RuntimePodResources) bool {
 	if expected == (model.RuntimePodResources{}) {
 		return true
 	}
-	value = configpkg.NormalizeRuntimePodResources(value)
-	expected = configpkg.NormalizeRuntimePodResources(expected)
-	valueCPU, valueCPUErr := configpkg.ParseKubernetesCPUToMilli(value.CPU)
-	expectedCPU, expectedCPUErr := configpkg.ParseKubernetesCPUToMilli(expected.CPU)
-	valueMemory, valueMemoryErr := configpkg.ParseKubernetesMemoryToMi(value.Memory)
-	expectedMemory, expectedMemoryErr := configpkg.ParseKubernetesMemoryToMi(expected.Memory)
+	value = runtimeresources.NormalizeRuntimePodResources(value)
+	expected = runtimeresources.NormalizeRuntimePodResources(expected)
+	valueCPU, valueCPUErr := runtimeresources.ParseKubernetesCPUToMilli(value.CPU)
+	expectedCPU, expectedCPUErr := runtimeresources.ParseKubernetesCPUToMilli(expected.CPU)
+	valueMemory, valueMemoryErr := runtimeresources.ParseKubernetesMemoryToMi(value.Memory)
+	expectedMemory, expectedMemoryErr := runtimeresources.ParseKubernetesMemoryToMi(expected.Memory)
 	return valueCPUErr == nil &&
 		expectedCPUErr == nil &&
 		valueMemoryErr == nil &&

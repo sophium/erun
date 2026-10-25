@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 // EnvironmentHostnameWriter writes an environment's wildcard A record in the
@@ -98,5 +98,5 @@ func (r EnvironmentHostnameRoutes) resolveWildcard(req *http.Request) (string, e
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("*.%s.%s", config.KubernetesNamespaceName(tenant.Name, environment.Name), r.servicesZone), nil
+	return fmt.Sprintf("*.%s.%s", runtimetarget.KubernetesNamespaceName(tenant.Name, environment.Name), r.servicesZone), nil
 }

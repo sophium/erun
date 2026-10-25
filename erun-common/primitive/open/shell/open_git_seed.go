@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -185,8 +186,8 @@ func remoteShellPrivateKeyMaterial(req configpkg.ShellLaunchParams) (string, err
 
 // RemoteSSHKeySeedArgs uses -i (not -it) so stdin stays a pipe for the key.
 func RemoteSSHKeySeedArgs(req configpkg.ShellLaunchParams) []string {
-	args := configpkg.KubectlTargetArgs(req)
-	return append(args, "exec", "-i", "deployment/"+configpkg.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
+	args := runtimetarget.KubectlTargetArgs(req)
+	return append(args, "exec", "-i", "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
 }
 
 func seedRemoteSSHKey(req configpkg.ShellLaunchParams) error {

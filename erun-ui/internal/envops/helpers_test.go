@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
@@ -58,7 +59,7 @@ func inertDeps() Deps {
 		Started:         func() bool { return false },
 		Emit:            func(string, ...any) {},
 		MCPEndpoint: func(result config.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer:           func(string, string) string { return "" },
 		CanConnectLocalPort: func(int) bool { return false },

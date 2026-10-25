@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 func ShellLaunchParamsFromResult(result configpkg.OpenResult) configpkg.ShellLaunchParams {
@@ -12,7 +13,7 @@ func ShellLaunchParamsFromResult(result configpkg.OpenResult) configpkg.ShellLau
 		Tenant:             result.Tenant,
 		Environment:        result.Environment,
 		Title:              result.Title,
-		Namespace:          configpkg.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:          runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment),
 		KubernetesContext:  strings.TrimSpace(result.EnvConfig.KubernetesContext),
 		RemoteRepo:         result.RemoteRepo(),
 		Type:               result.EnvConfig.ResolvedType(),

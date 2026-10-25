@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/cmd/shared/envscope"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -73,7 +73,7 @@ func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen envscope.OpenResolver, p
 	if err != nil {
 		return McpEdgeTarget{}, err
 	}
-	port := config.MCPPortForResult(result)
+	port := localports.MCPPortForResult(result)
 	if port <= 0 {
 		return McpEdgeTarget{}, fmt.Errorf("no local MCP port is configured for %s/%s", result.Tenant, result.Environment)
 	}

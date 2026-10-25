@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
@@ -95,10 +96,10 @@ func HelmDeployCommand(d helmdeploy.HelmDeploySpec) helm.CommandSpec {
 		"--set-string", "idle.workingHours="+helmargs.HelmIdleWorkingHours(d.Idle),
 		"--set-string", "idle.timezone="+helmargs.HelmIdleTimezone(d.Idle),
 		"--set", "idle.trafficBytes="+helmargs.FormatHelmInt64(helmargs.HelmIdleTrafficBytes(d.Idle)),
-		"--set-string", "runtime.resources.limits.cpu="+configpkg.NormalizeRuntimePodResources(d.RuntimePod).CPU,
-		"--set-string", "runtime.resources.limits.memory="+configpkg.NormalizeRuntimePodResources(d.RuntimePod).Memory,
-		"--set-string", "runtime.dind.resources.limits.cpu="+configpkg.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
-		"--set-string", "runtime.dind.resources.limits.memory="+configpkg.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
+		"--set-string", "runtime.resources.limits.cpu="+runtimeresources.NormalizeRuntimePodResources(d.RuntimePod).CPU,
+		"--set-string", "runtime.resources.limits.memory="+runtimeresources.NormalizeRuntimePodResources(d.RuntimePod).Memory,
+		"--set-string", "runtime.dind.resources.limits.cpu="+runtimeresources.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
+		"--set-string", "runtime.dind.resources.limits.memory="+runtimeresources.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
 	)
 	args = append(args, helmargs.HelmClaudeSetArgs(d.Claude, d.OpenRouter)...)
 	prefixHelmSetKeys(args, d.SubchartKey)

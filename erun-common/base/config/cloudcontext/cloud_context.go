@@ -1,4 +1,4 @@
-package config
+package cloudcontext
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -50,12 +51,12 @@ func NormalizeCloudContextConfig(config model.CloudContextConfig) model.CloudCon
 	return config
 }
 
-func ListCloudContexts(store CloudReadStore) ([]model.CloudContextConfig, error) {
+func ListCloudContexts(store configpkg.CloudReadStore) ([]model.CloudContextConfig, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
 	config, _, err := store.LoadERunConfig()
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil
 	}
 	if err != nil {
@@ -64,7 +65,7 @@ func ListCloudContexts(store CloudReadStore) ([]model.CloudContextConfig, error)
 	return normalizedCloudContexts(config.CloudContexts), nil
 }
 
-func FindCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (model.CloudContextStatus, bool, error) {
+func FindCloudContextForKubernetesContext(store configpkg.CloudReadStore, kubernetesContext string) (model.CloudContextStatus, bool, error) {
 	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
 		return model.CloudContextStatus{}, false, nil

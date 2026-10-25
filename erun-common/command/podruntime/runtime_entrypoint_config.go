@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
@@ -35,17 +36,17 @@ func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 	if err := writeRuntimeBootTenantConfig(configHome, injected); err != nil {
 		return err
 	}
-	env, _, err := configpkg.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
+	env, _, err := runtimesync.LoadRuntimeEnvConfigForSync(configHome, injected.Tenant, injected.Environment)
 	if err != nil {
 		env = configpkg.EnvConfig{}
 	}
 	env = cloudconfig.OverlayInjectedEnvConfig(env, injected.Env)
 	env.LocalRepoPath = boot.repoDir()
-	return writeRuntimeBootYAML(configpkg.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
+	return writeRuntimeBootYAML(runtimesync.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
 }
 
 func writeRuntimeBootRootConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {
-	root, _, err := configpkg.LoadRuntimeRootConfigForSync(configHome)
+	root, _, err := runtimesync.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = configpkg.ERunConfig{}
 	}
@@ -56,7 +57,7 @@ func writeRuntimeBootRootConfig(configHome string, injected cloudconfig.Injected
 	for _, context := range injected.Contexts {
 		root.CloudContexts = cloudcontext.UpsertCloudContext(root.CloudContexts, context)
 	}
-	return writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(configHome), root)
+	return writeRuntimeBootYAML(runtimesync.RuntimeRootConfigPath(configHome), root)
 }
 
 func writeRuntimeBootTenantConfig(configHome string, injected cloudconfig.InjectedRuntimeConfig) error {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
@@ -79,7 +80,7 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	}
 	// Normalize like every writer does, or the injected "" never matches the
 	// on-disk default and drift never clears.
-	contexts := []model.CloudContextConfig{configpkg.NormalizeCloudContextConfig(model.CloudContextConfig{
+	contexts := []model.CloudContextConfig{cloudcontext.NormalizeCloudContextConfig(model.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,

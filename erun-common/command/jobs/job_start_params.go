@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 )
@@ -85,7 +85,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 	}
 	resolved := dir
 	if !filepath.IsAbs(resolved) {
-		if _, root, err := config.FindProjectRoot(); err == nil {
+		if _, root, err := projectroot.FindProjectRoot(); err == nil {
 			resolved = filepath.Join(root, resolved)
 		} else if abs, absErr := filepath.Abs(resolved); absErr == nil {
 			resolved = abs

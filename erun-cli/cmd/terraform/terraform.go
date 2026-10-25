@@ -7,17 +7,17 @@ import (
 
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/cloudcli"
-	"github.com/sophium/erun/erun-common/base/config"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/base/seam/operatorprompt"
-	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/terraform"
 	"github.com/spf13/cobra"
 )
 
-func NewTerraformCmd(store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc) *cobra.Command {
+func NewTerraformCmd(store envstore.TerraformStore, findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
@@ -65,7 +65,7 @@ func NewTerraformCmd(store envstore.TerraformStore, findProjectRoot projectroot.
 	return cmd
 }
 
-func newTerraformOperationCmd(store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
+func newTerraformOperationCmd(store envstore.TerraformStore, findProjectRoot seamprojectroot.ProjectFinderFunc, op model.TerraformOperation, use, short, long, example string) *cobra.Command {
 	var tenantFlag, environmentFlag, confirmEnvironment string
 	cmd := &cobra.Command{
 		Use:          use,
@@ -87,9 +87,9 @@ func newTerraformOperationCmd(store envstore.TerraformStore, findProjectRoot pro
 	return cmd
 }
 
-func runTerraformCommand(ctx core.Context, store envstore.TerraformStore, findProjectRoot projectroot.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store envstore.TerraformStore, findProjectRoot seamprojectroot.ProjectFinderFunc, op model.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {

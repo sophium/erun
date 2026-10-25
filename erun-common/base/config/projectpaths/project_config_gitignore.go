@@ -1,4 +1,4 @@
-package config
+package projectpaths
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -21,7 +22,7 @@ func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ign
 		return false, false, nil
 	}
 
-	relPath := filepath.Join(ProjectConfigDir, ConfigFile)
+	relPath := filepath.Join(config.ProjectConfigDir, config.ConfigFile)
 	ctx.TraceCommand(projectRoot, "git", "check-ignore", "-q", "--", relPath)
 	cmd := core.Command("git", "-C", projectRoot, "check-ignore", "-q", "--", relPath)
 	runErr := cmd.Run()
@@ -36,7 +37,7 @@ func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ign
 }
 
 func projectConfigFileExists(projectRoot string) bool {
-	configFilePath, err := projectConfigPath(projectRoot)
+	configFilePath, err := config.ProjectConfigPath(projectRoot)
 	if err != nil {
 		return false
 	}

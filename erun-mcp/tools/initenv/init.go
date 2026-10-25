@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/command/setup"
@@ -129,7 +130,7 @@ func initToolExecute(runtime runtimecfg.RuntimeConfig, input InitInput) (func(bo
 		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
 			Store: setup.TraceBootstrapStore(ctx, runtime.Store),
 			FindProjectRoot: func() (string, string, error) {
-				return config.FindProjectRootFromDir(workDir)
+				return projectroot.FindProjectRootFromDir(workDir)
 			},
 			GetWorkingDir: func() (string, error) {
 				return workDir, nil

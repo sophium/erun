@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
@@ -50,7 +51,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatalf("write the pod's config: %v", err)
 	}
-	rootPath := configpkg.RuntimeRootConfigPath(boot.configHome())
+	rootPath := runtimesync.RuntimeRootConfigPath(boot.configHome())
 	unprovisioned, err := os.ReadFile(rootPath)
 	if err != nil {
 		t.Fatal(err)

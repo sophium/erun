@@ -10,6 +10,8 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
@@ -48,7 +50,7 @@ func ResolveDeploySpec(ctx core.Context, store deploytarget.DeployStore, findPro
 		spec.Deploy.Timeout = override
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+		if err := runtimeresources.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
 			return helmdeploy.DeploySpec{}, fmt.Errorf("namespace quota override: %w", err)
 		}
 		spec.Deploy.NamespaceQuota = target.NamespaceQuotaOverride
@@ -76,7 +78,7 @@ func ResolveCurrentDeploySpecs(ctx core.Context, store deploytarget.DeployStore,
 		}
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+		if err := runtimeresources.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
 			return nil, fmt.Errorf("namespace quota override: %w", err)
 		}
 		for i := range specs {
@@ -336,7 +338,7 @@ func appendRuntimeFallbackSpecs(ctx core.Context, store deploytarget.DeployStore
 	if !runtimeSelected || hasLocalRuntime {
 		return specs, nil
 	}
-	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + configpkg.DevopsComponentName + " chart")
+	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + runtimetarget.DevopsComponentName + " chart")
 	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
 	if err != nil {
 		return nil, err

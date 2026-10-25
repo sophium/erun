@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
@@ -191,7 +193,7 @@ func resolveTerraformTargetEnvironment(params model.TerraformParams, store envst
 	if err != nil {
 		return terraformTarget{}, err
 	}
-	if err := configpkg.ValidateTenantName(tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(tenant); err != nil {
 		return terraformTarget{}, err
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
@@ -238,7 +240,7 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params model.Te
 	req := configpkg.ShellLaunchParams{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
-		Namespace:         configpkg.KubernetesNamespaceName(target.Tenant, target.Environment),
+		Namespace:         runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext: target.KubeContext,
 	}
 	script := terraformDispatchScript(target, params.Operation)
@@ -314,7 +316,7 @@ func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, 
 
 	tenant, environment, kubeContext, envType, remoteWorktree := target.Tenant, target.Environment, target.KubeContext, target.EnvType, target.RemoteWorktree
 
-	paths, err := configpkg.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return model.TerraformResult{}, nil, err
 	}
@@ -339,7 +341,7 @@ func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, 
 		Tenant:                  tenant,
 		Environment:             environment,
 		Operation:               string(op),
-		Namespace:               configpkg.KubernetesNamespaceName(tenant, environment),
+		Namespace:               runtimetarget.KubernetesNamespaceName(tenant, environment),
 		Directory:               dir,
 		RootSource:              string(source),
 		ConfiguredTerraformBase: configuredBase,
@@ -370,7 +372,7 @@ func validateTerraformOperation(op model.TerraformOperation) error {
 // resolveTerraformDir prefers paths.terraform, then terraform-<tenant>/, then
 // <tenant>-devops/terraform-<tenant>/, and appends /<environment>.
 func resolveTerraformDir(projectRoot, tenant, environment, configuredBase string) (dir, varFile string, source terraformRootSource, err error) {
-	if base := configpkg.ResolveProjectPath(projectRoot, configuredBase); base != "" {
+	if base := projectpaths.ResolveProjectPath(projectRoot, configuredBase); base != "" {
 		dir = filepath.Join(base, environment)
 		if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
 			return "", "", "", terraformRootNotFoundError(tenant, environment, configuredBase, dir)

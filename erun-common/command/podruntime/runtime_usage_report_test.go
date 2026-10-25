@@ -3,7 +3,7 @@ package podruntime
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
@@ -89,7 +89,7 @@ func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	if recommendation.Evidence.MemoryLimitBytes != testMemoryWarn {
 		t.Errorf("scored against %d, want the live limit %d", recommendation.Evidence.MemoryLimitBytes, testMemoryWarn)
 	}
-	if got := memoryVerdict(t, recommendation).Current; got != config.FormatBytesAsMi(testMemoryWarn) {
-		t.Errorf("current size reported as %q, want %q", got, config.FormatBytesAsMi(testMemoryWarn))
+	if got := memoryVerdict(t, recommendation).Current; got != runtimeresources.FormatBytesAsMi(testMemoryWarn) {
+		t.Errorf("current size reported as %q, want %q", got, runtimeresources.FormatBytesAsMi(testMemoryWarn))
 	}
 }

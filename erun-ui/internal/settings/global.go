@@ -6,11 +6,12 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
 	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
@@ -82,7 +83,7 @@ func (s *Service) InitCloudContext(input CloudContextInitInput) (CloudContextSta
 		InstanceType:       strings.TrimSpace(input.InstanceType),
 		DiskType:           strings.TrimSpace(input.DiskType),
 		DiskSizeGB:         input.DiskSizeGB,
-	}, cloudcontext.CloudContextDependencies{})
+	}, cloudcloudcontext.CloudContextDependencies{})
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -428,7 +429,7 @@ func statusesForCloudProvidersFromStore(store configpkg.CloudReadStore, deps clo
 func statusesForCloudContexts(contexts []model.CloudContextConfig) []model.CloudContextStatus {
 	statuses := make([]model.CloudContextStatus, 0, len(contexts))
 	for _, context := range contexts {
-		statuses = append(statuses, model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(context)})
+		statuses = append(statuses, model.CloudContextStatus{CloudContextConfig: configcloudcontext.NormalizeCloudContextConfig(context)})
 	}
 	return statuses
 }
@@ -442,7 +443,7 @@ func cloudContextStatusesToUI(statuses []model.CloudContextStatus) []CloudContex
 }
 
 func cloudContextStatusToUI(status model.CloudContextStatus) CloudContextStatus {
-	context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
+	context := configcloudcontext.NormalizeCloudContextConfig(status.CloudContextConfig)
 	return CloudContextStatus{
 		Name:                strings.TrimSpace(context.Name),
 		Provider:            strings.TrimSpace(context.Provider),

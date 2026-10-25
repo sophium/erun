@@ -7,6 +7,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/cmd/shared/helmrecovery"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -66,13 +68,13 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 		return false, nil
 	}
 	deployed, err := r.checkKubernetesDeployment(r.ctx, model.KubernetesDeploymentCheckParams{
-		Name:               config.RuntimeReleaseName(r.result.Tenant),
-		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
+		Name:               runtimetarget.RuntimeReleaseName(r.result.Tenant),
+		Namespace:          runtimetarget.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
 		ExpectedRepoPath:   runtimeref.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
-		ExpectedMCPPort:    config.MCPPortForResult(r.result),
-		ExpectedSSHPort:    config.SSHLocalPortForResult(r.result),
+		ExpectedMCPPort:    localports.MCPPortForResult(r.result),
+		ExpectedSSHPort:    localports.SSHLocalPortForResult(r.result),
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
 	if err != nil {
@@ -115,8 +117,8 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution helmdeploy.DeploySpec) h
 // ensureRuntimeDeployed detects an undeployed runtime by deployment presence, the
 // signal the desktop surfaces as "deploy this environment".
 func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
-	release := config.RuntimeReleaseName(r.result.Tenant)
-	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	release := runtimetarget.RuntimeReleaseName(r.result.Tenant)
+	namespace := runtimetarget.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	if r.ctx.DryRun {
 		// Dry-run shows the check and assumes present.
 		r.ctx.TraceCommand("", "kubectl", runtimeDeploymentPresenceArgs(r.result.EnvConfig.KubernetesContext, namespace, release)...)

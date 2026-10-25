@@ -1,8 +1,9 @@
-package config
+package localports
 
 import (
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -12,10 +13,10 @@ func TestLocalPortsForResultPrefersInjectedRuntimePorts(t *testing.T) {
 	t.Setenv("ERUN_MCP_PORT", "17200")
 	t.Setenv("ERUN_SSHD_PORT", "17222")
 
-	result := OpenResult{
+	result := config.OpenResult{
 		Tenant:      "tenant-a",
 		Environment: "dev",
-		LocalPorts:  EnvironmentLocalPortsFromRangeStart(LowerServicePort),
+		LocalPorts:  EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
 	}
 	if got := MCPPortForResult(result); got != 17200 {
 		t.Fatalf("expected the injected mcp port, got %d", got)
@@ -48,7 +49,7 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 			env:         injectedEnv,
 			tenant:      "tenant-a",
 			environment: "dev",
-			ports:       EnvironmentLocalPortsFromRangeStart(LowerServicePort),
+			ports:       EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
 			want:        model.EnvironmentLocalPorts{RangeStart: 17200, RangeEnd: 17299, MCP: 17200, API: 17233, SSH: 17222, ContributeApp: 17250},
 		},
 		{
@@ -56,8 +57,8 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 			env:         map[string]string{"ERUN_MCP_PORT": "17200", "ERUN_SSHD_PORT": "17222"},
 			tenant:      "tenant-a",
 			environment: "dev",
-			ports:       EnvironmentLocalPortsFromRangeStart(LowerServicePort),
-			want:        EnvironmentLocalPortsFromRangeStart(LowerServicePort),
+			ports:       EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
+			want:        EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
 		},
 		{
 			name:        "another environment's injected ports are not this environment's",
@@ -80,8 +81,8 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 			env:         map[string]string{"ERUN_TENANT": "tenant-a", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17233"},
 			tenant:      "tenant-a",
 			environment: "dev",
-			ports:       EnvironmentLocalPortsFromRangeStart(LowerServicePort),
-			want:        EnvironmentLocalPortsFromRangeStart(LowerServicePort),
+			ports:       EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
+			want:        EnvironmentLocalPortsFromRangeStart(config.LowerServicePort),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

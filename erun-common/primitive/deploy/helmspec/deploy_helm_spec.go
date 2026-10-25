@@ -8,9 +8,14 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
@@ -27,10 +32,10 @@ func NewHelmDeploySpec(target configpkg.OpenResult, deployContext model.Kubernet
 
 func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (helmdeploy.HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
-	ports := configpkg.LocalPortsForResult(target)
+	ports := localports.LocalPortsForResult(target)
 
 	// Validated here so a bad marker list fails at deploy time, not in-pod.
-	containerRegistries, err := configpkg.DeployTargetContainerRegistries(target)
+	containerRegistries, err := containerregistry.DeployTargetContainerRegistries(target)
 	if err != nil {
 		return helmdeploy.HelmDeploySpec{}, err
 	}
@@ -66,7 +71,7 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		SubchartKey:         subchartKey,
 		Tenant:              target.Tenant,
 		Environment:         target.Environment,
-		Namespace:           configpkg.KubernetesNamespaceName(target.Tenant, target.Environment),
+		Namespace:           runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext:   target.EnvConfig.KubernetesContext,
 		WorktreeStorage:     resolveWorktreeStorage(target),
 		WorktreeRepoName:    resolveWorktreeRepoName(target.RepoPath),
@@ -86,8 +91,8 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
-		RuntimePod:          configpkg.NormalizeRuntimePodResources(configpkg.ResolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, configpkg.DefaultCgroupRoot)),
-		RuntimeDindPod:      configpkg.NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
+		RuntimePod:          runtimeresources.NormalizeRuntimePodResources(runtimeresources.ResolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, runtimeresources.DefaultCgroupRoot)),
+		RuntimeDindPod:      runtimeresources.NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
@@ -132,7 +137,7 @@ func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg
 	if deployInput == nil {
 		return
 	}
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return
 	}
@@ -153,7 +158,7 @@ func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 		deployInput.CloudProvider = resolveCloudProviderForAlias(store, alias, deployInput.CloudProvider)
 	}
 
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err == nil && ok {
 		if alias == "" || strings.TrimSpace(status.CloudProviderAlias) == alias {
 			deployInput.CloudContextName = status.Name
@@ -165,7 +170,7 @@ func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 	}
 	// Without a region every AWS call in the pod would need one by hand.
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == configpkg.CloudProviderAWS {
-		deployInput.CloudRegion = cloudcontext.ResolveEnvironmentAWSRegion(store, env)
+		deployInput.CloudRegion = cloudcloudcontext.ResolveEnvironmentAWSRegion(store, env)
 	}
 }
 

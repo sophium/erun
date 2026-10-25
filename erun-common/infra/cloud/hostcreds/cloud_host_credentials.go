@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -115,9 +116,9 @@ func traceRuntimeExecCommand(ctx core.Context, args []string, label, script stri
 
 // hostAWSCredentialsWriteArgs uses -i (not -it) so stdin stays a pipe for the credential bytes.
 func hostAWSCredentialsWriteArgs(req config.ShellLaunchParams, script string) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "exec", "-i")
-	return append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	return append(args, "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 }
 
 func writeHostAWSCredentials(req config.ShellLaunchParams, script, payload string) error {
@@ -128,9 +129,9 @@ func writeHostAWSCredentials(req config.ShellLaunchParams, script, payload strin
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
 		if message := strings.TrimSpace(output.String()); message != "" {
-			return fmt.Errorf("write host credentials into %s: %w: %s", config.RuntimeReleaseName(req.Tenant), err, message)
+			return fmt.Errorf("write host credentials into %s: %w: %s", runtimetarget.RuntimeReleaseName(req.Tenant), err, message)
 		}
-		return fmt.Errorf("write host credentials into %s: %w", config.RuntimeReleaseName(req.Tenant), err)
+		return fmt.Errorf("write host credentials into %s: %w", runtimetarget.RuntimeReleaseName(req.Tenant), err)
 	}
 	return nil
 }

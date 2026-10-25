@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -89,7 +90,7 @@ func (s *Service) resolveWorkingIssue(result config.OpenResult) WorkingIssue {
 
 // resolvePodWorkingIssue needs the port-forward, which exists only while the env is open.
 func (s *Service) resolvePodWorkingIssue(result config.OpenResult) WorkingIssue {
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if mcpPort <= 0 || !s.d.CanReachMCPEndpoint(mcpPort) {
 		return WorkingIssue{Available: false, Reason: "open this environment to see its in-pod work"}
 	}

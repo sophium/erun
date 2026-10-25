@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -411,7 +412,7 @@ func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
 }
 
 func (r *resolvedOpenRunner) emitNoShellSetup() error {
-	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	namespace := runtimetarget.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	r.ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(r.result.EnvConfig.KubernetesContext))
 	r.ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 	r.ctx.TraceCommand("", "cd", r.result.RepoPath)

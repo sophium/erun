@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -41,7 +42,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	if got := helmargs.HelmPlatformAliasSecretSetArgs(deployInput.PlatformAliasSecretName); got != nil {
@@ -93,7 +94,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             configpkg.RuntimeReleaseName("team"),
+		ReleaseName:             runtimetarget.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}

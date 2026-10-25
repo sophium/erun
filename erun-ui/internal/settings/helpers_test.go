@@ -13,6 +13,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -47,7 +48,7 @@ func inertDeps() Deps {
 		RecordManualStop:     func(context.Context, string) {},
 		EnsureMCPAvailable:   func(context.Context, configpkg.OpenResult) error { return nil },
 		MCPEndpoint: func(result configpkg.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", configpkg.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer: func(string, string) string { return "" },
 		SetRemoteCloudAlias: func(context.Context, string, string, string, string, string) (configpkg.EnvConfig, error) {

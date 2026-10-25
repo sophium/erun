@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
@@ -138,7 +139,7 @@ func (s *Service) ReconcileRefresher(selection uimodel.Selection, enabled bool) 
 
 func (s *Service) runRefresher(ctx context.Context, selection uimodel.Selection, alias string, result config.OpenResult) {
 	endpoint := s.d.MCPEndpoint(result)
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	notifiedFailure := false
 	for {
 		if err := s.waitForMCPReady(ctx, mcpPort); err != nil {

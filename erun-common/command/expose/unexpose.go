@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
@@ -79,7 +80,7 @@ func resolveUnexposeServicePlan(params model.UnexposeParams, store envstore.Expo
 	if err := core.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
 		return UnexposeResult{}, err
 	}
-	if err := config.ValidateTenantName(tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(tenant); err != nil {
 		return UnexposeResult{}, err
 	}
 
@@ -92,7 +93,7 @@ func resolveUnexposeServicePlan(params model.UnexposeParams, store envstore.Expo
 		return UnexposeResult{}, err
 	}
 
-	envLabel := config.KubernetesNamespaceName(tenant, environment)
+	envLabel := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	return UnexposeResult{
 		Tenant:                     tenant,
 		Environment:                environment,

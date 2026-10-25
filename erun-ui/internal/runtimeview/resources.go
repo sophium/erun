@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/command/setup"
 )
@@ -113,8 +115,8 @@ func runtimeResourceStatusFromKubernetes(input ResourceInput, nodes kubernetesNo
 		if name == "" {
 			continue
 		}
-		cpuTotal, _ := config.ParseKubernetesCPUToMilli(node.Status.Allocatable.CPU)
-		memoryTotal, _ := config.ParseKubernetesMemoryToMi(node.Status.Allocatable.Memory)
+		cpuTotal, _ := runtimeresources.ParseKubernetesCPUToMilli(node.Status.Allocatable.CPU)
+		memoryTotal, _ := runtimeresources.ParseKubernetesMemoryToMi(node.Status.Allocatable.Memory)
 		bursting := accounting.usage[name]
 		requests := accounting.requests[name]
 		targetHeld := accounting.targetUsage[name]
@@ -317,7 +319,7 @@ func containerConsumption(pod kubernetesPod, container kubernetesContainer, meas
 	usage, hasUsage := measured[containerUsageKey(pod, container)]
 	complete := true
 
-	if cpu, err := config.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
+	if cpu, err := runtimeresources.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
 		totals.CPUMilli = cpu
 	} else if hasUsage {
 		totals.CPUMilli = usage.CPUMilli
@@ -325,7 +327,7 @@ func containerConsumption(pod kubernetesPod, container kubernetesContainer, meas
 		complete = false
 	}
 
-	if memory, err := config.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
+	if memory, err := runtimeresources.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
 		totals.MemoryMi = memory
 	} else if hasUsage {
 		totals.MemoryMi = usage.MemoryMi
@@ -363,10 +365,10 @@ func runtimeResourceTarget(input ResourceInput) runtimeResourceTargetSpec {
 		return runtimeResourceTargetSpec{}
 	}
 	return runtimeResourceTargetSpec{
-		namespace: config.KubernetesNamespaceName(input.Tenant, input.Environment),
+		namespace: runtimetarget.KubernetesNamespaceName(input.Tenant, input.Environment),
 		// The runtime container is named for the component in every tenant; the release is
 		// <tenant>-devops, so match on the container name.
-		container: config.DevopsComponentName,
+		container: runtimetarget.DevopsComponentName,
 	}
 }
 
@@ -416,7 +418,7 @@ func formatRuntimeResourceCPU(milli int64) string {
 	if milli <= 0 {
 		return "0"
 	}
-	return config.FormatKubernetesCPUFromMilli(milli)
+	return runtimeresources.FormatKubernetesCPUFromMilli(milli)
 }
 
 func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) ResourceMetric {

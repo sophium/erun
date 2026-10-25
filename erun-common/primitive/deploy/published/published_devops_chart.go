@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -70,8 +71,8 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	}
 	if version == "" {
 		// Dry-run contract: trace the stopping decision before the error return.
-		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + config.DevopsComponentName + " chart")
-		return helmdeploy.DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", config.DevopsComponentName)
+		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + runtimetarget.DevopsComponentName + " chart")
+		return helmdeploy.DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", runtimetarget.DevopsComponentName)
 	}
 
 	chart, err := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason, strings.TrimSpace(runtimeChartOverride) != "")
@@ -81,7 +82,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
 	deployContext := model.KubernetesDeployContext{
-		ComponentName: config.DevopsComponentName,
+		ComponentName: runtimetarget.DevopsComponentName,
 		ChartPath:     chart.reference,
 	}
 	valuesFilePath := publishedDevopsValuesOverlayPath(ctx, target)
@@ -98,7 +99,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		// Without this the next deploy reads the lagging pin back and never converges.
 		deployInput.PersistRuntimeChart = chart.reference + ":" + chart.version
 	}
-	deployInput.ReleaseName = config.RuntimeReleaseName(target.Tenant)
+	deployInput.ReleaseName = runtimetarget.RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
@@ -106,7 +107,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	deployInput.RuntimeChartRegistry = chart.registry
 	image, persistImage := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
 	if image != "" {
-		deployInput.ImageOverrides = map[string]string{config.DevopsComponentName: image}
+		deployInput.ImageOverrides = map[string]string{runtimetarget.DevopsComponentName: image}
 		deployInput.ResolvedRuntimeImage = image
 	} else {
 		// No override applies, so the chart's stock default image is fully known; record it.

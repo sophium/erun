@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
@@ -62,7 +63,7 @@ func RunDeployRegistryCopies(ctx core.Context, execution helmdeploy.DeploySpec) 
 }
 
 func ResolveDeployRegistryCopies(execution helmdeploy.DeploySpec) ([]registryCopy, error) {
-	list, err := config.DeployTargetContainerRegistries(execution.Target)
+	list, err := containerregistry.DeployTargetContainerRegistries(execution.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func deployCopyImages(execution helmdeploy.DeploySpec) []string {
 		seen[ref] = struct{}{}
 		images = append(images, ref)
 	}
-	if execution.Deploy.ReleaseName == config.RuntimeReleaseName(execution.Target.Tenant) {
+	if execution.Deploy.ReleaseName == runtimetarget.RuntimeReleaseName(execution.Target.Tenant) {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
@@ -117,10 +118,10 @@ func deployCopyImages(execution helmdeploy.DeploySpec) []string {
 }
 
 func runtimeCopyImage(execution helmdeploy.DeploySpec) (string, string) {
-	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[config.DevopsComponentName]); override != "" {
+	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[runtimetarget.DevopsComponentName]); override != "" {
 		return imageNameVersion(override)
 	}
-	return config.DevopsComponentName, execution.Deploy.Version
+	return runtimetarget.DevopsComponentName, execution.Deploy.Version
 }
 
 func imageNameVersion(reference string) (string, string) {

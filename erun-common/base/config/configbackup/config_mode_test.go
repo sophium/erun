@@ -1,4 +1,4 @@
-package config
+package configbackup
 
 import (
 	"os"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -65,12 +66,12 @@ func TestRootConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	defer restore()
 
 	save := func() {
-		if err := SaveERunConfig(ERunConfig{DefaultTenant: "erun"}); err != nil {
+		if err := config.SaveERunConfig(config.ERunConfig{DefaultTenant: "erun"}); err != nil {
 			t.Fatalf("save root config: %v", err)
 		}
 	}
 	save()
-	_, rootPath, err := LoadERunConfig()
+	_, rootPath, err := config.LoadERunConfig()
 	if err != nil {
 		t.Fatalf("load root config: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestEnvConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	defer restore()
 
 	save := func() {
-		if err := SaveEnvConfig("erun", EnvConfig{Name: "dev"}); err != nil {
+		if err := config.SaveEnvConfig("erun", config.EnvConfig{Name: "dev"}); err != nil {
 			t.Fatalf("save env config: %v", err)
 		}
 	}

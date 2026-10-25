@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -24,7 +25,7 @@ func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) model.DoctorDockerD
 			Container: model.RuntimeDindContainerName,
 			Label:     "the " + model.RuntimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
-				model.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
+				model.RuntimeDindContainerName, runtimetarget.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
 		return model.DoctorDockerDaemon{

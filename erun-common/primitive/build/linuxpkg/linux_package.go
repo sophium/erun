@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
 	"github.com/sophium/erun/erun-common/base/seam/projectroot"
@@ -108,7 +108,7 @@ func detectedProjectRootDevopsLinuxDir(findProjectRoot projectroot.ProjectFinder
 	if !ok {
 		return "", false, nil
 	}
-	linuxDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "linux")
+	linuxDir := filepath.Join(projectRoot, runtimetarget.RuntimeReleaseName(tenant), "linux")
 	if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
 		return "", false, err
 	} else if ok {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
@@ -204,7 +205,7 @@ func SetEnvironmentCloudProviderAlias(ctx core.Context, store cloudstore.Environ
 
 	config, _, err := store.LoadEnvConfig(tenant, environment)
 	if errors.Is(err, configpkg.ErrNotInitialized) {
-		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", configpkg.ErrEnvironmentNotFound, environment)
+		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", runtimetarget.ErrEnvironmentNotFound, environment)
 	}
 	if err != nil {
 		return configpkg.EnvConfig{}, err

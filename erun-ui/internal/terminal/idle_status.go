@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
@@ -27,7 +28,7 @@ func (s *Service) LoadIdleStatus(selection uimodel.Selection) (IdleStatus, error
 	if err != nil {
 		return IdleStatus{}, err
 	}
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		status, err := s.loadLocalIdleStatus(result)
 		if err == nil {
@@ -310,7 +311,7 @@ func (s *Service) RecordManualStopForCloudContext(ctx context.Context, cloudCont
 			s.emitAppNotification("warning", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 			continue
 		}
-		mcpPort := config.MCPPortForResult(result)
+		mcpPort := localports.MCPPortForResult(result)
 		if !s.d.CanReachMCPEndpoint(mcpPort) {
 			continue
 		}

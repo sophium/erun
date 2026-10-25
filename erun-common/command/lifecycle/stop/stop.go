@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
@@ -32,8 +34,8 @@ func RuntimeScaleTargetForResult(result config.OpenResult) RuntimeScaleTarget {
 	return RuntimeScaleTarget{
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
-		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
-		ReleaseName:       config.RuntimeReleaseName(result.Tenant),
+		Namespace:         runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment),
+		ReleaseName:       runtimetarget.RuntimeReleaseName(result.Tenant),
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
 	}
 }
@@ -368,7 +370,7 @@ func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	if ctx.DryRun {
 		return nil
 	}
-	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == execmode.ExecutionModeLibrary {
 		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, runtimewait.DefaultShellLaunchWaitTimeout)
 	}
 	return core.RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)

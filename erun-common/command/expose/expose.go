@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
@@ -328,7 +329,7 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 	if tenant == "" || environment == "" || service == "" {
 		return "", "", "", fmt.Errorf("tenant, environment, and service are required")
 	}
-	if err := config.ValidateTenantName(tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(tenant); err != nil {
 		return "", "", "", err
 	}
 	// Validate before any DNS record is written: the name becomes a DNS label.
@@ -375,7 +376,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store envstore.ExposeS
 	if servicePort <= 0 {
 		servicePort = defaultExposeServicePort
 	}
-	envLabel := config.KubernetesNamespaceName(tenant, environment)
+	envLabel := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	tlsEnabled, ingressClass, tlsSecret, scheme, tlsDisabledReason := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,

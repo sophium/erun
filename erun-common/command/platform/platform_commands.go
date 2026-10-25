@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -274,7 +275,7 @@ func populatedPortableFieldsForLocal(local model.EnvDefinitionAdoptParams) []str
 	if err != nil {
 		return nil
 	}
-	return configpkg.PopulatedPortableEnvConfigFields(config)
+	return envdefinition.PopulatedPortableEnvConfigFields(config)
 }
 
 // RunPlatformPushEnvDefinition uploads a local environment's portable settings to its hosted row.
@@ -287,13 +288,13 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	if err != nil {
 		return EnvDefinitionPushResult{}, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
 	}
-	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+	marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return EnvDefinitionPushResult{}, notHostedError(params.Tenant, params.Environment)
 	}
 	ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s", params.Tenant, params.Environment, marker.Describe()))
 
-	portable := configpkg.PopulatedPortableEnvConfigFields(config)
+	portable := envdefinition.PopulatedPortableEnvConfigFields(config)
 	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+marker.EnvironmentID)
 	platformapi.TracePlatformCall(ctx, provider, "PUT", "/v1/environments/"+marker.EnvironmentID+"/definition",
 		"revision="+fmt.Sprintf("%d", marker.DefinitionRevision+1),
@@ -306,7 +307,7 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 
 // RunPlatformPullEnvDefinition pulls the stored definition into a local environment.
 // A nil confirm refuses a two-sided edit with the diff instead of overwriting.
-func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(configpkg.EnvDefinitionPlan) (bool, error), deps cloud.CloudDependencies) (EnvDefinitionPullResult, error) {
+func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(envdefinition.EnvDefinitionPlan) (bool, error), deps cloud.CloudDependencies) (EnvDefinitionPullResult, error) {
 	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return EnvDefinitionPullResult{}, err
@@ -327,7 +328,7 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 		ctx.Trace(fmt.Sprintf("definition: creating local environment %s/%s from platform row %s", params.Tenant, params.Environment, environmentID))
 		platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
 	} else {
-		marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+		marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 		if !ok {
 			return EnvDefinitionPullResult{}, notHostedError(params.Tenant, params.Environment)
 		}

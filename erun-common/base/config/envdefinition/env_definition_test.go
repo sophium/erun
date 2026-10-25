@@ -1,4 +1,4 @@
-package config
+package envdefinition
 
 import (
 	"encoding/json"
@@ -6,16 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // sentinelEnvConfig sets every field to a greppable marker; a zero field fails so
 // a new field cannot leave the sweep blind.
-func sentinelEnvConfig() EnvConfig {
+func sentinelEnvConfig() configpkg.EnvConfig {
 	enabled := true
-	return EnvConfig{
+	return configpkg.EnvConfig{
 		Name:               "sentinel-environment-name",
-		Type:               EnvironmentType("sentinel-environment-type"),
+		Type:               configpkg.EnvironmentType("sentinel-environment-type"),
 		LocalRepoPath:      "/sentinel/host-owned/localrepopath",
 		MountSource:        true,
 		RepoURL:            "https://sentinel.example/host-owned/repourl",
@@ -25,7 +26,7 @@ func sentinelEnvConfig() EnvConfig {
 			"aws": "sentinel-cloud-provider-aliases",
 		},
 		ManagedCloud: true,
-		Hosted: HostedEnvironment{
+		Hosted: configpkg.HostedEnvironment{
 			APIHost:            "sentinel-apihost.example",
 			TenantID:           "sentinel-tenant-id",
 			EnvironmentID:      "sentinel-environment-id",
@@ -33,7 +34,7 @@ func sentinelEnvConfig() EnvConfig {
 		},
 		RuntimeVersion:               "sentinel-runtime-version",
 		RuntimeRegistry:              "sentinel-host-owned/runtimeregistry",
-		ContainerRegistries:          ContainerRegistries{{Registry: "sentinel-container-registry"}},
+		ContainerRegistries:          configpkg.ContainerRegistries{{Registry: "sentinel-container-registry"}},
 		RuntimeImage:                 "sentinel-runtime-image",
 		RuntimeRunningImage:          "sentinel-host-owned/runtimerunningimage",
 		RuntimeChart:                 "sentinel-runtime-chart",
@@ -44,7 +45,7 @@ func sentinelEnvConfig() EnvConfig {
 		RuntimePod:                   model.RuntimePodResources{CPU: "111m", Memory: "111Mi"},
 		RuntimeDindPod:               model.RuntimePodResources{CPU: "222m", Memory: "222Mi"},
 		NamespaceQuota:               model.NamespaceResourceQuota{CPU: "333", Memory: "333Gi", Storage: "333Gi"},
-		SSHD: SSHDConfig{
+		SSHD: configpkg.SSHDConfig{
 			Enabled:       true,
 			LocalPort:     1234,
 			PublicKeyPath: "/sentinel/host-owned/sshd-public-key",
@@ -53,17 +54,17 @@ func sentinelEnvConfig() EnvConfig {
 				LocalPath: "/sentinel/host-owned/sshd-workspace-sync",
 			},
 		},
-		Idle: EnvironmentIdleConfig{
+		Idle: configpkg.EnvironmentIdleConfig{
 			Timeout:          "sentinel-idle-timeout",
 			WorkingHours:     "sentinel-idle-working-hours",
 			Timezone:         "sentinel-idle-timezone",
 			IdleTrafficBytes: 4444,
 		},
-		Deploy: EnvironmentDeployConfig{
+		Deploy: configpkg.EnvironmentDeployConfig{
 			Timeout:    "sentinel-deploy-timeout",
 			Components: []string{"sentinel-host-owned/deploy-components"},
 		},
-		Claude: EnvironmentClaudeConfig{
+		Claude: configpkg.EnvironmentClaudeConfig{
 			UseMantle:  &enabled,
 			UseBedrock: &enabled,
 			UseGateway: &enabled,
@@ -111,7 +112,7 @@ func TestPortableAndHostOwnedFieldListsAreDisjointAndComplete(t *testing.T) {
 		}
 		hostOwned++
 	}
-	configType := reflect.TypeOf(EnvConfig{})
+	configType := reflect.TypeOf(configpkg.EnvConfig{})
 	if total := len(portable) + hostOwned + len(platformOwnedFieldNames()); total != configType.NumField() {
 		t.Fatalf("classification covers %d fields, EnvConfig has %d", total, configType.NumField())
 	}
@@ -230,7 +231,7 @@ func assertSentinelValueAbsent(t *testing.T, serialized, sentinel, field string)
 }
 
 // sentinelForField returns the field's marker string from sentinelEnvConfig.
-func sentinelForField(t *testing.T, config EnvConfig, field string) string {
+func sentinelForField(t *testing.T, config configpkg.EnvConfig, field string) string {
 	t.Helper()
 	// Deploy's components are host-owned; the timeout half is checked elsewhere.
 	if field == "Deploy" {
@@ -337,7 +338,7 @@ func TestApplyIgnoresNonPortableKeysOnTheWire(t *testing.T) {
 		"runtimePod": {"cpu": "999m", "memory": "999Mi"}
 	}`)
 
-	var definition PlatformEnvDefinition
+	var definition configpkg.PlatformEnvDefinition
 	if err := json.Unmarshal(hostile, &definition); err != nil {
 		t.Fatalf("decode hostile definition: %v", err)
 	}
@@ -375,10 +376,10 @@ func TestApplyIgnoresNonPortableKeysOnTheWire(t *testing.T) {
 func TestBuildEnvDefinitionPlanPromptsOnATwoSidedPortableEdit(t *testing.T) {
 	platformVersion := "1.2.3"
 	plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
-		Local:            EnvConfig{Name: "same", Type: EnvironmentTypeRuntime, RuntimeVersion: "1.2.2"},
-		Definition:       PlatformEnvDefinition{RuntimeVersion: &platformVersion},
+		Local:            configpkg.EnvConfig{Name: "same", Type: configpkg.EnvironmentTypeRuntime, RuntimeVersion: "1.2.2"},
+		Definition:       configpkg.PlatformEnvDefinition{RuntimeVersion: &platformVersion},
 		PlatformName:     "same",
-		PlatformType:     string(EnvironmentTypeRuntime),
+		PlatformType:     string(configpkg.EnvironmentTypeRuntime),
 		LocalRevision:    1,
 		PlatformRevision: 2,
 	})
@@ -400,21 +401,21 @@ func TestBuildEnvDefinitionPlanSeesEveryClaudeField(t *testing.T) {
 	small, large := 16000, 64000
 	cases := []struct {
 		name            string
-		local, platform EnvironmentClaudeConfig
+		local, platform configpkg.EnvironmentClaudeConfig
 	}{
-		{"effort", EnvironmentClaudeConfig{Effort: &low}, EnvironmentClaudeConfig{Effort: &high}},
-		{"default model", EnvironmentClaudeConfig{DefaultModel: &opus}, EnvironmentClaudeConfig{DefaultModel: &sonnet}},
-		{"max output tokens", EnvironmentClaudeConfig{MaxOutputTokens: &small}, EnvironmentClaudeConfig{MaxOutputTokens: &large}},
-		{"verbose debug", EnvironmentClaudeConfig{}, EnvironmentClaudeConfig{VerboseDebug: true}},
+		{"effort", configpkg.EnvironmentClaudeConfig{Effort: &low}, configpkg.EnvironmentClaudeConfig{Effort: &high}},
+		{"default model", configpkg.EnvironmentClaudeConfig{DefaultModel: &opus}, configpkg.EnvironmentClaudeConfig{DefaultModel: &sonnet}},
+		{"max output tokens", configpkg.EnvironmentClaudeConfig{MaxOutputTokens: &small}, configpkg.EnvironmentClaudeConfig{MaxOutputTokens: &large}},
+		{"verbose debug", configpkg.EnvironmentClaudeConfig{}, configpkg.EnvironmentClaudeConfig{VerboseDebug: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			platform := tc.platform
 			plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
-				Local:            EnvConfig{Name: "same", Type: EnvironmentTypeRuntime, Claude: tc.local},
-				Definition:       PlatformEnvDefinition{Claude: &platform},
+				Local:            configpkg.EnvConfig{Name: "same", Type: configpkg.EnvironmentTypeRuntime, Claude: tc.local},
+				Definition:       configpkg.PlatformEnvDefinition{Claude: &platform},
 				PlatformName:     "same",
-				PlatformType:     string(EnvironmentTypeRuntime),
+				PlatformType:     string(configpkg.EnvironmentTypeRuntime),
 				LocalRevision:    1,
 				PlatformRevision: 1,
 			})

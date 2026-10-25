@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
@@ -15,7 +16,7 @@ import (
 // ResolveDockerBuildRegistryForEnvironment's no-registry error must read the
 // same in dry-run and real runs.
 func ResolveDockerBuildRegistryForEnvironment(ctx core.Context, projectRoot, environment string) (string, bool, error) {
-	list, err := config.EffectiveContainerRegistries(projectRoot, environment)
+	list, err := containerregistry.EffectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
 		return "", false, err
 	}
@@ -59,7 +60,7 @@ func ResolveDockerBuildContextDirForProject(buildDir, projectRoot, selectedCompo
 
 // configuredDockerContext fails on an invalid value rather than fall back silently.
 func configuredDockerContext(projectRoot string) (string, bool, error) {
-	paths, err := config.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -67,7 +68,7 @@ func configuredDockerContext(projectRoot string) (string, bool, error) {
 }
 
 func resolveComponentAwareDockerContext(projectRoot, selectedComponent string) (string, bool, error) {
-	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, err
 	}

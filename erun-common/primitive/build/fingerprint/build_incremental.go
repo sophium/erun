@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/build/ignore"
@@ -246,7 +246,7 @@ func componentChartDirForBuild(buildInput imagebuild.DockerBuildSpec) string {
 // the one that ships; it never fails the build.
 func componentChartDirCandidate(projectRoot, dockerDir string) string {
 	component := filepath.Base(dockerDir)
-	if k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
+	if k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(projectroot.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
 		return filepath.Join(k8sDir, component)
 	}
 	return filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", component)

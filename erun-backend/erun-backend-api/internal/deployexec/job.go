@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -199,7 +199,7 @@ func ExposeHostnameFromParams(params DeployJobParams) string {
 	if ip == "" || zone == "" || namespace == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s.%s.%s", mcpExposeService, config.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
+	return fmt.Sprintf("%s.%s.%s", mcpExposeService, runtimetarget.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
 }
 
 func namespaceQuotaFlags(params DeployJobParams) []string {

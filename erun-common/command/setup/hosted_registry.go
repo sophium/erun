@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 )
 
 // HostedRegistryProbeTimeout is short because the probe blocks an interactive
@@ -35,7 +35,7 @@ func (s HostedRegistryStatus) Err() error {
 // ProbeHostedRegistry reports whether the hosted registry serves the OCI API.
 // Any HTTP response, including 401, counts as available.
 func ProbeHostedRegistry(ctx context.Context, client *http.Client) HostedRegistryStatus {
-	return ProbeHostedRegistryAt(ctx, client, "https://"+config.HostedRegistryHost+"/v2/", config.HostedRegistryHost)
+	return ProbeHostedRegistryAt(ctx, client, "https://"+containerregistry.HostedRegistryHost+"/v2/", containerregistry.HostedRegistryHost)
 }
 
 // ProbeHostedRegistryAt is ProbeHostedRegistry with the endpoint injected.

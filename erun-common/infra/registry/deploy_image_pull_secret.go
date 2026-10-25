@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -27,8 +28,8 @@ const kubectlSecretGetExecutionOperation = "kubectl-secret-get"
 
 // ExistingImagePullSecretAuths reads a dockerconfigjson Secret so this run's
 // credentials overlay it. Real runs only: a dry run traces the merge as conditional.
-func ExistingImagePullSecretAuths(contextName, namespace, name string, args []string) (map[string]config.DockerConfigJSONAuthEntry, error) {
-	if config.CurrentExecutionMode(kubectlSecretGetExecutionOperation) == config.ExecutionModeLibrary {
+func ExistingImagePullSecretAuths(contextName, namespace, name string, args []string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
+	if execmode.CurrentExecutionMode(kubectlSecretGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return kube.LibraryImagePullSecretAuths(contextName, namespace, name)
 	}
 	return defaultExistingImagePullSecretAuths(name, args)
@@ -36,7 +37,7 @@ func ExistingImagePullSecretAuths(contextName, namespace, name string, args []st
 
 // defaultExistingImagePullSecretAuths treats a missing Secret as empty, but refuses
 // an undecodable one or a failed read rather than destroying existing coverage.
-func defaultExistingImagePullSecretAuths(name string, args []string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+func defaultExistingImagePullSecretAuths(name string, args []string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		if kube.KubernetesResourceNotFound(string(output)) {
@@ -50,17 +51,17 @@ func defaultExistingImagePullSecretAuths(name string, args []string) (map[string
 	if err := json.Unmarshal(output, &secret); err != nil {
 		return nil, fmt.Errorf("read existing image pull secret %s: could not parse the existing secret", name)
 	}
-	encoded, ok := secret.Data[config.DockerConfigJSONSecretKey]
+	encoded, ok := secret.Data[containerregistry.DockerConfigJSONSecretKey]
 	if !ok {
 		return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 	}
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s holds an unreadable value", name, config.DockerConfigJSONSecretKey)
+		return nil, fmt.Errorf("read existing image pull secret %s: %s holds an unreadable value", name, containerregistry.DockerConfigJSONSecretKey)
 	}
-	var file config.DockerConfigJSONFile
+	var file containerregistry.DockerConfigJSONFile
 	if err := json.Unmarshal(decoded, &file); err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, config.DockerConfigJSONSecretKey)
+		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, containerregistry.DockerConfigJSONSecretKey)
 	}
 	return file.Auths, nil
 }

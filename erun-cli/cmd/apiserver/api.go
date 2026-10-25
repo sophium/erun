@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
@@ -39,7 +40,7 @@ func NewAPICmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), ru
 			}
 			resolvedPort := port
 			if !cmd.Flags().Changed("port") {
-				resolvedPort = config.APIPortForResult(result)
+				resolvedPort = localports.APIPortForResult(result)
 			}
 
 			commandArgs := apiCommandArgs(host, resolvedPort, databaseURL, allowedIssuers, awsIdentityStoreID, awsIdentityStoreRegion)

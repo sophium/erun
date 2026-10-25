@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
@@ -35,7 +36,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 		},
 		SkipHelm: true,
 		Deploy: helmdeploy.HelmDeploySpec{
-			ReleaseName:       config.RuntimeReleaseName(tenant),
+			ReleaseName:       runtimetarget.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
 			ContainerRegistry: registry,
@@ -92,7 +93,7 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
 		Deploy: helmdeploy.HelmDeploySpec{
-			ReleaseName:          config.RuntimeReleaseName(tenant),
+			ReleaseName:          runtimetarget.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",
 			ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,

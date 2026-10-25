@@ -36,6 +36,42 @@ excludeFiles:
 components:
   base-config:
     in: "base/config"
+  base-config-awssso:
+    in: "base/config/awssso"
+  base-config-claudedefaults:
+    in: "base/config/claudedefaults"
+  base-config-cloudcontext:
+    in: "base/config/cloudcontext"
+  base-config-configbackup:
+    in: "base/config/configbackup"
+  base-config-containerregistry:
+    in: "base/config/containerregistry"
+  base-config-envdefinition:
+    in: "base/config/envdefinition"
+  base-config-execmode:
+    in: "base/config/execmode"
+  base-config-kubetoken:
+    in: "base/config/kubetoken"
+  base-config-localports:
+    in: "base/config/localports"
+  base-config-openrouter:
+    in: "base/config/openrouter"
+  base-config-orchestratorrole:
+    in: "base/config/orchestratorrole"
+  base-config-projectpaths:
+    in: "base/config/projectpaths"
+  base-config-projectroot:
+    in: "base/config/projectroot"
+  base-config-repopath:
+    in: "base/config/repopath"
+  base-config-runtimeresources:
+    in: "base/config/runtimeresources"
+  base-config-runtimesync:
+    in: "base/config/runtimesync"
+  base-config-runtimetarget:
+    in: "base/config/runtimetarget"
+  base-config-sshconfig:
+    in: "base/config/sshconfig"
   base-core:
     in: "base/core"
   base-model:
@@ -351,6 +387,73 @@ deps:
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
+  base-config-claudedefaults:
+    mayDependOn:
+      - base-config
+  base-config-cloudcontext:
+    mayDependOn:
+      - base-config
+      - base-model
+  base-config-configbackup:
+    mayDependOn:
+      - base-config
+      - base-model
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+  base-config-containerregistry:
+    mayDependOn:
+      - base-config
+      - base-model
+  base-config-envdefinition:
+    mayDependOn:
+      - base-config
+      - base-model
+  base-config-execmode:
+    mayDependOn:
+      - base-config
+  base-config-kubetoken:
+    canUse:
+      - gopkg-in-yaml-v3
+  base-config-localports:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+  base-config-openrouter:
+    mayDependOn:
+      - base-config
+  base-config-orchestratorrole:
+    mayDependOn:
+      - base-config
+      - base-model
+  base-config-projectpaths:
+    mayDependOn:
+      - base-config
+      - base-core
+  base-config-projectroot:
+    mayDependOn:
+      - base-config
+  base-config-repopath:
+    mayDependOn:
+      - base-config
+  base-config-runtimeresources:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+  base-config-runtimesync:
+    mayDependOn:
+      - base-config
+      - base-model
+    canUse:
+      - gopkg-in-yaml-v3
+  base-config-runtimetarget:
+    mayDependOn:
+      - base-config
+  base-config-sshconfig:
+    mayDependOn:
+      - base-model
   base-core:
     mayDependOn:
       - base-model
@@ -421,6 +524,9 @@ deps:
   command-doctor:
     mayDependOn:
       - base-config
+      - base-config-runtimeresources
+      - base-config-runtimesync
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -442,6 +548,8 @@ deps:
   command-e2e:
     mayDependOn:
       - base-config
+      - base-config-projectpaths
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-projectroot
@@ -454,6 +562,8 @@ deps:
   command-expose:
     mayDependOn:
       - base-config
+      - base-config-projectroot
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-envstore
@@ -468,6 +578,7 @@ deps:
   command-inputs:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-runtimepod
@@ -475,6 +586,10 @@ deps:
   command-jobs:
     mayDependOn:
       - base-config
+      - base-config-execmode
+      - base-config-projectroot
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-kubeapi
@@ -507,6 +622,8 @@ deps:
   command-lifecycle-envdelete:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
+      - base-config-sshconfig
       - base-core
       - base-model
       - base-seam-envstore
@@ -516,6 +633,9 @@ deps:
   command-lifecycle-envread:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
+      - base-config-configbackup
+      - base-config-localports
       - base-core
       - base-model
       - base-seam-envstore
@@ -529,10 +649,18 @@ deps:
   command-lifecycle-gatewayrouting:
     mayDependOn:
       - base-config
+      - base-config-openrouter
+      - base-config-runtimetarget
       - base-core
   command-lifecycle-list:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
+      - base-config-containerregistry
+      - base-config-envdefinition
+      - base-config-localports
+      - base-config-projectroot
+      - base-config-sshconfig
       - base-model
       - base-seam-envstore
       - base-seam-projectroot
@@ -547,6 +675,7 @@ deps:
   command-lifecycle-pin:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - infra-gitx
@@ -556,6 +685,7 @@ deps:
   command-lifecycle-resize:
     mayDependOn:
       - base-config
+      - base-config-runtimeresources
       - base-core
       - base-model
       - base-seam-buildtarget
@@ -572,6 +702,8 @@ deps:
   command-lifecycle-stop:
     mayDependOn:
       - base-config
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-core
       - base-model
       - infra-activity-remotesession
@@ -581,6 +713,8 @@ deps:
   command-lifecycle-upgrade:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-deploytarget
@@ -589,6 +723,7 @@ deps:
   command-lifecycle-versiondrift:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-imageregistry
@@ -608,6 +743,7 @@ deps:
   command-observe:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - orchestration-clusterread
@@ -615,6 +751,7 @@ deps:
   command-orchestrator:
     mayDependOn:
       - base-config
+      - base-config-orchestratorrole
       - base-core
       - base-model
       - base-seam-envstore
@@ -632,6 +769,10 @@ deps:
   command-platform:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
+      - base-config-envdefinition
+      - base-config-localports
+      - base-config-repopath
       - base-core
       - base-model
       - base-seam-bootstrap
@@ -644,6 +785,9 @@ deps:
   command-podruntime:
     mayDependOn:
       - base-config
+      - base-config-runtimeresources
+      - base-config-runtimesync
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-runtimepod
@@ -679,6 +823,13 @@ deps:
   command-setup:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
+      - base-config-containerregistry
+      - base-config-localports
+      - base-config-projectroot
+      - base-config-repopath
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-bootstrap
@@ -717,6 +868,8 @@ deps:
   command-terraform:
     mayDependOn:
       - base-config
+      - base-config-projectpaths
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-envstore
@@ -775,6 +928,7 @@ deps:
   infra-activity-managedcloud:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
   infra-activity-records:
     mayDependOn:
       - base-config
@@ -802,6 +956,7 @@ deps:
   infra-cloud-cloudcontext:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -810,6 +965,7 @@ deps:
   infra-cloud-clouddefaults:
     mayDependOn:
       - base-config
+      - base-config-execmode
       - base-core
       - base-model
       - infra-cloud
@@ -832,6 +988,7 @@ deps:
   infra-cloud-contextinit:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -840,7 +997,8 @@ deps:
       - infra-cloud-providerconfig
   infra-cloud-contextinstance:
     mayDependOn:
-      - base-config
+      - base-config-cloudcontext
+      - base-config-execmode
       - base-core
       - base-model
       - infra-cloud-cloudcontext
@@ -849,6 +1007,7 @@ deps:
   infra-cloud-contextpower:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -859,6 +1018,7 @@ deps:
   infra-cloud-contextrecover:
     mayDependOn:
       - base-config
+      - base-config-kubetoken
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -867,6 +1027,7 @@ deps:
   infra-cloud-hostcreds:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-runtimepod
@@ -895,6 +1056,7 @@ deps:
   infra-cloud-providerlifecycle:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -916,6 +1078,8 @@ deps:
   infra-cloud-runtimewait:
     mayDependOn:
       - base-config
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-core
       - infra-kube
   infra-cloud-secretstore:
@@ -925,6 +1089,7 @@ deps:
   infra-cloud-shelllaunch:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
   infra-codesign:
     mayDependOn:
       - base-core
@@ -939,7 +1104,8 @@ deps:
       - infra-kube
   infra-helm:
     mayDependOn:
-      - base-config
+      - base-config-projectpaths
+      - base-config-runtimetarget
       - base-core
       - base-model
     canUse:
@@ -947,6 +1113,10 @@ deps:
   infra-kube:
     mayDependOn:
       - base-config
+      - base-config-configbackup
+      - base-config-containerregistry
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-runtimepod
@@ -975,6 +1145,9 @@ deps:
   infra-registry:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-core
       - base-model
       - infra-kube
@@ -1008,6 +1181,7 @@ deps:
   orchestration-clusterread:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - primitive-deploy-observe
@@ -1025,6 +1199,7 @@ deps:
   orchestration-diagnosis:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-runtimepod
@@ -1070,7 +1245,7 @@ deps:
       - primitive-shared-releaseflow
   primitive-build-diagnose:
     mayDependOn:
-      - base-config
+      - base-config-execmode
       - base-core
       - base-model
       - base-seam-kubeapi
@@ -1096,6 +1271,7 @@ deps:
   primitive-build-fingerprint:
     mayDependOn:
       - base-config
+      - base-config-projectroot
       - base-core
       - base-seam-imagebuild
       - primitive-build-dockercli
@@ -1106,7 +1282,7 @@ deps:
       - primitive-shared-dockerspec
   primitive-build-linuxpkg:
     mayDependOn:
-      - base-config
+      - base-config-runtimetarget
       - base-model
       - base-seam-buildtarget
       - base-seam-projectroot
@@ -1140,6 +1316,7 @@ deps:
   primitive-build-registrylogin:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
       - base-core
       - base-model
       - base-seam-imagebuild
@@ -1153,6 +1330,7 @@ deps:
   primitive-build-releasespec:
     mayDependOn:
       - base-config
+      - base-config-projectroot
       - base-core
       - base-model
       - base-seam-buildtarget
@@ -1203,6 +1381,9 @@ deps:
   primitive-build-spec:
     mayDependOn:
       - base-config
+      - base-config-projectpaths
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-buildtarget
@@ -1213,19 +1394,20 @@ deps:
       - primitive-shared-dockerspec
   primitive-deploy-chartfiles:
     mayDependOn:
-      - base-config
+      - base-config-projectroot
       - base-model
       - primitive-shared-dockerbuild
     canUse:
       - gopkg-in-yaml-v3
   primitive-deploy-chartref:
     mayDependOn:
-      - base-config
+      - base-config-runtimetarget
       - base-model
       - base-seam-helmdeploy
   primitive-deploy-components:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-model
       - base-seam-buildtarget
       - base-seam-deploytarget
@@ -1236,17 +1418,21 @@ deps:
       - primitive-shared-opentarget
   primitive-deploy-defaultchart:
     mayDependOn:
-      - base-config
+      - base-config-runtimetarget
       - base-core
   primitive-deploy-diagnosis:
     mayDependOn:
       - base-config
+      - base-config-openrouter
+      - base-config-runtimetarget
       - base-core
       - base-model
       - primitive-deploy-observe
   primitive-deploy-gateway:
     mayDependOn:
       - base-config
+      - base-config-openrouter
+      - base-config-runtimetarget
       - base-core
       - base-seam-cloudstore
       - base-seam-helmdeploy
@@ -1256,10 +1442,15 @@ deps:
   primitive-deploy-helmargs:
     mayDependOn:
       - base-config
+      - base-config-claudedefaults
+      - base-config-openrouter
       - base-seam-helmdeploy
   primitive-deploy-helmrun:
     mayDependOn:
       - base-config
+      - base-config-execmode
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-helmdeploy
@@ -1277,6 +1468,11 @@ deps:
   primitive-deploy-helmspec:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
+      - base-config-containerregistry
+      - base-config-localports
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-model
       - base-seam-helmdeploy
       - infra-cloud-cloudcontext
@@ -1286,7 +1482,8 @@ deps:
       - primitive-deploy-helmargs
   primitive-deploy-kubecheck:
     mayDependOn:
-      - base-config
+      - base-config-projectpaths
+      - base-config-runtimeresources
       - base-core
       - base-model
       - base-seam-deploytarget
@@ -1301,6 +1498,7 @@ deps:
   primitive-deploy-mcpauth:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-helmdeploy
@@ -1319,6 +1517,7 @@ deps:
   primitive-deploy-platformalias:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-helmdeploy
@@ -1335,6 +1534,7 @@ deps:
   primitive-deploy-published:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-helmdeploy
@@ -1353,7 +1553,8 @@ deps:
       - infra-helm
   primitive-deploy-registrycopy:
     mayDependOn:
-      - base-config
+      - base-config-containerregistry
+      - base-config-runtimetarget
       - base-core
       - base-seam-helmdeploy
       - infra-helm
@@ -1361,6 +1562,9 @@ deps:
   primitive-deploy-run:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-helmdeploy
@@ -1383,17 +1587,19 @@ deps:
   primitive-deploy-runtimeimage:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - primitive-deploy-chartref
   primitive-deploy-runtimeusage:
     mayDependOn:
-      - base-config
+      - base-config-runtimeresources
       - base-model
       - infra-activity
       - primitive-shared-jobstate
   primitive-deploy-runtimeversion:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-deploytarget
@@ -1407,6 +1613,9 @@ deps:
   primitive-deploy-spec:
     mayDependOn:
       - base-config
+      - base-config-openrouter
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-buildtarget
@@ -1433,6 +1642,7 @@ deps:
   primitive-deploy-target:
     mayDependOn:
       - base-config
+      - base-config-projectroot
       - base-model
       - base-seam-buildtarget
       - base-seam-deploytarget
@@ -1446,6 +1656,8 @@ deps:
   primitive-open-ailaunch:
     mayDependOn:
       - base-config
+      - base-config-claudedefaults
+      - base-config-openrouter
       - base-core
     canUse:
       - gopkg-in-yaml-v3
@@ -1464,6 +1676,8 @@ deps:
   primitive-open-podwait:
     mayDependOn:
       - base-config
+      - base-config-execmode
+      - base-config-runtimetarget
       - base-model
       - base-seam-kubeapi
       - infra-cloud-runtimewait
@@ -1472,6 +1686,7 @@ deps:
   primitive-open-resolve:
     mayDependOn:
       - base-config
+      - base-config-projectroot
       - base-model
       - primitive-shared-opentarget
   primitive-open-runtimeref:
@@ -1481,6 +1696,7 @@ deps:
   primitive-open-shell:
     mayDependOn:
       - base-config
+      - base-config-runtimetarget
       - base-core
       - base-model
       - infra-activity-remotesession
@@ -1497,6 +1713,7 @@ deps:
   primitive-open-sshconn:
     mayDependOn:
       - base-config
+      - base-config-localports
       - base-model
       - infra-cloud-shelllaunch
       - primitive-open-runtimeref
@@ -1524,10 +1741,11 @@ deps:
       - github-com-adrg-xdg
   primitive-shared-buildversion:
     mayDependOn:
-      - base-config
+      - base-config-projectpaths
   primitive-shared-cloudconfig:
     mayDependOn:
       - base-config
+      - base-config-cloudcontext
       - base-core
       - base-model
       - base-seam-cloudstore
@@ -1541,6 +1759,11 @@ deps:
   primitive-shared-dockerbuild:
     mayDependOn:
       - base-config
+      - base-config-containerregistry
+      - base-config-projectpaths
+      - base-config-projectroot
+      - base-config-runtimeresources
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-buildtarget
@@ -1577,6 +1800,10 @@ deps:
   primitive-shared-opentarget:
     mayDependOn:
       - base-config
+      - base-config-localports
+      - base-config-openrouter
+      - base-config-projectroot
+      - base-config-runtimetarget
       - base-core
       - base-model
       - base-seam-projectroot

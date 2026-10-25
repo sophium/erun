@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -67,8 +68,8 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 		what  string
 		build func() (string, error)
 	}{
-		{"EnvConfigPath tenant", func() (string, error) { return config.EnvConfigPath(name, "local") }},
-		{"EnvConfigPath environment", func() (string, error) { return config.EnvConfigPath("frs", name) }},
+		{"EnvConfigPath tenant", func() (string, error) { return configbackup.EnvConfigPath(name, "local") }},
+		{"EnvConfigPath environment", func() (string, error) { return configbackup.EnvConfigPath("frs", name) }},
 		{"PortForwardStatePath tenant", func() (string, error) { return PortForwardStatePath("mcp", name, "local") }},
 		{"PortForwardStatePath environment", func() (string, error) { return PortForwardStatePath("mcp", "frs", name) }},
 	} {

@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/projectroot"
@@ -217,7 +218,7 @@ func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string)
 	}
 	if listEnvConfigs != nil {
 		if envs, err := listEnvConfigs(result.Tenant); err == nil {
-			if root, ok := config.TenantLocalCheckoutRoot(envs); ok {
+			if root, ok := repopath.TenantLocalCheckoutRoot(envs); ok {
 				return root, false, nil
 			}
 		}

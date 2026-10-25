@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -99,7 +100,7 @@ func (s *Service) runtimeDeployedHealthCheck(tenant, environment string, config 
 // CheckRuntimeDeployed treats only a genuine NotFound as not deployed; any other
 // kubectl failure is an error so the check reports "could not check".
 func CheckRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
-	namespace := configpkg.KubernetesNamespaceName(tenant, environment)
+	namespace := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	output, err := kubectlJSON(ctx, kubeContext,
 		"get", "pods", "-n", namespace,
 		"-o", `jsonpath={range .items[*]}{range .spec.containers[*]}{.name}{"\n"}{end}{end}`)
@@ -111,7 +112,7 @@ func CheckRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment 
 		return false, err
 	}
 	for _, name := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(name) == configpkg.DevopsComponentName {
+		if strings.TrimSpace(name) == runtimetarget.DevopsComponentName {
 			return true, nil
 		}
 	}

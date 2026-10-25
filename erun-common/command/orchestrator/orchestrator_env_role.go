@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/orchestratorrole"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/envstore"
@@ -55,7 +56,7 @@ func SetOrchestratorEnvRole(ctx core.Context, store envstore.OrchestratorRoleSto
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("resolve %s/%s's environment type to validate role %q: %w", tenant, environment, roleLabel(params.Role), err)
 	}
 	envType := envConfig.ResolvedType()
-	if reason := configpkg.OrchestratorEnvRoleIneligibilityReason(envType, params.Role); reason != "" {
+	if reason := orchestratorrole.OrchestratorEnvRoleIneligibilityReason(envType, params.Role); reason != "" {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %s/%s is a %q environment, so it cannot take role %q -- %s",
 			orchestratorID, tenant, environment, envType, roleLabel(params.Role), reason)
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 // ProvisionRoutes serves the provision preview; it never executes or writes.
@@ -226,7 +226,7 @@ func provisionPlan(in provisionPlanInput) []string {
 		plan = append(plan, in.contextPlan...)
 	}
 
-	namespace := config.KubernetesNamespaceName(in.tenantName, in.envName)
+	namespace := runtimetarget.KubernetesNamespaceName(in.tenantName, in.envName)
 	plan = append(plan, fmt.Sprintf("namespace: would create %s", namespace))
 
 	plan = append(plan, fmt.Sprintf("register: would persist environment %s (%s) in tenant %s referencing context %s", in.envName, in.envType, in.tenantName, contextRef))
@@ -234,7 +234,7 @@ func provisionPlan(in provisionPlanInput) []string {
 	if in.envType != model.EnvironmentTypeRuntime {
 		return plan
 	}
-	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", config.RuntimeReleaseName(in.tenantName), namespace))
+	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", runtimetarget.RuntimeReleaseName(in.tenantName), namespace))
 	plan = append(plan, "auth: would inject this backend's MCP-signing public key so the runtime's MCP edge trusts tokens minted for the console (skipped when the backend has no MCP signing key configured)")
 	plan = append(plan, fmt.Sprintf("expose: would wire mcp.%s.<services zone> via a per-env wildcard DNS record and Host-routing Ingress (skipped when the platform has no services zone configured)", namespace))
 	return append(plan, "tls: would provision a per-env wildcard certificate through the DNS-01 broker (skipped when the platform has no ACME email or DNS-01 broker configured)")

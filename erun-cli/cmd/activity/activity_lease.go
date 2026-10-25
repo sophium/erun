@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
@@ -358,7 +359,7 @@ func newActivitySampleCmd() *cobra.Command {
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&procRoot, "proc-root", sampling.DefaultProcRoot, "Process filesystem to sample")
-	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", config.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
+	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", runtimeresources.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON (alias for --output json)")
 	return cmd
 }
@@ -419,7 +420,7 @@ func WriteActivitySampleResult(ctx core.Context, result model.ResidentActivityRe
 
 // retainRuntimeUsage records nothing when the host supplies no cgroup counters.
 func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
-	sample := config.ReadLocalRuntimeUsage(cgroupRoot)
+	sample := runtimeresources.ReadLocalRuntimeUsage(cgroupRoot)
 	if !sample.HasCounters() {
 		return nil
 	}

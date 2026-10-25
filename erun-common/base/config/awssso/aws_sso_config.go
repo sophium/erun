@@ -1,4 +1,4 @@
-package config
+package awssso
 
 import (
 	"bufio"

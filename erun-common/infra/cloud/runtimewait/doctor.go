@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -17,8 +19,8 @@ func TraceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) erro
 	if ctx.DryRun {
 		return nil
 	}
-	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, config.RuntimeReleaseName(req.Tenant), DefaultShellLaunchWaitTimeout); err != nil {
+	if execmode.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == execmode.ExecutionModeLibrary {
+		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, runtimetarget.RuntimeReleaseName(req.Tenant), DefaultShellLaunchWaitTimeout); err != nil {
 			// The diagnostics match kubectl stderr text, which client-go errors never produce.
 			return err
 		}

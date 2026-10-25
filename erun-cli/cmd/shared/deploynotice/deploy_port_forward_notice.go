@@ -2,7 +2,7 @@ package deploynotice
 
 import (
 	"github.com/sophium/erun/cmd/shared/portfwd"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
@@ -14,7 +14,7 @@ func NoticeStaleRuntimePortForwards(ctx core.Context, specs []helmdeploy.DeployS
 		return
 	}
 	for _, spec := range specs {
-		if spec.SkipHelm || spec.Deploy.ReleaseName != config.RuntimeReleaseName(spec.Target.Tenant) {
+		if spec.SkipHelm || spec.Deploy.ReleaseName != runtimetarget.RuntimeReleaseName(spec.Target.Tenant) {
 			continue
 		}
 		if !runtimeMCPPortForwardIsStale(spec.Target.Tenant, spec.Target.Environment) {

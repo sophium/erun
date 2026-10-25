@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -26,7 +28,7 @@ metadata:
 type: Opaque
 stringData:
   %s: %q
-`, name, namespace, config.GatewaySecretKey, authToken)
+`, name, namespace, openrouter.GatewaySecretKey, authToken)
 }
 
 // ApplyGatewayCredentialsSecret delivers the gateway credential, keeping it out of argv,
@@ -34,12 +36,12 @@ stringData:
 // pointing at a missing Secret.
 func ApplyGatewayCredentialsSecret(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
 	// Resolved like the chart values, so the Secret exists exactly when the env reads it.
-	gateway := config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
+	gateway := openrouter.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
 	if !gateway.Configured() {
 		return nil
 	}
 	args := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
-	ctx.Trace("apply gateway credentials secret " + config.GatewaySecretName + " (token redacted)")
+	ctx.Trace("apply gateway credentials secret " + openrouter.GatewaySecretName + " (token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
@@ -48,25 +50,25 @@ func ApplyGatewayCredentialsSecret(ctx core.Context, deployInput helmdeploy.Helm
 	if err != nil {
 		return err
 	}
-	manifest := renderGatewayCredentialsSecret(config.GatewaySecretName, deployInput.Namespace, authToken)
+	manifest := renderGatewayCredentialsSecret(openrouter.GatewaySecretName, deployInput.Namespace, authToken)
 	return kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "gateway credentials secret", manifest, args)
 }
 
 // PruneGatewayCredentialsSecret removes the credential after a runtime rollout
 // without the gateway; it runs after rollout because the old pod still references it.
 func PruneGatewayCredentialsSecret(ctx core.Context, deployInput helmdeploy.HelmDeploySpec) error {
-	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput.ReleaseName != runtimetarget.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
-	if config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
+	if openrouter.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
 		return nil
 	}
 	args := []string{}
 	if c := strings.TrimSpace(deployInput.KubernetesContext); c != "" {
 		args = append(args, "--context", c)
 	}
-	args = append(args, "-n", strings.TrimSpace(deployInput.Namespace), "delete", "secret", config.GatewaySecretName, "--ignore-not-found")
-	ctx.Trace("remove gateway credentials secret " + config.GatewaySecretName + " (environment does not use the gateway)")
+	args = append(args, "-n", strings.TrimSpace(deployInput.Namespace), "delete", "secret", openrouter.GatewaySecretName, "--ignore-not-found")
+	ctx.Trace("remove gateway credentials secret " + openrouter.GatewaySecretName + " (environment does not use the gateway)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil

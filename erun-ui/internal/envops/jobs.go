@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
@@ -125,7 +126,7 @@ func (s *Service) jobsReachability(tenant, environment string) (config.OpenResul
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if s.d.CanReachMCPEndpoint(mcpPort) {
 		return result, true, nil
 	}
@@ -140,7 +141,7 @@ func (s *Service) wrapJobMCPErr(result config.OpenResult, err error) error {
 	if err == nil || !s.d.IsMCPDialFailure(err) {
 		return err
 	}
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	return s.d.WrapMCPUnreachable(s.classifyMCPUnreachable(mcpPort), err)
 }
 

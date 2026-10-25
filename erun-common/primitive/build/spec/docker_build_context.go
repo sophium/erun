@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build/ignore"
 )
@@ -20,12 +20,12 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (model.D
 
 	// A declared components: entry scopes the walk to its own docker root.
 	searchRoot := projectRoot
-	declared, ok, err := config.DeclaredComponentPaths(projectRoot, componentName)
+	declared, ok, err := projectpaths.DeclaredComponentPaths(projectRoot, componentName)
 	if err != nil {
 		return model.DockerBuildContext{}, false, err
 	}
 	if ok {
-		if dockerRoot := config.ResolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
+		if dockerRoot := projectpaths.ResolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
 			searchRoot = dockerRoot
 		}
 	}

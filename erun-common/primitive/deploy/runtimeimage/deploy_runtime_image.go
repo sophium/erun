@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 )
@@ -16,10 +17,10 @@ func StaleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 		return ""
 	}
 	switch {
-	case chartName != "" && chartName != config.DevopsComponentName:
-		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + config.DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
+	case chartName != "" && chartName != runtimetarget.DevopsComponentName:
+		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + runtimetarget.DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
 	case chartVersion != "" && chartVersion != version:
-		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + config.DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
+		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + runtimetarget.DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
 	}
 	return ""
 }
@@ -28,14 +29,14 @@ func StaleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 // behind on erun's own line, where chart, image and runtime version are one
 // coordinate. The line must be confirmed from the env's images, never guessed.
 func StockRuntimePinMovesWithDeployVersion(tenant string, env config.EnvConfig, pinName, pinVersion, version string) bool {
-	if strings.TrimSpace(pinName) != config.DevopsComponentName {
+	if strings.TrimSpace(pinName) != runtimetarget.DevopsComponentName {
 		return false
 	}
 	version = strings.TrimSpace(version)
 	if strings.TrimSpace(pinVersion) == "" || strings.TrimSpace(pinVersion) == version || version == "" {
 		return false
 	}
-	if config.RuntimeReleaseName(tenant) != config.DevopsComponentName {
+	if runtimetarget.RuntimeReleaseName(tenant) != runtimetarget.DevopsComponentName {
 		return false
 	}
 	for _, reference := range []string{env.RuntimeImage, env.RuntimeRunningImage} {
@@ -75,11 +76,11 @@ func moveRuntimeImagePinToVersion(image, registry, version string) string {
 // DefaultDeployRuntimeImageBareName returns "" for the erun product tenant, which
 // rides the stock image and lets the chart default win.
 func DefaultDeployRuntimeImageBareName(tenant, chartName string) string {
-	if chartName != "" && chartName != config.DevopsComponentName {
+	if chartName != "" && chartName != runtimetarget.DevopsComponentName {
 		return chartName
 	}
-	tenantImage := config.RuntimeReleaseName(tenant)
-	if tenant == "" || tenantImage == config.DevopsComponentName {
+	tenantImage := runtimetarget.RuntimeReleaseName(tenant)
+	if tenant == "" || tenantImage == runtimetarget.DevopsComponentName {
 		return ""
 	}
 	return tenantImage
@@ -98,10 +99,10 @@ func DefaultDeployRuntimeImage(ctx core.Context, registry, version, tenant, char
 	if image == "" {
 		return ""
 	}
-	if chartName != "" && chartName != config.DevopsComponentName {
-		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + config.DevopsComponentName + ")")
+	if chartName != "" && chartName != runtimetarget.DevopsComponentName {
+		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + runtimetarget.DevopsComponentName + ")")
 	} else {
-		ctx.Trace("deploy: defaulting runtime image to the tenant's " + config.RuntimeReleaseName(tenant) + " image " + image + " (imageOverrides." + config.DevopsComponentName + ")")
+		ctx.Trace("deploy: defaulting runtime image to the tenant's " + runtimetarget.RuntimeReleaseName(tenant) + " image " + image + " (imageOverrides." + runtimetarget.DevopsComponentName + ")")
 	}
 	return image
 }

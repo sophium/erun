@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
 )
 
 // TestManageDialogRepoPathMatchesInit runs the shared fixtures from
@@ -46,15 +47,15 @@ func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 				LocalRepoPath: tc.path,
 			}
 			updated, err := svc.updatedEnvironmentConfig(config, existing)
-			initErr := configpkg.ValidateHostRepoPath(envType, tc.path)
+			initErr := repopath.ValidateHostRepoPath(envType, tc.path)
 
 			switch {
 			case (err == nil) != (initErr == nil):
 				t.Errorf("%s / %s: dialog err=%v but init err=%v for %q — the two sides disagree",
 					envType, tc.name, err, initErr, tc.path)
-			case err != nil && !strings.Contains(err.Error(), configpkg.HostRepoPathRequirement(envType)):
+			case err != nil && !strings.Contains(err.Error(), repopath.HostRepoPathRequirement(envType)):
 				t.Errorf("%s / %s: dialog refusal %q does not carry init's reason %q",
-					envType, tc.name, err, configpkg.HostRepoPathRequirement(envType))
+					envType, tc.name, err, repopath.HostRepoPathRequirement(envType))
 			case err == nil && strings.TrimSpace(updated.LocalRepoPath) != strings.TrimSpace(tc.path):
 				t.Errorf("%s / %s: dialog accepted %q but saved %q",
 					envType, tc.name, tc.path, updated.LocalRepoPath)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -77,7 +77,7 @@ func (s *Service) reloadedHostedLocalChange(tenant, environment string) HostedDe
 	if err != nil {
 		return HostedDefinitionLocalChange{}
 	}
-	return hostedDefinitionLocalChangeToUI(configpkg.HostedDefinitionLocalChangeFor(config))
+	return hostedDefinitionLocalChangeToUI(envdefinition.HostedDefinitionLocalChangeFor(config))
 }
 
 // autoUploadHostedDefinition uploads settings that moved since the last
@@ -88,10 +88,10 @@ func (s *Service) autoUploadHostedDefinition(tenant, environment string) {
 		// Deleted, half-created, or mid-init: nothing to send.
 		return
 	}
-	if _, ok := configpkg.HostedEnvironmentFromConfig(config); !ok {
+	if _, ok := envdefinition.HostedEnvironmentFromConfig(config); !ok {
 		return
 	}
-	if !configpkg.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
+	if !envdefinition.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
 		return
 	}
 	// Check readiness first so an unsigned machine is not notified on every write.
@@ -135,10 +135,10 @@ func (s *Service) CatchUpHostedDefinitions() {
 			continue
 		}
 		for _, config := range envs {
-			if _, ok := configpkg.HostedEnvironmentFromConfig(config); !ok {
+			if _, ok := envdefinition.HostedEnvironmentFromConfig(config); !ok {
 				continue
 			}
-			if !configpkg.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
+			if !envdefinition.HostedDefinitionLocalChangeFor(config).HasUnsentChange() {
 				continue
 			}
 			s.autoUploadHostedDefinition(tenant.Name, config.Name)

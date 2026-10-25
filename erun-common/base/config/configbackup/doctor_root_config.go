@@ -1,19 +1,20 @@
-package config
+package configbackup
 
 import (
 	"errors"
 	"sort"
 	"strings"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // RootConfigInspectionStore stays narrow so inspection works when the root
 // config is unloadable.
 type RootConfigInspectionStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
+	LoadERunConfig() (configpkg.ERunConfig, string, error)
 	ListTenantConfigs() ([]model.TenantConfig, error)
-	ListEnvConfigs(tenant string) ([]EnvConfig, error)
+	ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error)
 }
 
 // InspectRootConfig reports dangling cloud-provider-alias references and backups
@@ -29,10 +30,10 @@ func InspectRootConfig(store RootConfigInspectionStore) (model.RootConfigInspect
 	switch {
 	case err == nil:
 		inspection.ConfigStatus = model.RootConfigStatusOK
-	case errors.Is(err, ErrNotInitialized):
+	case errors.Is(err, configpkg.ErrNotInitialized):
 		inspection.ConfigStatus = model.RootConfigStatusMissing
 		inspection.ConfigError = err.Error()
-	case errors.Is(err, ErrConfigCorrupted):
+	case errors.Is(err, configpkg.ErrConfigCorrupted):
 		inspection.ConfigStatus = model.RootConfigStatusCorrupted
 		inspection.ConfigError = err.Error()
 	default:
@@ -216,7 +217,7 @@ func indexCloudContextsByKubernetesName(contexts []model.CloudContextConfig) map
 	return known
 }
 
-func recordOrphanedCloudContext(orphans map[string]*model.OrphanedCloudContext, known map[string]struct{}, tenantName string, env EnvConfig) {
+func recordOrphanedCloudContext(orphans map[string]*model.OrphanedCloudContext, known map[string]struct{}, tenantName string, env configpkg.EnvConfig) {
 	if !envExpectsCloudContext(env) {
 		return
 	}
@@ -251,7 +252,7 @@ func recordOrphanedCloudContext(orphans map[string]*model.OrphanedCloudContext, 
 }
 
 // envExpectsCloudContext limits orphan detection to erun-managed cloud envs.
-func envExpectsCloudContext(env EnvConfig) bool {
+func envExpectsCloudContext(env configpkg.EnvConfig) bool {
 	if strings.TrimSpace(env.CloudProviderAlias) != "" {
 		return true
 	}
@@ -285,7 +286,7 @@ func parseErunCloudContextName(name string) (string, string) {
 
 func newOrphanedAlias(alias string) *model.OrphanedAlias {
 	entry := &model.OrphanedAlias{Alias: alias}
-	if username, accountID, provider, ok := ParseCloudProviderAlias(alias); ok {
+	if username, accountID, provider, ok := configpkg.ParseCloudProviderAlias(alias); ok {
 		entry.Username = username
 		entry.AccountID = accountID
 		entry.Provider = provider

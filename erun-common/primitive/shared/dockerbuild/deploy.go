@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 )
@@ -111,11 +112,11 @@ func configuredK8sDirForDeploy(findProjectRoot projectroot.ProjectFinderFunc, pr
 
 // ConfiguredK8sDir fails on a non-chart override rather than fall back to convention.
 func ConfiguredK8sDir(projectRoot string) (string, bool, error) {
-	paths, err := configpkg.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
-	k8sDir := configpkg.ResolveProjectPath(projectRoot, paths.K8s)
+	k8sDir := projectpaths.ResolveProjectPath(projectRoot, paths.K8s)
 	if k8sDir == "" {
 		return "", false, nil
 	}
@@ -198,7 +199,7 @@ func detectedProjectRootDevopsK8sDir(findProjectRoot projectroot.ProjectFinderFu
 	if !ok {
 		return "", false, nil
 	}
-	k8sDir := filepath.Join(projectRoot, configpkg.RuntimeReleaseName(tenant), "k8s")
+	k8sDir := filepath.Join(projectRoot, runtimetarget.RuntimeReleaseName(tenant), "k8s")
 	if ok, err := IsKubernetesDeployModuleDir(k8sDir); err != nil {
 		return "", false, err
 	} else if ok {

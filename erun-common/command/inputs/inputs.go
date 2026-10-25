@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
@@ -167,8 +168,8 @@ func parseRuntimeInputUploadResponse(stdout string) (size int64, sha string, err
 }
 
 func kubectlRemoteExecStdinArgs(req config.ShellLaunchParams, script string) []string {
-	args := config.KubectlTargetArgs(req)
-	args = append(args, "exec", "-i", "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
+	args := runtimetarget.KubectlTargetArgs(req)
+	args = append(args, "exec", "-i", "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
 	return args
 }
 

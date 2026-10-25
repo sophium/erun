@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -23,7 +24,7 @@ metadata:
 type: kubernetes.io/dockerconfigjson
 stringData:
   %q: %q
-`, name, namespace, config.DockerConfigJSONSecretKey, dockerConfigJSON)
+`, name, namespace, containerregistry.DockerConfigJSONSecretKey, dockerConfigJSON)
 }
 
 // refreshImagePullSecrets re-mints the named pull Secrets before every rollout,
@@ -57,8 +58,8 @@ func resolveImagePullSecretCredentials(ctx core.Context, deployInput helmdeploy.
 	return credentials
 }
 
-func mergeImagePullSecretAuths(existing map[string]config.DockerConfigJSONAuthEntry, credentials map[string]registry.RegistryBasicAuth) map[string]config.DockerConfigJSONAuthEntry {
-	merged := make(map[string]config.DockerConfigJSONAuthEntry, len(existing)+len(credentials))
+func mergeImagePullSecretAuths(existing map[string]containerregistry.DockerConfigJSONAuthEntry, credentials map[string]registry.RegistryBasicAuth) map[string]containerregistry.DockerConfigJSONAuthEntry {
+	merged := make(map[string]containerregistry.DockerConfigJSONAuthEntry, len(existing)+len(credentials))
 	for host, entry := range existing {
 		merged[host] = entry
 	}

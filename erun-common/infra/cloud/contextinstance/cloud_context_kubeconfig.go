@@ -5,15 +5,16 @@ import (
 	"os"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func DescribeCloudContextPublicIP(ctx core.Context, deps cloudcontext.CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
+func DescribeCloudContextPublicIP(ctx core.Context, deps cloudcloudcontext.CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
 	publicIP, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-instances",
 		"--instance-ids", instanceID,
@@ -46,8 +47,8 @@ func cloudContextKubeconfigCommands(config model.CloudContextConfig) [][]string 
 	}
 }
 
-func ConfigureCloudKubeContext(ctx core.Context, deps cloudcontext.CloudContextDependencies, config model.CloudContextConfig) error {
-	config = configpkg.NormalizeCloudContextConfig(config)
+func ConfigureCloudKubeContext(ctx core.Context, deps cloudcloudcontext.CloudContextDependencies, config model.CloudContextConfig) error {
+	config = configcloudcontext.NormalizeCloudContextConfig(config)
 	if config.PublicIP == "" {
 		return fmt.Errorf("cloud context public IP is required")
 	}
@@ -61,7 +62,7 @@ func ConfigureCloudKubeContext(ctx core.Context, deps cloudcontext.CloudContextD
 	if ctx.DryRun {
 		return nil
 	}
-	if configpkg.CurrentExecutionMode(kubectlContextConfigureExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kubectlContextConfigureExecutionOperation) == execmode.ExecutionModeLibrary {
 		if err := libraryConfigureCloudKubeContext(config); err != nil {
 			return fmt.Errorf("kubectl config context %s: %w", config.KubernetesContext, err)
 		}

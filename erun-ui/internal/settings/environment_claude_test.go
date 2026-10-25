@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/claudedefaults"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -60,10 +61,10 @@ func assertClaudeOverrides(t *testing.T, claude ClaudeConfig) {
 func assertClaudeDefaults(t *testing.T, defaults ClaudeDefaults) {
 	t.Helper()
 
-	if defaults.MaxOutputTokens != configpkg.DefaultClaudeMaxOutputTokens {
+	if defaults.MaxOutputTokens != claudedefaults.DefaultClaudeMaxOutputTokens {
 		t.Fatalf("expected default max output tokens, got %d", defaults.MaxOutputTokens)
 	}
-	if !equalStringSlices(defaults.Models, configpkg.DefaultClaudeAvailableModels()) {
+	if !equalStringSlices(defaults.Models, claudedefaults.DefaultClaudeAvailableModels()) {
 		t.Fatalf("expected default models, got %+v", defaults.Models)
 	}
 	if !equalStringSlices(defaults.KnownModels, configpkg.KnownClaudeModels()) {

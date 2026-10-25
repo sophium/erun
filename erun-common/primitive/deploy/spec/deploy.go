@@ -3,7 +3,7 @@ package spec
 import (
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
@@ -22,7 +22,7 @@ func applyRuntimeChartOverride(ctx core.Context, target model.DeployTarget, spec
 	if override == "" || spec == nil {
 		return
 	}
-	if spec.Deploy.ReleaseName != configpkg.RuntimeReleaseName(spec.Target.Tenant) {
+	if spec.Deploy.ReleaseName != runtimetarget.RuntimeReleaseName(spec.Target.Tenant) {
 		return
 	}
 	reference, version := chartref.SplitChartReferenceVersion(override)

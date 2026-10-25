@@ -3,7 +3,7 @@ package repository
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 )
 
 func parseKubernetesQuantityOrFatal(t *testing.T, parse func(string) (int64, error), value string) int64 {
@@ -18,14 +18,14 @@ func parseKubernetesQuantityOrFatal(t *testing.T, parse func(string) (int64, err
 // Recomputes the floor from config constants rather than
 // config.MinimumRuntimeNamespaceQuota, so a derivation bug fails here.
 func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
-	devopsCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimePodCPU)
-	dindCPU := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesCPUToMilli, config.DefaultRuntimeDindCPU)
-	devopsMemory := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesMemoryToMi, config.DefaultRuntimePodMemory)
-	dindMemory := parseKubernetesQuantityOrFatal(t, config.ParseKubernetesMemoryToMi, config.DefaultRuntimeDindMemory)
+	devopsCPU := parseKubernetesQuantityOrFatal(t, runtimeresources.ParseKubernetesCPUToMilli, runtimeresources.DefaultRuntimePodCPU)
+	dindCPU := parseKubernetesQuantityOrFatal(t, runtimeresources.ParseKubernetesCPUToMilli, runtimeresources.DefaultRuntimeDindCPU)
+	devopsMemory := parseKubernetesQuantityOrFatal(t, runtimeresources.ParseKubernetesMemoryToMi, runtimeresources.DefaultRuntimePodMemory)
+	dindMemory := parseKubernetesQuantityOrFatal(t, runtimeresources.ParseKubernetesMemoryToMi, runtimeresources.DefaultRuntimeDindMemory)
 
 	wantCPU := int(devopsCPU + dindCPU)
 	wantMemory := int(devopsMemory + dindMemory)
-	wantStorage := config.DefaultRuntimeHomePVCGi + config.DefaultRuntimeDockerPVCGi + config.DefaultRuntimeWorktreePVCGi
+	wantStorage := runtimeresources.DefaultRuntimeHomePVCGi + runtimeresources.DefaultRuntimeDockerPVCGi + runtimeresources.DefaultRuntimeWorktreePVCGi
 
 	got := [3]int{DefaultMaxCPUMillicores, DefaultMaxMemoryMB, DefaultMaxStorageGB}
 	want := [3]int{wantCPU, wantMemory, wantStorage}

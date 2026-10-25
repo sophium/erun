@@ -9,8 +9,12 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 )
 
 var (
@@ -43,7 +47,7 @@ func LoadOpenDefaultTenant(store configpkg.OpenStore) (string, error) {
 	return toolConfig.DefaultTenant, nil
 }
 
-func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc, params model.OpenParams) (configpkg.OpenResult, error) {
+func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot seamprojectroot.ProjectFinderFunc, params model.OpenParams) (configpkg.OpenResult, error) {
 	if store == nil {
 		return configpkg.OpenResult{}, fmt.Errorf("store is required")
 	}
@@ -71,7 +75,7 @@ func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot projectroo
 	if err := validateOpenTarget(tenant, environment, repoPath, envConfig); err != nil {
 		return configpkg.OpenResult{}, err
 	}
-	localPorts, err := configpkg.EnvironmentLocalPortsForTarget(store, tenant, envConfig)
+	localPorts, err := localports.EnvironmentLocalPortsForTarget(store, tenant, envConfig)
 	if err != nil {
 		return configpkg.OpenResult{}, err
 	}
@@ -90,7 +94,7 @@ func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot projectroo
 
 // ResolveOpenGateway reads the erun-level gateway catalog; an unreadable root config leaves it unset.
 func ResolveOpenGateway(store configpkg.OpenStore) *configpkg.OpenRouterConfig {
-	gateway, err := configpkg.ResolveOpenRouterConfig(store)
+	gateway, err := openrouter.ResolveOpenRouterConfig(store)
 	if err != nil {
 		return nil
 	}
@@ -113,7 +117,7 @@ func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
 	return fmt.Sprintf("%s — pass a tenant explicitly with `%s --tenant <name>`, %s", cause, command, setState)
 }
 
-func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc, params model.OpenParams) (string, error) {
+func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot seamprojectroot.ProjectFinderFunc, params model.OpenParams) (string, error) {
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
 		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
@@ -171,7 +175,7 @@ func resolveOpenEnvironment(params model.OpenParams, tenantConfig model.TenantCo
 func loadOpenEnvConfig(store configpkg.OpenStore, tenant, environment string) (configpkg.EnvConfig, error) {
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if errors.Is(err, configpkg.ErrNotInitialized) {
-		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", configpkg.ErrEnvironmentNotFound, environment)
+		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", runtimetarget.ErrEnvironmentNotFound, environment)
 	}
 	if err != nil {
 		return configpkg.EnvConfig{}, err
@@ -221,7 +225,7 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig configpk
 	return nil
 }
 
-func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot projectroot.ProjectFinderFunc) (string, bool, error) {
+func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot seamprojectroot.ProjectFinderFunc) (string, bool, error) {
 	tenantLister, ok := store.(interface {
 		ListTenantConfigs() ([]model.TenantConfig, error)
 	})
@@ -230,7 +234,7 @@ func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot proje
 	}
 
 	if findProjectRoot == nil {
-		findProjectRoot = configpkg.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 
 	tenant, _, err := findProjectRoot()
@@ -262,5 +266,5 @@ func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot proje
 // TenantResourcePrefix is a tenant's component-chart resource prefix: the tenant, or "erun"
 // when empty, matching the charts' `{{ .Values.tenant | default "erun" }}`.
 func TenantResourcePrefix(tenant string) string {
-	return strings.TrimSuffix(configpkg.RuntimeReleaseName(tenant), "-devops")
+	return strings.TrimSuffix(runtimetarget.RuntimeReleaseName(tenant), "-devops")
 }

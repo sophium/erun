@@ -4,6 +4,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -35,11 +36,11 @@ type CloudContextDependencies struct {
 }
 
 func CloudContextInstanceTypes() []string {
-	return []string{configpkg.DefaultCloudContextInstanceType, AlternateCloudContextInstanceType}
+	return []string{cloudcontext.DefaultCloudContextInstanceType, AlternateCloudContextInstanceType}
 }
 
 func CloudContextDiskSizesGB() []int {
-	return []int{configpkg.DefaultCloudContextDiskSizeGB, AlternateCloudContextDiskSizeGB}
+	return []int{cloudcontext.DefaultCloudContextDiskSizeGB, AlternateCloudContextDiskSizeGB}
 }
 
 func CloudContextRegions() []string {
@@ -47,7 +48,7 @@ func CloudContextRegions() []string {
 }
 
 func ListCloudContextStatuses(store configpkg.CloudReadStore) ([]model.CloudContextStatus, error) {
-	contexts, err := configpkg.ListCloudContexts(store)
+	contexts, err := cloudcontext.ListCloudContexts(store)
 	if err != nil {
 		return nil, err
 	}

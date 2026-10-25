@@ -38,7 +38,7 @@ new code goes into the layer it belongs to:
 
 ```
 erun-common/
-  base/          model/ core/ config/ seam/<concern>/
+  base/          model/ core/ config/ config/<concern>/ seam/<concern>/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/<concern>/ activity/<concern>/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
   primitive/     shared/<concern>/ build/<concern>/ deploy/<concern>/ open/<concern>/ push/ release/
   orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
@@ -53,6 +53,7 @@ import only the erun packages its row names:
 | `base/model` | no other erun package |
 | `base/core` | `base/model` |
 | `base/config` | `base/model`, `base/core` |
+| `base/config/*` | `base/model`, `base/core`, `base/config` |
 | `base/seam/*` | `base/model`, `base/core`, `base/config`, sibling seams |
 | `infra/*` | `base/*` and, for cloud and activity, their own `<concern>` subpackages; another `infra/*` only where its depguard rule names it |
 | `primitive/shared/*` | `base/*`, `infra/*`, other `primitive/shared/*` |

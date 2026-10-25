@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
@@ -119,8 +120,8 @@ func runtimeDindResizeActions(current, target model.RuntimePodResources) []model
 
 // ResolveRuntimeResizePlan resolves and quota-checks a resize target without side effects.
 func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind model.RuntimePodResources, ceiling model.NamespaceResourceQuota, input model.RuntimeResizeInput, recommendation *model.RuntimeSizingRecommendation) (model.RuntimeResizePlan, error) {
-	current = config.NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
-	currentDind = config.NormalizeRuntimeDindPodResources(currentDind)
+	current = runtimeresources.NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
+	currentDind = runtimeresources.NormalizeRuntimeDindPodResources(currentDind)
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
 	explicitDindCPU := strings.TrimSpace(input.DindCPU)
@@ -134,13 +135,13 @@ func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind m
 	if err != nil {
 		return model.RuntimeResizePlan{}, err
 	}
-	target = config.NormalizeRuntimePodResources(target)
-	if err := config.ValidateRuntimePodResources(target); err != nil {
+	target = runtimeresources.NormalizeRuntimePodResources(target)
+	if err := runtimeresources.ValidateRuntimePodResources(target); err != nil {
 		return model.RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
 	}
 
-	dindTarget := config.NormalizeRuntimeDindPodResources(resolveRuntimeDindResizeTarget(currentDind, explicitDindCPU, explicitDindMemory))
-	if err := config.ValidateRuntimeDindPodResources(dindTarget); err != nil {
+	dindTarget := runtimeresources.NormalizeRuntimeDindPodResources(resolveRuntimeDindResizeTarget(currentDind, explicitDindCPU, explicitDindMemory))
+	if err := runtimeresources.ValidateRuntimeDindPodResources(dindTarget); err != nil {
 		return model.RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
 	}
 
@@ -167,9 +168,9 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget model.RuntimePodResour
 	if ceiling.IsZero() {
 		return nil
 	}
-	if quotaCPUMilli, err := config.ParseKubernetesCPUToMilli(ceiling.CPU); err == nil {
-		dindCPUMilli, _ := config.ParseKubernetesCPUToMilli(dindTarget.CPU)
-		if targetCPUMilli, tErr := config.ParseKubernetesCPUToMilli(target.CPU); tErr == nil && targetCPUMilli+dindCPUMilli > quotaCPUMilli {
+	if quotaCPUMilli, err := runtimeresources.ParseKubernetesCPUToMilli(ceiling.CPU); err == nil {
+		dindCPUMilli, _ := runtimeresources.ParseKubernetesCPUToMilli(dindTarget.CPU)
+		if targetCPUMilli, tErr := runtimeresources.ParseKubernetesCPUToMilli(target.CPU); tErr == nil && targetCPUMilli+dindCPUMilli > quotaCPUMilli {
 			available := quotaCPUMilli - dindCPUMilli
 			if available < 0 {
 				available = 0
@@ -177,9 +178,9 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget model.RuntimePodResour
 			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, dindTarget.CPU, ceiling.CPU, formatAvailableCPUMilli(available))
 		}
 	}
-	if quotaMemMi, err := config.ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
-		dindMemMi, _ := config.ParseKubernetesMemoryToMi(dindTarget.Memory)
-		if targetMemMi, tErr := config.ParseKubernetesMemoryToMi(target.Memory); tErr == nil && targetMemMi+dindMemMi > quotaMemMi {
+	if quotaMemMi, err := runtimeresources.ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
+		dindMemMi, _ := runtimeresources.ParseKubernetesMemoryToMi(dindTarget.Memory)
+		if targetMemMi, tErr := runtimeresources.ParseKubernetesMemoryToMi(target.Memory); tErr == nil && targetMemMi+dindMemMi > quotaMemMi {
 			available := quotaMemMi - dindMemMi
 			if available < 0 {
 				available = 0
@@ -195,7 +196,7 @@ func formatAvailableCPUMilli(milli int64) string {
 	if milli <= 0 {
 		return "0"
 	}
-	return config.FormatKubernetesCPUFromMilli(milli)
+	return runtimeresources.FormatKubernetesCPUFromMilli(milli)
 }
 
 // RuntimeResizeOccupancyError refuses a resize while leases are held, since the pod roll kills sessions.

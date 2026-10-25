@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -31,7 +32,7 @@ func announceWorktreeVolumeChange(ctx core.Context, spec helmdeploy.HelmDeploySp
 		return
 	}
 	// Component releases carry the same env fields but create no worktree claim.
-	if strings.TrimSpace(spec.ReleaseName) != config.RuntimeReleaseName(spec.Tenant) {
+	if strings.TrimSpace(spec.ReleaseName) != runtimetarget.RuntimeReleaseName(spec.Tenant) {
 		return
 	}
 	worktreePath := podWorktreePath(spec.WorktreeRepoName)
@@ -83,7 +84,7 @@ func kubectlWorktreeClaimArgs(spec helmdeploy.HelmDeploySpec, claim string) []st
 // worktreeClaimExists distinguishes "absent" from "unknown" so an unreadable
 // cluster never passes as settled.
 func worktreeClaimExists(contextName, namespace, claim string) (bool, error) {
-	if config.CurrentExecutionMode(kube.KubectlPVCGetExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kube.KubectlPVCGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return kube.LibraryPersistentVolumeClaimExists(contextName, namespace, claim)
 	}
 	return defaultWorktreeClaimExists(contextName, namespace, claim)

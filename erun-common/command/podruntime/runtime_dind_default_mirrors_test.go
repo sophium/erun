@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 )
 
 // DefaultRuntimeDindCPU must match the erun-devops chart's fallback; this reads the real chart.
@@ -40,9 +40,9 @@ func TestDindCPUDefaultMatchesEveryMirror(t *testing.T) {
 				t.Fatalf("%s no longer matches %s, so nothing establishes %s — a mirror nothing reads is "+
 					"how the constant and the file it mirrors drift apart", mirror.path, mirror.pattern, mirror.what)
 			}
-			if match[1] != config.DefaultRuntimeDindCPU {
+			if match[1] != runtimeresources.DefaultRuntimeDindCPU {
 				t.Errorf("%s sets %s to %q, but DefaultRuntimeDindCPU is %q: raise or lower both together, since "+
-					"they are one sizing decision written down twice", mirror.path, mirror.what, match[1], config.DefaultRuntimeDindCPU)
+					"they are one sizing decision written down twice", mirror.path, mirror.what, match[1], runtimeresources.DefaultRuntimeDindCPU)
 			}
 		})
 	}

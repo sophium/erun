@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
@@ -36,7 +38,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 		deps.store = config.ConfigStore{}
 	}
 	if deps.findProjectRoot == nil {
-		deps.findProjectRoot = config.FindProjectRoot
+		deps.findProjectRoot = projectroot.FindProjectRoot
 	}
 	if deps.resolveCLIPath == nil {
 		deps.resolveCLIPath = terminal.ResolveCLIExecutable
@@ -154,7 +156,7 @@ func loadHostedRegistryWithTestOverride(ctx context.Context) runtimeview.HostedR
 	if !ok {
 		return runtimeview.ProbeHostedRegistry(ctx)
 	}
-	status := runtimeview.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
+	status := runtimeview.HostedRegistryStatus{Host: containerregistry.HostedRegistryHost, Available: available}
 	if !available {
 		status.Reason = "does not resolve"
 		status.Recovery = "Choose a different registry instead."

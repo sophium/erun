@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
@@ -62,7 +63,7 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read captured args: %v", err)
 	}
-	wantArgs := "login\n" + config.HostedRegistryHost + "\n-u\n" + config.HostedRegistryLoginUsername + "\n--password-stdin\n"
+	wantArgs := "login\n" + containerregistry.HostedRegistryHost + "\n-u\n" + containerregistry.HostedRegistryLoginUsername + "\n--password-stdin\n"
 	if string(gotArgs) != wantArgs {
 		t.Fatalf("docker args = %q, want %q", string(gotArgs), wantArgs)
 	}
@@ -112,7 +113,7 @@ func TestIsHostedRegistry(t *testing.T) {
 		registry string
 		want     bool
 	}{
-		{config.HostedRegistryHost, true},
+		{containerregistry.HostedRegistryHost, true},
 		{"REGISTRY.ERUNPAAS.COM", true},
 		{" registry.erunpaas.com ", true},
 		{"registry.erunpaas.com/acme", false},

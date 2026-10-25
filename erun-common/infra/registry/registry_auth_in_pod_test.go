@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -21,10 +22,10 @@ func inPodTestContext(dryRun bool) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace), DryRun: dryRun}
 }
 
-func stubDeclaredImagePullSecrets(t *testing.T, auths map[string]config.DockerConfigJSONAuthEntry) {
+func stubDeclaredImagePullSecrets(t *testing.T, auths map[string]containerregistry.DockerConfigJSONAuthEntry) {
 	t.Helper()
 	prev := readDeclaredImagePullSecretAuths
-	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 		return auths, nil
 	}
 	t.Cleanup(func() {
@@ -45,8 +46,8 @@ func useInPodIdentity(t *testing.T) {
 	t.Setenv("ERUN_NAMESPACE", "")
 }
 
-func ghcrDeclaredAuths(userPass string) map[string]config.DockerConfigJSONAuthEntry {
-	return map[string]config.DockerConfigJSONAuthEntry{
+func ghcrDeclaredAuths(userPass string) map[string]containerregistry.DockerConfigJSONAuthEntry {
+	return map[string]containerregistry.DockerConfigJSONAuthEntry{
 		"ghcr.io": {Auth: b64Auth(userPass)},
 	}
 }
@@ -100,7 +101,7 @@ func TestConfigureInPodDeclaredRegistryAuthRequiresRuntimePodIdentity(t *testing
 	t.Setenv("ERUN_TENANT", "")
 	calls := 0
 	prev := readDeclaredImagePullSecretAuths
-	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 		calls++
 		return ghcrDeclaredAuths("pullsecret:pw"), nil
 	}
@@ -136,7 +137,7 @@ func TestConfigureInPodDeclaredRegistryAuthSkipsDryRun(t *testing.T) {
 	useInPodIdentity(t)
 	calls := 0
 	prev := readDeclaredImagePullSecretAuths
-	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 		calls++
 		return ghcrDeclaredAuths("pullsecret:pw"), nil
 	}
@@ -207,7 +208,7 @@ func TestDeclaredImagePullSecretConfirmsPrivateChart(t *testing.T) {
 func TestConfigureInPodDeclaredRegistryAuthToleratesUnreadableSecret(t *testing.T) {
 	useInPodIdentity(t)
 	prev := readDeclaredImagePullSecretAuths
-	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+	readDeclaredImagePullSecretAuths = func(string, string, string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 		return nil, fmt.Errorf("read existing image pull secret ghcr-pull: forbidden")
 	}
 	t.Cleanup(func() {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -240,8 +241,8 @@ func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
 		Environment: "code1",
 		Requests: &model.RuntimeUsageRequests{
 			Containers: map[string]model.KubernetesRequests{
-				config.DevopsComponentName: {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
-				"erun-dind":                {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
+				runtimetarget.DevopsComponentName: {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
+				"erun-dind":                       {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
 			},
 			Pod: model.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * (1 << 20)},
 		},

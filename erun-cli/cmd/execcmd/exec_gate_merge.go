@@ -6,16 +6,16 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared/clicmd"
-	"github.com/sophium/erun/erun-common/base/config"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/spf13/cobra"
 )
 
-func newExecGateMergeCmd(findProjectRoot projectroot.ProjectFinderFunc) *cobra.Command {
+func newExecGateMergeCmd(findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	var (
 		sources    []string
 		target     string
@@ -81,7 +81,7 @@ func newExecGateMergeCmd(findProjectRoot projectroot.ProjectFinderFunc) *cobra.C
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx core.Context, findProjectRoot projectroot.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
+func runExecGateMergeCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}
@@ -89,7 +89,7 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot projectroot.Proje
 		return fmt.Errorf("--target is required")
 	}
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {

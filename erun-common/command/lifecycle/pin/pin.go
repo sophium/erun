@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
@@ -145,12 +146,12 @@ func ownLineChartStatement(chart string) *runtimeImageStatement {
 	}
 	reference, _ := chartref.SplitChartReferenceVersion(chart)
 	name := chartref.ChartName(reference)
-	if name == "" || name == config.DevopsComponentName {
+	if name == "" || name == runtimetarget.DevopsComponentName {
 		return nil
 	}
 	return &runtimeImageStatement{
 		Reference: chart,
-		Origin:    "from runtimechart, the " + name + " chart publishes its own runtime image, not erun's stock " + config.DevopsComponentName,
+		Origin:    "from runtimechart, the " + name + " chart publishes its own runtime image, not erun's stock " + runtimetarget.DevopsComponentName,
 	}
 }
 
@@ -162,7 +163,7 @@ func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeIm
 	}
 	chartReference, _ := chartref.SplitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
 	name := runtimeimage.DefaultDeployRuntimeImageBareName(tenant, chartref.ChartName(chartReference))
-	if name == "" || name == config.DevopsComponentName {
+	if name == "" || name == runtimetarget.DevopsComponentName {
 		return nil
 	}
 	return &runtimeImageStatement{
@@ -229,8 +230,8 @@ func resolveRuntimeChartPinSite(chart, target string) (*model.PinSite, string) {
 	}
 	reference, chartVersion := chartref.SplitChartReferenceVersion(chart)
 	chartName := chartref.ChartName(reference)
-	if chartName != config.DevopsComponentName {
-		reason := "names " + chartName + ", not the stock " + config.DevopsComponentName + " chart, so it rides its own release line"
+	if chartName != runtimetarget.DevopsComponentName {
+		reason := "names " + chartName + ", not the stock " + runtimetarget.DevopsComponentName + " chart, so it rides its own release line"
 		if chartName == "" {
 			reason = "could not be read to find its chart name"
 		}

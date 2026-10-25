@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
 	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
@@ -95,7 +96,7 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t 
 
 	dir := t.TempDir()
 	got := dockerbuild.ResolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
-	want := model.RuntimePodResources{CPU: "8", Memory: config.DefaultRuntimeDindMemory}
+	want := model.RuntimePodResources{CPU: "8", Memory: runtimeresources.DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected valid CPU env var and default memory, got %+v want %+v", got, want)
 	}

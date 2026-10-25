@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -30,7 +31,7 @@ func resolveRouteCheckRoutesDir(explicit string) (string, error) {
 	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
 		return trimmed, nil
 	}
-	_, root, err := config.FindProjectRoot()
+	_, root, err := projectroot.FindProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve routes directory: %w (pass --routes-dir explicitly outside a checkout of the erun repository)", err)
 	}

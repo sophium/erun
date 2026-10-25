@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
@@ -290,7 +290,7 @@ func runHelmDeployExecute(ctx core.Context, deployInput helmdeploy.HelmDeploySpe
 // is not mistaken for a full-env redeploy.
 func helmDeployTargetLabel(deployInput helmdeploy.HelmDeploySpec) string {
 	target := deployInput.Tenant + "/" + deployInput.Environment
-	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != configpkg.RuntimeReleaseName(deployInput.Tenant) {
+	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != runtimetarget.RuntimeReleaseName(deployInput.Tenant) {
 		target += " · " + release
 	}
 	if version := strings.TrimSpace(deployInput.Version); version != "" {

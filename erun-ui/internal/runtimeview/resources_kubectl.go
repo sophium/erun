@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -46,8 +46,8 @@ func parseKubernetesContainerUsage(output string) kubernetesContainerUsage {
 		if len(fields) < 5 {
 			continue
 		}
-		cpu, cpuErr := config.ParseKubernetesCPUToMilli(fields[3])
-		memory, memoryErr := config.ParseKubernetesMemoryToMi(fields[4])
+		cpu, cpuErr := runtimeresources.ParseKubernetesCPUToMilli(fields[3])
+		memory, memoryErr := runtimeresources.ParseKubernetesMemoryToMi(fields[4])
 		if cpuErr != nil && memoryErr != nil {
 			continue
 		}

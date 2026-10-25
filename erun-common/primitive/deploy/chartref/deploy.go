@@ -3,7 +3,7 @@ package chartref
 import (
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
@@ -50,5 +50,5 @@ func SplitChartReferenceVersion(raw string) (string, string) {
 
 func SpecDeploysRuntimeChart(spec helmdeploy.DeploySpec) bool {
 	tenant := strings.TrimSpace(spec.Target.Tenant)
-	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == configpkg.RuntimeReleaseName(tenant)
+	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == runtimetarget.RuntimeReleaseName(tenant)
 }

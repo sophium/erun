@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/claudedefaults"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -41,7 +43,7 @@ func ResolveClaudeEffort(config configpkg.EnvironmentClaudeConfig) string {
 // ResolveClaudeLaunchModel never falls back to the agent's own default, which
 // the environment may not be able to serve.
 func ResolveClaudeLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
-	if effective := configpkg.EffectiveGateway(config, gateway); effective.Configured() {
+	if effective := openrouter.EffectiveGateway(config, gateway); effective.Configured() {
 		return ResolveGatewayLaunchModel(config, effective)
 	}
 	return resolveAvailableClaudeModel(config)
@@ -71,7 +73,7 @@ func ResolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway
 func resolveAvailableClaudeModel(config configpkg.EnvironmentClaudeConfig) string {
 	available := config.NormalizedModels()
 	if len(available) == 0 {
-		available = configpkg.DefaultClaudeAvailableModels()
+		available = claudedefaults.DefaultClaudeAvailableModels()
 	}
 	if model := ClaudeConfiguredModel(config); model != "" {
 		for _, candidate := range available {
@@ -145,7 +147,7 @@ func claudeRemoteControlFlag(claude configpkg.EnvironmentClaudeConfig, gateway *
 }
 
 func claudeUsesGatewayAuth(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) bool {
-	if configpkg.EffectiveGateway(claude, gateway).Configured() {
+	if openrouter.EffectiveGateway(claude, gateway).Configured() {
 		return true
 	}
 	return (claude.UseBedrock != nil && *claude.UseBedrock) ||
@@ -174,7 +176,7 @@ func claudeLaunchEnvPrefix(claude configpkg.EnvironmentClaudeConfig, gateway *co
 		return ""
 	}
 	prefix := "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
-	if context := configpkg.EffectiveGateway(claude, gateway).ContextFor(model); context > 0 {
+	if context := openrouter.EffectiveGateway(claude, gateway).ContextFor(model); context > 0 {
 		prefix = "CLAUDE_CODE_MAX_CONTEXT_TOKENS=" + strconv.Itoa(context) + " " + prefix
 	}
 	return prefix

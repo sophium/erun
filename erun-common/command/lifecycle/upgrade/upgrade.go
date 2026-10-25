@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
@@ -64,7 +66,7 @@ func UpgradeVersionsResolverForStore(_ deploytarget.DeployStore, lookup Registry
 			}
 			return []SourcedRuntimeVersions{{Versions: versions}}, nil
 		}
-		repository := config.RuntimeReleaseName(tenant)
+		repository := runtimetarget.RuntimeReleaseName(tenant)
 		sourced := make([]SourcedRuntimeVersions, 0, 4)
 		queried := make(map[string]struct{}, 4)
 		var firstErr error
@@ -113,7 +115,7 @@ func upgradeDiscoveryRegistries(env config.EnvConfig) []string {
 		registries = append(registries, registry)
 	}
 	add(env.RuntimeRegistry)
-	for _, registry := range config.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
+	for _, registry := range containerregistry.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
 		add(registry)
 	}
 	if len(registries) == 0 {
