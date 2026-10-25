@@ -37,11 +37,11 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// Re-enumerated every tick: an env linked while the app runs gets no sync worker
 			// otherwise. Idempotent once every linked env is syncing.
 			a.envops.ReconcileConfiguredWorkspaceSyncs()
-			a.reconcileOrchestratorActivity()
-			// After reconcileOrchestratorActivity so shellRunning is this tick's report.
-			a.reconcileOrchestratorPacing()
-			// Reaps reports for orchestrator ids no longer in a.orchestrators.
-			a.reconcileOrphanedOrchestratorShellActivity(time.Now())
+			a.orchestrator.ReconcileOrchestratorActivity()
+			// After the activity reconcile so the shell state is this tick's report.
+			a.orchestrator.ReconcileOrchestratorPacing()
+			// Reaps reports for orchestrator ids with no live session.
+			a.orchestrator.ReconcileOrphanedShellActivity(time.Now())
 		}
 	}
 }

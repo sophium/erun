@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/envops"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
@@ -25,7 +27,7 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 	log.SetOutput(&logs)
 	restoreLogOutputAfter(t)
 
-	app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
+	spawnEdgeOrchestrator(t, app, "petios", "Petios", []config.OrchestratorEnvConfig{
 		{Tenant: "erun", Environment: "remote"},
 	})
 	if got := logs.String(); !strings.Contains(got, "orchestrator petios: wired erun/remote but its edge is not answering") {
@@ -53,6 +55,24 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 	}
 }
 
+// spawnEdgeOrchestrator spawns a session linking envs, which wires their MCP
+// edges and records any that do not answer; every process it would run is stubbed.
+func spawnEdgeOrchestrator(t *testing.T, app *App, id, name string, envs []config.OrchestratorEnvConfig) {
+	t.Helper()
+	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
+	t.Setenv("ERUN_AGENTS_DIR", t.TempDir())
+	app.deps.startTerminal = func(terminal.StartParams) (terminal.PTY, error) {
+		return newStubTerminalSession(), nil
+	}
+	app.deps.resolveOrchestratorLaunch = func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		return "claude-stub", nil, nil
+	}
+	app.deps.runOrchestratorLabelCommand = stubOrchestratorClaimLabel
+	if _, err := app.orchestrator.SpawnTransient(orchestratorsvc.TransientSpawn{ID: id, Name: name, Envs: envs, Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("SpawnTransient %s: %v", id, err)
+	}
+}
+
 // sealForwardForSweep re-seeds the forward; without it the sweep returns before
 // the edge question and the test passes vacuously.
 func sealForwardForSweep(t *testing.T) {
@@ -71,8 +91,8 @@ func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.
 	restoreLogOutputAfter(t)
 
 	envs := []config.OrchestratorEnvConfig{{Tenant: "erun", Environment: "remote"}}
-	app.wireOrchestratorMCP("petios", "Petios", envs)
-	app.wireOrchestratorMCP("atlas", "Atlas", envs)
+	spawnEdgeOrchestrator(t, app, "petios", "Petios", envs)
+	spawnEdgeOrchestrator(t, app, "atlas", "Atlas", envs)
 	for _, id := range []string{"petios", "atlas"} {
 		want := "orchestrator " + id + ": wired erun/remote but its edge is not answering"
 		if got := logs.String(); !strings.Contains(got, want) {
@@ -115,7 +135,7 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 			log.SetOutput(&logs)
 			restoreLogOutputAfter(t)
 
-			app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
+			spawnEdgeOrchestrator(t, app, "petios", "Petios", []config.OrchestratorEnvConfig{
 				{Tenant: "erun", Environment: "remote"},
 			})
 			sealForwardForSweep(t)
@@ -136,26 +156,5 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 				t.Fatalf("an unresolved outage reported a recovery:\n%s", got)
 			}
 		})
-	}
-}
-
-func TestCutEnvLabelRejectsLabelsTheSweepCouldNeverMatch(t *testing.T) {
-	for _, tc := range []struct {
-		label       string
-		tenant      string
-		environment string
-		ok          bool
-	}{
-		{label: "frs/dev", tenant: "frs", environment: "dev", ok: true},
-		{label: "no-separator", ok: false},
-		{label: "/dev", ok: false},
-		{label: "frs/", ok: false},
-		{label: "", ok: false},
-	} {
-		tenant, environment, ok := cutEnvLabel(tc.label)
-		if ok != tc.ok || tenant != tc.tenant || environment != tc.environment {
-			t.Fatalf("cutEnvLabel(%q) = (%q, %q, %v), want (%q, %q, %v)",
-				tc.label, tenant, environment, ok, tc.tenant, tc.environment, tc.ok)
-		}
 	}
 }

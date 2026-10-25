@@ -65,12 +65,3 @@ type uiVersionSuggestions struct {
 	Suggestions []uiVersion             `json:"suggestions"`
 	Notices     []uimodel.VersionNotice `json:"notices,omitempty"`
 }
-
-// orchestratorShellActivityPayload is emitted every tick so a missed event
-// self-heals.
-type orchestratorShellActivityPayload struct {
-	SessionID     int    `json:"sessionId"`
-	Running       bool   `json:"running"`
-	Command       string `json:"command,omitempty"`
-	StartedAtUnix int64  `json:"startedAtUnix,omitempty"`
-}

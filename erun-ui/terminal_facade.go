@@ -217,8 +217,8 @@ func (a *App) newTerminalService() *terminal.Service {
 		MaybeStartDeployOrchestration: func(selection uimodel.Selection, force bool) (uimodel.StartSessionResult, bool) {
 			return a.activity.MaybeStartDeployOrchestration(selection, force)
 		},
-		RearmOrchestratorPacing:      a.rearmOrchestratorPacing,
-		OrchestratorRegisteredLocked: func(id string) bool { return a.orchestrators[id] != nil },
+		RearmOrchestratorPacing:      func(id string) { a.orchestrator.RearmOrchestratorPacing(id) },
+		OrchestratorRegisteredLocked: func(id string) bool { return a.orchestrator.OrchestratorRegisteredLocked(id) },
 	})
 }
 

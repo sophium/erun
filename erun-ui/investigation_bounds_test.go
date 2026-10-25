@@ -14,6 +14,7 @@ import (
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -86,7 +87,7 @@ type stubInvestigationTimer struct{}
 
 func (stubInvestigationTimer) Stop() bool { return true }
 
-func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) orchestratorInfo {
+func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) orchestratorsvc.Info {
 	t.Helper()
 	h.app.deps.startTerminal = func(terminal.StartParams) (terminal.PTY, error) {
 		session := newStubTerminalSession()

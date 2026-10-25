@@ -31,8 +31,8 @@ func stubCodesign(t *testing.T, dir string) string {
 
 func seedOrchestratorArtifact(t *testing.T, name string, content []byte) string {
 	t.Helper()
-	dir, err := ensureOrchestratorOutputsDir("erun")
-	if err != nil {
+	dir := orchestratorConfigFile(t, "orchestrator-outputs", "erun")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("ensure outputs dir: %v", err)
 	}
 	path := filepath.Join(dir, name)
@@ -53,7 +53,8 @@ func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) 
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -100,7 +101,8 @@ func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}

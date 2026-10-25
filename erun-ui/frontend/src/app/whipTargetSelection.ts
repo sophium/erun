@@ -1,6 +1,6 @@
 import type { WhipDefaultTarget, WhipTargetSelection } from '@/app/model';
 
-import type { main } from '../../wailsjs/go/models';
+import type { orchestrator } from '../../wailsjs/go/models';
 
 // Starts from the sidebar's focus only; with no focus, nothing is selected.
 export function defaultWhipTargetSelection(defaultTarget: WhipDefaultTarget): WhipTargetSelection {
@@ -64,9 +64,9 @@ export function selectAllWhipTargets(selection: WhipTargetSelection): WhipTarget
 // orchestrators started after the click are included, and drops vanished ids.
 export function resolveWhipTargetRefs(
   selection: WhipTargetSelection,
-  targets: main.uiWhipTargetList,
-): main.uiWhipTargetRef[] {
-  const refs: main.uiWhipTargetRef[] = [];
+  targets: orchestrator.WhipTargetList,
+): orchestrator.WhipTargetRef[] {
+  const refs: orchestrator.WhipTargetRef[] = [];
   if (selection.environmentMode === 'all') {
     for (const env of targets.environments) {
       refs.push({ kind: 'environment', id: env.id });
@@ -96,7 +96,7 @@ export function resolveWhipTargetRefs(
 
 export function countWhipTargets(
   selection: WhipTargetSelection,
-  targets: main.uiWhipTargetList,
+  targets: orchestrator.WhipTargetList,
 ): number {
   return resolveWhipTargetRefs(selection, targets).length;
 }

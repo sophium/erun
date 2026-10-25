@@ -20,6 +20,7 @@ import (
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
@@ -213,10 +214,10 @@ func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
 		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
 	}
 	if deps.orchestratorOpenPath == "" {
-		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
+		deps.orchestratorOpenPath = orchestratorsvc.DefaultOpenPath()
 	}
 	if deps.orchestratorNudgeHistoryPath == "" {
-		deps.orchestratorNudgeHistoryPath = defaultOrchestratorNudgeHistoryPath()
+		deps.orchestratorNudgeHistoryPath = orchestratorsvc.DefaultNudgeHistoryPath()
 	}
 	if deps.runOrchestratorLabelCommand == nil {
 		deps.runOrchestratorLabelCommand = execWorkingIssueCommand

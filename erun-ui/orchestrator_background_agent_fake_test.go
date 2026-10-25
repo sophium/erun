@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 )
 
 func init() {
-	newDefaultClaudeAgents = func() claudeAgentCLI { return newFakeClaudeAgents() }
+	newDefaultClaudeAgents = func() orchestratorsvc.AgentCLI { return newFakeClaudeAgents() }
 	// Keep agent settings out of the developer's real HOME.
 	home, err := os.MkdirTemp("", "erun-ui-test-home-")
 	if err != nil {
@@ -32,7 +34,7 @@ var realHomeEnv []string
 
 type fakeClaudeAgents struct {
 	mu        sync.Mutex
-	agents    []claudeBackgroundAgent
+	agents    []orchestratorsvc.ClaudeAgent
 	creates   [][]string
 	stops     []string
 	removes   []string
@@ -40,14 +42,14 @@ type fakeClaudeAgents struct {
 	createErr error
 }
 
-func newFakeClaudeAgents(agents ...claudeBackgroundAgent) *fakeClaudeAgents {
+func newFakeClaudeAgents(agents ...orchestratorsvc.ClaudeAgent) *fakeClaudeAgents {
 	return &fakeClaudeAgents{agents: agents}
 }
 
-func (f *fakeClaudeAgents) List() ([]claudeBackgroundAgent, error) {
+func (f *fakeClaudeAgents) List() ([]orchestratorsvc.ClaudeAgent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]claudeBackgroundAgent(nil), f.agents...), nil
+	return append([]orchestratorsvc.ClaudeAgent(nil), f.agents...), nil
 }
 
 func (f *fakeClaudeAgents) Create(dir string, args []string) (string, error) {
@@ -59,7 +61,7 @@ func (f *fakeClaudeAgents) Create(dir string, args []string) (string, error) {
 	}
 	f.next++
 	id := fmt.Sprintf("%08x", 0xa0000000+f.next)
-	agent := claudeBackgroundAgent{ID: id, PID: 1000 + f.next, Cwd: dir, Kind: "background", SessionID: id + "-0000-4000-8000-000000000000"}
+	agent := orchestratorsvc.ClaudeAgent{ID: id, PID: 1000 + f.next, Cwd: dir, Kind: "background", SessionID: id + "-0000-4000-8000-000000000000"}
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
 		case "-n":
@@ -99,21 +101,6 @@ func (f *fakeClaudeAgents) Remove(id string) error {
 	return nil
 }
 
-func (f *fakeClaudeAgents) clear(id, sessionID string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := range f.agents {
-		if f.agents[i].ID == id {
-			f.agents[i].SessionID = sessionID
-		}
-	}
-}
-
-func (f *fakeClaudeAgents) named(name string) []claudeBackgroundAgent {
-	agents, _ := f.List()
-	return findOrchestratorAgents(agents, name)
-}
-
 func fakeAgentsOf(t *testing.T, app *App) *fakeClaudeAgents {
 	t.Helper()
 	fake, ok := app.deps.claudeAgents.(*fakeClaudeAgents)
@@ -121,19 +108,4 @@ func fakeAgentsOf(t *testing.T, app *App) *fakeClaudeAgents {
 		t.Fatalf("expected the app to drive a fake Claude agent service, got %T", app.deps.claudeAgents)
 	}
 	return fake
-}
-
-func stageOrchestratorConversation(t *testing.T, conversationID string) {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
-	}
-	dir := filepath.Join(home, ".claude", "projects", "-orchestrators")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create transcript dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, conversationID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
 }

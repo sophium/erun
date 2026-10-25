@@ -812,7 +812,7 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
   };
 }
 
-// orchestratorOpenStatePath is the desktop's open set (orchestrator_open_state.go), separate
+// orchestratorOpenStatePath is the desktop's open set (internal/orchestrator/open_state.go), separate
 // from config.yaml.
 function orchestratorOpenStatePath(): string {
   return path.join(desktopConfigDir(), 'orchestrator-open.json');

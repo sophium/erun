@@ -5,7 +5,7 @@ import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
 // The orchestrator list snapshot carries the busy flag, so the spinner survives a missed
 // ai-activity event.
-// Re-emit timing is covered by erun-ui/session_heartbeat_test.go.
+// Re-emit timing is covered by erun-ui/internal/orchestrator/activity_snapshot_test.go.
 
 const RUNNING_SESSION_ID = 4242;
 

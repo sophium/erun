@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -81,9 +82,9 @@ func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 	var calls []string
 	app, _ := orchestratorLinkForwardTestApp(t, countingReconnect(&mu, &calls, nil), nil)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
@@ -101,18 +102,18 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	var calls []string
 	app, _ := orchestratorLinkForwardTestApp(t, countingReconnect(&mu, &calls, nil), nil)
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	created, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{})
+	}, nil, "", orchestratorsvc.LaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 	waitForReconnectCalls(t, &mu, &calls, 1, 2*time.Second)
 
-	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
+	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
 		{Tenant: "frs", Environment: "laptop"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -141,9 +142,9 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		},
 	)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
@@ -163,9 +164,9 @@ func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 		nil,
 	)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 

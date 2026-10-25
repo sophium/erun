@@ -22,17 +22,7 @@ func (a *App) emitAppNotification(kind, message string) {
 	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{Kind: kind, Message: message})
 }
 
-// notificationSourceOrchestratorEdgeUnreachable is posted per linked env, carrying that env's deploy action.
-const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
-
 const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
-
-const notificationActionDeploy = uimodel.NotificationActionDeploy
-
-const notificationActionRestartOrchestrator = "restart-orchestrator"
-
-// notificationActionInstallAndRestartOrchestrator also links the CLI install docs.
-const notificationActionInstallAndRestartOrchestrator = "install-and-restart-orchestrator"
 
 func (a *App) notifyCredentialRefreshFailure(selection uimodel.Selection, message string) {
 	a.emitEnvNotification("error", selection.Tenant, selection.Environment, notificationSourceCredentialRefreshFailed, message, "")
@@ -52,21 +42,4 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message, ac
 		Source:      source,
 		Action:      action,
 	})
-}
-
-// emitOrchestratorNotification tags the orchestrator so the frontend can act on it.
-func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action string) {
-	if strings.TrimSpace(message) == "" {
-		return
-	}
-	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{
-		Kind:           kind,
-		Message:        message,
-		OrchestratorID: orchestratorID,
-		Action:         action,
-	})
-}
-
-func (a *App) emitEvent(name string, payload any) {
-	a.emit(name, payload)
 }

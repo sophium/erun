@@ -115,7 +115,7 @@ func (a *App) newRuntimeService() *runtimeview.Service {
 		ReconcileForwardHealth: func(selection uimodel.Selection, port int, portIsBound bool) bool {
 			return a.envops.ReconcileForwardHealth(selection, port, portIsBound)
 		},
-		NoteEdgeAnswering: a.noteOrchestratorEdgeAnswering,
+		NoteEdgeAnswering: func(selection uimodel.Selection) { a.orchestrator.NoteEdgeAnswering(selection) },
 		EffectiveContainerRegistries: func(tenant, environment string, env config.EnvConfig) (config.ContainerRegistries, bool) {
 			return a.settings.EffectiveContainerRegistries(tenant, environment, env)
 		},

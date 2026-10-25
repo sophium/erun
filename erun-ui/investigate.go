@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -22,7 +23,7 @@ import (
 // InvestigateFailure stages a failure report to a host file and, within the
 // investigation bounds, spawns a transient orchestrator to investigate it. A
 // refusal is returned as an error naming the bound.
-func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows int) (orchestratorInfo, error) {
+func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows int) (orchestratorsvc.Info, error) {
 	name := "Investigate"
 	if env := strings.TrimSpace(environment); env != "" {
 		name = "Investigate " + env
@@ -34,20 +35,20 @@ func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows 
 
 // spawnFailureAgent is the bounded-spawn plumbing shared by investigations and
 // bug-report drafts.
-func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, cols, rows int, name string, prompt func(reportPath string) string) (orchestratorInfo, error) {
+func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, cols, rows int, name string, prompt func(reportPath string) string) (orchestratorsvc.Info, error) {
 	report = strings.TrimSpace(report)
 	if report == "" {
-		return orchestratorInfo{}, fmt.Errorf("nothing to work from: the failure report is empty")
+		return orchestratorsvc.Info{}, fmt.Errorf("nothing to work from: the failure report is empty")
 	}
 	path, err := a.investigations.stageReport(report)
 	if err != nil {
-		return orchestratorInfo{}, err
+		return orchestratorsvc.Info{}, err
 	}
 	id := fmt.Sprintf("%s-%d", idPrefix, time.Now().UnixNano())
 	if err := a.investigations.admit(id, report, tenant, environment); err != nil {
 		// The refused report stays staged as the record of what was reported.
 		log.Printf("erun-app: %s refused for %s (%s): report=%s", idPrefix, investigationTargetLabel(tenant, environment), investigationRefusalReason(err), path)
-		return orchestratorInfo{}, err
+		return orchestratorsvc.Info{}, err
 	}
 
 	var envs []config.OrchestratorEnvConfig
@@ -56,19 +57,17 @@ func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, co
 			{Tenant: t, Environment: env, Directory: a.investigateWorkingDir(t, env)},
 		}
 	}
-	info, err := a.spawnOrchestratorSession(orchestratorSpawn{
-		id:            id,
-		name:          name,
-		launch:        defaultOrchestratorLaunchPlan(),
-		envs:          envs,
-		initialPrompt: prompt(path),
-		transient:     true,
-		cols:          cols,
-		rows:          rows,
+	info, err := a.orchestrator.SpawnTransient(orchestratorsvc.TransientSpawn{
+		ID:            id,
+		Name:          name,
+		Envs:          envs,
+		InitialPrompt: prompt(path),
+		Cols:          cols,
+		Rows:          rows,
 	})
 	if err != nil {
 		a.investigations.discard(id)
-		return orchestratorInfo{}, err
+		return orchestratorsvc.Info{}, err
 	}
 	a.activateInvestigation(investigationRecord{
 		ID:          id,
@@ -116,7 +115,7 @@ func (a *App) attachInvestigationJob(record investigationRecord, name string) st
 
 // Releases the lease so the environment stops reading as busy.
 func (a *App) finishExpiredInvestigation(record investigationRecord) {
-	a.stopOrchestratorSession(record.ID)
+	a.orchestrator.StopOrchestratorSession(record.ID)
 	a.investigations.appendInvestigationLog(record, fmt.Sprintf("terminated: still running after the %s lifetime bound without concluding; stopped by the desktop", investigationAge(investigationLifetime)))
 	if record.Tenant != "" && record.Environment != "" && record.LeaseID != "" {
 		if _, err := activity.ReleaseEnvironmentActivityLease(record.Tenant, record.Environment, record.LeaseID); err != nil {

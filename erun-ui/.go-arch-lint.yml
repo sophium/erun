@@ -41,6 +41,8 @@ components:
     in: "internal/contribute"
   internal-envops:
     in: "internal/envops"
+  internal-orchestrator:
+    in: "internal/orchestrator"
   internal-runtimeview:
     in: "internal/runtimeview"
   internal-settings:
@@ -77,6 +79,13 @@ deps:
     canUse:
       - github-com-adrg-xdg
       - github-com-sophium-erun-erun-common
+  internal-orchestrator:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-google-uuid
+      - github-com-sophium-erun-erun-common
   internal-runtimeview:
     mayDependOn:
       - internal-uimodel
@@ -111,6 +120,7 @@ deps:
       - internal-cloudctx
       - internal-contribute
       - internal-envops
+      - internal-orchestrator
       - internal-runtimeview
       - internal-settings
       - internal-tenant
@@ -119,7 +129,6 @@ deps:
     canUse:
       - cgo
       - github-com-adrg-xdg
-      - github-com-google-uuid
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common
       - github-com-wailsapp-wails-v2

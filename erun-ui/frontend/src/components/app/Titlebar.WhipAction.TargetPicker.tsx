@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import type { WhipTargetSelection } from '@/app/model';
 
-import type { main } from '../../../wailsjs/go/models';
+import type { orchestrator } from '../../../wailsjs/go/models';
 
 interface TargetRow {
   id: string;
@@ -29,7 +29,7 @@ function isWhipSelectionEmpty(selection: WhipTargetSelection): boolean {
 }
 
 function orchestratorRows(
-  targets: main.uiWhipTargetList,
+  targets: orchestrator.WhipTargetList,
   selection: WhipTargetSelection,
 ): TargetRow[] {
   return targets.orchestrators.map((orchestrator) => ({
@@ -42,7 +42,7 @@ function orchestratorRows(
 }
 
 function environmentRows(
-  targets: main.uiWhipTargetList,
+  targets: orchestrator.WhipTargetList,
   selection: WhipTargetSelection,
 ): TargetRow[] {
   return targets.environments.map((environment) => ({
@@ -66,7 +66,7 @@ export function TitlebarWhipTargetPicker({
   onSelectAllOrchestrators,
   onSelectAll,
 }: {
-  targets: main.uiWhipTargetList | null;
+  targets: orchestrator.WhipTargetList | null;
   targetsLoading: boolean;
   selection: WhipTargetSelection;
   onToggleEnvironment: (id: string, checked: boolean) => void;

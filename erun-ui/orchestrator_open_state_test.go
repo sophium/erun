@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
@@ -17,7 +18,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	state := t.TempDir()
-	openPath := filepath.Join(state, orchestratorOpenFileName)
+	openPath := filepath.Join(state, "orchestrator-open.json")
 	restoreDir := filepath.Join(state, orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
@@ -37,7 +38,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 
 func createAndStartOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
+	created, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorsvc.LaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -61,14 +62,14 @@ func TestPlainLaunchReopensTheOrchestratorThatWasOpen(t *testing.T) {
 	if again := app.ResolveOrchestratorToReopen(); again.OrchestratorID != id {
 		t.Fatalf("expected the record to survive being read, got %q", again.OrchestratorID)
 	}
-	if got := readOpenOrchestrators(openPath); len(got) != 1 || got[0].OrchestratorID != id {
+	if got := orchestratorsvc.ReadOpenOrchestrators(openPath); len(got) != 1 || got[0].OrchestratorID != id {
 		t.Fatalf("expected [%q] on disk, got %v", id, got)
 	}
 }
 
 func createAndStartNamedOrchestrator(t *testing.T, app *App, name, environment string) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: environment}}, nil, "", orchestratorLaunchInput{})
+	created, err := app.CreateOrchestrator(name, []orchestratorsvc.EnvInput{{Tenant: "frs", Environment: environment}}, nil, "", orchestratorsvc.LaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestTwoOpenOrchestratorsAreBothRestoredOnPlainLaunch(t *testing.T) {
 	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != first {
 		t.Fatalf("expected %q to also be reopened, got %v", first, target.AlsoReopen)
 	}
-	if got := readOpenOrchestrators(openPath); len(got) != 2 || got[0].OrchestratorID != first || got[1].OrchestratorID != second {
+	if got := orchestratorsvc.ReadOpenOrchestrators(openPath); len(got) != 2 || got[0].OrchestratorID != first || got[1].OrchestratorID != second {
 		t.Fatalf("expected both ids recorded oldest-first, got %v", got)
 	}
 }
@@ -152,7 +153,7 @@ func TestRestartHandOffOverASetOfOpenOrchestratorsReopensTheRest(t *testing.T) {
 	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != second {
 		t.Fatalf("expected %q to reopen alongside it, got %v", second, target.AlsoReopen)
 	}
-	if got := readOpenOrchestrators(openPath); len(got) != 2 {
+	if got := orchestratorsvc.ReadOpenOrchestrators(openPath); len(got) != 2 {
 		t.Fatalf("expected both still recorded open, got %v", got)
 	}
 }

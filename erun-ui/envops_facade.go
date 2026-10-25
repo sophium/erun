@@ -159,7 +159,7 @@ func (a *App) newEnvopsService() *envops.Service {
 		DeployInFlight: func(selection uimodel.Selection) bool {
 			return a.terminal.DeployInFlight(selection)
 		},
-		NoteEdgeAnswering: a.noteOrchestratorEdgeAnswering,
+		NoteEdgeAnswering: func(selection uimodel.Selection) { a.orchestrator.NoteEdgeAnswering(selection) },
 		StopRuntime: func(ctx core.Context, params lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			return a.deps.stopEnvironmentRuntime(ctx, params)
 		},

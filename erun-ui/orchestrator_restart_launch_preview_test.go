@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 )
 
 func requireLoneRestartPreviewNotice(t *testing.T, preview []model.DesktopRestartReopen, id string, wants ...string) {
@@ -29,7 +30,7 @@ func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 		return testGatewayToken, credentialErr
 	}
 	stageGatewayCatalog(app)
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{UseGateway: true})
+	created, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorsvc.LaunchInput{UseGateway: true})
 	mustNoErr(t, err, "CreateOrchestrator")
 	_, err = app.StartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "StartOrchestrator")

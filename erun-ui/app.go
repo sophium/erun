@@ -22,6 +22,7 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
 	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
@@ -70,7 +71,7 @@ type erunUIDeps struct {
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
 	resolveOrchestratorLaunch func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
-	claudeAgents              claudeAgentCLI
+	claudeAgents              orchestratorsvc.AgentCLI
 	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
 	savePastedFile            func(terminal.PasteParams) (string, error)
 	listAgentOutputs          func(config.OpenResult, model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error)
@@ -120,21 +121,12 @@ type App struct {
 	// identity signs per-env MCP bearers; nil in unit tests.
 	identity *desktopIdentity
 
-	// edgeOutages, orchestrators, unmanagedPacingReason, the *SourceReported flags
-	// and closeConfirmed are guarded by the terminal lock
-	// (terminal.WithLock) until their concerns move out of main, so a section that
-	// reads them together with sessions stays one critical section.
-	edgeOutages   map[string]orchestratorEdgeOutage
-	orchestrators map[string]*orchestratorSession
-	// unmanagedPacingReason dedups pacing log lines for orchestrators without a session.
-	unmanagedPacingReason map[string]orchestratorPacingReason
 	// investigations has its own lock; never call into it while holding the terminal lock.
 	investigations *investigationRegistry
-	// skillsSourceReported warns once per run about unresolvable shipped skills.
-	skillsSourceReported bool
-	agentsSourceReported bool
 
-	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
+	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit
+	// proceed without prompting. It is guarded by the terminal lock
+	// (terminal.WithLock) until the window-close concern moves out of main.
 	closeConfirmed bool
 
 	// emitMu guards emitFn: the notify loop and session streamers may emit while SetEmitter runs.
@@ -157,6 +149,7 @@ type App struct {
 	terminal      *terminal.Service
 	activity      *activitysvc.Service
 	contribute    *contribute.Service
+	orchestrator  *orchestratorsvc.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -197,16 +190,9 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCloudDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
-	app := &App{
-		deps:                  deps,
-		orchestrators:         make(map[string]*orchestratorSession),
-		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
-	}
+	app := &App{deps: deps}
 	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
-	app.investigations.live = func(id string) bool {
-		_, running := app.runningOrchestratorInfo(id)
-		return running
-	}
+	app.investigations.live = func(id string) bool { return app.orchestrator.Running(id) }
 	app.investigations.onExpire = app.finishExpiredInvestigation
 	app.activity = app.newActivityService()
 	app.contribute = app.newContributeService()
@@ -216,13 +202,14 @@ func NewApp(deps erunUIDeps) *App {
 		Context:               app.context,
 		MCPBearer:             app.mcpBearer,
 		LoadAPILog:            deps.loadAPILog,
-		ConfiguredERunAliases: app.configuredERunAliases,
+		ConfiguredERunAliases: func() ([]string, error) { return app.orchestrator.ConfiguredERunAliases() },
 	})
 	app.cloudContexts = app.newCloudContextService(time.Now)
 	app.envops = app.newEnvopsService()
 	app.terminal = app.newTerminalService()
 	app.settings = app.newSettingsService()
 	app.runtime = app.newRuntimeService()
+	app.orchestrator = app.newOrchestratorService()
 	if app.identity == nil {
 		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}

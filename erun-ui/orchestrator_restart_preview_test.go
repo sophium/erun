@@ -158,7 +158,7 @@ func TestTheRestartPlanAgreesWithWhatTheNextLaunchReopens(t *testing.T) {
 	if target.OrchestratorID != asking || len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != refused {
 		t.Fatalf("expected %q to own the pane with %q reopened beside it, got %+v", asking, refused, target)
 	}
-	app.stopOrchestratorSession(refused)
+	app.orchestrator.StopOrchestratorSession(refused)
 	_, err := app.StartOrchestrator(refused, 80, 24)
 	if err == nil {
 		t.Fatalf("the plan said %q would not reopen, but it did", refused)

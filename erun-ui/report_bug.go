@@ -3,16 +3,18 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 )
 
 // reportBugOutcome is ReportBugFailure's result: either Admitted, or a refusal
 // with ExistingID set when an earlier session for the same failure exists.
 type reportBugOutcome struct {
-	Orchestrator orchestratorInfo `json:"orchestrator"`
-	Admitted     bool             `json:"admitted"`
-	Reason       string           `json:"reason,omitempty"`
-	Message      string           `json:"message,omitempty"`
-	ExistingID   string           `json:"existingId,omitempty"`
+	Orchestrator orchestratorsvc.Info `json:"orchestrator"`
+	Admitted     bool                 `json:"admitted"`
+	Reason       string               `json:"reason,omitempty"`
+	Message      string               `json:"message,omitempty"`
+	ExistingID   string               `json:"existingId,omitempty"`
 }
 
 // ReportBugFailure spawns an orchestrator that drafts a GitHub issue and waits

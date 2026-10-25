@@ -32,7 +32,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorRestoreDir: restoreDir,
-		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
+		orchestratorOpenPath:   filepath.Join(home, "orchestrator-open.json"),
 		relaunchApp:            func() error { return nil },
 		quitApp:                func() {},
 		// The real probe needs a Wails context.
@@ -162,11 +162,7 @@ func TestRestartHandOffNamesOnlyThePaneOwner(t *testing.T) {
 
 func TestReopenGivesThePaneToTheHandOffAndReopensTheRest(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
-	for _, id := range []string{"alpha", "beta", "gamma"} {
-		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
-			t.Fatalf("record %s: %v", id, err)
-		}
-	}
+	recordOpenOrchestrators(t, app.deps.orchestratorOpenPath, "alpha", "beta", "gamma")
 	if err := writeOrchestratorRestoreTarget(restoreDir, orchestratorRestoreState{OrchestratorID: "beta"}, time.Now()); err != nil {
 		t.Fatalf("write hand-off: %v", err)
 	}
@@ -182,11 +178,7 @@ func TestReopenGivesThePaneToTheHandOffAndReopensTheRest(t *testing.T) {
 
 func TestReopenWithoutAHandOffGivesThePaneToTheMostRecent(t *testing.T) {
 	app, _ := restartTestApp(t)
-	for _, id := range []string{"alpha", "beta"} {
-		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
-			t.Fatalf("record %s: %v", id, err)
-		}
-	}
+	recordOpenOrchestrators(t, app.deps.orchestratorOpenPath, "alpha", "beta")
 	target := app.ResolveOrchestratorToReopen()
 	if target.OrchestratorID != "beta" || len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != "alpha" {
 		t.Fatalf("expected beta to own the pane with alpha beside it, got %+v", target)
