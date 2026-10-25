@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -13,9 +14,9 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 		{Tenant: "petios", Environment: "rihards-review"},
 		{Tenant: "erun", Environment: "local-ideas"},
 	}
-	activity := map[string]environmentActivityState{
+	activity := map[string]runtimeview.ActivityState{
 		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
-			reachable: true, observed: true, busy: true, detail: "holding: gradle-build",
+			Reachable: true, Observed: true, Busy: true, Detail: "holding: gradle-build",
 		},
 	}
 	out := envInfos(envs, activity, nil)
@@ -37,17 +38,17 @@ func TestEnvInfosDistinguishesOutageFromIdleAndUnobserved(t *testing.T) {
 	key := selectionKey(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	envs := []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
 
-	outage := envInfos(envs, map[string]environmentActivityState{key: {outage: true}}, nil)
+	outage := envInfos(envs, map[string]runtimeview.ActivityState{key: {Outage: true}}, nil)
 	if outage[0].Activity == nil || !outage[0].Activity.Outage {
 		t.Fatalf("expected an outage observation to render as outage, got %+v", outage[0].Activity)
 	}
 
-	idle := envInfos(envs, map[string]environmentActivityState{key: {reachable: true, observed: true, busy: false}}, nil)
+	idle := envInfos(envs, map[string]runtimeview.ActivityState{key: {Reachable: true, Observed: true, Busy: false}}, nil)
 	if idle[0].Activity == nil || idle[0].Activity.Outage || idle[0].Activity.Busy {
 		t.Fatalf("expected a reachable, observed, non-busy env to render idle, got %+v", idle[0].Activity)
 	}
 
-	unobserved := envInfos(envs, map[string]environmentActivityState{key: {reachable: true, observed: false}}, nil)
+	unobserved := envInfos(envs, map[string]runtimeview.ActivityState{key: {Reachable: true, Observed: false}}, nil)
 	if unobserved[0].Activity == nil || unobserved[0].Activity.Observed {
 		t.Fatalf("expected reachable-but-unobserved to stay distinct from idle, got %+v", unobserved[0].Activity)
 	}
@@ -59,10 +60,10 @@ func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
 		{Tenant: "erun", Environment: "local-ideas"},
 	}
 	observedAt := time.Unix(1000, 0)
-	usage := map[string]environmentUsageReading{
+	usage := map[string]runtimeview.UsageReading{
 		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
-			usage:      uiRuntimeUsage{Available: true, CPU: uiRuntimeCPUUsage{Available: true, Utilization: "12.0%"}},
-			observedAt: observedAt,
+			Usage:      runtimeview.Usage{Available: true, CPU: runtimeview.CPUUsage{Available: true, Utilization: "12.0%"}},
+			ObservedAt: observedAt,
 		},
 	}
 	out := envInfos(envs, nil, usage)

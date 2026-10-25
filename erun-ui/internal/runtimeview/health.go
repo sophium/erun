@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -14,25 +14,25 @@ import (
 
 // CheckEnvironmentHealth checks registry config and runtime deployment from the
 // host, since `erun doctor` runs in-pod and cannot see an undeployed env.
-func (a *App) CheckEnvironmentHealth(selection uimodel.Selection) (uiEnvironmentHealth, error) {
+func (s *Service) CheckEnvironmentHealth(selection uimodel.Selection) (Health, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
-		return uiEnvironmentHealth{}, err
+		return Health{}, err
 	}
-	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	config, _, err := s.d.Store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentHealth{}, err
+		return Health{}, err
 	}
-	result := uiEnvironmentHealth{Tenant: selection.Tenant, Environment: selection.Environment}
-	result.Checks = []uiEnvironmentHealthCheck{
-		a.registryHealthCheck(selection.Tenant, selection.Environment, config),
-		a.runtimeDeployedHealthCheck(selection.Tenant, selection.Environment, config),
+	result := Health{Tenant: selection.Tenant, Environment: selection.Environment}
+	result.Checks = []HealthCheck{
+		s.registryHealthCheck(selection.Tenant, selection.Environment, config),
+		s.runtimeDeployedHealthCheck(selection.Tenant, selection.Environment, config),
 	}
 	result.Healthy = healthChecksAllOK(result.Checks)
 	return result, nil
 }
 
-func healthChecksAllOK(checks []uiEnvironmentHealthCheck) bool {
+func healthChecksAllOK(checks []HealthCheck) bool {
 	for _, check := range checks {
 		if check.Status != healthCheckStatusOK {
 			return false
@@ -41,9 +41,9 @@ func healthChecksAllOK(checks []uiEnvironmentHealthCheck) bool {
 	return true
 }
 
-func (a *App) registryHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
-	list, inherited := a.settings.EffectiveContainerRegistries(tenant, environment, config)
-	check := uiEnvironmentHealthCheck{ID: healthCheckIDRegistry, Title: "Container registry"}
+func (s *Service) registryHealthCheck(tenant, environment string, config configpkg.EnvConfig) HealthCheck {
+	list, inherited := s.d.EffectiveContainerRegistries(tenant, environment, config)
+	check := HealthCheck{ID: healthCheckIDRegistry, Title: "Container registry"}
 	if list.IsZero() {
 		check.Status = healthCheckStatusError
 		check.Detail = "No container registry is configured, so this environment cannot build or deploy. Set one in Container registries below."
@@ -70,16 +70,16 @@ func registryHealthDetail(list configpkg.ContainerRegistries, inherited bool) st
 	return fmt.Sprintf("Using %s.", target)
 }
 
-func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
-	check := uiEnvironmentHealthCheck{ID: healthCheckIDRuntime, Title: "Runtime deployment"}
+func (s *Service) runtimeDeployedHealthCheck(tenant, environment string, config configpkg.EnvConfig) HealthCheck {
+	check := HealthCheck{ID: healthCheckIDRuntime, Title: "Runtime deployment"}
 	kubeContext := strings.TrimSpace(config.KubernetesContext)
 	if kubeContext == "" {
 		check.Status = healthCheckStatusUnknown
 		check.Detail = "No Kubernetes context is set for this environment, so its deployment state can't be checked."
 		return check
 	}
-	ctx := a.context()
-	deployed, err := a.deps.checkRuntimeDeployed(ctx, kubeContext, tenant, environment)
+	ctx := s.d.Context()
+	deployed, err := s.d.CheckRuntimeDeployed(ctx, kubeContext, tenant, environment)
 	if err != nil {
 		check.Status = healthCheckStatusUnknown
 		check.Detail = fmt.Sprintf("Could not check the runtime deployment on %s: %s", kubeContext, strings.TrimSpace(err.Error()))
@@ -96,9 +96,9 @@ func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config conf
 	return check
 }
 
-// checkRuntimeDeployed treats only a genuine NotFound as not deployed; any other
+// CheckRuntimeDeployed treats only a genuine NotFound as not deployed; any other
 // kubectl failure is an error so the check reports "could not check".
-func checkRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
+func CheckRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
 	namespace := configpkg.KubernetesNamespaceName(tenant, environment)
 	output, err := kubectlJSON(ctx, kubeContext,
 		"get", "pods", "-n", namespace,

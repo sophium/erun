@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -26,8 +26,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
-	// adrg/xdg caches ConfigHome at init, so Reload is needed; the
-	// environmentIsConfigured guard reads the real on-disk ConfigStore.
+	// adrg/xdg caches ConfigHome at init, so Reload is needed.
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
@@ -55,29 +54,27 @@ func observeWith(
 	t *testing.T,
 	canConnect bool,
 	load func(context.Context, string, string) (model.EnvironmentIdleStatus, error),
-) environmentActivityState {
+) ActivityState {
 	t.Helper()
 	seedMCPForward(t, "acme", "dev", 17500)
-	app := NewApp(erunUIDeps{
-		store:               stubUIStore{},
-		canConnectLocalPort: func(int) bool { return canConnect },
-		loadIdleStatus:      load,
+	service := newTestService(Deps{
+		CanConnectLocalPort: func(int) bool { return canConnect },
+		LoadIdleStatus:      load,
 	})
-	t.Cleanup(func() { app.shutdown(context.Background()) })
-	return app.observeEnvironmentActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}).state
+	return service.ObserveActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 }
 
 func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
 	got := observeWith(t, true, func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 		return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 	})
-	if !got.reachable {
+	if !got.Reachable {
 		t.Fatal("a port that accepts connections is still reachable")
 	}
-	if got.observed {
+	if got.Observed {
 		t.Fatal("a wedged edge must not be reported as an answered idle question")
 	}
-	if got.busy {
+	if got.Busy {
 		t.Fatal("no answer is not evidence of work either")
 	}
 }
@@ -88,10 +85,10 @@ func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		}, nil
 	})
-	if !got.reachable || !got.observed {
+	if !got.Reachable || !got.Observed {
 		t.Fatalf("an environment that answered is reachable and observed, got %+v", got)
 	}
-	if got.busy {
+	if got.Busy {
 		t.Fatal("every marker idle means no work")
 	}
 }
@@ -101,14 +98,14 @@ func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
 		t.Fatal("the idle question must not be asked when the port does not answer")
 		return model.EnvironmentIdleStatus{}, nil
 	})
-	if got.reachable || got.observed || got.busy {
+	if got.Reachable || got.Observed || got.Busy {
 		t.Fatalf("an unreachable environment reports nothing, got %+v", got)
 	}
 }
 
 func TestEnvActivityStateComparesTheVerdict(t *testing.T) {
-	answered := environmentActivityState{reachable: true, observed: true}
-	silent := environmentActivityState{reachable: true}
+	answered := ActivityState{Reachable: true, Observed: true}
+	silent := ActivityState{Reachable: true}
 	if answered == silent {
 		t.Fatal("the verdict must take part in the transition check")
 	}
@@ -120,15 +117,14 @@ func observeViaPodWith(
 	t *testing.T,
 	kubernetesContext string,
 	execRuntimePod func(context.Context, uimodel.Selection, string) (string, error),
-) environmentActivityState {
+) ActivityState {
 	t.Helper()
-	store := stubUIStore{envs: map[string]config.EnvConfig{
+	store := fakeStore{envs: map[string]config.EnvConfig{
 		"acme/dev": {Name: "dev", KubernetesContext: kubernetesContext},
 	}}
-	app := NewApp(erunUIDeps{store: store, execRuntimePod: execRuntimePod})
-	t.Cleanup(func() { app.shutdown(context.Background()) })
+	service := newTestService(Deps{Store: store, ExecRuntimePod: execRuntimePod})
 	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
-	return app.observeEnvironmentActivityViaPod(selection, environmentActivity{selection: selection}).state
+	return service.observeEnvironmentActivityViaPod(selection, envObservation{selection: selection}).state
 }
 
 func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
@@ -145,13 +141,13 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 		}
 		return string(data), nil
 	})
-	if !got.reachable || !got.observed {
+	if !got.Reachable || !got.Observed {
 		t.Fatalf("a pod that answers is reachable and observed, got %+v", got)
 	}
-	if !got.busy || got.detail != "holding: job-fix-1570" {
+	if !got.Busy || got.Detail != "holding: job-fix-1570" {
 		t.Fatalf("a held lease must read as busy and name the holder, got %+v", got)
 	}
-	if got.checkFailed {
+	if got.CheckFailed {
 		t.Fatalf("a successful probe is not a failed check, got %+v", got)
 	}
 }
@@ -166,7 +162,7 @@ func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 		}
 		return string(data), nil
 	})
-	if !got.reachable || !got.observed || got.busy || got.checkFailed {
+	if !got.Reachable || !got.Observed || got.Busy || got.CheckFailed {
 		t.Fatalf("an idle pod answer must not read as busy or unconfirmed, got %+v", got)
 	}
 }
@@ -175,10 +171,10 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly(t *testing.
 	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		return "", errors.New("kubectl exec: the connection to the server was refused")
 	})
-	if got.reachable || got.observed || got.busy {
+	if got.Reachable || got.Observed || got.Busy {
 		t.Fatalf("a failed probe carries no verdict about the environment, got %+v", got)
 	}
-	if !got.checkFailed {
+	if !got.CheckFailed {
 		t.Fatal("a real attempt that failed must be named distinctly from never asking")
 	}
 }
@@ -187,10 +183,10 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput(t *tes
 	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		return "not json", nil
 	})
-	if got.reachable || got.observed || got.busy {
+	if got.Reachable || got.Observed || got.Busy {
 		t.Fatalf("unparseable output carries no verdict about the environment, got %+v", got)
 	}
-	if !got.checkFailed {
+	if !got.CheckFailed {
 		t.Fatal("unparseable output must be named as a failed check, not silence")
 	}
 }
@@ -200,7 +196,7 @@ func TestObserveEnvironmentActivityViaPodSkipsEnvironmentsWithNoCluster(t *testi
 		t.Fatal("an environment with no kubernetes context must never be exec'd into")
 		return "", nil
 	})
-	if got.reachable || got.observed || got.busy || got.checkFailed {
+	if got.Reachable || got.Observed || got.Busy || got.CheckFailed {
 		t.Fatalf("an environment with no cluster reports nothing, got %+v", got)
 	}
 }

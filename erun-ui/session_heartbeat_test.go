@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -80,16 +80,16 @@ func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) 
 	}
 	app.sessions[managed.key] = managed
 
-	app.applySessionHeartbeat(selection, uiRuntimeActivity{
-		Sessions:        []uiRuntimeSession{{ID: "ai", Running: true, Program: "claude"}},
+	app.applySessionHeartbeat(selection, runtimeview.Activity{
+		Sessions:        []runtimeview.Session{{ID: "ai", Running: true, Program: "claude"}},
 		SessionsRunning: 1,
 	})
 	if len(emits.events(uimodel.AIActivityEvent)) != 0 {
 		t.Fatalf("a running session must not be released: %+v", emits.events(uimodel.AIActivityEvent))
 	}
 
-	app.applySessionHeartbeat(selection, uiRuntimeActivity{
-		Sessions:        []uiRuntimeSession{{ID: "ai", Running: false}},
+	app.applySessionHeartbeat(selection, runtimeview.Activity{
+		Sessions:        []runtimeview.Session{{ID: "ai", Running: false}},
 		SessionsRunning: 0,
 	})
 	if len(emits.events(uimodel.AIActivityEvent)) != 1 {
@@ -121,29 +121,6 @@ func TestHeartbeatObservationExpires(t *testing.T) {
 	}
 }
 
-func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
-	probe := "erun-session\tai\t900\tclaude\n" +
-		"erun-session\topen-0\t901\tbash\n" +
-		"erun-session\topen-3\t0\t\n"
-
-	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
-	if activity.SessionsRunning != 2 {
-		t.Fatalf("expected 2 running sessions, got %d (%+v)", activity.SessionsRunning, activity.Sessions)
-	}
-	running := 0
-	for _, session := range activity.Sessions {
-		if session.Running {
-			running++
-		}
-	}
-	if running != activity.SessionsRunning {
-		t.Fatalf("rendered count %d disagrees with the per-session state %d", activity.SessionsRunning, running)
-	}
-	if want := "Live in the pod right now: 2 sessions running (1 socket no longer has a program behind it), 0 MiB held by running processes."; activity.Message != want {
-		t.Fatalf("unexpected message:\n got %q\nwant %q", activity.Message, want)
-	}
-}
-
 func TestSelectionsWithPodSessionsSkipsSessionsWithoutAPodSession(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	app.sessions["local"] = &managedTerminal{kind: sessionKindLocal, selection: uimodel.Selection{Tenant: "petios", Environment: "local"}}
@@ -166,35 +143,6 @@ func heartbeatFor(running bool) sessionHeartbeat {
 		heartbeat.running["ai"] = struct{}{}
 	}
 	return heartbeat
-}
-
-func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
-	var ran []string
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(_ context.Context, _ uimodel.Selection, script string) (string, error) {
-			ran = append(ran, script)
-			return "", nil
-		},
-	})
-	app.SetEmitter(func(string, ...any) {})
-
-	if _, err := app.ReclaimRuntimeResources(uiRuntimeReclaimInput{Tenant: "petios", Environment: "local", Action: "delete-everything"}); err == nil {
-		t.Fatalf("an unknown reclaim action must be refused")
-	}
-	if len(ran) != 0 {
-		t.Fatalf("a refused action must run nothing in the pod: %+v", ran)
-	}
-
-	result, err := app.ReclaimRuntimeResources(uiRuntimeReclaimInput{Tenant: "petios", Environment: "local", Action: runtimeReclaimGradleDaemons})
-	if err != nil {
-		t.Fatalf("ReclaimRuntimeResources: %v", err)
-	}
-	if len(ran) != 1 || !strings.Contains(ran[0], "gradle --stop") || !strings.Contains(ran[0], "Gradle[D]aemon") {
-		t.Fatalf("unexpected reclaim script: %+v", ran)
-	}
-	if result.Message == "" {
-		t.Fatalf("a completed reclaim must report what it did")
-	}
 }
 
 // Deliberately ignores emitted events: a remount only reads the snapshot.

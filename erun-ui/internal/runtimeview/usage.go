@@ -1,10 +1,11 @@
-package main
+package runtimeview
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -23,14 +24,14 @@ const runtimeUsageTimeout = 10 * time.Second
 
 // LoadRuntimeUsage reports the environment's CPU, memory and disk usage against its
 // cgroup limits; it fails soft to an unavailable report.
-func (a *App) LoadRuntimeUsage(selection uimodel.Selection) (uiRuntimeUsage, error) {
+func (s *Service) LoadRuntimeUsage(selection uimodel.Selection) (Usage, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime usage", selection.Tenant, selection.Environment); err != nil {
-		return uiRuntimeUsage{}, err
+		return Usage{}, err
 	}
-	usage, err := a.deps.loadRuntimeUsage(a.context(), selection)
+	usage, err := s.d.LoadUsage(s.d.Context(), selection)
 	if err != nil {
-		return uiRuntimeUsage{
+		return Usage{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
 			Message:     fmt.Sprintf("Cannot read this environment's resource usage: %v", err),
@@ -39,27 +40,36 @@ func (a *App) LoadRuntimeUsage(selection uimodel.Selection) (uiRuntimeUsage, err
 	return usage, nil
 }
 
-func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selection uimodel.Selection) (uiRuntimeUsage, error) {
+// ReadUsageViaKubectl is the production LoadUsage seam.
+func ReadUsageViaKubectl(parent context.Context, store config.OpenStore, selection uimodel.Selection) (Usage, error) {
 	if store == nil {
-		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
+		return Usage{}, fmt.Errorf("configuration store is unavailable")
 	}
 	result, err := resolve.ResolveOpen(store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return uiRuntimeUsage{}, err
+		return Usage{}, err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
 
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
 
-	reading, err := podruntime.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, model.RuntimeUsageParams{})
+	reading, err := podruntime.RunRuntimeUsage(quietContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, model.RuntimeUsageParams{})
 	if err != nil {
-		return uiRuntimeUsage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
+		return Usage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
 	}
 	return uiRuntimeUsageFromReading(reading), nil
+}
+
+func quietContext() core.Context {
+	return core.Context{
+		Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}
 }
 
 // erun-common's RunRuntimeContainerCommand has no timeout; a UI probe needs one.
@@ -99,8 +109,8 @@ func runtimePodRequestsRunner(ctx context.Context) podruntime.RuntimePodRequests
 }
 
 // Every field keeps its own unavailability rather than collapsing to zero.
-func uiRuntimeUsageFromReading(reading model.RuntimeUsage) uiRuntimeUsage {
-	usage := uiRuntimeUsage{
+func uiRuntimeUsageFromReading(reading model.RuntimeUsage) Usage {
+	usage := Usage{
 		Tenant:         reading.Tenant,
 		Environment:    reading.Environment,
 		Available:      true,
@@ -115,7 +125,7 @@ func uiRuntimeUsageFromReading(reading model.RuntimeUsage) uiRuntimeUsage {
 	}
 	// Builds run in the dind sidecar, so it is carried separately; nil (older image) stays nil, not zero.
 	if reading.Dind != nil {
-		usage.Dind = &uiRuntimeDindUsage{
+		usage.Dind = &DindUsage{
 			CPU:    uiRuntimeCPUUsageFromReading(reading.Dind.CPU),
 			Memory: uiRuntimeMemoryUsageFromReading(reading.Dind.Memory),
 		}
@@ -124,12 +134,12 @@ func uiRuntimeUsageFromReading(reading model.RuntimeUsage) uiRuntimeUsage {
 	return usage
 }
 
-func uiRuntimeCPUUsageFromReading(cpu model.RuntimeCPUUsage) uiRuntimeCPUUsage {
+func uiRuntimeCPUUsageFromReading(cpu model.RuntimeCPUUsage) CPUUsage {
 	// UsageUsec is read before the quota, so it is set even without a ceiling.
 	if cpu.Unavailable != "" {
-		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable, UsageUsec: cpu.UsageUsec}
+		return CPUUsage{Unavailable: cpu.Unavailable, UsageUsec: cpu.UsageUsec}
 	}
-	return uiRuntimeCPUUsage{
+	return CPUUsage{
 		Available:          true,
 		QuotaCores:         cpu.QuotaCores,
 		Quota:              fmt.Sprintf("%.2f cores", cpu.QuotaCores),
@@ -139,11 +149,11 @@ func uiRuntimeCPUUsageFromReading(cpu model.RuntimeCPUUsage) uiRuntimeCPUUsage {
 	}
 }
 
-func uiRuntimeMemoryUsageFromReading(memory model.RuntimeMemoryUsage) uiRuntimeMemoryUsage {
+func uiRuntimeMemoryUsageFromReading(memory model.RuntimeMemoryUsage) MemoryUsage {
 	if memory.Unavailable != "" {
-		return uiRuntimeMemoryUsage{Unavailable: memory.Unavailable}
+		return MemoryUsage{Unavailable: memory.Unavailable}
 	}
-	result := uiRuntimeMemoryUsage{
+	result := MemoryUsage{
 		Available:    true,
 		Unlimited:    memory.Unlimited,
 		CurrentBytes: memory.CurrentBytes,
@@ -161,19 +171,19 @@ func uiRuntimeMemoryUsageFromReading(memory model.RuntimeMemoryUsage) uiRuntimeM
 }
 
 // nil means never read; an unreadable pod spec arrives as unavailable with its reason.
-func uiRuntimeUsageRequestsFromReading(requests *model.RuntimeUsageRequests) *uiRuntimeUsageRequests {
+func uiRuntimeUsageRequestsFromReading(requests *model.RuntimeUsageRequests) *UsageRequests {
 	if requests == nil {
 		return nil
 	}
-	return &uiRuntimeUsageRequests{
+	return &UsageRequests{
 		Unavailable: requests.Unavailable,
 		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[config.DevopsComponentName]),
 	}
 }
 
 // CPU/memory strings are formatted once here so every view spells them the same.
-func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) uiRuntimeContainerRequests {
-	rendered := uiRuntimeContainerRequests{
+func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) ContainerRequests {
+	rendered := ContainerRequests{
 		CPUMilli:    requests.CPUMilli,
 		MemoryBytes: requests.MemoryBytes,
 	}
@@ -186,11 +196,11 @@ func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) ui
 	return rendered
 }
 
-func uiRuntimeDiskUsageFromReading(disk model.RuntimeDiskUsage) uiRuntimeDiskUsage {
+func uiRuntimeDiskUsageFromReading(disk model.RuntimeDiskUsage) DiskUsage {
 	if disk.Unavailable != "" {
-		return uiRuntimeDiskUsage{Mount: disk.Mount, Unavailable: disk.Unavailable}
+		return DiskUsage{Mount: disk.Mount, Unavailable: disk.Unavailable}
 	}
-	return uiRuntimeDiskUsage{
+	return DiskUsage{
 		Mount:       disk.Mount,
 		Available:   true,
 		TotalBytes:  disk.TotalBytes,
@@ -202,7 +212,7 @@ func uiRuntimeDiskUsageFromReading(disk model.RuntimeDiskUsage) uiRuntimeDiskUsa
 	}
 }
 
-func uiRuntimeUsageMessage(usage uiRuntimeUsage) string {
+func uiRuntimeUsageMessage(usage Usage) string {
 	var parts []string
 	if usage.CPU.Available {
 		parts = append(parts, fmt.Sprintf("CPU %s of a %s quota", usage.CPU.Utilization, usage.CPU.Quota))

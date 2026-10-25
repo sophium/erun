@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -43,79 +44,11 @@ type uiEnvironment struct {
 	AutoStart                *bool                                 `json:"autoStart,omitempty"`
 	// Activity seeds a frontend store reset; the poller only emits on transitions.
 	// nil means not yet observed.
-	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+	Activity *runtimeview.ActivitySnapshot `json:"activity,omitempty"`
 	// Usage is the usage poller's last reading; nil means not yet observed.
-	Usage *uiEnvironmentUsageSnapshot `json:"usage,omitempty"`
+	Usage *runtimeview.UsageSnapshot `json:"usage,omitempty"`
 	// Node nil means erun manages no node for this env, never a failed read.
-	Node *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
-}
-
-// uiEnvironmentNodeSnapshot describes the node, kept apart from environment
-// state: a stopped node and a stopped environment have different remedies.
-type uiEnvironmentNodeSnapshot struct {
-	Name  string `json:"name"`
-	Label string `json:"label,omitempty"`
-	// Status "unknown" (stale) and "" (unobserved) must never render as stopped.
-	Status string `json:"status"`
-}
-
-// envNodePayload is emitted on transitions; a nil Node is still published.
-type envNodePayload struct {
-	Tenant      string                     `json:"tenant"`
-	Environment string                     `json:"environment"`
-	Node        *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
-}
-
-// uiEnvironmentActivitySnapshot mirrors envActivityPayload without the identity.
-type uiEnvironmentActivitySnapshot struct {
-	Reachable bool `json:"reachable"`
-	Observed  bool `json:"observed"`
-	Outage    bool `json:"outage"`
-	// CheckFailed is a kubectl-exec probe that did not answer, distinct from Outage.
-	CheckFailed bool   `json:"checkFailed,omitempty"`
-	Busy        bool   `json:"busy"`
-	Detail      string `json:"detail,omitempty"`
-}
-
-// uiEnvironmentUsageSnapshot lets the renderer mark a reading stale without
-// knowing the sweep interval.
-type uiEnvironmentUsageSnapshot struct {
-	Usage             uiRuntimeUsage `json:"usage"`
-	ObservedAtUnix    int64          `json:"observedAtUnix"`
-	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
-}
-
-// uiWorkingIssue: Available is false when the worktree is not on this host.
-type uiWorkingIssue struct {
-	Available   bool   `json:"available"`
-	Branch      string `json:"branch,omitempty"`
-	IssueNumber int    `json:"issueNumber,omitempty"`
-	IssueTitle  string `json:"issueTitle,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-}
-
-// envActivityPayload is replaced every poll, unlike the sticky uimodel.EnvStatusPayload.
-type envActivityPayload struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Reachable   bool   `json:"reachable"`
-	// Observed separates "answered, no work" from "no answer".
-	Observed bool `json:"observed"`
-	// Outage diagnoses a dropped forward that reconnecting did not fix, so the row
-	// does not look merely quiet.
-	Outage      bool   `json:"outage"`
-	CheckFailed bool   `json:"checkFailed,omitempty"`
-	Busy        bool   `json:"busy"`
-	Detail      string `json:"detail,omitempty"`
-}
-
-// envUsagePayload is published on the sweep cadence, not per hover.
-type envUsagePayload struct {
-	Tenant            string         `json:"tenant"`
-	Environment       string         `json:"environment"`
-	Usage             uiRuntimeUsage `json:"usage"`
-	ObservedAtUnix    int64          `json:"observedAtUnix"`
-	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
+	Node *runtimeview.NodeSnapshot `json:"node,omitempty"`
 }
 
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.

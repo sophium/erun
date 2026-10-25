@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -65,16 +67,16 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 		deps.listKubeContexts = listKubernetesContexts
 	}
 	if deps.loadResourceStatus == nil {
-		deps.loadResourceStatus = loadRuntimeResourceStatus
+		deps.loadResourceStatus = runtimeview.ReadResourceStatus
 	}
 	if deps.loadClusterRegistry == nil {
-		deps.loadClusterRegistry = loadClusterRegistry
+		deps.loadClusterRegistry = runtimeview.ReadClusterRegistry
 	}
 	if deps.loadHostedRegistry == nil {
 		deps.loadHostedRegistry = loadHostedRegistryWithTestOverride
 	}
 	if deps.checkRuntimeDeployed == nil {
-		deps.checkRuntimeDeployed = checkRuntimeDeployed
+		deps.checkRuntimeDeployed = runtimeview.CheckRuntimeDeployed
 	}
 	if deps.stopEnvironmentRuntime == nil {
 		deps.stopEnvironmentRuntime = lifecycle.RunStopEnvironment
@@ -139,12 +141,12 @@ func localPortReachabilityOverride() (bool, bool) {
 }
 
 // loadHostedRegistryWithTestOverride prefers the test override over the real probe.
-func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
+func loadHostedRegistryWithTestOverride(ctx context.Context) runtimeview.HostedRegistryStatus {
 	available, ok := hostedRegistryReachabilityOverride()
 	if !ok {
-		return loadHostedRegistry(ctx)
+		return runtimeview.ProbeHostedRegistry(ctx)
 	}
-	status := uiHostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
+	status := runtimeview.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
 	if !available {
 		status.Reason = "does not resolve"
 		status.Recovery = "Choose a different registry instead."
@@ -283,12 +285,12 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		}
 	}
 	if deps.loadRuntimeUsage == nil {
-		deps.loadRuntimeUsage = func(ctx context.Context, selection uimodel.Selection) (uiRuntimeUsage, error) {
-			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
+		deps.loadRuntimeUsage = func(ctx context.Context, selection uimodel.Selection) (runtimeview.Usage, error) {
+			return runtimeview.ReadUsageViaKubectl(ctx, deps.store, selection)
 		}
 	}
 	if deps.environmentUsageHistoryPath == "" {
-		deps.environmentUsageHistoryPath = defaultEnvironmentUsageHistoryPath()
+		deps.environmentUsageHistoryPath = runtimeview.DefaultUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = activity.RecordEnvironmentActivity
@@ -321,4 +323,12 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 		deps.desktopControlMarkerPath = core.DefaultDesktopControlMarkerPath()
 	}
 	return deps
+}
+
+func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	core.HideConsoleWindow(cmd)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
 }

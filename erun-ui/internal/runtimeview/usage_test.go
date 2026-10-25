@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -119,7 +119,7 @@ func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 
 // Uses the real wiring: the expired parent ctx triggers the timeout before kubectl runs.
 func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"petios": {Name: "petios", DefaultEnvironment: "local"},
 		},
@@ -127,12 +127,17 @@ func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 			"petios/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "test-context"},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
 	defer cancel()
-	app.ctx = ctx
+	service := newTestService(Deps{
+		Store:   store,
+		Context: func() context.Context { return ctx },
+		LoadUsage: func(ctx context.Context, selection uimodel.Selection) (Usage, error) {
+			return ReadUsageViaKubectl(ctx, store, selection)
+		},
+	})
 
-	usage, err := app.LoadRuntimeUsage(uimodel.Selection{Tenant: "petios", Environment: "local"})
+	usage, err := service.LoadRuntimeUsage(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeUsage must not surface a probe failure as an error: %v", err)
 	}
@@ -164,17 +169,17 @@ func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *t
 
 	payload, err := json.Marshal(usage)
 	if err != nil {
-		t.Fatalf("marshal uiRuntimeUsage: %v", err)
+		t.Fatalf("marshal Usage: %v", err)
 	}
 	var wire struct {
 		ExcludesBuilds bool `json:"excludesBuilds"`
 		Dind           *struct {
-			CPU    uiRuntimeCPUUsage    `json:"cpu"`
-			Memory uiRuntimeMemoryUsage `json:"memory"`
+			CPU    CPUUsage    `json:"cpu"`
+			Memory MemoryUsage `json:"memory"`
 		} `json:"dind"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
-		t.Fatalf("unmarshal uiRuntimeUsage payload: %v", err)
+		t.Fatalf("unmarshal Usage payload: %v", err)
 	}
 	if !wire.ExcludesBuilds {
 		t.Fatalf("the payload must disclose that CPU/memory exclude builds, got %s", payload)

@@ -1,7 +1,6 @@
-package main
+package runtimeview
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -87,131 +86,70 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 	}
 }
 
-// A frontend reset without a Go restart must keep a busy env's activity.
-func TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation(t *testing.T) {
-	app := &App{envActivity: map[string]environmentActivityState{
-		selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"}): {
-			reachable: true,
-			observed:  true,
-			busy:      true,
-			detail:    "an agent is driving it over MCP",
-		},
-	}}
-	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
-
-	app.seedEnvironmentActivitySnapshots(&state)
-
-	activity := state.Tenants[0].Environments[0].Activity
-	if activity == nil {
-		t.Fatal("expected the busy observation to be seeded onto the env")
-	}
-	if !activity.Reachable || !activity.Observed || !activity.Busy || activity.Detail != "an agent is driving it over MCP" {
-		t.Fatalf("unexpected snapshot: %+v", activity)
-	}
-}
-
-func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
-	app := &App{}
-	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
-
-	app.seedEnvironmentActivitySnapshots(&state)
-
-	if state.Tenants[0].Environments[0].Activity != nil {
-		t.Fatalf("expected no activity snapshot, got %+v", state.Tenants[0].Environments[0].Activity)
-	}
-}
-
 func TestEnvActivitySnapshotCopiesRatherThanAliases(t *testing.T) {
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
+	key := uimodel.SelectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	service := newTestService(Deps{})
+	service.activity = map[string]ActivityState{key: {Busy: true, Detail: "gradle-build"}}
 
-	snapshot := app.envActivitySnapshot()
-	if len(snapshot) != 1 || !snapshot[key].busy {
+	snapshot := service.ActivitySnapshot()
+	if len(snapshot) != 1 || !snapshot[key].Busy {
 		t.Fatalf("expected the snapshot to carry the observation, got %+v", snapshot)
 	}
-	app.envActivity[key] = environmentActivityState{}
-	if !snapshot[key].busy {
-		t.Fatalf("expected the snapshot to be a copy, unaffected by a later mutation of a.envActivity")
+	service.activity[key] = ActivityState{}
+	if !snapshot[key].Busy {
+		t.Fatalf("expected the snapshot to be a copy, unaffected by a later mutation of the cache")
 	}
 }
 
 func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
-	app := &App{}
-	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+	service := newTestService(Deps{})
+	if snapshot := service.ActivitySnapshot(); snapshot != nil {
 		t.Fatalf("expected a nil snapshot for an empty poller state, got %+v", snapshot)
 	}
 }
 
 func TestResetEnvironmentActivityObservationsClearsTheCache(t *testing.T) {
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
+	service := newTestService(Deps{})
+	service.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, ActivityState{Busy: true, Detail: "gradle-build"})
 
-	app.ResetEnvironmentActivityObservations()
+	service.ResetEnvironmentActivityObservations()
 
-	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+	if snapshot := service.ActivitySnapshot(); snapshot != nil {
 		t.Fatalf("expected no cached observations after reset, got %+v", snapshot)
 	}
 }
 
 func TestResetEnvironmentActivityObservationsOnEmptyCacheIsANoop(t *testing.T) {
-	app := &App{}
-	app.ResetEnvironmentActivityObservations()
-	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+	service := newTestService(Deps{})
+	service.ResetEnvironmentActivityObservations()
+	if snapshot := service.ActivitySnapshot(); snapshot != nil {
 		t.Fatalf("expected no cached observations, got %+v", snapshot)
 	}
 }
 
-func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
-	projectRoot := t.TempDir()
-	store := stubUIStore{
-		tenants: map[string]model.TenantConfig{
-			"acme": {Name: "acme", DefaultEnvironment: "dev"},
-		},
-		envs: map[string]config.EnvConfig{
-			"acme/dev": {Name: "dev", LocalRepoPath: projectRoot},
-		},
-	}
-	app := NewApp(erunUIDeps{
-		store:            store,
-		findProjectRoot:  func() (string, string, error) { return "acme", projectRoot, nil },
-		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.0"} },
-		resolveImageRegistry: func(context.Context, string, string) (model.RuntimeRegistryVersions, error) {
-			return model.RuntimeRegistryVersions{}, nil
-		},
-	})
-	app.envActivity = map[string]environmentActivityState{
-		selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"}): {
-			reachable: true,
-			observed:  true,
-			busy:      true,
-			detail:    "an agent is driving it over MCP",
-		},
-	}
+func TestPublishActivityEmitsOnlyTransitions(t *testing.T) {
+	emits := newCapturedEmits()
+	service := newTestService(Deps{Emit: emits.fn()})
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 
-	state, err := app.LoadState()
-	if err != nil {
-		t.Fatalf("LoadState failed: %v", err)
-	}
-	if len(state.Tenants) != 1 || len(state.Tenants[0].Environments) != 1 {
-		t.Fatalf("unexpected state shape: %+v", state)
-	}
-	activity := state.Tenants[0].Environments[0].Activity
-	if activity == nil || !activity.Busy {
-		t.Fatalf("expected LoadState to seed the busy observation, got %+v", activity)
+	service.PublishActivity(selection, ActivityState{Reachable: true, Observed: true})
+	service.PublishActivity(selection, ActivityState{Reachable: true, Observed: true})
+	service.PublishActivity(selection, ActivityState{Reachable: true, Observed: true, Busy: true})
+
+	if got := len(emits.events(uimodel.EnvActivityEvent)); got != 2 {
+		t.Fatalf("a restated observation must not re-emit: got %d emits, want 2", got)
 	}
 }
 
 func TestTriggerEnvironmentActivitySweepRunsSynchronously(t *testing.T) {
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"acme": {Name: "acme"}},
 		envs:    map[string]config.EnvConfig{"acme/dev": {Name: "dev"}},
 	}
-	app := NewApp(erunUIDeps{store: store})
-	t.Cleanup(func() { app.shutdown(context.Background()) })
 	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
+	service := newTestService(Deps{Store: store, Emit: emits.fn()})
 
-	app.TriggerEnvironmentActivitySweep()
+	service.TriggerEnvironmentActivitySweep()
 
 	if len(emits.events(uimodel.EnvActivityEvent)) == 0 {
 		t.Fatal("triggering a sweep must observe and emit for every configured selection before returning")

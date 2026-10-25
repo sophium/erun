@@ -240,7 +240,7 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	}
 
 	elapsed := now.Sub(lastActiveAt)
-	envBusy := orchestratorLinkedEnvBusyStateFor(row.id, row.envs, a.envActivitySnapshot())
+	envBusy := orchestratorLinkedEnvBusyStateFor(row.id, row.envs, a.runtime.ActivitySnapshot())
 	if a.orchestratorPacingSuppressedByLinkedEnv(row, explicit, envBusy, elapsed) {
 		a.logOrchestratorPacingTransition(row, orchestratorPacingReasonEnvBusy, elapsed, true)
 		return orchestratorPacingNone, orchestratorPacingReasonEnvBusy

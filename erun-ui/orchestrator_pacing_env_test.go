@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -32,10 +33,9 @@ func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordi
 
 func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app.envActivity = map[string]environmentActivityState{
-		key: {observed: true, busy: true, detail: "holding: 1682 desktop ux and co", busyHolderOrchestrators: "agent"},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, runtimeview.ActivityState{
+		Observed: true, Busy: true, Detail: "holding: 1682 desktop ux and co", BusyHolderOrchestrators: "agent",
+	})
 
 	rows := app.orchestratorPacingRows()
 	if len(rows) != 1 {
@@ -58,10 +58,9 @@ func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 
 func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	unrelatedKey := selectionKey(uimodel.Selection{Tenant: "other", Environment: "prod"})
-	app.envActivity = map[string]environmentActivityState{
-		unrelatedKey: {observed: true, busy: true, detail: "holding: something-else", busyHolderOrchestrators: "agent"},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "other", Environment: "prod"}, runtimeview.ActivityState{
+		Observed: true, Busy: true, Detail: "holding: something-else", BusyHolderOrchestrators: "agent",
+	})
 
 	app.reconcileOrchestratorPacing()
 
@@ -72,10 +71,9 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testin
 
 func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app.envActivity = map[string]environmentActivityState{
-		key: {observed: true, busy: true, detail: "holding: someone-elses-job", busyHolderOrchestrators: "another-orchestrator"},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, runtimeview.ActivityState{
+		Observed: true, Busy: true, Detail: "holding: someone-elses-job", BusyHolderOrchestrators: "another-orchestrator",
+	})
 
 	app.reconcileOrchestratorPacing()
 
@@ -86,10 +84,9 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *te
 
 func TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app.envActivity = map[string]environmentActivityState{
-		key: {observed: true, busy: false},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, runtimeview.ActivityState{
+		Observed: true, Busy: false,
+	})
 
 	app.reconcileOrchestratorPacing()
 
@@ -100,10 +97,10 @@ func TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday(t *testing.T) {
 
 func TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	// app.envActivity is left nil: the poller has never observed "acme/dev".
+	// The runtime service has no observation: the poller has never observed "acme/dev".
 
 	rows := app.orchestratorPacingRows()
-	envBusy := orchestratorLinkedEnvBusyStateFor(rows[0].id, rows[0].envs, app.envActivitySnapshot())
+	envBusy := orchestratorLinkedEnvBusyStateFor(rows[0].id, rows[0].envs, app.runtime.ActivitySnapshot())
 	if envBusy.signal != orchestratorEnvActivityUnknown {
 		t.Fatalf("expected the unobserved linked env to read as unknown, got %v", envBusy.signal)
 	}
@@ -118,10 +115,9 @@ func TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal(t *testing.T)
 func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-bound-time.Minute))
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app.envActivity = map[string]environmentActivityState{
-		key: {observed: true, busy: true, detail: "holding: a build that never finished", busyHolderOrchestrators: "agent"},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, runtimeview.ActivityState{
+		Observed: true, Busy: true, Detail: "holding: a build that never finished", BusyHolderOrchestrators: "agent",
+	})
 
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
@@ -143,10 +139,9 @@ func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	app.envActivity = map[string]environmentActivityState{
-		key: {observed: true, busy: true, detail: "holding: a long gate run", busyHolderOrchestrators: "agent"},
-	}
+	app.runtime.PublishActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}, runtimeview.ActivityState{
+		Observed: true, Busy: true, Detail: "holding: a long gate run", BusyHolderOrchestrators: "agent",
+	})
 
 	rows := app.orchestratorPacingRows()
 	tick := time.Now()
@@ -182,44 +177,44 @@ func TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		snapshot map[string]environmentActivityState
+		snapshot map[string]runtimeview.ActivityState
 		want     orchestratorEnvActivitySignal
 	}{
 		{
 			"both idle and observed",
-			map[string]environmentActivityState{
-				devKey:   {observed: true},
-				buildKey: {observed: true},
+			map[string]runtimeview.ActivityState{
+				devKey:   {Observed: true},
+				buildKey: {Observed: true},
 			},
 			orchestratorEnvActivityIdle,
 		},
 		{
 			"one busy for this orchestrator, one idle",
-			map[string]environmentActivityState{
-				devKey:   {observed: true},
-				buildKey: {observed: true, busy: true, busyHolderOrchestrators: "agent"},
+			map[string]runtimeview.ActivityState{
+				devKey:   {Observed: true},
+				buildKey: {Observed: true, Busy: true, BusyHolderOrchestrators: "agent"},
 			},
 			orchestratorEnvActivityBusy,
 		},
 		{
 			"one busy for a different orchestrator, one idle: not busy",
-			map[string]environmentActivityState{
-				devKey:   {observed: true},
-				buildKey: {observed: true, busy: true, busyHolderOrchestrators: "someone-else"},
+			map[string]runtimeview.ActivityState{
+				devKey:   {Observed: true},
+				buildKey: {Observed: true, Busy: true, BusyHolderOrchestrators: "someone-else"},
 			},
 			orchestratorEnvActivityIdle,
 		},
 		{
 			"one never observed: unknown even though the other is idle",
-			map[string]environmentActivityState{
-				devKey: {observed: true},
+			map[string]runtimeview.ActivityState{
+				devKey: {Observed: true},
 			},
 			orchestratorEnvActivityUnknown,
 		},
 		{
 			"one busy for this orchestrator beats an unknown sibling",
-			map[string]environmentActivityState{
-				devKey:   {observed: true, busy: true, busyHolderOrchestrators: "agent"},
+			map[string]runtimeview.ActivityState{
+				devKey:   {Observed: true, Busy: true, BusyHolderOrchestrators: "agent"},
 				buildKey: {},
 			},
 			orchestratorEnvActivityBusy,

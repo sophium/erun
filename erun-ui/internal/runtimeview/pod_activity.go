@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -39,14 +38,14 @@ const (
 
 // LoadRuntimeActivity reports the pod's sessions and memory-holding processes; it
 // never reclaims and fails soft to an unavailable report.
-func (a *App) LoadRuntimeActivity(selection uimodel.Selection) (uiRuntimeActivity, error) {
+func (s *Service) LoadRuntimeActivity(selection uimodel.Selection) (Activity, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime activity", selection.Tenant, selection.Environment); err != nil {
-		return uiRuntimeActivity{}, err
+		return Activity{}, err
 	}
-	report, err := a.probeRuntimeActivity(selection)
+	report, err := s.ProbeRuntimeActivity(selection)
 	if err != nil {
-		return uiRuntimeActivity{
+		return Activity{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
 			Message:     fmt.Sprintf("Cannot read what the runtime is running: %v", err),
@@ -56,65 +55,37 @@ func (a *App) LoadRuntimeActivity(selection uimodel.Selection) (uiRuntimeActivit
 }
 
 // ReclaimRuntimeResources runs one named reclaim action in the pod.
-func (a *App) ReclaimRuntimeResources(input uiRuntimeReclaimInput) (uiRuntimeReclaimResult, error) {
+func (s *Service) ReclaimRuntimeResources(input ReclaimInput) (ReclaimResult, error) {
 	selection := uimodel.NormalizeSelection(uimodel.Selection{Tenant: input.Tenant, Environment: input.Environment})
 	if err := uimodel.ErrMissingTenantOrEnvironment("reclaim runtime resources", selection.Tenant, selection.Environment); err != nil {
-		return uiRuntimeReclaimResult{}, err
+		return ReclaimResult{}, err
 	}
 	action := strings.TrimSpace(input.Action)
 	script, err := runtimeReclaimScript(action)
 	if err != nil {
-		return uiRuntimeReclaimResult{}, err
+		return ReclaimResult{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.context(), runtimeReclaimTimeout)
+	ctx, cancel := context.WithTimeout(s.d.Context(), runtimeReclaimTimeout)
 	defer cancel()
-	if _, err := a.execInRuntimePod(ctx, selection, script); err != nil {
-		return uiRuntimeReclaimResult{}, fmt.Errorf("%s: %w", runtimeReclaimLabel(action), err)
+	if _, err := s.d.ExecRuntimePod(ctx, selection, script); err != nil {
+		return ReclaimResult{}, fmt.Errorf("%s: %w", runtimeReclaimLabel(action), err)
 	}
 	notice := fmt.Sprintf("%s in %s/%s. The figures below refresh with what is left.",
 		runtimeReclaimDoneLabel(action), selection.Tenant, selection.Environment)
-	a.emitAppNotification("info", notice)
-	return uiRuntimeReclaimResult{Action: action, Message: notice}, nil
+	s.notify("info", notice)
+	return ReclaimResult{Action: action, Message: notice}, nil
 }
 
-func (a *App) probeRuntimeActivity(selection uimodel.Selection) (uiRuntimeActivity, error) {
-	ctx, cancel := context.WithTimeout(a.context(), runtimeActivityTimeout)
+// ProbeRuntimeActivity reads the pod over kubectl exec, so it works while the MCP edge is down.
+func (s *Service) ProbeRuntimeActivity(selection uimodel.Selection) (Activity, error) {
+	ctx, cancel := context.WithTimeout(s.d.Context(), runtimeActivityTimeout)
 	defer cancel()
-	output, err := a.execInRuntimePod(ctx, selection,
+	output, err := s.d.ExecRuntimePod(ctx, selection,
 		activitypkg.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
 	if err != nil {
-		return uiRuntimeActivity{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeActivityTimeout, err, func(e error) string { return e.Error() }))
+		return Activity{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeActivityTimeout, err, func(e error) string { return e.Error() }))
 	}
 	return runtimeActivityFromProbe(selection, output), nil
-}
-
-// execInRuntimePod uses kubectl exec rather than the MCP edge so it works while the edge is down.
-func (a *App) execInRuntimePod(ctx context.Context, selection uimodel.Selection, script string) (string, error) {
-	if a.deps.execRuntimePod != nil {
-		return a.deps.execRuntimePod(ctx, selection, script)
-	}
-	return "", fmt.Errorf("runtime pod exec is unavailable")
-}
-
-func execInRuntimePodViaKubectl(ctx context.Context, selection uimodel.Selection, store erunUIStore, script string) (string, error) {
-	if store == nil {
-		return "", fmt.Errorf("configuration store is unavailable")
-	}
-	envConfig, _, err := store.LoadEnvConfig(selection.Tenant, selection.Environment)
-	if err != nil {
-		return "", err
-	}
-	kubernetesContext := strings.TrimSpace(envConfig.KubernetesContext)
-	if kubernetesContext == "" {
-		return "", fmt.Errorf("environment has no kubernetes context")
-	}
-	return kubectlText(ctx, kubernetesContext,
-		"--namespace", config.KubernetesNamespaceName(selection.Tenant, selection.Environment),
-		"exec",
-		"deployment/"+config.RuntimeReleaseName(selection.Tenant),
-		"--",
-		"/bin/sh", "-c", script,
-	)
 }
 
 const runtimeProcessSnapshotPrefix = "erun-process\t"
@@ -124,18 +95,18 @@ func runtimeProcessSnapshotScript() string {
 		"printf '" + runtimeProcessSnapshotPrefix + "%s\\t%s\\t%s\\n' \"$rss\" \"$comm\" \"$args\"; done"
 }
 
-func runtimeActivityFromProbe(selection uimodel.Selection, output string) uiRuntimeActivity {
+func runtimeActivityFromProbe(selection uimodel.Selection, output string) Activity {
 	heartbeats := activitypkg.ParseRemoteAppSessionHeartbeats(output)
-	sessions := make([]uiRuntimeSession, 0, len(heartbeats))
+	sessions := make([]Session, 0, len(heartbeats))
 	for _, heartbeat := range heartbeats {
-		sessions = append(sessions, uiRuntimeSession{
+		sessions = append(sessions, Session{
 			ID:      heartbeat.ID,
 			Running: heartbeat.Running(),
 			Program: heartbeat.Program,
 		})
 	}
 	groups, totalMi := runtimeProcessGroupsFromProbe(output)
-	activity := uiRuntimeActivity{
+	activity := Activity{
 		Tenant:          selection.Tenant,
 		Environment:     selection.Environment,
 		Available:       true,
@@ -149,7 +120,7 @@ func runtimeActivityFromProbe(selection uimodel.Selection, output string) uiRunt
 	return activity
 }
 
-func runtimeActivityMessage(activity uiRuntimeActivity) string {
+func runtimeActivityMessage(activity Activity) string {
 	sessions := "no sessions running"
 	switch activity.SessionsRunning {
 	case 1:
@@ -173,7 +144,7 @@ func pluralizeSockets(count int) string {
 	return fmt.Sprintf("%d sockets", count)
 }
 
-func runtimeProcessGroupsFromProbe(output string) ([]uiRuntimeProcessGroup, int64) {
+func runtimeProcessGroupsFromProbe(output string) ([]ProcessGroup, int64) {
 	type accumulator struct {
 		count int
 		rssKi int64
@@ -208,10 +179,10 @@ func runtimeProcessGroupsFromProbe(output string) ([]uiRuntimeProcessGroup, int6
 		totals[group].count++
 		totals[group].rssKi += rssKi
 	}
-	groups := make([]uiRuntimeProcessGroup, 0, len(totals))
+	groups := make([]ProcessGroup, 0, len(totals))
 	for id, totals := range totals {
 		memoryMi := totals.rssKi / 1024
-		groups = append(groups, uiRuntimeProcessGroup{
+		groups = append(groups, ProcessGroup{
 			ID:           id,
 			Label:        runtimeProcessGroupLabel(id, totals.count),
 			Count:        totals.count,

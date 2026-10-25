@@ -4,7 +4,7 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 
 // A stopped cloud node must be distinguishable from an undetermined status and a missing
 // port-forward.
-// Specs drive the `env-node` event (environment_node.go); the backend sweep can clear it, so
+// Specs drive the `env-node` event (internal/runtimeview/node.go); the backend sweep can clear it, so
 // assertions re-drive until they converge.
 
 interface NodeEvent {

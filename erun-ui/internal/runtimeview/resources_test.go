@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ func TestRuntimeResourceStatusUsesBestAvailableNode(t *testing.T) {
 	pod.Spec.Containers[0].Resources.Limits.CPU = "2"
 	pod.Spec.Containers[0].Resources.Limits.Memory = "4Gi"
 
-	status := runtimeResourceStatusFromKubernetes(uiRuntimeResourceInput{KubernetesContext: "cluster"}, kubernetesNodeList{Items: []kubernetesNode{nodeA, nodeB}}, kubernetesPodList{Items: []kubernetesPod{pod}}, nil)
+	status := runtimeResourceStatusFromKubernetes(ResourceInput{KubernetesContext: "cluster"}, kubernetesNodeList{Items: []kubernetesNode{nodeA, nodeB}}, kubernetesPodList{Items: []kubernetesPod{pod}}, nil)
 	if !status.Available {
 		t.Fatalf("expected status to be available: %+v", status)
 	}
@@ -57,7 +57,7 @@ func TestRuntimeResourceStatusExcludesCurrentRuntimePodAllocation(t *testing.T) 
 	otherPod.Spec.Containers[0].Resources.Limits.Memory = "4Gi"
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		ResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{runtimePod, otherPod}},
 		nil,
@@ -88,7 +88,7 @@ func TestRuntimeResourceStatusKeepsCurrentRuntimeAllocationAsMinimumCapacity(t *
 	otherPod.Spec.Containers[0].Resources.Limits.Memory = "12Gi"
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		ResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{runtimePod, otherPod}},
 		nil,
@@ -130,7 +130,7 @@ func TestRuntimeResourceStatusCountsLimitlessContainersAtMeasuredUsage(t *testin
 	}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{neighbour}},
 		measured,
@@ -165,7 +165,7 @@ func TestRuntimeResourceStatusSurfacesUnaccountedContainers(t *testing.T) {
 	neighbour.Spec.Containers[0].Resources.Limits.Memory = "4Gi"
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{neighbour}},
 		nil,
@@ -215,7 +215,7 @@ func TestRuntimeResourceStatusFormatsZeroCPUCapacity(t *testing.T) {
 	pod.Spec.Containers[0].Resources.Limits.Memory = "1Gi"
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		ResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{pod}},
 		nil,
@@ -251,7 +251,7 @@ func TestRuntimeResourceStatusIgnoresTerminalPodAllocation(t *testing.T) {
 	failedInstallPod.Spec.Containers[0].Resources.Limits.Memory = "32G"
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		ResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{completedInstallPod, failedInstallPod}},
 		nil,
@@ -291,7 +291,7 @@ func TestRuntimeResourceStatusReportsSchedulableCapacityFromRequests(t *testing.
 	}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		pods,
 		nil,
@@ -344,7 +344,7 @@ func TestRuntimeResourceStatusNeverReadsAnUnreadableRequestAsZero(t *testing.T) 
 	pod.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "plenty", "memory": "1024Mi"}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{pod}},
 		nil,
@@ -378,7 +378,7 @@ func TestRuntimeResourceStatusCountsTheInitPhaseInThePodRequest(t *testing.T) {
 	pod.Spec.InitContainers[0].Resources.Requests = map[string]string{"cpu": "2", "memory": "4Gi"}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{pod}},
 		nil,
@@ -412,7 +412,7 @@ func TestRuntimeResourceStatusKeepsAnExistingEnvironmentResizableOnARequestFullN
 	neighbour.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "8", "memory": "15Gi"}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		ResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{target, neighbour}},
 		nil,
@@ -444,7 +444,7 @@ func TestRuntimeResourceStatusReportsNoSchedulingRoomForANewEnvironment(t *testi
 	neighbour.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "8", "memory": "16Gi"}
 
 	status := runtimeResourceStatusFromKubernetes(
-		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		ResourceInput{KubernetesContext: "cluster"},
 		kubernetesNodeList{Items: []kubernetesNode{node}},
 		kubernetesPodList{Items: []kubernetesPod{neighbour}},
 		nil,

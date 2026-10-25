@@ -27,9 +27,9 @@ func (a *App) startActivityPollers() {
 	// The heartbeat poller catches sessions alive but silent; the stale detector catches dead ones.
 	go a.runSessionHeartbeatPoller(stop)
 	// Sweeps every configured environment, including ones driven from the CLI or in-pod agents.
-	go a.runEnvironmentActivityPoller(stop)
+	go a.runtime.RunActivityPoller(stop)
 	// Usage readings cost a kubectl exec, so they run on a slower cadence.
-	go a.runEnvironmentUsagePoller(stop)
+	go a.runtime.RunUsagePoller(stop)
 }
 
 // stopActivityPollers is idempotent.

@@ -33,7 +33,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false)
+	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot(), false, false)
 	return orchestratorInfoWithLaunchSettings(info, launch, false), nil
 }
 
@@ -72,7 +72,7 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 		return orchestratorInfo{}, err
 	}
 	status, sessionID, busy, shell, pacing, restartRequired, roleChanged := a.updatedOrchestratorRunningSnapshot(id, refs)
-	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged)
+	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot(), restartRequired, roleChanged)
 	return orchestratorInfoWithLaunchSettings(info, launch, a.orchestratorLaunchSettingsChanged(configs[index], catalog)), nil
 }
 
@@ -175,6 +175,8 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 }
 
 func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
+	// The runtime readings are a snapshot taken outside a.mu; the card only renders them.
+	envActivity, envUsage := a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	session := a.orchestrators[id]
@@ -184,7 +186,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshotFromSession(session)
-	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
+	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, envActivity, envUsage, false, false), true
 }
 
 // orchestratorWiredEnvs returns what the live session started with, which may differ
@@ -237,6 +239,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	// File reads happen before taking a.mu.
 	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
 	unreachable := unreachableOrchestratorIDs(configs, time.Now())
+	envActivity, envUsage := a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
@@ -267,7 +270,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				launchSettingsChanged = orchestratorLaunchDiffers(config, catalog, session.launched)
 			}
 		}
-		info := orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged)
+		info := orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, envActivity, envUsage, restartRequired, roleChanged)
 		out = append(out, orchestratorInfoWithLaunchSettings(info, launchSettings, launchSettingsChanged))
 		seen[config.ID] = struct{}{}
 	}
@@ -281,7 +284,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshotFromSession(session)
-		out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
+		out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, envActivity, envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

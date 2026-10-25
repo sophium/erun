@@ -8,13 +8,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // uiDeployComponents is what a deploy at a chosen version would roll out.
 type uiDeployComponents struct {
 	Components   []componentspkg.DeployableComponent `json:"components"`
-	RuntimeChart uiRuntimeChartPlan                  `json:"runtimeChart"`
+	RuntimeChart runtimeview.ChartPlan               `json:"runtimeChart"`
 }
 
 // LoadDeployComponents lists what an equivalent `erun deploy` would roll out, limited
@@ -47,7 +48,7 @@ func (a *App) LoadDeployComponents(selection uimodel.Selection) (uiDeployCompone
 	}
 	return uiDeployComponents{
 		Components:   filtered,
-		RuntimeChart: a.resolveRuntimeChartPlan(tenant, environment, version, runtimeIsLocalChart(filtered)),
+		RuntimeChart: a.runtime.ResolveRuntimeChartPlan(tenant, environment, version, runtimeIsLocalChart(filtered)),
 	}, nil
 }
 

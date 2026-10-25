@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -36,18 +37,18 @@ func (s orchestratorLinkedEnvBusyState) stuckDetail() string {
 
 // orchestratorLinkedEnvBusyStateFor counts only leases held by this orchestrator's
 // own ID; other orchestrators' or the operator's work must not silence it.
-func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.OrchestratorEnvConfig, snapshot map[string]environmentActivityState) orchestratorLinkedEnvBusyState {
+func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.OrchestratorEnvConfig, snapshot map[string]runtimeview.ActivityState) orchestratorLinkedEnvBusyState {
 	sawUnknown := false
 	for _, env := range envs {
 		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		state, ok := snapshot[key]
-		if !ok || !state.observed {
+		if !ok || !state.Observed {
 			// Unobserved and inconclusive are both no evidence either way.
 			sawUnknown = true
 			continue
 		}
 		if environmentStateBusyForOrchestrator(state, orchestratorID) {
-			return orchestratorLinkedEnvBusyState{signal: orchestratorEnvActivityBusy, detail: state.detail}
+			return orchestratorLinkedEnvBusyState{signal: orchestratorEnvActivityBusy, detail: state.Detail}
 		}
 	}
 	if sawUnknown {
@@ -56,11 +57,11 @@ func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.Orch
 	return orchestratorLinkedEnvBusyState{signal: orchestratorEnvActivityIdle}
 }
 
-func environmentStateBusyForOrchestrator(state environmentActivityState, orchestratorID string) bool {
-	if state.busyHolderOrchestrators == "" || orchestratorID == "" {
+func environmentStateBusyForOrchestrator(state runtimeview.ActivityState, orchestratorID string) bool {
+	if state.BusyHolderOrchestrators == "" || orchestratorID == "" {
 		return false
 	}
-	for _, id := range strings.Split(state.busyHolderOrchestrators, ",") {
+	for _, id := range strings.Split(state.BusyHolderOrchestrators, ",") {
 		if id == orchestratorID {
 			return true
 		}

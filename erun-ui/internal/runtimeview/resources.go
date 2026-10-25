@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -12,26 +12,27 @@ import (
 	"github.com/sophium/erun/erun-common/command/setup"
 )
 
-func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
-	ctx := a.context()
-	return a.deps.loadResourceStatus(ctx, normalizeRuntimeResourceInput(input))
+func (s *Service) LoadRuntimeResourceStatus(input ResourceInput) (ResourceStatus, error) {
+	ctx := s.d.Context()
+	return s.d.LoadResourceStatus(ctx, normalizeRuntimeResourceInput(input))
 }
 
 // LoadClusterRegistry reports whether the context has an in-cluster erun-registry Service.
-func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
-	ctx := a.context()
-	return a.deps.loadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
+func (s *Service) LoadClusterRegistry(input ResourceInput) (ClusterRegistryStatus, error) {
+	ctx := s.d.Context()
+	return s.d.LoadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
 }
 
 // LoadHostedRegistry reports whether erun's hosted container registry is reachable.
-func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
-	ctx := a.context()
-	return a.deps.loadHostedRegistry(ctx), nil
+func (s *Service) LoadHostedRegistry() (HostedRegistryStatus, error) {
+	ctx := s.d.Context()
+	return s.d.LoadHostedRegistry(ctx), nil
 }
 
-func loadHostedRegistry(ctx context.Context) uiHostedRegistryStatus {
+// ProbeHostedRegistry is the production LoadHostedRegistry seam.
+func ProbeHostedRegistry(ctx context.Context) HostedRegistryStatus {
 	status := setup.ProbeHostedRegistry(ctx, nil)
-	return uiHostedRegistryStatus{
+	return HostedRegistryStatus{
 		Host:      status.Host,
 		Available: status.Available,
 		Reason:    status.Reason,
@@ -39,19 +40,20 @@ func loadHostedRegistry(ctx context.Context) uiHostedRegistryStatus {
 	}
 }
 
-func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
+// ReadClusterRegistry is the production LoadClusterRegistry seam.
+func ReadClusterRegistry(ctx context.Context, input ResourceInput) (ClusterRegistryStatus, error) {
 	input = normalizeRuntimeResourceInput(input)
 	if input.KubernetesContext == "" {
-		return uiClusterRegistryStatus{}, nil
+		return ClusterRegistryStatus{}, nil
 	}
 	service := config.DefaultClusterRegistryService
 	namespace := config.DefaultClusterRegistryNamespace
 	// A missing Service makes kubectl exit non-zero; that means "not deployed", not an error.
 	if !clusterRegistryServiceDeployed(ctx, input.KubernetesContext, service, namespace) {
-		return uiClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
+		return ClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
 	}
 	port := config.DefaultClusterRegistryPort
-	return uiClusterRegistryStatus{
+	return ClusterRegistryStatus{
 		KubernetesContext: input.KubernetesContext,
 		Deployed:          true,
 		Service:           service,
@@ -70,7 +72,8 @@ func clusterRegistryServiceDeployed(ctx context.Context, kubernetesContext, serv
 	return err == nil && clusterIP != "" && clusterIP != "None"
 }
 
-func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
+// ReadResourceStatus is the production LoadResourceStatus seam.
+func ReadResourceStatus(ctx context.Context, input ResourceInput) (ResourceStatus, error) {
 	input = normalizeRuntimeResourceInput(input)
 	if input.KubernetesContext == "" {
 		return unavailableRuntimeResourceStatus("", "Choose a Kubernetes context to inspect node capacity."), nil
@@ -87,20 +90,20 @@ func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput
 	return runtimeResourceStatusFromKubernetes(input, nodes, pods, loadKubernetesContainerUsage(ctx, input.KubernetesContext)), nil
 }
 
-func normalizeRuntimeResourceInput(input uiRuntimeResourceInput) uiRuntimeResourceInput {
-	return uiRuntimeResourceInput{
+func normalizeRuntimeResourceInput(input ResourceInput) ResourceInput {
+	return ResourceInput{
 		KubernetesContext: strings.TrimSpace(input.KubernetesContext),
 		Tenant:            strings.TrimSpace(input.Tenant),
 		Environment:       strings.TrimSpace(input.Environment),
 	}
 }
 
-func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kubernetesNodeList, pods kubernetesPodList, measured kubernetesContainerUsage) uiRuntimeResourceStatus {
+func runtimeResourceStatusFromKubernetes(input ResourceInput, nodes kubernetesNodeList, pods kubernetesPodList, measured kubernetesContainerUsage) ResourceStatus {
 	input = normalizeRuntimeResourceInput(input)
 	target := runtimeResourceTarget(input)
 	accounting := accumulateRuntimePodUsage(pods, target, measured)
 
-	result := uiRuntimeResourceStatus{
+	result := ResourceStatus{
 		KubernetesContext: input.KubernetesContext,
 		Available:         true,
 		MeasuredUsage:     len(measured) > 0,
@@ -115,17 +118,17 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 		bursting := accounting.usage[name]
 		requests := accounting.requests[name]
 		targetHeld := accounting.targetUsage[name]
-		item := uiRuntimeResourceNode{
+		item := ResourceNode{
 			Name: name,
 			// Allocatable minus requests: what a deploy's outcome follows. Floored at what an
 			// environment already on the node holds, since its pod is already admitted.
-			Schedulable: uiRuntimeResourceReading{
+			Schedulable: ResourceReading{
 				CPU:    cpuMetricWithMinimumFree(cpuTotal, requests.CPUMilli, targetHeld.CPUMilli),
 				Memory: memoryMetricWithMinimumFree(memoryTotal, requests.MemoryMi, targetHeld.MemoryMi),
 			},
 			SchedulableComplete: accounting.unreadable[name] == 0,
 			// Every container at its limit at once, floored at what this environment holds.
-			WorstCase: uiRuntimeResourceReading{
+			WorstCase: ResourceReading{
 				CPU:    cpuMetricWithMinimumFree(cpuTotal, bursting.CPUMilli, targetHeld.CPUMilli),
 				Memory: memoryMetricWithMinimumFree(memoryTotal, bursting.MemoryMi, targetHeld.MemoryMi),
 			},
@@ -154,7 +157,7 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 	return result
 }
 
-func runtimeResourceNodeLabel(status uiRuntimeResourceStatus) string {
+func runtimeResourceNodeLabel(status ResourceStatus) string {
 	if node := strings.TrimSpace(status.Node); node != "" {
 		return node
 	}
@@ -162,7 +165,7 @@ func runtimeResourceNodeLabel(status uiRuntimeResourceStatus) string {
 }
 
 // The scheduler admits on requests; the dialog's CPU/memory are limits, which reserve nothing.
-func runtimeSchedulableMessage(status uiRuntimeResourceStatus, targeted bool) string {
+func runtimeSchedulableMessage(status ResourceStatus, targeted bool) string {
 	node := runtimeResourceNodeLabel(status)
 	if !status.SchedulableComplete {
 		return fmt.Sprintf("Right now on %s: at most %s CPU and %s memory free for the scheduler to admit a pod with -- an upper bound, "+
@@ -179,13 +182,13 @@ func runtimeSchedulableMessage(status uiRuntimeResourceStatus, targeted bool) st
 		node, status.Schedulable.CPU.Formatted, status.Schedulable.Memory.Formatted)
 }
 
-func runtimeWorstCaseMessage(status uiRuntimeResourceStatus) string {
+func runtimeWorstCaseMessage(status ResourceStatus) string {
 	return fmt.Sprintf("Worst case, with every container on %s at its declared limit at once: %s CPU and %s memory left. "+
 		"That is oversubscription headroom, not scheduling capacity.",
 		runtimeResourceNodeLabel(status), status.WorstCase.CPU.Formatted, status.WorstCase.Memory.Formatted)
 }
 
-func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
+func runtimeSchedulableNotice(status ResourceStatus) string {
 	if !status.SchedulableComplete && status.UnreadableRequests > 0 {
 		return fmt.Sprintf("%s on this node declares a request this reading could not read, so the free figure above is an upper bound.",
 			pluralizePods(status.UnreadableRequests))
@@ -205,7 +208,7 @@ func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
 
 // Never suggests a smaller limit: the limit is sized for the agent's cold full
 // build, and lowering it brings back OOM kills.
-func runtimeWorstCaseNotice(status uiRuntimeResourceStatus) string {
+func runtimeWorstCaseNotice(status ResourceStatus) string {
 	var notices []string
 	if status.Floored {
 		notices = append(notices, "The node is fully committed at those limits, so this figure is what this environment already holds rather than spare capacity.")
@@ -339,7 +342,7 @@ func addTotals(totals, add runtimeResourceTotals) runtimeResourceTotals {
 }
 
 // The scheduler places by requests, so the schedulable reading picks the node.
-func shouldUseRuntimeResourceNode(name, targetNode string, item uiRuntimeResourceNode, result uiRuntimeResourceStatus) bool {
+func shouldUseRuntimeResourceNode(name, targetNode string, item ResourceNode, result ResourceStatus) bool {
 	if targetNode != "" {
 		return name == targetNode
 	}
@@ -355,7 +358,7 @@ type runtimeResourceTargetSpec struct {
 	container string
 }
 
-func runtimeResourceTarget(input uiRuntimeResourceInput) runtimeResourceTargetSpec {
+func runtimeResourceTarget(input ResourceInput) runtimeResourceTargetSpec {
 	if input.Tenant == "" || input.Environment == "" {
 		return runtimeResourceTargetSpec{}
 	}
@@ -389,7 +392,7 @@ type runtimeResourceTotals struct {
 }
 
 // Floored records when the floor produced the number, so it isn't read as a product limit.
-func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiRuntimeResourceMetric {
+func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) ResourceMetric {
 	freeMilli := totalMilli - usedMilli
 	if freeMilli < 0 {
 		freeMilli = 0
@@ -399,7 +402,7 @@ func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiR
 		freeMilli = minimumFreeMilli
 		floored = minimumFreeMilli > 0
 	}
-	return uiRuntimeResourceMetric{
+	return ResourceMetric{
 		Total:     round1(float64(totalMilli) / 1000),
 		Used:      round1(float64(usedMilli) / 1000),
 		Free:      round1(float64(freeMilli) / 1000),
@@ -416,7 +419,7 @@ func formatRuntimeResourceCPU(milli int64) string {
 	return config.FormatKubernetesCPUFromMilli(milli)
 }
 
-func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntimeResourceMetric {
+func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) ResourceMetric {
 	freeMi := totalMi - usedMi
 	if freeMi < 0 {
 		freeMi = 0
@@ -426,7 +429,7 @@ func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntime
 		freeMi = minimumFreeMi
 		floored = minimumFreeMi > 0
 	}
-	return uiRuntimeResourceMetric{
+	return ResourceMetric{
 		Total:     round1(float64(totalMi) / 1024),
 		Used:      round1(float64(usedMi) / 1024),
 		Free:      round1(float64(freeMi) / 1024),
@@ -440,8 +443,8 @@ func round1(value float64) float64 {
 	return math.Round(value*10) / 10
 }
 
-func unavailableRuntimeResourceStatus(kubernetesContext, message string) uiRuntimeResourceStatus {
-	return uiRuntimeResourceStatus{
+func unavailableRuntimeResourceStatus(kubernetesContext, message string) ResourceStatus {
+	return ResourceStatus{
 		KubernetesContext: strings.TrimSpace(kubernetesContext),
 		Available:         false,
 		Message:           strings.TrimSpace(message),

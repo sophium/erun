@@ -97,7 +97,7 @@ async function emitRunningBuild(page: Page, tenant: string, environment: string)
   );
 }
 
-// Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.
+// Mirrors the env-activity event erun-ui/internal/runtimeview/env_activity.go emits per tick.
 async function emitEnvActivity(
   page: Page,
   payload: {

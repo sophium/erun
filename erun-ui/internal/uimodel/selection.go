@@ -53,6 +53,13 @@ func NormalizeSelection(selection Selection) Selection {
 	}
 }
 
+// SelectionKey identifies an environment in per-environment maps; services and
+// the App key the same environment the same way.
+func SelectionKey(selection Selection) string {
+	selection = NormalizeSelection(selection)
+	return selection.Tenant + "\x00" + selection.Environment
+}
+
 // TrimmedNonEmpty trims each value and drops the blank ones; nil when none remain.
 func TrimmedNonEmpty(values []string) []string {
 	out := make([]string, 0, len(values))

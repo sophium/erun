@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -108,7 +109,7 @@ func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command
 
 func (a *App) reconcileSessionHeartbeatsOnce() {
 	for _, selection := range a.selectionsWithPodSessions() {
-		activity, err := a.probeRuntimeActivity(selection)
+		activity, err := a.runtime.ProbeRuntimeActivity(selection)
 		if err != nil {
 			// An unreadable pod is not a finished session; let the observation age out.
 			continue
@@ -171,7 +172,7 @@ func (a *App) selectionsWithPodSessions() []uimodel.Selection {
 	return out
 }
 
-func (a *App) applySessionHeartbeat(selection uimodel.Selection, activity uiRuntimeActivity) {
+func (a *App) applySessionHeartbeat(selection uimodel.Selection, activity runtimeview.Activity) {
 	heartbeat := sessionHeartbeat{
 		observedAt: time.Now(),
 		running:    make(map[string]struct{}, len(activity.Sessions)),

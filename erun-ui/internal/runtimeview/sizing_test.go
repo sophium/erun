@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -24,11 +24,11 @@ func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
 
 	got := runtimeSizingFromOutput(uimodel.Selection{Tenant: "myapp", Environment: "prod"}, output)
 
-	want := uiRuntimeSizingRecommendation{
+	want := SizingRecommendation{
 		Tenant:      "myapp",
 		Environment: "prod",
 		Available:   true,
-		Actions: []uiRuntimeSizingAction{
+		Actions: []SizingAction{
 			{Resource: "cpu", From: "4", To: "6"},
 			{Resource: "memory", From: "8916Mi", To: "12288Mi"},
 		},
@@ -107,16 +107,16 @@ type wrappedError struct{ msg string }
 func (e *wrappedError) Error() string { return e.msg }
 
 func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+	service := newTestService(Deps{
+		ExecRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", errors.New("signal: killed")
 		},
 	})
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
 	defer cancel()
-	app.ctx = ctx
+	service.d.Context = func() context.Context { return ctx }
 
-	recommendation, err := app.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
+	recommendation, err := service.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
 	}
@@ -135,15 +135,14 @@ func TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("signal-terminated exec is a POSIX concept")
 	}
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+	service := newTestService(Deps{
+		ExecRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
 			return "", cmd.Run()
 		},
 	})
-	app.ctx = context.Background()
 
-	recommendation, err := app.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
+	recommendation, err := service.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -26,6 +27,9 @@ import (
 )
 
 const appSessionEnvVar = orchestrator.DesktopSessionEnvVar
+
+// workingIssueCommandRunner runs a host command in dir and returns its trimmed stdout.
+type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
 
 type erunUIStore interface {
 	seam.ListStore
@@ -44,9 +48,9 @@ type erunUIDeps struct {
 	cloudContextDeps       cloud.CloudContextDependencies
 	deleteNamespace        seam.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
-	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
-	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
+	loadResourceStatus     func(context.Context, runtimeview.ResourceInput) (runtimeview.ResourceStatus, error)
+	loadClusterRegistry    func(context.Context, runtimeview.ResourceInput) (runtimeview.ClusterRegistryStatus, error)
+	loadHostedRegistry     func(context.Context) runtimeview.HostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
 	stopEnvironmentRuntime func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error)
 	readRuntimeRunState    func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error)
@@ -85,7 +89,7 @@ type erunUIDeps struct {
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
 	execRuntimePod            func(context.Context, uimodel.Selection, string) (string, error)
-	loadRuntimeUsage          func(context.Context, uimodel.Selection) (uiRuntimeUsage, error)
+	loadRuntimeUsage          func(context.Context, uimodel.Selection) (runtimeview.Usage, error)
 	stopCloudContext          func(context.Context, string) (model.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
@@ -124,8 +128,6 @@ type App struct {
 	// sessionHeartbeats is the latest pod observation of live sessions per environment.
 	sessionHeartbeats map[string]sessionHeartbeat
 	aiSessionReadings map[string]aiSessionReading
-	envActivity       map[string]environmentActivityState
-	envUsage          map[string]environmentUsageReading
 	forwardRepairs    map[string]forwardRepairEpisode
 	edgeOutages       map[string]orchestratorEdgeOutage
 	busyEnvs          map[string]int
@@ -157,14 +159,8 @@ type App struct {
 	contribute     *contributeStore
 	contributeApps *contributeAppForwards
 
-	envNodesMu sync.Mutex
-	envNodes   map[string]uiEnvironmentNodeSnapshot
-
 	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
 	closeConfirmed bool
-
-	workingIssueMu    sync.Mutex
-	workingIssueCache map[string]workingIssueCacheEntry
 
 	// emitMu guards emitFn: the notify loop and session streamers may emit while SetEmitter runs.
 	emitMu sync.RWMutex
@@ -181,6 +177,7 @@ type App struct {
 	// cloudContexts is the live power state; config no longer persists it.
 	cloudContexts *cloudctx.Service
 	settings      *settingssvc.Service
+	runtime       *runtimeview.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -232,8 +229,6 @@ func NewApp(deps erunUIDeps) *App {
 		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
 		orchestrators:         make(map[string]*orchestratorSession),
 		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
-		workingIssueCache:     make(map[string]workingIssueCacheEntry),
-		envUsage:              loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
 	}
 	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
 	app.investigations.live = func(id string) bool {
@@ -261,6 +256,7 @@ func NewApp(deps erunUIDeps) *App {
 	})
 	app.cloudContexts = app.newCloudContextService(time.Now)
 	app.settings = app.newSettingsService()
+	app.runtime = app.newRuntimeService()
 	if app.identity == nil {
 		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}
@@ -281,7 +277,7 @@ func (a *App) newCloudContextService(now func() time.Time) *cloudctx.Service {
 		},
 		ClientVersion:        func() string { return currentBuildInfo().Version },
 		NotifyRefreshFailure: a.notifyCredentialRefreshFailure,
-		OnStatusChange:       a.refreshEnvironmentNodeStatuses,
+		OnStatusChange:       func() { a.runtime.RefreshNodeStatuses() },
 		Now:                  now,
 	})
 }

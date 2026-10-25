@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -29,10 +29,10 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 	}
 }
 
-// workingIssueApp pins the local port unreachable so tests never probe real ports.
-func workingIssueApp(t *testing.T, env config.EnvConfig, run workingIssueCommandRunner) *App {
+// workingIssueService pins the local port unreachable so tests never probe real ports.
+func workingIssueService(t *testing.T, env config.EnvConfig, run CommandRunner) *Service {
 	t.Helper()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
@@ -40,19 +40,16 @@ func workingIssueApp(t *testing.T, env config.EnvConfig, run workingIssueCommand
 			"acme/dev": env,
 		},
 	}
-	app := NewApp(erunUIDeps{
-		store:                  store,
-		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
-		runWorkingIssueCommand: run,
-		canConnectLocalPort:    func(int) bool { return false },
-		canReachMCPEndpoint:    func(int) bool { return false },
-		loadPodBranch: func(context.Context, string, string) (string, error) {
+	return newTestService(Deps{
+		Store:               store,
+		RunCommand:          run,
+		CanConnectLocalPort: func(int) bool { return false },
+		CanReachMCPEndpoint: func(int) bool { return false },
+		LoadPodBranch: func(context.Context, string, string) (string, error) {
 			t.Fatal("loadPodBranch must not run through the legacy working-issue helper")
 			return "", nil
 		},
 	})
-	t.Cleanup(func() { app.shutdown(context.Background()) })
-	return app
 }
 
 func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
@@ -67,14 +64,14 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		}
 		return "", nil
 	}
-	app := workingIssueApp(t, config.EnvConfig{
+	service := workingIssueService(t, config.EnvConfig{
 		Name:              "dev",
 		Type:              config.EnvironmentTypeLocalAgent,
 		KubernetesContext: "ctx",
 		LocalRepoPath:     t.TempDir(),
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -83,7 +80,7 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		t.Fatalf("expected git + gh (2 calls), got %d: %v", len(calls), calls)
 	}
 
-	if _, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
+	if _, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
 		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
 	}
 	if len(calls) != 2 {
@@ -91,7 +88,7 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 	}
 }
 
-func assertResolvedWorkingIssue(t *testing.T, got uiWorkingIssue) {
+func assertResolvedWorkingIssue(t *testing.T, got WorkingIssue) {
 	t.Helper()
 
 	if !got.Available {
@@ -107,14 +104,14 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 		t.Fatalf("runner must not be invoked for a remote-worktree env")
 		return "", nil
 	}
-	app := workingIssueApp(t, config.EnvConfig{
+	service := workingIssueService(t, config.EnvConfig{
 		Name:              "dev",
 		LocalRepoPath:     "/home/erun/git/acme",
 		Type:              config.EnvironmentTypeRemoteAgent,
 		KubernetesContext: "ctx",
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -126,9 +123,9 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 	}
 }
 
-func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
+func remoteWorkingIssueService(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run CommandRunner) *Service {
 	t.Helper()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
@@ -142,20 +139,17 @@ func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(cont
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{
-		store:                  store,
-		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
-		canConnectLocalPort:    func(int) bool { return reachable },
-		canReachMCPEndpoint:    func(int) bool { return reachable },
-		loadPodBranch:          loadPodBranch,
-		runWorkingIssueCommand: run,
+	return newTestService(Deps{
+		Store:               store,
+		CanConnectLocalPort: func(int) bool { return reachable },
+		CanReachMCPEndpoint: func(int) bool { return reachable },
+		LoadPodBranch:       loadPodBranch,
+		RunCommand:          run,
 	})
-	t.Cleanup(func() { app.shutdown(context.Background()) })
-	return app
 }
 
 func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
-	app := remoteWorkingIssueApp(t, false,
+	service := remoteWorkingIssueService(t, false,
 		func(context.Context, string, string) (string, error) {
 			t.Fatal("loadPodBranch must not run while the env is not reachable")
 			return "", nil
@@ -166,7 +160,7 @@ func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -180,7 +174,7 @@ func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
 
 func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 	var ghDirs []string
-	app := remoteWorkingIssueApp(t, true,
+	service := remoteWorkingIssueService(t, true,
 		func(context.Context, string, string) (string, error) {
 			return "bug/470-sidebar-status", nil
 		},
@@ -193,7 +187,7 @@ func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -207,7 +201,7 @@ func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 
 func TestEnvironmentWorkingIssueRemotePodErrorNotCached(t *testing.T) {
 	var loads int
-	app := remoteWorkingIssueApp(t, true,
+	service := remoteWorkingIssueService(t, true,
 		func(context.Context, string, string) (string, error) {
 			loads++
 			return "", context.DeadlineExceeded
@@ -218,14 +212,14 @@ func TestEnvironmentWorkingIssueRemotePodErrorNotCached(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
 	if got.Available || !strings.Contains(got.Reason, "not reachable right now") {
 		t.Fatalf("expected the not-reachable reason, got %+v", got)
 	}
-	if _, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
+	if _, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
 		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
 	}
 	if loads != 2 {
@@ -240,14 +234,14 @@ func TestEnvironmentWorkingIssueBranchWithoutIssue(t *testing.T) {
 		}
 		return "main", nil
 	}
-	app := workingIssueApp(t, config.EnvConfig{
+	service := workingIssueService(t, config.EnvConfig{
 		Name:              "dev",
 		Type:              config.EnvironmentTypeLocalAgent,
 		KubernetesContext: "ctx",
 		LocalRepoPath:     t.TempDir(),
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	got, err := service.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}

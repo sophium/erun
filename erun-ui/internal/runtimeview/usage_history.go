@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"encoding/json"
@@ -20,18 +20,18 @@ const environmentUsageHistoryFileName = "environment-usage-history.json"
 
 // environmentUsageHistoryEntry keys by tenant/environment to keep the file readable.
 type environmentUsageHistoryEntry struct {
-	Tenant         string         `json:"tenant"`
-	Environment    string         `json:"environment"`
-	Usage          uiRuntimeUsage `json:"usage"`
-	ObservedAtUnix int64          `json:"observedAtUnix"`
+	Tenant         string `json:"tenant"`
+	Environment    string `json:"environment"`
+	Usage          Usage  `json:"usage"`
+	ObservedAtUnix int64  `json:"observedAtUnix"`
 }
 
 type environmentUsageHistoryState struct {
 	Environments []environmentUsageHistoryEntry `json:"environments,omitempty"`
 }
 
-// defaultEnvironmentUsageHistoryPath sits beside orchestrator-nudge-history.json.
-func defaultEnvironmentUsageHistoryPath() string {
+// DefaultUsageHistoryPath sits beside orchestrator-nudge-history.json.
+func DefaultUsageHistoryPath() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -58,25 +58,25 @@ func readEnvironmentUsageHistoryEntries(path string) (entries []environmentUsage
 }
 
 // loadPersistedEnvironmentUsage treats an unreadable file as no readings.
-func loadPersistedEnvironmentUsage(path string) map[string]environmentUsageReading {
+func loadPersistedEnvironmentUsage(path string) map[string]UsageReading {
 	entries, unreadable := readEnvironmentUsageHistoryEntries(path)
 	if unreadable || len(entries) == 0 {
 		return nil
 	}
-	out := make(map[string]environmentUsageReading, len(entries))
+	out := make(map[string]UsageReading, len(entries))
 	for _, entry := range entries {
 		selection := uimodel.Selection{Tenant: entry.Tenant, Environment: entry.Environment}
-		out[selectionKey(selection)] = environmentUsageReading{
-			usage:      entry.Usage,
-			observedAt: time.Unix(entry.ObservedAtUnix, 0),
+		out[uimodel.SelectionKey(selection)] = UsageReading{
+			Usage:      entry.Usage,
+			ObservedAt: time.Unix(entry.ObservedAtUnix, 0),
 		}
 	}
 	return out
 }
 
 // persistEnvironmentUsage logs write failures; the in-memory cache still serves.
-func (a *App) persistEnvironmentUsage(selection uimodel.Selection, reading environmentUsageReading) {
-	if err := writeEnvironmentUsageHistoryEntry(a.deps.environmentUsageHistoryPath, selection, reading); err != nil {
+func (s *Service) persistEnvironmentUsage(selection uimodel.Selection, reading UsageReading) {
+	if err := writeEnvironmentUsageHistoryEntry(s.d.UsageHistoryPath, selection, reading); err != nil {
 		log.Printf("erun-app: persist environment usage history %s/%s: %v", selection.Tenant, selection.Environment, err)
 	}
 }
@@ -85,7 +85,7 @@ var errEnvironmentUsageHistoryUnreadable = errors.New("environment usage history
 
 // writeEnvironmentUsageHistoryEntry upserts atomically and refuses to overwrite
 // an unreadable file, which would destroy other environments' entries.
-func writeEnvironmentUsageHistoryEntry(path string, selection uimodel.Selection, reading environmentUsageReading) error {
+func writeEnvironmentUsageHistoryEntry(path string, selection uimodel.Selection, reading UsageReading) error {
 	if path == "" || selection.Tenant == "" || selection.Environment == "" {
 		return nil
 	}
@@ -103,8 +103,8 @@ func writeEnvironmentUsageHistoryEntry(path string, selection uimodel.Selection,
 	out = append(out, environmentUsageHistoryEntry{
 		Tenant:         selection.Tenant,
 		Environment:    selection.Environment,
-		Usage:          reading.usage,
-		ObservedAtUnix: reading.observedAt.Unix(),
+		Usage:          reading.Usage,
+		ObservedAtUnix: reading.ObservedAt.Unix(),
 	})
 	data, err := json.Marshal(environmentUsageHistoryState{Environments: out})
 	if err != nil {

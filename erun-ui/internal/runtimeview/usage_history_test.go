@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"os"
@@ -12,43 +12,35 @@ import (
 func TestEnvironmentUsageHistorySurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
-	before := &App{deps: erunUIDeps{environmentUsageHistoryPath: path}}
-	reading := environmentUsageReading{
-		usage:      uiRuntimeUsage{Available: true, CPU: uiRuntimeCPUUsage{Available: true, Utilization: "17.0%"}},
-		observedAt: time.Now().Add(-10 * time.Minute).Truncate(time.Second),
+	before := newTestService(Deps{UsageHistoryPath: path})
+	reading := UsageReading{
+		Usage:      Usage{Available: true, CPU: CPUUsage{Available: true, Utilization: "17.0%"}},
+		ObservedAt: time.Now().Add(-10 * time.Minute).Truncate(time.Second),
 	}
-	before.persistEnvironmentUsage(selection, reading)
+	before.PublishUsage(selection, reading)
 
-	// Go through NewApp, the real restart path.
-	after := NewApp(erunUIDeps{environmentUsageHistoryPath: path})
+	after := newTestService(Deps{UsageHistoryPath: path})
 
-	restored, ok := after.envUsage[selectionKey(selection)]
+	restored, ok := after.UsageSnapshot()[uimodel.SelectionKey(selection)]
 	if !ok {
 		t.Fatal("expected the persisted reading to be present after a simulated restart")
 	}
-	if restored.usage.CPU.Utilization != "17.0%" {
-		t.Fatalf("expected the reading's figures to survive, got %+v", restored.usage)
+	if restored.Usage.CPU.Utilization != "17.0%" {
+		t.Fatalf("expected the reading's figures to survive, got %+v", restored.Usage)
 	}
-	if !restored.observedAt.Equal(reading.observedAt) {
-		t.Fatalf("expected observedAt=%v to be preserved, got %v", reading.observedAt, restored.observedAt)
+	if !restored.ObservedAt.Equal(reading.ObservedAt) {
+		t.Fatalf("expected ObservedAt=%v to be preserved, got %v", reading.ObservedAt, restored.ObservedAt)
 	}
-
-	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
-	after.seedEnvironmentUsageSnapshots(&state)
-	usage := state.Tenants[0].Environments[0].Usage
-	if usage == nil {
-		t.Fatal("expected seedEnvironmentUsageSnapshots to attach the restored reading")
-	}
-	if usage.ObservedAtUnix != reading.observedAt.Unix() {
-		t.Fatalf("expected the restored reading to render as stale with its real age, got observedAtUnix=%d", usage.ObservedAtUnix)
+	if snapshot := UsageSnapshotFrom(restored); snapshot.ObservedAtUnix != reading.ObservedAt.Unix() {
+		t.Fatalf("expected the restored reading to render as stale with its real age, got observedAtUnix=%d", snapshot.ObservedAtUnix)
 	}
 }
 
 func TestEnvironmentUsageHistoryFreshEnvironmentStartsUnobserved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
-	app := NewApp(erunUIDeps{environmentUsageHistoryPath: path})
+	service := newTestService(Deps{UsageHistoryPath: path})
 
-	if _, ok := app.envUsage[selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})]; ok {
+	if _, ok := service.UsageSnapshot()[uimodel.SelectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})]; ok {
 		t.Fatal("expected no persisted reading for an environment that was never sampled")
 	}
 }
@@ -70,7 +62,7 @@ func TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers(t *test
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	first := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	second := uimodel.Selection{Tenant: "acme", Environment: "staging"}
-	reading := environmentUsageReading{usage: uiRuntimeUsage{Available: true}, observedAt: time.Now().Truncate(time.Second)}
+	reading := UsageReading{Usage: Usage{Available: true}, ObservedAt: time.Now().Truncate(time.Second)}
 
 	if err := writeEnvironmentUsageHistoryEntry(path, first, reading); err != nil {
 		t.Fatalf("writeEnvironmentUsageHistoryEntry(first) failed: %v", err)
@@ -83,7 +75,7 @@ func TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers(t *test
 	if len(seeded) != 2 {
 		t.Fatalf("expected both environments' readings to survive, got %+v", seeded)
 	}
-	updated := environmentUsageReading{usage: uiRuntimeUsage{Available: true, Message: "Not running, or not open here: there is no runtime pod to measure."}, observedAt: time.Now().Truncate(time.Second)}
+	updated := UsageReading{Usage: Usage{Available: true, Message: "Not running, or not open here: there is no runtime pod to measure."}, ObservedAt: time.Now().Truncate(time.Second)}
 	if err := writeEnvironmentUsageHistoryEntry(path, first, updated); err != nil {
 		t.Fatalf("writeEnvironmentUsageHistoryEntry(update) failed: %v", err)
 	}
@@ -91,10 +83,10 @@ func TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers(t *test
 	if len(seeded) != 2 {
 		t.Fatalf("expected the update to upsert rather than duplicate, got %+v", seeded)
 	}
-	if seeded[selectionKey(first)].usage.Message == "" {
-		t.Fatalf("expected first's updated message to be persisted, got %+v", seeded[selectionKey(first)].usage)
+	if seeded[uimodel.SelectionKey(first)].Usage.Message == "" {
+		t.Fatalf("expected first's updated message to be persisted, got %+v", seeded[uimodel.SelectionKey(first)].Usage)
 	}
-	if seeded[selectionKey(second)].usage.Message != "" {
-		t.Fatalf("expected second to be untouched by first's update, got %+v", seeded[selectionKey(second)].usage)
+	if seeded[uimodel.SelectionKey(second)].Usage.Message != "" {
+		t.Fatalf("expected second to be untouched by first's update, got %+v", seeded[uimodel.SelectionKey(second)].Usage)
 	}
 }

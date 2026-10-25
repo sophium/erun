@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 
 	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
 
-	want := []uiRuntimeProcessGroup{
+	want := []ProcessGroup{
 		{ID: runtimeProcessGroupGradle, Label: "2 Gradle daemons", Count: 2, Memory: "3.0 GiB", MemoryMiB: 3072, Reclaim: runtimeReclaimGradleDaemons, ReclaimLabel: "Stop build daemons"},
 		{ID: runtimeProcessGroupJava, Label: "1 Java process", Count: 1, Memory: "512 MiB", MemoryMiB: 512, Reclaim: runtimeReclaimGradleDaemons, ReclaimLabel: "Stop build daemons"},
 		{ID: runtimeProcessGroupDocker, Label: "1 container build process", Count: 1, Memory: "256 MiB", MemoryMiB: 256, Reclaim: runtimeReclaimBuildCache, ReclaimLabel: "Prune build cache"},
@@ -54,12 +54,12 @@ func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
 }
 
 func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+	service := newTestService(Deps{
+		ExecRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", context.DeadlineExceeded
 		},
 	})
-	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
+	activity, err := service.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a pod read failure as an error: %v", err)
 	}
@@ -73,16 +73,16 @@ func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 
 // An already-expired parent ctx must be reported as our timeout, not the mocked "signal: killed".
 func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+	service := newTestService(Deps{
+		ExecRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", errors.New("signal: killed")
 		},
 	})
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
 	defer cancel()
-	app.ctx = ctx
+	service.d.Context = func() context.Context { return ctx }
 
-	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
+	activity, err := service.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
 	}
@@ -101,15 +101,14 @@ func TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout(t *testing.T)
 	if goruntime.GOOS == "windows" {
 		t.Skip("signal-terminated exec is a POSIX concept")
 	}
-	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+	service := newTestService(Deps{
+		ExecRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
 			return "", cmd.Run()
 		},
 	})
-	app.ctx = context.Background()
 
-	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
+	activity, err := service.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
 	}
@@ -168,4 +167,55 @@ func mustReclaimScript(t *testing.T, action string) string {
 		t.Fatalf("%s reclaim: %v", action, err)
 	}
 	return script
+}
+
+func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
+	probe := "erun-session\tai\t900\tclaude\n" +
+		"erun-session\topen-0\t901\tbash\n" +
+		"erun-session\topen-3\t0\t\n"
+
+	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
+	if activity.SessionsRunning != 2 {
+		t.Fatalf("expected 2 running sessions, got %d (%+v)", activity.SessionsRunning, activity.Sessions)
+	}
+	running := 0
+	for _, session := range activity.Sessions {
+		if session.Running {
+			running++
+		}
+	}
+	if running != activity.SessionsRunning {
+		t.Fatalf("rendered count %d disagrees with the per-session state %d", activity.SessionsRunning, running)
+	}
+	if want := "Live in the pod right now: 2 sessions running (1 socket no longer has a program behind it), 0 MiB held by running processes."; activity.Message != want {
+		t.Fatalf("unexpected message:\n got %q\nwant %q", activity.Message, want)
+	}
+}
+
+func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
+	var ran []string
+	service := newTestService(Deps{
+		ExecRuntimePod: func(_ context.Context, _ uimodel.Selection, script string) (string, error) {
+			ran = append(ran, script)
+			return "", nil
+		},
+	})
+
+	if _, err := service.ReclaimRuntimeResources(ReclaimInput{Tenant: "petios", Environment: "local", Action: "delete-everything"}); err == nil {
+		t.Fatalf("an unknown reclaim action must be refused")
+	}
+	if len(ran) != 0 {
+		t.Fatalf("a refused action must run nothing in the pod: %+v", ran)
+	}
+
+	result, err := service.ReclaimRuntimeResources(ReclaimInput{Tenant: "petios", Environment: "local", Action: runtimeReclaimGradleDaemons})
+	if err != nil {
+		t.Fatalf("ReclaimRuntimeResources: %v", err)
+	}
+	if len(ran) != 1 || !strings.Contains(ran[0], "gradle --stop") || !strings.Contains(ran[0], "Gradle[D]aemon") {
+		t.Fatalf("unexpected reclaim script: %+v", ran)
+	}
+	if result.Message == "" {
+		t.Fatalf("a completed reclaim must report what it did")
+	}
 }

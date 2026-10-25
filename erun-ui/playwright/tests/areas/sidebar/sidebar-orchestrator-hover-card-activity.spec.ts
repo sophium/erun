@@ -647,7 +647,7 @@ interface EnvActivityEvent {
   detail?: string;
 }
 
-// Mirrors erun-ui/environment_activity.go's env-activity event; re-driven until it converges since
+// Mirrors erun-ui/internal/runtimeview/env_activity.go's env-activity event; re-driven until it converges since
 // the backend sweep can overwrite it.
 async function driveEnvActivity(
   page: Page,

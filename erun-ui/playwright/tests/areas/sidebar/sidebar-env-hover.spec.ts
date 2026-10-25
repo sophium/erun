@@ -169,7 +169,7 @@ interface EnvActivityEvent {
   detail?: string;
 }
 
-// Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.
+// Mirrors the env-activity event erun-ui/internal/runtimeview/env_activity.go emits per tick.
 async function emitEnvActivityEvent(
   page: import('@playwright/test').Page,
   event: EnvActivityEvent,

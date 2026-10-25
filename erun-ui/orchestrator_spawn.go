@@ -201,7 +201,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	info := orchestratorInfoFor(id, name, spawn.alias, envs, spawn.dirs, "running", serial, orchestratorBusySnapshot{}, spawn.transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false)
+	info := orchestratorInfoFor(id, name, spawn.alias, envs, spawn.dirs, "running", serial, orchestratorBusySnapshot{}, spawn.transient, orchestratorShellSnapshot{}, pacing, a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot(), false, false)
 	info.RestartRequired = orchestratorScopeMismatch(wired.scope, envs)
 	return orchestratorInfoWithLaunchSettings(info, spawn.launch.settings, wired.launched != resolvedLaunchOf(spawn.launch.launch)), nil
 }

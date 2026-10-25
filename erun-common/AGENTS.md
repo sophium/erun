@@ -467,10 +467,11 @@ drift. `erun-cli/AGENTS.md` and `erun-ui/AGENTS.md` apply this record to their o
 surfaces.
 
 - **A failed read states what could not be read, in the operator's terms, before
-  the underlying error.** `erun-ui/runtime_usage.go` and
-  `erun-ui/environment_usage.go` both lead with `Cannot read this environment's
-  resource usage: ` and let the cause follow; `erun-ui/runtime_sizing.go` does the
-  same for a sizing recommendation. A bare `exit status 1: kubectl ...` with no
+  the underlying error.** `erun-ui/internal/runtimeview/usage.go` and
+  `erun-ui/internal/runtimeview/env_usage.go` both lead with `Cannot read this
+  environment's resource usage: ` and let the cause follow;
+  `erun-ui/internal/runtimeview/sizing.go` does the same for a sizing
+  recommendation. A bare `exit status 1: kubectl ...` with no
   headline is the departure this names.
 - **A message names the command actually invoked, or names none.**
   `erun-common/open.go`'s shared tenant resolver hardcodes its own caller --

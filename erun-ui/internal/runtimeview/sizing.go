@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -26,38 +26,38 @@ var (
 	runtimeSizingEvidenceLine = regexp.MustCompile(`^resize: \S+/\S+ sizing-evidence: (.+)$`)
 )
 
-// uiRuntimeSizingAction mirrors lifecycle.RuntimeResizeAction.
-type uiRuntimeSizingAction struct {
+// SizingAction mirrors lifecycle.RuntimeResizeAction.
+type SizingAction struct {
 	Resource string `json:"resource"`
 	From     string `json:"from"`
 	To       string `json:"to"`
 }
 
-// uiRuntimeSizingRecommendation: Available=false with Message covers both
+// SizingRecommendation: Available=false with Message covers both
 // "nothing to recommend" and "could not read it".
-type uiRuntimeSizingRecommendation struct {
-	Tenant      string                  `json:"tenant"`
-	Environment string                  `json:"environment"`
-	Available   bool                    `json:"available"`
-	Message     string                  `json:"message,omitempty"`
-	NoOp        bool                    `json:"noOp,omitempty"`
-	Actions     []uiRuntimeSizingAction `json:"actions,omitempty"`
+type SizingRecommendation struct {
+	Tenant      string         `json:"tenant"`
+	Environment string         `json:"environment"`
+	Available   bool           `json:"available"`
+	Message     string         `json:"message,omitempty"`
+	NoOp        bool           `json:"noOp,omitempty"`
+	Actions     []SizingAction `json:"actions,omitempty"`
 	// Verdicts and Evidence are set even on NoOp so the tab can explain why.
 	Verdicts []string `json:"verdicts,omitempty"`
 	Evidence string   `json:"evidence,omitempty"`
 }
 
 // LoadRuntimeSizing previews the standing recommendation via `erun resize --dry-run`; it writes nothing.
-func (a *App) LoadRuntimeSizing(selection uimodel.Selection) (uiRuntimeSizingRecommendation, error) {
+func (s *Service) LoadRuntimeSizing(selection uimodel.Selection) (SizingRecommendation, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime sizing", selection.Tenant, selection.Environment); err != nil {
-		return uiRuntimeSizingRecommendation{}, err
+		return SizingRecommendation{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.context(), runtimeSizingTimeout)
+	ctx, cancel := context.WithTimeout(s.d.Context(), runtimeSizingTimeout)
 	defer cancel()
-	output, err := a.execInRuntimePod(ctx, selection, resizeCommandScript(selection, true, false))
+	output, err := s.d.ExecRuntimePod(ctx, selection, resizeCommandScript(selection, true, false))
 	if err != nil {
-		return uiRuntimeSizingRecommendation{
+		return SizingRecommendation{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
 			Message:     "Cannot read this environment's sizing recommendation: " + runtimeProbeFailureMessage(ctx, runtimeSizingTimeout, err, friendlyRuntimeResizeError),
@@ -68,23 +68,23 @@ func (a *App) LoadRuntimeSizing(selection uimodel.Selection) (uiRuntimeSizingRec
 
 // ResizeRuntimeToRecommendation applies the standing recommendation. overrideLease
 // is only set by the follow-up to a lease-held refusal.
-func (a *App) ResizeRuntimeToRecommendation(selection uimodel.Selection, overrideLease bool) (uiRuntimeSizingRecommendation, error) {
+func (s *Service) ResizeRuntimeToRecommendation(selection uimodel.Selection, overrideLease bool) (SizingRecommendation, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("resize runtime to recommendation", selection.Tenant, selection.Environment); err != nil {
-		return uiRuntimeSizingRecommendation{}, err
+		return SizingRecommendation{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.context(), runtimeReclaimTimeout)
+	ctx, cancel := context.WithTimeout(s.d.Context(), runtimeReclaimTimeout)
 	defer cancel()
-	output, err := a.execInRuntimePod(ctx, selection, resizeCommandScript(selection, true, overrideLease))
+	output, err := s.d.ExecRuntimePod(ctx, selection, resizeCommandScript(selection, true, overrideLease))
 	if err != nil {
-		return uiRuntimeSizingRecommendation{}, fmt.Errorf("%s", runtimeProbeFailureMessage(ctx, runtimeReclaimTimeout, err, friendlyRuntimeResizeError))
+		return SizingRecommendation{}, fmt.Errorf("%s", runtimeProbeFailureMessage(ctx, runtimeReclaimTimeout, err, friendlyRuntimeResizeError))
 	}
 	result := runtimeSizingFromOutput(selection, output)
 	result.Available = true
 	if result.NoOp {
-		a.emitAppNotification("info", fmt.Sprintf("%s/%s is already sized as recommended.", selection.Tenant, selection.Environment))
+		s.notify("info", fmt.Sprintf("%s/%s is already sized as recommended.", selection.Tenant, selection.Environment))
 	} else {
-		a.emitAppNotification("info", fmt.Sprintf("Resized %s/%s to the standing recommendation.", selection.Tenant, selection.Environment))
+		s.notify("info", fmt.Sprintf("Resized %s/%s to the standing recommendation.", selection.Tenant, selection.Environment))
 	}
 	return result, nil
 }
@@ -127,8 +127,8 @@ func shellSingleQuote(value string) string {
 }
 
 // Unrecognised lines are dropped; the caller's exit-code check gates success.
-func runtimeSizingFromOutput(selection uimodel.Selection, output string) uiRuntimeSizingRecommendation {
-	result := uiRuntimeSizingRecommendation{
+func runtimeSizingFromOutput(selection uimodel.Selection, output string) SizingRecommendation {
+	result := SizingRecommendation{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Available:   true,
@@ -140,7 +140,7 @@ func runtimeSizingFromOutput(selection uimodel.Selection, output string) uiRunti
 			continue
 		}
 		if match := runtimeSizingActionLine.FindStringSubmatch(line); match != nil {
-			result.Actions = append(result.Actions, uiRuntimeSizingAction{Resource: match[1], From: match[2], To: match[3]})
+			result.Actions = append(result.Actions, SizingAction{Resource: match[1], From: match[2], To: match[3]})
 			continue
 		}
 		if match := runtimeSizingVerdictLine.FindStringSubmatch(line); match != nil {

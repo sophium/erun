@@ -188,3 +188,7 @@ func (a *App) applyAISessionReading(managed *managedTerminal) {
 	// is alive and waiting for input.
 	a.releaseAIActivity(managed)
 }
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}

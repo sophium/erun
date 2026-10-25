@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 )
 
 // An orchestrator is a host-side AI session that drives its linked environments.
@@ -102,12 +103,12 @@ type orchestratorEnvCandidate struct {
 // orchestratorEnvInfo is the JSON view of one linked environment; nil Activity
 // means not yet observed.
 type orchestratorEnvInfo struct {
-	Tenant      string                         `json:"tenant"`
-	Environment string                         `json:"environment"`
-	Directory   string                         `json:"directory"`
-	Role        model.OrchestratorEnvRole      `json:"role"`
-	Activity    *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
-	Usage       *uiEnvironmentUsageSnapshot    `json:"usage,omitempty"`
+	Tenant      string                        `json:"tenant"`
+	Environment string                        `json:"environment"`
+	Directory   string                        `json:"directory"`
+	Role        model.OrchestratorEnvRole     `json:"role"`
+	Activity    *runtimeview.ActivitySnapshot `json:"activity,omitempty"`
+	Usage       *runtimeview.UsageSnapshot    `json:"usage,omitempty"`
 }
 
 // orchestratorInfo is the JSON view the frontend renders. Nudge* is the live cap
@@ -226,7 +227,7 @@ func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, 
 	}
 }
 
-func orchestratorInfoFor(id, name, alias string, envs []configpkg.OrchestratorEnvConfig, dirs []configpkg.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
+func orchestratorInfoFor(id, name, alias string, envs []configpkg.OrchestratorEnvConfig, dirs []configpkg.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]runtimeview.ActivityState, envUsage map[string]runtimeview.UsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                     id,
 		Name:                   name,

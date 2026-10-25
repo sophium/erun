@@ -11,28 +11,22 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // envInfos keys env state by selectionKey, as the poller does, so the card and
 // sidebar never disagree.
-func envInfos(envs []configpkg.OrchestratorEnvConfig, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading) []orchestratorEnvInfo {
+func envInfos(envs []configpkg.OrchestratorEnvConfig, envActivity map[string]runtimeview.ActivityState, envUsage map[string]runtimeview.UsageReading) []orchestratorEnvInfo {
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
 		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory, Role: env.Role}
 		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		if state, ok := envActivity[key]; ok {
-			info.Activity = &uiEnvironmentActivitySnapshot{
-				Reachable:   state.reachable,
-				Observed:    state.observed,
-				Outage:      state.outage,
-				CheckFailed: state.checkFailed,
-				Busy:        state.busy,
-				Detail:      state.detail,
-			}
+			info.Activity = runtimeview.ActivitySnapshotFrom(state)
 		}
 		if reading, ok := envUsage[key]; ok {
-			info.Usage = uiEnvironmentUsageSnapshotFrom(reading)
+			info.Usage = runtimeview.UsageSnapshotFrom(reading)
 		}
 		out = append(out, info)
 	}

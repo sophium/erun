@@ -1,4 +1,4 @@
-package main
+package runtimeview
 
 import (
 	"context"
@@ -12,15 +12,13 @@ import (
 )
 
 func TestRuntimeDeployedHealthCheckPropagatesProbeError(t *testing.T) {
-	app := &App{
-		deps: erunUIDeps{
-			checkRuntimeDeployed: func(context.Context, string, string, string) (bool, error) {
-				return false, errors.New("Unable to connect to the server: dial tcp: i/o timeout")
-			},
+	service := newTestService(Deps{
+		CheckRuntimeDeployed: func(context.Context, string, string, string) (bool, error) {
+			return false, errors.New("Unable to connect to the server: dial tcp: i/o timeout")
 		},
-	}
+	})
 	config := configpkg.EnvConfig{KubernetesContext: "team-context"}
-	check := app.runtimeDeployedHealthCheck("team", "dev", config)
+	check := service.runtimeDeployedHealthCheck("team", "dev", config)
 	if check.Status != healthCheckStatusUnknown {
 		t.Fatalf("status = %q, want %q (unknown/could-not-check)", check.Status, healthCheckStatusUnknown)
 	}
@@ -33,15 +31,13 @@ func TestRuntimeDeployedHealthCheckPropagatesProbeError(t *testing.T) {
 }
 
 func TestRuntimeDeployedHealthCheckReportsNotDeployedOnGenuineNotFound(t *testing.T) {
-	app := &App{
-		deps: erunUIDeps{
-			checkRuntimeDeployed: func(context.Context, string, string, string) (bool, error) {
-				return false, nil
-			},
+	service := newTestService(Deps{
+		CheckRuntimeDeployed: func(context.Context, string, string, string) (bool, error) {
+			return false, nil
 		},
-	}
+	})
 	config := configpkg.EnvConfig{KubernetesContext: "team-context"}
-	check := app.runtimeDeployedHealthCheck("team", "dev", config)
+	check := service.runtimeDeployedHealthCheck("team", "dev", config)
 	if check.Status != healthCheckStatusError {
 		t.Fatalf("status = %q, want %q", check.Status, healthCheckStatusError)
 	}
@@ -64,7 +60,7 @@ func TestCheckRuntimeDeployedDistinguishesNotFoundFromRealErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubKubectlForTest(t, tc.stubStderr, tc.stubExit)
-			deployed, err := checkRuntimeDeployed(context.Background(), "some-context", "team", "dev")
+			deployed, err := CheckRuntimeDeployed(context.Background(), "some-context", "team", "dev")
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected an error, got deployed=%v", deployed)
 			}

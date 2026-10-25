@@ -365,8 +365,7 @@ const (
 )
 
 func selectionKey(selection uimodel.Selection) string {
-	selection = uimodel.NormalizeSelection(selection)
-	return selection.Tenant + "\x00" + selection.Environment
+	return uimodel.SelectionKey(selection)
 }
 
 func openSessionKey(selection uimodel.Selection, slot int) string {

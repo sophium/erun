@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 )
 
 func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
@@ -37,7 +39,7 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 
 	probe.setAnswers(true)
 	state := sweepUntilRebindSettles(t, app)
-	if !state.reachable || !state.observed {
+	if !state.Reachable || !state.Observed {
 		t.Fatalf("expected the sweep to observe the answering edge, got %+v", state)
 	}
 	if got := logs.String(); !strings.Contains(got, "orchestrator petios: wired erun/remote and its edge is answering again") {
@@ -79,7 +81,7 @@ func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.
 
 	sealForwardForSweep(t)
 	probe.setAnswers(true)
-	if state := sweepUntilRebindSettles(t, app); !state.reachable || !state.observed {
+	if state := sweepUntilRebindSettles(t, app); !state.Reachable || !state.Observed {
 		t.Fatalf("expected the sweep to observe the answering edge, got %+v", state)
 	}
 
@@ -116,7 +118,7 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 				{Tenant: "erun", Environment: "remote"},
 			})
 			sealForwardForSweep(t)
-			var state environmentActivityState
+			var state runtimeview.ActivityState
 			for range forwardRepairAttempts + 2 {
 				state = sweepUntilRebindSettles(t, app)
 			}
@@ -126,7 +128,7 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 				t.Fatalf("expected the entry to be recorded, got:\n%s", got)
 			}
 			// A sweep that returned early would also log no recovery.
-			if !state.outage {
+			if !state.Outage {
 				t.Fatalf("expected the sweep to diagnose the unreachable edge, got %+v", state)
 			}
 			if strings.Contains(got, "answering again") {
