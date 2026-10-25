@@ -43,7 +43,7 @@ func newAuthedAttachServer(t *testing.T, runtime runtimecfg.RuntimeConfig, issue
 	t.Setenv(edgeauth.EnvMCPAudience, "erun-mcp")
 	t.Setenv(edgeauth.EnvTenant, tenant)
 
-	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtime, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, withStubRuntime(runtime), nil))
 	t.Cleanup(server.Close)
 	return server
 }

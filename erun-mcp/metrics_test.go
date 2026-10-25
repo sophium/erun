@@ -16,7 +16,6 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
-	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
 )
@@ -67,7 +66,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	xdg.Reload()
 
-	runtime := runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	runtime := withStubRuntime(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 	})
 	// Near-all-day working hours so the result does not depend on the wall clock.
@@ -135,7 +134,7 @@ func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
-	runtime := runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	runtime := withStubRuntime(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{Tenant: "acme", Environment: "dev"},
 	})
 	recorder := toolmetrics.NewMetricsRecorder("acme", "dev")

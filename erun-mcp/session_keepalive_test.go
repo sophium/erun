@@ -28,7 +28,7 @@ func sessionTestEdge(t *testing.T) *httptest.Server {
 	mcpSessionTimeout = sessionTestTimeout
 	t.Cleanup(func() { mcpSessionTimeout = previousTimeout })
 
-	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, runtimecfg.RuntimeConfig{}, nil))
+	server := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, HTTPConfig{Path: "/mcp"}, withStubRuntime(runtimecfg.RuntimeConfig{}), nil))
 	t.Cleanup(server.Close)
 	return server
 }

@@ -15,10 +15,23 @@ import (
 	"github.com/sophium/erun/erun-mcp"
 	"github.com/sophium/erun/erun-mcp/tools/shared/buildinfo"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, buildinfo.CurrentBuildInfo(), erunmcp.RunHTTP))
+	os.Exit(run(os.Args[1:], os.Stderr, buildinfo.CurrentBuildInfo(), withRuntimeDefaults(erunmcp.RunHTTP)))
+}
+
+// withRuntimeDefaults wires the concrete build, deploy and cluster primitives
+// here rather than in the server package, so editing a primitive does not
+// recompile the server. The defaults are applied twice on purpose: each pass
+// wraps DeployHelmChart in a namespace and quota ensure, and the edge has
+// always run that ensure twice per deploy.
+func withRuntimeDefaults(next serverRunner) serverRunner {
+	return func(ctx context.Context, info model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
+		runtime = runtimedefaults.NormalizeRuntimeConfig(runtimedefaults.NormalizeRuntimeConfig(runtime))
+		return next(ctx, info, cfg, metricsCfg, runtime)
+	}
 }
 
 type serverRunner func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error

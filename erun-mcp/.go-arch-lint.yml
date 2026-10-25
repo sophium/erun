@@ -131,6 +131,7 @@ deps:
       - root
       - tools-shared-buildinfo
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
     canUse:
       - github-com-sophium-erun-erun-common
@@ -168,7 +169,6 @@ deps:
       - tools-shared-edgeauth
       - tools-shared-registrar
       - tools-shared-runtimecfg
-      - tools-shared-runtimedefaults
       - tools-shared-toolio
       - tools-shared-toolmetrics
       - tools-terraform

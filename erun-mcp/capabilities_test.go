@@ -35,7 +35,7 @@ func connectWithRuntime(t *testing.T, runtime runtimecfg.RuntimeConfig, capabili
 	}
 	info := model.BuildInfo{Version: "1.2.3"}
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return newServer(info, runtime, identity, nil)
+		return newServer(info, withStubRuntime(runtime), identity, nil)
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
 	httpServer := httptest.NewServer(handler)
@@ -192,7 +192,7 @@ func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsew
 	t.Setenv(edgeauth.EnvTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, runtimecfg.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, withStubRuntime(runtimecfg.RuntimeConfig{}), nil))
 	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "operate-edge-test", Version: "v0.0.1"}, nil)

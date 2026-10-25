@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-mcp"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -116,5 +118,36 @@ func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "erun mcp listening on 127.0.0.1:17000/mcp") || !strings.HasSuffix(got, "boom\n") {
 		t.Fatalf("unexpected stderr: %q", got)
+	}
+}
+
+func TestWithRuntimeDefaultsWiresEverySeamAndEnsuresTheNamespaceTwicePerDeploy(t *testing.T) {
+	ensured := 0
+	deployed := 0
+	var got runtimecfg.RuntimeConfig
+	runner := withRuntimeDefaults(func(_ context.Context, _ model.BuildInfo, _ erunmcp.HTTPConfig, _ erunmcp.MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
+		got = runtime
+		return nil
+	})
+	if err := runner(context.Background(), model.BuildInfo{}, erunmcp.HTTPConfig{}, erunmcp.MetricsConfig{}, runtimecfg.RuntimeConfig{
+		EnsureKubernetesNamespace: func(string, string) error { ensured++; return nil },
+		DeployHelmChart:           func(seam.HelmDeployParams) error { deployed++; return nil },
+	}); err != nil {
+		t.Fatalf("runner failed: %v", err)
+	}
+
+	unwired := []bool{
+		got.Store == nil, got.BuildScriptRunner == nil, got.BuildDockerImage == nil, got.PushDockerImage == nil,
+		got.DeployHelmChart == nil, got.DeleteKubernetesNamespace == nil, got.WaitForRemoteRuntime == nil,
+		got.RunRemoteCommand == nil, got.ResolveRuntimeRegistryVersions == nil,
+	}
+	if slices.Contains(unwired, true) {
+		t.Fatalf("expected every runtime seam to be wired, got %+v", got)
+	}
+	if err := got.DeployHelmChart(seam.HelmDeployParams{}); err != nil {
+		t.Fatalf("DeployHelmChart failed: %v", err)
+	}
+	if ensured != 2 || deployed != 1 {
+		t.Fatalf("ensured=%d deployed=%d, want the namespace ensured twice around one deploy", ensured, deployed)
 	}
 }

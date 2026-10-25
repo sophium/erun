@@ -11,7 +11,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/idle"
 	"github.com/sophium/erun/erun-mcp/tools/jobs"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
-	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
@@ -62,7 +61,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	// ensureAgentJobToolAvailable resolves "claude" before the preview short-circuit.
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
-	runtime := runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := withStubRuntime(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()
 
 	for _, tc := range []struct {
