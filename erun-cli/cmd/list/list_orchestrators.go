@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 )
 
 func writeOrchestrators(ctx core.Context, orchestrators []modelpkg.ListOrchestratorResult) error {
@@ -115,7 +115,7 @@ func writeOrchestratorEnvEntry(ctx core.Context, env modelpkg.ListOrchestratorEn
 	return err
 }
 
-func writeEffectiveOpen(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
+func writeEffectiveOpen(ctx core.Context, current list.ListCurrentDirectoryResult) error {
 	if current.Effective == nil {
 		if strings.TrimSpace(current.EffectiveError) != "" {
 			return textfmt.WriteLabeledValue(ctx, "effective target", "unavailable ("+current.EffectiveError+")")
@@ -133,7 +133,7 @@ func writeEffectiveOpen(ctx core.Context, current lifecycle.ListCurrentDirectory
 	return textfmt.WriteLabeledValue(ctx, "repo path", current.Effective.RepoPath)
 }
 
-func writeEffectiveOpenBase(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
+func writeEffectiveOpenBase(ctx core.Context, effective list.ListEffectiveTargetResult) error {
 	if err := writeEffectiveTargetIdentity(ctx, effective); err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func writeEffectiveOpenBase(ctx core.Context, effective lifecycle.ListEffectiveT
 	return writeEffectiveTargetPorts(ctx, effective)
 }
 
-func writeEffectiveTargetIdentity(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
+func writeEffectiveTargetIdentity(ctx core.Context, effective list.ListEffectiveTargetResult) error {
 	if err := textfmt.WriteLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
 		return err
 	}
@@ -158,11 +158,11 @@ func writeEffectiveTargetIdentity(ctx core.Context, effective lifecycle.ListEffe
 	return nil
 }
 
-func writeEffectiveTargetType(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
+func writeEffectiveTargetType(ctx core.Context, effective list.ListEffectiveTargetResult) error {
 	return textfmt.WriteLabeledValue(ctx, "type", textfmt.ValueOrNone(string(effective.Type)))
 }
 
-func writeEffectiveTargetPorts(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
+func writeEffectiveTargetPorts(ctx core.Context, effective list.ListEffectiveTargetResult) error {
 	if err := textfmt.WriteLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func writeEffectiveTargetPorts(ctx core.Context, effective lifecycle.ListEffecti
 	return textfmt.WriteLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
-func writeEffectiveOpenSSH(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
+func writeEffectiveOpenSSH(ctx core.Context, effective list.ListEffectiveTargetResult) error {
 	ssh := effective.SSH
 	if err := textfmt.WriteLabeledValue(ctx, "sshd", "on"); err != nil {
 		return err

@@ -12,8 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
+	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -32,7 +33,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appSessionEnvVar = orchestrator.DesktopSessionEnvVar
+const appSessionEnvVar = orchestratorpkg.DesktopSessionEnvVar
 
 // workingIssueCommandRunner runs a host command in dir and returns its trimmed stdout.
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
@@ -58,8 +59,8 @@ type erunUIDeps struct {
 	loadClusterRegistry    func(context.Context, runtimeview.ResourceInput) (runtimeview.ClusterRegistryStatus, error)
 	loadHostedRegistry     func(context.Context) runtimeview.HostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error)
-	readRuntimeRunState    func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error)
+	stopEnvironmentRuntime func(core.Context, stop.StopEnvironmentParams) (model.StopEnvironmentResult, error)
+	readRuntimeRunState    func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error)
 	ensureMCP              func(context.Context, config.OpenResult) error
 	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, config.OpenResult) error
@@ -71,7 +72,7 @@ type erunUIDeps struct {
 	runIDECommand             func(context.Context, terminal.StartParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
-	resolveOrchestratorLaunch func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
+	resolveOrchestratorLaunch func(launch orchestratorpkg.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
 	claudeAgents              orchestratorsvc.AgentCLI
 	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
 	savePastedFile            func(terminal.PasteParams) (string, error)
@@ -86,7 +87,7 @@ type erunUIDeps struct {
 	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
 	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)
 	loadAPILog                func(context.Context, tenantsvc.DashboardInput) (string, error)
-	readGatewayRouting        func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error)
+	readGatewayRouting        func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error)
 	workspaceSyncReady        func(context.Context, string) error
 	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error)
 	workspaceSyncInterval     time.Duration
@@ -277,7 +278,7 @@ func (a *App) newSettingsService() *settingssvc.Service {
 			return a.tenant.Client(ctx, tenant)
 		},
 		PlatformRequestTimeout: tenantsvc.RequestTimeout,
-		ReadGatewayRouting: func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
+		ReadGatewayRouting: func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error) {
 			return a.deps.readGatewayRouting(ctx, env, tenant, catalog)
 		},
 	})

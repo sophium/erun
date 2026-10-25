@@ -8,7 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
+	"github.com/sophium/erun/erun-common/command/lifecycle/upgrade"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
@@ -96,7 +97,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uimodel.Selection, podPath st
 	return a.envops.ResolveEnvironmentHostPath(selection, podPath)
 }
 
-func (a *App) ResolveUpgradePlan() (lifecycle.UpgradePlan, error) {
+func (a *App) ResolveUpgradePlan() (upgrade.UpgradePlan, error) {
 	return a.envops.ResolveUpgradePlan()
 }
 
@@ -160,10 +161,10 @@ func (a *App) newEnvopsService() *envops.Service {
 			return a.terminal.DeployInFlight(selection)
 		},
 		NoteEdgeAnswering: func(selection uimodel.Selection) { a.orchestrator.NoteEdgeAnswering(selection) },
-		StopRuntime: func(ctx core.Context, params lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
+		StopRuntime: func(ctx core.Context, params stop.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			return a.deps.stopEnvironmentRuntime(ctx, params)
 		},
-		ReadRuntimeRunState: func(ctx core.Context, target lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+		ReadRuntimeRunState: func(ctx core.Context, target stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
 			return a.deps.readRuntimeRunState(ctx, target)
 		},
 		ResolveImageRegistry: func(ctx context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {

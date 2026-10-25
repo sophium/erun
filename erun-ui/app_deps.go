@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -85,10 +86,10 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 		deps.checkRuntimeDeployed = runtimeview.CheckRuntimeDeployed
 	}
 	if deps.stopEnvironmentRuntime == nil {
-		deps.stopEnvironmentRuntime = lifecycle.RunStopEnvironment
+		deps.stopEnvironmentRuntime = stop.RunStopEnvironment
 	}
 	if deps.readRuntimeRunState == nil {
-		deps.readRuntimeRunState = lifecycle.ReadRuntimeRunState
+		deps.readRuntimeRunState = stop.ReadRuntimeRunState
 	}
 	deps = withDefaultReachabilityDeps(deps)
 	if deps.setRemoteCloudAlias == nil {
@@ -105,7 +106,7 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 		deps.claudeAgents = newDefaultClaudeAgents()
 	}
 	if deps.readGatewayRouting == nil {
-		deps.readGatewayRouting = lifecycle.ReadGatewayRouting
+		deps.readGatewayRouting = gatewayrouting.ReadGatewayRouting
 	}
 	if deps.resolveGatewayCredential == nil {
 		deps.resolveGatewayCredential = gateway.ResolveGatewayCredential

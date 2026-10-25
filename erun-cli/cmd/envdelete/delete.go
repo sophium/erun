@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +40,7 @@ func NewDeleteCmd(store seam.DeleteStore, promptRunner prompt.PromptRunner, dele
 func runDeleteCommand(ctx core.Context, store seam.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace seam.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
+	expected := envdelete.DeleteEnvironmentConfirmation(tenant, environment)
 	if expected == "" {
 		return fmt.Errorf("tenant and environment must not be empty: run `erun delete TENANT ENVIRONMENT` with both positional arguments set")
 	}
@@ -51,7 +51,7 @@ func runDeleteCommand(ctx core.Context, store seam.DeleteStore, promptRunner pro
 		}
 	}
 
-	result, err := lifecycle.RunDeleteEnvironment(ctx, model.DeleteEnvironmentParams{
+	result, err := envdelete.RunDeleteEnvironment(ctx, model.DeleteEnvironmentParams{
 		Tenant:      tenant,
 		Environment: environment,
 	}, store, deleteNamespace)

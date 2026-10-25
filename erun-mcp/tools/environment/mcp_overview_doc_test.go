@@ -13,7 +13,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/envread"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 )
 
 func repoRootForOverviewDocTest(t *testing.T) string {
@@ -139,9 +140,9 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 
 	// Populate every field the example names, including omitempty ones.
 	policy := model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
-	fixture := lifecycle.EnvironmentReadModel{
+	fixture := envread.EnvironmentReadModel{
 		Tenant: "myapp",
-		Environment: lifecycle.ListEnvironmentResult{
+		Environment: list.ListEnvironmentResult{
 			Name:           "local",
 			Type:           config.EnvironmentTypeLocalAgent,
 			RuntimeVersion: "1.0.308",

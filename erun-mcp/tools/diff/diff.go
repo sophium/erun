@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/diff"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -26,7 +26,7 @@ func DiffTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallT
 		if err != nil {
 			return nil, model.DiffResult{}, err
 		}
-		workDir, err := lifecycle.ResolveDiffTargetRoot(input.Target, envRoot, "")
+		workDir, err := diff.ResolveDiffTargetRoot(input.Target, envRoot, "")
 		if err != nil {
 			return nil, model.DiffResult{}, err
 		}
@@ -36,10 +36,10 @@ func DiffTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallT
 		traceOutput := new(strings.Builder)
 		ctx := toolio.RuntimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.TraceCommand(workDir, "git", "diff", "--no-color", "--no-ext-diff")
-		result, err := lifecycle.ResolveGitDiffWithOptions(workDir, model.DiffOptions{
+		result, err := diff.ResolveGitDiffWithOptions(workDir, model.DiffOptions{
 			Scope:          input.Scope,
 			SelectedCommit: input.SelectedCommit,
-			Target:         lifecycle.NormalizeDiffTarget(input.Target),
+			Target:         diff.NormalizeDiffTarget(input.Target),
 		}, gitx.GitCommandRunner)
 		return nil, result, err
 	}

@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/resize"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
@@ -52,7 +52,7 @@ func ResizeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return kubecheck.KubernetesDeployContextAtDir(workDir), nil
 			}
-			_, err := lifecycle.RunRuntimeResize(runCtx, lifecycle.RuntimeResizeDependencies{
+			_, err := resize.RunRuntimeResize(runCtx, resize.RuntimeResizeDependencies{
 				Store:                          runtime.Store,
 				SaveEnvConfig:                  runtime.Store.SaveEnvConfig,
 				FindProjectRoot:                findProjectRoot,

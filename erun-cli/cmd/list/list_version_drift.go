@@ -7,13 +7,14 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
+	"github.com/sophium/erun/erun-common/command/lifecycle/versiondrift"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-func runListVersionDrift(ctx core.Context, result lifecycle.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
-	drift, err := lifecycle.ResolveTenantVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
+func runListVersionDrift(ctx core.Context, result list.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
+	drift, err := versiondrift.ResolveTenantVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
 	if err != nil {
 		return err
 	}
@@ -30,8 +31,8 @@ func runListVersionDrift(ctx core.Context, result lifecycle.ListResult, versionD
 	return versionDriftExitError(drift)
 }
 
-func runListControlPlanes(ctx core.Context, result lifecycle.ListResult, erunAlias string, failOnDrift bool) error {
-	drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, cloud.DefaultCloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
+func runListControlPlanes(ctx core.Context, result list.ListResult, erunAlias string, failOnDrift bool) error {
+	drift, err := versiondrift.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, cloud.DefaultCloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 	if err != nil {
 		return err
 	}

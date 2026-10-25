@@ -6,7 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
@@ -194,9 +194,9 @@ func TestLoadStateSeedsTheNodeReadingOntoEachEnvironment(t *testing.T) {
 		Name:         "petios",
 		Environments: []uiEnvironment{{Name: "develop"}},
 	}}}
-	app.seedEnvironmentNodeSnapshots(&state, lifecycle.ListResult{Tenants: []lifecycle.ListTenantResult{{
+	app.seedEnvironmentNodeSnapshots(&state, list.ListResult{Tenants: []list.ListTenantResult{{
 		Name: "petios",
-		Environments: []lifecycle.ListEnvironmentResult{{
+		Environments: []list.ListEnvironmentResult{{
 			Name:               "develop",
 			CloudProviderAlias: "acct",
 			KubernetesContext:  "erun-node-1-eu-west-2",

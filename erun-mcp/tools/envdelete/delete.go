@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -31,7 +31,7 @@ func DeleteTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 		if err != nil {
 			return nil, jobenvelope.JobEnvelopeOutput{}, err
 		}
-		expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
+		expected := envdelete.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
 			return nil, jobenvelope.JobEnvelopeOutput{}, runtimecfg.ErrMissingLocalTarget(tenant == "", environment == "")
 		}
@@ -45,7 +45,7 @@ func DeleteTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 
 		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
-			result, err := lifecycle.RunDeleteEnvironment(runCtx, model.DeleteEnvironmentParams{
+			result, err := envdelete.RunDeleteEnvironment(runCtx, model.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,
 			}, deleteStore, runtime.DeleteKubernetesNamespace)

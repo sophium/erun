@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -78,7 +78,7 @@ func (c *ensureCounter) waitFor(t *testing.T, want int, timeout time.Duration) {
 func ensureTestService(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
-	readRunState func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error),
+	readRunState func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error),
 	deployInFlight func(uimodel.Selection) bool,
 ) (*Service, *capturedEmits) {
 	t.Helper()
@@ -193,8 +193,8 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 
 // `open --reconnect` refuses to start a stopped runtime; that error is the operator's own Stop.
 func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
-	service, emits := ensureTestService(t, reconnectSucceeds, func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-		return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
+	service, emits := ensureTestService(t, reconnectSucceeds, func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+		return stop.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
 	}, nil)
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 

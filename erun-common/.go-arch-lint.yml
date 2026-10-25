@@ -60,8 +60,26 @@ components:
     in: "command/inputs"
   command-jobs:
     in: "command/jobs"
-  command-lifecycle:
-    in: "command/lifecycle"
+  command-lifecycle-diff:
+    in: "command/lifecycle/diff"
+  command-lifecycle-envdelete:
+    in: "command/lifecycle/envdelete"
+  command-lifecycle-envread:
+    in: "command/lifecycle/envread"
+  command-lifecycle-gatewayrouting:
+    in: "command/lifecycle/gatewayrouting"
+  command-lifecycle-list:
+    in: "command/lifecycle/list"
+  command-lifecycle-pin:
+    in: "command/lifecycle/pin"
+  command-lifecycle-resize:
+    in: "command/lifecycle/resize"
+  command-lifecycle-stop:
+    in: "command/lifecycle/stop"
+  command-lifecycle-upgrade:
+    in: "command/lifecycle/upgrade"
+  command-lifecycle-versiondrift:
+    in: "command/lifecycle/versiondrift"
   command-mergequeue:
     in: "command/mergequeue"
   command-observe:
@@ -347,31 +365,96 @@ deps:
       - primitive-shared-releaseflow
     canUse:
       - github-com-adrg-xdg
-  command-lifecycle:
+  command-lifecycle-diff:
+    mayDependOn:
+      - base-core
+      - base-model
+      - base-seam
+      - infra-gitx
+  command-lifecycle-envdelete:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-kube
+      - primitive-open-sshconn
+  command-lifecycle-envread:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - command-lifecycle-list
+      - infra-activity
+      - infra-cloud
+      - orchestration-diagnosis
+      - primitive-deploy-diagnosis
+      - primitive-open-resolve
+  command-lifecycle-gatewayrouting:
+    mayDependOn:
+      - base-config
+      - base-core
+  command-lifecycle-list:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - infra-cloud
+      - primitive-deploy-runtimeusage
+      - primitive-deploy-runtimeversion
+      - primitive-open-resolve
+      - primitive-open-sshconn
+      - primitive-shared-opentarget
+  command-lifecycle-pin:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-gitx
+      - primitive-deploy-chartref
+      - primitive-deploy-runtimeimage
+      - primitive-shared-gitref
+  command-lifecycle-resize:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - command-lifecycle-list
+      - infra-activity
+      - primitive-deploy-run
+      - primitive-deploy-runtimeusage
+      - primitive-deploy-runtimeversion
+      - primitive-deploy-spec
+      - primitive-open-resolve
+  command-lifecycle-stop:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-cloud
+      - infra-kube
+      - primitive-deploy-components
+  command-lifecycle-upgrade:
     mayDependOn:
       - base-config
       - base-core
       - base-model
       - base-seam
       - infra-activity
+      - infra-registry
+  command-lifecycle-versiondrift:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - command-lifecycle-list
       - infra-cloud
-      - infra-gitx
-      - infra-kube
       - infra-registry
       - orchestration-clusterread
-      - orchestration-diagnosis
-      - primitive-deploy-chartref
-      - primitive-deploy-components
-      - primitive-deploy-diagnosis
-      - primitive-deploy-run
-      - primitive-deploy-runtimeimage
-      - primitive-deploy-runtimeusage
-      - primitive-deploy-runtimeversion
-      - primitive-deploy-spec
-      - primitive-open-resolve
-      - primitive-open-sshconn
-      - primitive-shared-gitref
-      - primitive-shared-opentarget
   command-mergequeue:
     mayDependOn:
       - base-core

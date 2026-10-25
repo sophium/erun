@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -47,8 +47,8 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 			sessionsMu.Unlock()
 			return session, nil
 		},
-		readRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
+		readRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+			return stop.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 		},
 	})
 

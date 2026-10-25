@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/pin"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -70,11 +70,11 @@ func runPinToolCommand(runtime runtimecfg.RuntimeConfig, input PinInput, runCtx 
 	if err != nil {
 		return nil, err
 	}
-	plan, err := lifecycle.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
+	plan, err := pin.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
 	if err != nil {
 		return nil, err
 	}
-	lifecycle.AnnotatePinPlanBaseFreshness(runCtx, &plan)
+	pin.AnnotatePinPlanBaseFreshness(runCtx, &plan)
 	if note := plan.BaseFreshnessNote(); note != "" {
 		runCtx.Trace("pin " + note)
 	}
@@ -98,20 +98,20 @@ func applyPinPlanUnlessPreviewing(runtime runtimecfg.RuntimeConfig, runCtx core.
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil
 	}
-	if err := lifecycle.RecordPinPrevious(workDir, tenant, environment, plan.Previous); err != nil {
+	if err := pin.RecordPinPrevious(workDir, tenant, environment, plan.Previous); err != nil {
 		return toolio.PinOutput{}, err
 	}
-	if err := lifecycle.ApplyPinPlan(plan); err != nil {
+	if err := pin.ApplyPinPlan(plan); err != nil {
 		return toolio.PinOutput{}, err
 	}
 	// Runtime version/image/chart live in the config store, not the repo.
-	if updated, changed := lifecycle.ApplyPinnedEnvConfig(envConfig, plan); changed {
+	if updated, changed := pin.ApplyPinnedEnvConfig(envConfig, plan); changed {
 		if err := runtime.Store.SaveEnvConfig(tenant, updated); err != nil {
 			return toolio.PinOutput{}, err
 		}
 	}
 	// deploy refuses a Chart.lock that disagrees with its Chart.yaml.
-	if err := lifecycle.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
+	if err := pin.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
 		return toolio.PinOutput{}, err
 	}
 	out.Applied = true
@@ -132,7 +132,7 @@ func resolvePinToolProjectRoot(runtime runtimecfg.RuntimeConfig, input PinInput)
 // later at terraform init or chart pull.
 func resolvePinToolTarget(ctx context.Context, runtime runtimecfg.RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
 	if input.Revert {
-		previous, ok := lifecycle.PinPrevious(workDir, tenant, environment)
+		previous, ok := pin.PinPrevious(workDir, tenant, environment)
 		if !ok {
 			return "", fmt.Errorf("no previous pin is recorded for %s/%s, so there is nothing to revert to", tenant, environment)
 		}

@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/diff"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -367,17 +367,17 @@ func runExecDiffCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)
 	}
-	return lifecycle.WriteRawDiff(ctx.Stdout, result)
+	return diff.WriteRawDiff(ctx.Stdout, result)
 }
 
 func resolveExecDiff(projectRoot string, runGit seam.GitCommandRunnerFunc, opts execDiffOptions) (model.DiffResult, error) {
 	if opts.Scope == "" && opts.SelectedCommit == "" {
-		return lifecycle.ResolveGitDiff(projectRoot, runGit)
+		return diff.ResolveGitDiff(projectRoot, runGit)
 	}
 	if opts.SelectedCommit != "" && opts.Scope != "commit" {
 		return model.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
 	}
-	return lifecycle.ResolveGitDiffWithOptions(projectRoot, model.DiffOptions{
+	return diff.ResolveGitDiffWithOptions(projectRoot, model.DiffOptions{
 		Scope:          opts.Scope,
 		SelectedCommit: opts.SelectedCommit,
 	}, runGit)

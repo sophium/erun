@@ -7,7 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
+	"github.com/sophium/erun/erun-common/command/lifecycle/upgrade"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -58,7 +59,7 @@ func (s *Service) StopEnvironment(selection uimodel.Selection) (EnvironmentStopR
 	// Latch before scaling: dropping the pod wakes every tab's reconnect loop, and
 	// `erun open` would undo the stop.
 	s.markRuntimeStopped(selection)
-	stopped, err := s.d.StopRuntime(core.Context{}, lifecycle.StopEnvironmentParams{
+	stopped, err := s.d.StopRuntime(core.Context{}, stop.StopEnvironmentParams{
 		Result:        result,
 		SaveEnvConfig: s.d.Store.SaveEnvConfig,
 	})
@@ -144,17 +145,17 @@ func (s *Service) RuntimeStopped(selection uimodel.Selection) bool {
 
 // readRuntimeRunStateForSelection is shared so the gate and the Runtime tab
 // resolve the same Deployment.
-func (s *Service) readRuntimeRunStateForSelection(selection uimodel.Selection) (config.OpenResult, lifecycle.RuntimeRunState, error) {
+func (s *Service) readRuntimeRunStateForSelection(selection uimodel.Selection) (config.OpenResult, stop.RuntimeRunState, error) {
 	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      strings.TrimSpace(selection.Tenant),
 		Environment: strings.TrimSpace(selection.Environment),
 	})
 	if err != nil {
-		return config.OpenResult{}, lifecycle.RuntimeRunState{}, err
+		return config.OpenResult{}, stop.RuntimeRunState{}, err
 	}
 	state, err := s.d.ReadRuntimeRunState(
 		core.Context{},
-		lifecycle.RuntimeScaleTargetForResult(result),
+		stop.RuntimeScaleTargetForResult(result),
 	)
 	return result, state, err
 }
@@ -183,7 +184,7 @@ func (s *Service) LoadRuntimeRunState(selection uimodel.Selection) (RuntimeRunSt
 	state.DesiredReplicas = read.DesiredReplicas
 	state.ReadyReplicas = read.ReadyReplicas
 	state.Stopped = read.Stopped()
-	state.RemainingComponents = lifecycle.StopRemainingComponents(resolved)
+	state.RemainingComponents = stop.StopRemainingComponents(resolved)
 	return state, nil
 }
 
@@ -196,12 +197,12 @@ func (s *Service) runtimeStopRemainingComponents(selection uimodel.Selection) []
 	if err != nil {
 		return nil
 	}
-	return lifecycle.StopRemainingComponents(result)
+	return stop.StopRemainingComponents(result)
 }
 
 // ResolveUpgradePlan builds the read-only "Upgrade all" preview using the shared
 // resolver, so it never promises what the run would refuse.
-func (s *Service) ResolveUpgradePlan() (lifecycle.UpgradePlan, error) {
-	resolver := lifecycle.UpgradeVersionsResolverForStore(s.d.Store, s.d.ResolveImageRegistry)
-	return lifecycle.BuildUpgradePlan(s.d.Store, model.UpgradeTarget{}, resolver)
+func (s *Service) ResolveUpgradePlan() (upgrade.UpgradePlan, error) {
+	resolver := upgrade.UpgradeVersionsResolverForStore(s.d.Store, s.d.ResolveImageRegistry)
+	return upgrade.BuildUpgradePlan(s.d.Store, model.UpgradeTarget{}, resolver)
 }

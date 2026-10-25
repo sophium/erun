@@ -12,8 +12,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	seampkg "github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -21,7 +21,7 @@ import (
 
 // Store is the slice of the desktop's config store the settings read and write.
 type Store interface {
-	seam.ListStore
+	seampkg.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
@@ -67,7 +67,7 @@ type Deps struct {
 	PlatformClient         func(ctx context.Context, tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error)
 	PlatformRequestTimeout time.Duration
 
-	ReadGatewayRouting func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error)
+	ReadGatewayRouting func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error)
 }
 
 type Service struct {

@@ -1,0 +1,22 @@
+# Split the command/lifecycle hub into per-concern packages so an importer names only
+# the concern it calls and a deploy edit rebuilds only the concerns that call deploy.
+command/lifecycle/list command/lifecycle/list.go
+command/lifecycle/list command/lifecycle/orphaned_ssh_alias.go
+command/lifecycle/list command/lifecycle/suite_main_test.go
+command/lifecycle/envread command/lifecycle/environment_read_model.go
+command/lifecycle/envread command/lifecycle/environment_read_model_test.go
+command/lifecycle/versiondrift command/lifecycle/version_drift.go
+command/lifecycle/versiondrift command/lifecycle/control_plane_version_drift.go
+command/lifecycle/versiondrift command/lifecycle/control_plane_version_drift_test.go
+command/lifecycle/resize command/lifecycle/runtime_resize.go
+command/lifecycle/pin command/lifecycle/pin*.go
+command/lifecycle/pin command/lifecycle/job_worktree_test.go
+command/lifecycle/pin command/lifecycle/work_clone_reclaim_test.go
+command/lifecycle/pin command/lifecycle/repo_root_test.go
+command/lifecycle/upgrade command/lifecycle/upgrade*.go
+command/lifecycle/stop command/lifecycle/stop*.go
+command/lifecycle/stop command/lifecycle/deploy_kubernetes_check_test.go
+command/lifecycle/stop command/lifecycle/registry_credential_secret_test.go
+command/lifecycle/envdelete command/lifecycle/delete*.go
+command/lifecycle/diff command/lifecycle/diff*.go
+command/lifecycle/gatewayrouting command/lifecycle/gateway_*.go

@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -18,7 +18,7 @@ import (
 func orchestratorLinkForwardTestApp(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
-	readRunState func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error),
+	readRunState func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	home := t.TempDir()
@@ -137,8 +137,8 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		func(context.Context, config.OpenResult, func(string)) error {
 			return errors.New("frs/dev is stopped, and a session reconnect does not start it; run `erun open frs dev` to start it again")
 		},
-		func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0}, nil
+		func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+			return stop.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0}, nil
 		},
 	)
 

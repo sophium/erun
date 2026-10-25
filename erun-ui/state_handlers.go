@@ -9,14 +9,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) LoadState() (uiState, error) {
-	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, model.OpenParams{
+	result, err := list.ResolveListResult(a.deps.store, a.deps.findProjectRoot, model.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -230,7 +230,7 @@ func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersio
 	return labeled
 }
 
-func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiState {
+func stateFromListResult(result list.ListResult, info model.BuildInfo) uiState {
 	state := uiState{
 		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
 		Build:          buildDetailsFrom(info),
@@ -278,7 +278,7 @@ func mcpEndpointForOpenResult(result config.OpenResult) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
 }
 
-func mcpEndpointForListEnvironment(environment lifecycle.ListEnvironmentResult) string {
+func mcpEndpointForListEnvironment(environment list.ListEnvironmentResult) string {
 	port := environment.LocalPorts.MCP
 	if port <= 0 {
 		return ""

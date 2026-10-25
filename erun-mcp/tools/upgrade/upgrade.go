@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/upgrade"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/deploy/run"
@@ -40,7 +40,7 @@ func UpgradeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 				VersionOverride: strings.TrimSpace(input.Version),
 				Force:           input.Force,
 			}
-			plan, err := lifecycle.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, lifecycle.UpgradeVersionsResolverForStore(runtime.Store, registry.ResolveRuntimeImageRegistryVersions))
+			plan, err := upgrade.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, upgrade.UpgradeVersionsResolverForStore(runtime.Store, registry.ResolveRuntimeImageRegistryVersions))
 			if err != nil {
 				return err
 			}
@@ -72,7 +72,7 @@ func UpgradeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 				return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 			}
 
-			result := lifecycle.RunUpgradePlan(runCtx, plan, deployer)
+			result := upgrade.RunUpgradePlan(runCtx, plan, deployer)
 			if len(result.Failed) > 0 {
 				names := make([]string, 0, len(result.Failed))
 				for _, failure := range result.Failed {

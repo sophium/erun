@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -33,34 +33,34 @@ func TestRuntimeStoppedMapsClusterStateToTheIndicator(t *testing.T) {
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	cases := []struct {
 		name  string
-		state lifecycle.RuntimeRunState
+		state stop.RuntimeRunState
 		err   error
 		want  bool
 	}{
 		{
 			name:  "scaled to zero with no pods is stopped",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
 			want:  true,
 		},
 		{
 			// The old pod stays Ready through its grace period after the scale lands.
 			name:  "scaled to zero while the old pod drains is stopped",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1},
 			want:  true,
 		},
 		{
 			name:  "pods wanted but not ready is not stopped",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 0},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 0},
 			want:  false,
 		},
 		{
 			name:  "running is not stopped",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
 			want:  false,
 		},
 		{
 			name:  "absent deployment is not stopped",
-			state: lifecycle.RuntimeRunState{},
+			state: stop.RuntimeRunState{},
 			want:  false,
 		},
 		{
@@ -73,7 +73,7 @@ func TestRuntimeStoppedMapsClusterStateToTheIndicator(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			emits := newCapturedEmits()
 			service := stopTestService(t, emits, Deps{
-				ReadRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+				ReadRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
 					return testCase.state, testCase.err
 				},
 			})
@@ -88,8 +88,8 @@ func TestRuntimeStoppedMapsClusterStateToTheIndicator(t *testing.T) {
 func TestRuntimeStoppedHonoursTheLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	emits := newCapturedEmits()
 	service := stopTestService(t, emits, Deps{
-		ReadRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
+		ReadRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+			return stop.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
 		},
 	})
 
@@ -109,9 +109,9 @@ func TestRuntimeStoppedHonoursTheLatchBeforeTheClusterCatchesUp(t *testing.T) {
 
 func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *testing.T) {
 	emits := newCapturedEmits()
-	var captured lifecycle.StopEnvironmentParams
+	var captured stop.StopEnvironmentParams
 	service := stopTestService(t, emits, Deps{
-		StopRuntime: func(_ core.Context, params lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
+		StopRuntime: func(_ core.Context, params stop.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			captured = params
 			return model.StopEnvironmentResult{
 				Tenant:      params.Result.Tenant,
@@ -145,27 +145,27 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 	cases := []struct {
 		name  string
-		state lifecycle.RuntimeRunState
+		state stop.RuntimeRunState
 		want  RuntimeRunState
 	}{
 		{
 			name:  "scaled to zero is stopped with nothing to stop",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
 			want:  RuntimeRunState{Present: true, DesiredReplicas: 0, Stopped: true},
 		},
 		{
 			name:  "running carries the replica counts the operator is shown",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
 			want:  RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
 		},
 		{
 			name:  "running but not ready is not stopped",
-			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1},
+			state: stop.RuntimeRunState{Present: true, DesiredReplicas: 1},
 			want:  RuntimeRunState{Present: true, DesiredReplicas: 1},
 		},
 		{
 			name:  "an absent Deployment is not deployed rather than stopped",
-			state: lifecycle.RuntimeRunState{},
+			state: stop.RuntimeRunState{},
 			want:  RuntimeRunState{},
 		},
 	}
@@ -184,10 +184,10 @@ func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 }
 
 // loadRunStateReading fails the test on an error: the reading must be fail-soft.
-func loadRunStateReading(t *testing.T, state lifecycle.RuntimeRunState, readErr error) RuntimeRunState {
+func loadRunStateReading(t *testing.T, state stop.RuntimeRunState, readErr error) RuntimeRunState {
 	t.Helper()
 	service := stopTestService(t, newCapturedEmits(), Deps{
-		ReadRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+		ReadRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
 			return state, readErr
 		},
 	})
@@ -199,7 +199,7 @@ func loadRunStateReading(t *testing.T, state lifecycle.RuntimeRunState, readErr 
 }
 
 func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
-	got := loadRunStateReading(t, lifecycle.RuntimeRunState{}, errors.New("connection refused"))
+	got := loadRunStateReading(t, stop.RuntimeRunState{}, errors.New("connection refused"))
 	if got.Present || got.Stopped {
 		t.Fatalf("an unread cluster must claim neither state, got %+v", got)
 	}
@@ -210,8 +210,8 @@ func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
 
 func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	service := stopTestService(t, newCapturedEmits(), Deps{
-		ReadRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
+		ReadRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+			return stop.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
 		},
 	})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
@@ -279,7 +279,7 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 	emits := newCapturedEmits()
 	service := stopTestService(t, emits, Deps{
-		StopRuntime: func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
+		StopRuntime: func(core.Context, stop.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			return model.StopEnvironmentResult{}, errors.New("forbidden")
 		},
 	})

@@ -14,7 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -78,11 +78,11 @@ func inertDeps() Deps {
 		ReconnectLineHandler: func(uimodel.Selection) func(string) { return func(string) {} },
 		DeployInFlight:       func(uimodel.Selection) bool { return false },
 		NoteEdgeAnswering:    func(uimodel.Selection) {},
-		StopRuntime: func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
+		StopRuntime: func(core.Context, stop.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			return model.StopEnvironmentResult{}, errors.New("stop is not wired in this test")
 		},
-		ReadRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
-			return lifecycle.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired in this test")
+		ReadRuntimeRunState: func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+			return stop.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired in this test")
 		},
 		ResolveImageRegistry: func(context.Context, string, string) (model.RuntimeRegistryVersions, error) {
 			return model.RuntimeRegistryVersions{}, errors.New("image registry is not wired in this test")

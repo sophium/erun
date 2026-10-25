@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 )
 
 const activityPollerInterval = 5 * time.Second
@@ -44,7 +44,7 @@ func (s *Service) StopPollers() {
 // seedConfiguredKubeContexts surfaces deploys left pending by a previous run;
 // store errors are non-fatal.
 func (s *Service) seedConfiguredKubeContexts() {
-	result, err := lifecycle.ResolveListResult(s.d.Store, s.d.FindProjectRoot, model.OpenParams{})
+	result, err := list.ResolveListResult(s.d.Store, s.d.FindProjectRoot, model.OpenParams{})
 	if err != nil {
 		return
 	}

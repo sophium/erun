@@ -9,10 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 )
 
-func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error {
+func writeTenantEntry(ctx core.Context, tenant list.ListTenantResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, tenantHeaderLine(tenant)); err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error
 	return nil
 }
 
-func writeEnvironmentEntry(ctx core.Context, tenantName string, env lifecycle.ListEnvironmentResult) error {
+func writeEnvironmentEntry(ctx core.Context, tenantName string, env list.ListEnvironmentResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, environmentHeaderLine(env)); err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func writeEnvironmentEntry(ctx core.Context, tenantName string, env lifecycle.Li
 	return nil
 }
 
-func tenantHeaderLine(tenant lifecycle.ListTenantResult) string {
+func tenantHeaderLine(tenant list.ListTenantResult) string {
 	header := "  " + tenant.Name
 	if markers := statusMarkers(tenant.IsDefault, tenant.IsEffective); len(markers) > 0 {
 		header += " [" + strings.Join(markers, ", ") + "]"
@@ -60,7 +60,7 @@ func tenantHeaderLine(tenant lifecycle.ListTenantResult) string {
 	return header
 }
 
-func environmentHeaderLine(env lifecycle.ListEnvironmentResult) string {
+func environmentHeaderLine(env list.ListEnvironmentResult) string {
 	envLine := "      - " + env.Name
 	if markers := statusMarkers(env.IsDefault, env.IsEffective); len(markers) > 0 {
 		envLine += " [" + strings.Join(markers, ", ") + "]"
@@ -72,7 +72,7 @@ func environmentHeaderLine(env lifecycle.ListEnvironmentResult) string {
 	return envLine
 }
 
-func environmentDetailLines(tenantName string, env lifecycle.ListEnvironmentResult) []string {
+func environmentDetailLines(tenantName string, env list.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
 		indent + "type: " + textfmt.ValueOrNone(string(env.Type)),
@@ -138,7 +138,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 
 // runtimeVersionLabel names the release line beside the version, since envs in one
 // tenant can ride different lines.
-func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult) string {
+func runtimeVersionLabel(tenantName string, env list.ListEnvironmentResult) string {
 	version := textfmt.ValueOrNone(env.RuntimeVersion)
 	if env.RuntimeVersionLine == nil {
 		return version
