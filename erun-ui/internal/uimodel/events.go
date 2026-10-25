@@ -70,3 +70,6 @@ type AppNotificationClearPayload struct {
 	Environment string `json:"environment"`
 	Source      string `json:"source"`
 }
+
+// NotificationActionDeploy opens the tagged env's deploy dialog; "" means no action.
+const NotificationActionDeploy = "deploy"

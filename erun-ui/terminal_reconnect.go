@@ -86,7 +86,7 @@ func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool
 
 	// Checked before the deploy-failure guards: a stopped runtime is not a failure,
 	// and respawning would undo the operator's stop.
-	if a.runtimeStoppedForSelection(managed.selection) {
+	if a.envops.RuntimeStopped(managed.selection) {
 		a.emitStoppedRuntimeMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, uimodel.EnvStatusRuntimeStopped)
 		return true
@@ -149,7 +149,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// Refresh the shared, TTL-deduped reconnect so forwarders rebind to a replaced
 	// pod; it never redeploys.
 	if managed.kind != sessionKindLocal && managed.kind != sessionKindOrchestrator {
-		a.ensureEnvRuntimeOnce(managed.selection)
+		a.envops.EnsureRuntimeOnce(managed.selection)
 	}
 	next, err := respawn()
 	if err != nil {

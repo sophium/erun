@@ -7,7 +7,7 @@ import (
 )
 
 func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	stub1 := newStubTerminalSession()
 	stub2 := newStubTerminalSession()
@@ -33,7 +33,7 @@ func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
 }
 
 func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	sameEnvDifferentTenant := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	sameTenantDifferentEnv := uimodel.Selection{Tenant: "erun", Environment: "dev"}
@@ -62,7 +62,7 @@ func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
 }
 
 func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	stub := newStubTerminalSession()
 	app.sessions["one"] = &managedTerminal{selection: target, session: stub, serial: 1, key: "one", closed: true}
@@ -82,7 +82,7 @@ func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
 }
 
 func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	if _, err := app.CloseEnvironmentSessions(uimodel.Selection{}); err == nil {
 		t.Fatal("expected error when tenant and environment are both empty")
 	}
@@ -93,10 +93,10 @@ func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 
 // Closing must mark sessions closed so tryReconnect refuses and the AI busy latch clears.
 func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
-	app := &App{
+	app := withTestEnvops(&App{
 		sessions: make(map[string]*managedTerminal),
 		busyEnvs: make(map[string]int),
-	}
+	})
 	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	// A non-nil respawn means only the closed flag can make tryReconnect refuse.
 	ai := &managedTerminal{

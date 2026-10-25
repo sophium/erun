@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
@@ -68,5 +70,29 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 	}
 	if leases[1].JobID != "" {
 		t.Fatalf("a lease with no job record behind it must not offer to act on one, got %q", leases[1].JobID)
+	}
+}
+
+// isolateJobsCache needs xdg.Reload because xdg resolves XDG_CACHE_HOME at init.
+func isolateJobsCache(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+}
+
+func jobsTestStore(t *testing.T) stubUIStore {
+	t.Helper()
+	return stubUIStore{
+		tenants: map[string]model.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "ux"},
+		},
+		envs: map[string]config.EnvConfig{
+			"erun/ux": {
+				Name:              "ux",
+				LocalRepoPath:     t.TempDir(),
+				KubernetesContext: "orbstack",
+			},
+		},
 	}
 }

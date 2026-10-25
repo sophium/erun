@@ -1,8 +1,8 @@
-package main
+package envops
 
 // Job times are unix seconds; zero means "not yet".
 
-type uiEnvironmentJob struct {
+type EnvironmentJob struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	State     string   `json:"state"`
@@ -11,30 +11,30 @@ type uiEnvironmentJob struct {
 	Command   []string `json:"command,omitempty"`
 	Dir       string   `json:"dir,omitempty"`
 	// ExitCode is nil unless exited, so a missing outcome never reads as success.
-	ExitCode      *int                      `json:"exitCode"`
-	StartedAtUnix int64                     `json:"startedAtUnix,omitempty"`
-	EndedAtUnix   int64                     `json:"endedAtUnix,omitempty"`
-	Progress      *uiEnvironmentJobProgress `json:"progress,omitempty"`
+	ExitCode      *int                    `json:"exitCode"`
+	StartedAtUnix int64                   `json:"startedAtUnix,omitempty"`
+	EndedAtUnix   int64                   `json:"endedAtUnix,omitempty"`
+	Progress      *EnvironmentJobProgress `json:"progress,omitempty"`
 }
 
-// uiEnvironmentJobProgress is nil for command jobs and agents that have not emitted.
-type uiEnvironmentJobProgress struct {
+// EnvironmentJobProgress is nil for command jobs and agents that have not emitted.
+type EnvironmentJobProgress struct {
 	Activity    string `json:"activity,omitempty"`
 	LastMessage string `json:"lastMessage,omitempty"`
 	Turns       int    `json:"turns"`
 	ToolsRun    int    `json:"toolsRun"`
 }
 
-type uiEnvironmentJobOutput struct {
-	Job        uiEnvironmentJob `json:"job"`
-	Offset     int64            `json:"offset"`
-	NextOffset int64            `json:"nextOffset"`
-	Output     string           `json:"output"`
-	HasMore    bool             `json:"hasMore"`
-	Complete   bool             `json:"complete"`
+type EnvironmentJobOutput struct {
+	Job        EnvironmentJob `json:"job"`
+	Offset     int64          `json:"offset"`
+	NextOffset int64          `json:"nextOffset"`
+	Output     string         `json:"output"`
+	HasMore    bool           `json:"hasMore"`
+	Complete   bool           `json:"complete"`
 }
 
-type uiJobOutputInput struct {
+type JobOutputInput struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	ID          string `json:"id"`
@@ -42,7 +42,7 @@ type uiJobOutputInput struct {
 	MaxBytes    int64  `json:"maxBytes"`
 }
 
-type uiCancelJobInput struct {
+type CancelJobInput struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	ID          string `json:"id"`

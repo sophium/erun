@@ -178,12 +178,12 @@ func (a *App) handleInitTraceLine(selection uimodel.Selection, line string) bool
 	}
 	if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
 		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
-		a.emitEnvironmentInitialized(match[1], match[2])
+		a.envops.EnvironmentInitialized(match[1], match[2])
 		return true
 	}
 	if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
 		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, cleanActivityFailureLine(line))
-		a.emitEnvironmentInitFailed(match[1], match[2])
+		a.envops.EnvironmentInitFailed(match[1], match[2])
 		return true
 	}
 	return false

@@ -50,7 +50,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uimodel.Selection, s
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
-		go a.startWorkspaceSyncForSelection(selection)
+		go a.envops.StartWorkspaceSync(selection)
 		existing.signalReady(nil)
 		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
@@ -61,7 +61,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uimodel.Selection, s
 	a.mu.Unlock()
 
 	// Opening never deploys; that is the caller's explicit action.
-	a.ensureEnvRuntimeOnce(selection)
+	a.envops.EnsureRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
@@ -101,12 +101,12 @@ func (a *App) runOpenSession(ctx context.Context, selection uimodel.Selection, s
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
 	a.spawnStreamSession(managed)
-	go a.startWorkspaceSyncForSelection(selection)
+	go a.envops.StartWorkspaceSync(selection)
 	go a.cloudContexts.StartRefresher(selection)
 
 	// Opening is the deliberate wake for a stopped runtime, so release the stop
 	// latch or the reconnect gate keeps refusing.
-	a.clearRuntimeStopped(selection)
+	a.envops.ClearRuntimeStopped(selection)
 	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
@@ -241,7 +241,7 @@ func (a *App) runAISession(ctx context.Context, selection uimodel.Selection, slo
 		}
 	}
 
-	a.ensureEnvRuntimeOnce(selection)
+	a.envops.EnsureRuntimeOnce(selection)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),

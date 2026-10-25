@@ -30,7 +30,7 @@ func (a *App) finishDeployByTenantEnv(selection uimodel.Selection, tenant, envir
 		}
 		if status == activityQueueStatusSucceeded || status == activityQueueStatusSkipped {
 			// Releases the create→deploy→open gate only once the runtime exists.
-			a.emitEnvironmentDeployed(tenant, environment)
+			a.envops.EnvironmentDeployed(tenant, environment)
 		}
 	}
 }
@@ -123,7 +123,7 @@ func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activit
 			a.activityQueue.finish(entry.ID, status, errMsg)
 		}
 	}
-	a.emitDoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
+	a.envops.DoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
 // startSSHDInitFromTrace locks terminals like init/deploy; it has no interactive prompts.
@@ -169,7 +169,7 @@ func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activ
 			}
 		}
 	}
-	a.emitSSHDInitCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
+	a.envops.SSHDInitCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
 // startDeployFromTrace is a no-op when an active entry exists, so poller and trace converge.

@@ -22,13 +22,6 @@ func (a *App) emitAppNotification(kind, message string) {
 	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{Kind: kind, Message: message})
 }
 
-// notificationSourceRuntimeUnreachable must match dismissNotificationForEnv in the frontend.
-const notificationSourceRuntimeUnreachable = "runtime-unreachable"
-
-// notificationSourceForwardOutage tags a port-forward repair that ran and did not help,
-// unlike notificationSourceRuntimeUnreachable.
-const notificationSourceForwardOutage = "port-forward-outage"
-
 const notificationSourceDeployFailed = "deploy-failed"
 
 // notificationSourceOrchestratorEdgeUnreachable is posted per linked env, carrying that env's deploy action.
@@ -38,12 +31,7 @@ const notificationSourceMCPUnreachable = "mcp-unreachable"
 
 const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
 
-const notificationSourceWorkspaceSyncNoPath = "workspace-sync-no-path"
-
-const notificationSourceWorkspaceSyncFailed = "workspace-sync-failed"
-
-// notificationActionDeploy opens the tagged env's deploy dialog; "" means no action.
-const notificationActionDeploy = "deploy"
+const notificationActionDeploy = uimodel.NotificationActionDeploy
 
 const notificationActionRestartOrchestrator = "restart-orchestrator"
 

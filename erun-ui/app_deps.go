@@ -17,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -190,7 +191,7 @@ func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 		deps.launchHostArtifact = launchHostArtifactDetached
 	}
 	if deps.launchHostOpener == nil {
-		deps.launchHostOpener = launchHostOpenerDetached
+		deps.launchHostOpener = envops.LaunchHostOpenerDetached
 	}
 	return deps
 }
@@ -225,10 +226,10 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 		deps.savePastedFile = savePastedFileToRuntime
 	}
 	if deps.listAgentOutputs == nil {
-		deps.listAgentOutputs = listAgentOutputsViaRuntime
+		deps.listAgentOutputs = envops.ListAgentOutputsViaRuntime
 	}
 	if deps.downloadAgentOutput == nil {
-		deps.downloadAgentOutput = downloadAgentOutputViaRuntime
+		deps.downloadAgentOutput = envops.DownloadAgentOutputViaRuntime
 	}
 	if deps.loadDiff == nil {
 		deps.loadDiff = loadDiffFromMCP
@@ -248,7 +249,18 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 		deps.syncWorkspace = workspace.SyncWorkspaceOnce
 	}
 	if deps.workspaceSyncInterval <= 0 {
-		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
+		deps.workspaceSyncInterval = envops.DefaultWorkspaceSyncInterval
+	}
+	return deps
+}
+
+// withDefaultExecWriteDeps is split out to stay under the cyclomatic-complexity cap.
+func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
+	if deps.execCommit == nil {
+		deps.execCommit = execCommitViaMCP
+	}
+	if deps.execPush == nil {
+		deps.execPush = execPushViaMCP
 	}
 	return deps
 }

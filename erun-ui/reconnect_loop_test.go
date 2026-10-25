@@ -183,7 +183,7 @@ func sawTerminalMarker(emits *capturedEmits, needle string) bool {
 
 // A long-lived session that exited once must still reconnect.
 func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
-	app := &App{}
+	app := withTestEnvops(&App{})
 	managed := &managedTerminal{}
 
 	older := time.Now().Add(-2 * reconnectLoopWindow)
@@ -363,7 +363,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 }
 
 func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
-	app := &App{}
+	app := withTestEnvops(&App{})
 	managed := &managedTerminal{}
 
 	for i := 1; i <= reconnectLoopMaxExits; i++ {
@@ -380,7 +380,7 @@ func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 // Respawning after a deploy failure would re-deploy from every tab at once.
 func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
 	emits := newCapturedEmits()
-	app := &App{}
+	app := withTestEnvops(&App{})
 	app.SetEmitter(emits.fn())
 
 	respawned := false
@@ -408,7 +408,7 @@ func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
 // The deploy failed in a separate activity, so this open's readyErr is clean.
 func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
 	emits := newCapturedEmits()
-	app := &App{}
+	app := withTestEnvops(&App{})
 	app.SetEmitter(emits.fn())
 	app.activityQueue = newActivityQueueStore(nil, nil)
 	failed, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "petios", Environment: "rihards-develop"})
@@ -441,7 +441,7 @@ func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
 // A healthy session that drops reconnects; its open skips the current deploy.
 func TestTryReconnectAfterHealthyDropRespawns(t *testing.T) {
 	emits := newCapturedEmits()
-	app := &App{}
+	app := withTestEnvops(&App{})
 	app.SetEmitter(emits.fn())
 
 	respawned := false

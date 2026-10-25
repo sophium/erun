@@ -36,7 +36,7 @@ func (a *App) DeleteEnvironment(selection uimodel.Selection, confirmation string
 	}
 
 	// A later re-create of this env must fire environment-initialized again.
-	a.clearInitEmitted(selection.Tenant, selection.Environment)
+	a.envops.ClearInitEmitted(selection.Tenant, selection.Environment)
 	result, err := lifecycle.RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -96,7 +96,7 @@ func (a *App) CloseEnvironmentSessions(selection uimodel.Selection) ([]int, erro
 	}
 	targets := a.collectAndMarkClosedForSelection(selection)
 	// Stop the env's workspace-sync worker; reopening restarts it.
-	a.stopWorkspaceSyncForSelection(selection)
+	a.envops.StopWorkspaceSync(selection)
 	// Reopening must start from a fresh pod reading.
 	a.forgetSessionHeartbeats(selection)
 	return a.closeManagedTerminals(targets)

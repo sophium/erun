@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 )
 
@@ -119,7 +120,7 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 			})
 			sealForwardForSweep(t)
 			var state runtimeview.ActivityState
-			for range forwardRepairAttempts + 2 {
+			for range envops.ForwardRepairAttempts + 2 {
 				state = sweepUntilRebindSettles(t, app)
 			}
 

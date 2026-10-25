@@ -281,7 +281,7 @@ func (a *App) linkOrchestratorEnvironments(refs []configpkg.OrchestratorEnvConfi
 		if a.orchestratorRefNamesHostEnv(ref) {
 			continue
 		}
-		a.ensureEnvRuntimeOnce(uimodel.Selection{Tenant: ref.Tenant, Environment: ref.Environment})
+		a.envops.EnsureRuntimeOnce(uimodel.Selection{Tenant: ref.Tenant, Environment: ref.Environment})
 	}
 	return nil
 }

@@ -32,7 +32,7 @@ func exitPayloadFor(t *testing.T, app *App, managed *managedTerminal, reason str
 // The mark comes from the close itself: it can error after killing everything
 // it reached.
 func TestACloseReportsTheExitsItKilledAsItsOwn(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	managed := &managedTerminal{
 		selection: target,
@@ -56,7 +56,7 @@ func TestACloseReportsTheExitsItKilledAsItsOwn(t *testing.T) {
 }
 
 func TestASessionThatDiesOnItsOwnIsNotMarkedDeliberate(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	managed := &managedTerminal{
 		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		session:   newStubTerminalSession(),
@@ -98,7 +98,7 @@ func managedWithSession(app *App, session terminalSession, serial int) *managedT
 }
 
 func TestACloseThatCouldNotKillDoesNotOwnTheSurvivorsExit(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	managed := managedWithSession(app, newSurvivingTerminalSession(), 43)
 
@@ -132,7 +132,7 @@ func TestACloseThatCouldNotKillDoesNotOwnTheSurvivorsExitOnEveryTeardownPath(t *
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			app := &App{sessions: make(map[string]*managedTerminal)}
+			app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 			managed := managedWithSession(app, newSurvivingTerminalSession(), 44)
 
 			_ = test.close(app, managed)
@@ -147,7 +147,7 @@ func TestACloseThatCouldNotKillDoesNotOwnTheSurvivorsExitOnEveryTeardownPath(t *
 
 // A Close that killed the process but failed to release the pty keeps the claim.
 func TestACloseThatCouldNotReleaseItsPtyStillOwnsItsExit(t *testing.T) {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestEnvops(&App{sessions: make(map[string]*managedTerminal)})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	session := &ptyReleaseFailureSession{stubTerminalSession: newStubTerminalSession()}
 	managed := managedWithSession(app, session, 45)

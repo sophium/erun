@@ -15,7 +15,7 @@ func newTestAppForActivityQueue(t *testing.T) *App {
 		sessions: make(map[string]*managedTerminal),
 	}
 	app.activityQueue = newActivityQueueStore(nil, nil)
-	return app
+	return withTestEnvops(app)
 }
 
 func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {

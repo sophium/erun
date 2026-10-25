@@ -19,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
@@ -71,7 +72,7 @@ type erunUIDeps struct {
 	savePastedFile            func(pastedFileSaveParams) (string, error)
 	listAgentOutputs          func(config.OpenResult, model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error)
 	downloadAgentOutput       func(config.OpenResult, model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error)
-	loadDiff                  func(context.Context, string, string, uiDiffOptions) (model.DiffResult, error)
+	loadDiff                  func(context.Context, string, string, uimodel.DiffOptions) (model.DiffResult, error)
 	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (model.CommitWorkingTreeResult, error)
 	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (model.PushWorkingTreeBranchResult, error)
 	loadIdleStatus            func(context.Context, string, string) (model.EnvironmentIdleStatus, error)
@@ -123,15 +124,11 @@ type App struct {
 	sessionWG        sync.WaitGroup
 	idleStops        map[string]struct{}
 	intentionalStops map[string]struct{}
-	// runtimeStops is separate from intentionalStops because their recoveries differ.
-	runtimeStops map[string]struct{}
 	// sessionHeartbeats is the latest pod observation of live sessions per environment.
 	sessionHeartbeats map[string]sessionHeartbeat
 	aiSessionReadings map[string]aiSessionReading
-	forwardRepairs    map[string]forwardRepairEpisode
 	edgeOutages       map[string]orchestratorEdgeOutage
 	busyEnvs          map[string]int
-	workspaceSyncs    map[string]*workspaceSyncWorker
 	orchestrators     map[string]*orchestratorSession
 	// unmanagedPacingReason dedups pacing log lines for orchestrators without a session. Guarded by a.mu.
 	unmanagedPacingReason map[string]orchestratorPacingReason
@@ -148,16 +145,8 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
-	envEnsureMu               sync.Mutex
-	envEnsureInflight         map[string]*envEnsureRun
-	envEnsureDone             map[string]time.Time
-	envEnsureFailNotified     map[string]struct{}
-	// initEmitted fires environment-initialized once per env: a Windows ConPTY repaint
-	// re-sends "==> Initialized", which would loop create→deploy.
-	initEmittedMu  sync.Mutex
-	initEmitted    map[string]struct{}
-	contribute     *contributeStore
-	contributeApps *contributeAppForwards
+	contribute                *contributeStore
+	contributeApps            *contributeAppForwards
 
 	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
 	closeConfirmed bool
@@ -178,6 +167,7 @@ type App struct {
 	cloudContexts *cloudctx.Service
 	settings      *settingssvc.Service
 	runtime       *runtimeview.Service
+	envops        *envops.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -223,10 +213,8 @@ func NewApp(deps erunUIDeps) *App {
 		sessions:              make(map[string]*managedTerminal),
 		idleStops:             make(map[string]struct{}),
 		intentionalStops:      make(map[string]struct{}),
-		runtimeStops:          make(map[string]struct{}),
 		sessionHeartbeats:     make(map[string]sessionHeartbeat),
 		busyEnvs:              make(map[string]int),
-		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
 		orchestrators:         make(map[string]*orchestratorSession),
 		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
 	}
@@ -255,6 +243,7 @@ func NewApp(deps erunUIDeps) *App {
 		ConfiguredERunAliases: app.configuredERunAliases,
 	})
 	app.cloudContexts = app.newCloudContextService(time.Now)
+	app.envops = app.newEnvopsService()
 	app.settings = app.newSettingsService()
 	app.runtime = app.newRuntimeService()
 	if app.identity == nil {
@@ -305,9 +294,11 @@ func (a *App) newSettingsService() *settingssvc.Service {
 		SetRemoteCloudAlias: func(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
 			return a.deps.setRemoteCloudAlias(ctx, endpoint, bearer, tenant, environment, alias)
 		},
-		ReconcileWorkspaceSync: a.reconcileWorkspaceSyncForSelection,
+		ReconcileWorkspaceSync: func(selection uimodel.Selection, enabled bool) {
+			a.envops.ReconcileWorkspaceSync(selection, enabled)
+		},
 		WorkspaceSyncStatus: func(selection uimodel.Selection) (string, string) {
-			status := a.workspaceSyncStatus(selection)
+			status := a.envops.WorkspaceSyncStatus(selection)
 			return status.Status, status.Message
 		},
 		PlatformReady: func(tenant string) bool {
@@ -352,7 +343,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startRestartControl()
 	go a.settings.CatchUpHostedDefinitions()
 	// Off the startup path so per-env I/O does not delay first paint.
-	go a.reconcileWorkspaceSyncForConfiguredEnvs()
+	go a.envops.ReconcileConfiguredWorkspaceSyncs()
 }
 
 func (a *App) shutdown(context.Context) {
@@ -363,10 +354,10 @@ func (a *App) shutdown(context.Context) {
 	a.investigations.stopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()
-	// The refreshers' own lock is a leaf, so stop them before taking a.mu.
+	// The refreshers' and sync workers' own locks are leaves, so stop them before taking a.mu.
 	a.cloudContexts.StopAllRefreshers()
+	a.envops.StopAllWorkspaceSyncs()
 	a.mu.Lock()
-	a.stopAllWorkspaceSyncsLocked()
 	a.closeAllSessionsLocked()
 	a.mu.Unlock()
 	// Readers take a.mu on exit, so wait outside the lock.

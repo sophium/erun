@@ -108,9 +108,13 @@ func (a *App) newRuntimeService() *runtimeview.Service {
 		RunCommand: func(ctx context.Context, dir, name string, args ...string) (string, error) {
 			return a.deps.runWorkingIssueCommand(ctx, dir, name, args...)
 		},
-		ForgetForwardRepair:    a.forgetForwardRepair,
-		ReconcileForwardHealth: a.reconcileForwardHealth,
-		NoteEdgeAnswering:      a.noteOrchestratorEdgeAnswering,
+		ForgetForwardRepair: func(selection uimodel.Selection) {
+			a.envops.ForgetForwardRepair(selection)
+		},
+		ReconcileForwardHealth: func(selection uimodel.Selection, port int, portIsBound bool) bool {
+			return a.envops.ReconcileForwardHealth(selection, port, portIsBound)
+		},
+		NoteEdgeAnswering: a.noteOrchestratorEdgeAnswering,
 		EffectiveContainerRegistries: func(tenant, environment string, env config.EnvConfig) (config.ContainerRegistries, bool) {
 			return a.settings.EffectiveContainerRegistries(tenant, environment, env)
 		},

@@ -1,7 +1,6 @@
-package main
+package envops
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +13,8 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func hostWorkspaceStore(localPath string) stubUIStore {
-	return stubUIStore{
+func hostWorkspaceStore(localPath string) fakeStore {
+	return fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
@@ -42,10 +41,9 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.Enabled = false
 	store.envs["frs/dev"] = env
-	app := NewApp(erunUIDeps{store: store})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: store})
 
-	if _, _, err := app.resolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"}); err == nil {
+	if _, _, err := service.ResolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"}); err == nil {
 		t.Fatal("expected a remote-agent env without workspace sync to have no host workspace")
 	}
 }
@@ -53,21 +51,20 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 	local := t.TempDir()
 	outputs := filepath.Join(local, workspace.WorkspaceSyncArtifactsSubdir)
-	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
+	requireNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
+	requireNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 
 	var launched, launchedDir string
-	app := NewApp(erunUIDeps{
-		store: hostWorkspaceStore(local),
-		launchHostArtifact: func(exePath, dir string) error {
+	service := newTestService(Deps{
+		Store: hostWorkspaceStore(local),
+		LaunchHostArtifact: func(exePath, dir string) error {
 			launched = exePath
 			launchedDir = dir
 			return nil
 		},
 	})
-	defer app.shutdown(context.Background())
 
-	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "erun-app.exe"); err != nil {
+	if err := service.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "erun-app.exe"); err != nil {
 		t.Fatalf("RunHostArtifact failed: %v", err)
 	}
 	if launched != filepath.Join(outputs, "erun-app.exe") {
@@ -80,22 +77,21 @@ func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 
 func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 	local := t.TempDir()
-	app := NewApp(erunUIDeps{
-		store:              hostWorkspaceStore(local),
-		launchHostArtifact: func(string, string) error { return nil },
+	service := newTestService(Deps{
+		Store:              hostWorkspaceStore(local),
+		LaunchHostArtifact: func(string, string) error { return nil },
 	})
-	defer app.shutdown(context.Background())
 
-	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "../escape.exe"); err == nil {
+	if err := service.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "../escape.exe"); err == nil {
 		t.Fatal("expected a traversal path to be rejected")
 	}
-	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "missing.exe"); err == nil {
+	if err := service.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "missing.exe"); err == nil {
 		t.Fatal("expected a missing artifact to error")
 	}
 }
 
-func hostTypeEnvironmentStore(localPath string) stubUIStore {
-	return stubUIStore{
+func hostTypeEnvironmentStore(localPath string) fakeStore {
+	return fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
@@ -112,11 +108,10 @@ func hostTypeEnvironmentStore(localPath string) stubUIStore {
 func TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment(t *testing.T) {
 	local := t.TempDir()
 	store := hostTypeEnvironmentStore(local)
-	app := NewApp(erunUIDeps{store: store})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: store})
 
-	_, path, err := app.resolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"})
-	requireWorkspaceSyncNoError(t, err, "resolve host workspace for a host-type env")
+	_, path, err := service.ResolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"})
+	requireNoError(t, err, "resolve host workspace for a host-type env")
 	if path != local {
 		t.Fatalf("expected host workspace path %q, got %q", local, path)
 	}
@@ -126,22 +121,21 @@ func TestLoadHostDiffReadsHostWorktreeWithoutMCP(t *testing.T) {
 	local := t.TempDir()
 	runGit := func(args ...string) {
 		cmd := exec.Command("git", append([]string{"-C", local}, args...)...)
-		requireWorkspaceSyncNoError(t, cmd.Run(), "git "+strings.Join(args, " "))
+		requireNoError(t, cmd.Run(), "git "+strings.Join(args, " "))
 	}
 	runGit("init")
 	runGit("config", "user.email", "t@example")
 	runGit("config", "user.name", "t")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n"), 0o644), "write baseline")
+	requireNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n"), 0o644), "write baseline")
 	runGit("add", ".")
 	runGit("commit", "-m", "init")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
+	requireNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
 
 	// No loadDiff/MCP dep is wired: a host diff must never dial the in-pod MCP.
-	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: hostWorkspaceStore(local)})
 
-	diff, err := app.LoadHostDiff(uimodel.Selection{Tenant: "frs", Environment: "dev"}, uiDiffOptions{})
-	requireWorkspaceSyncNoError(t, err, "load host diff")
+	diff, err := service.LoadHostDiff(uimodel.Selection{Tenant: "frs", Environment: "dev"}, uimodel.DiffOptions{})
+	requireNoError(t, err, "load host diff")
 	if diff.WorkingDirectory != local {
 		t.Fatalf("expected working dir %q, got %q", local, diff.WorkingDirectory)
 	}
@@ -160,21 +154,20 @@ func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
 	local := t.TempDir()
 	runGit := func(args ...string) {
 		cmd := exec.Command("git", append([]string{"-C", local}, args...)...)
-		requireWorkspaceSyncNoError(t, cmd.Run(), "git "+strings.Join(args, " "))
+		requireNoError(t, cmd.Run(), "git "+strings.Join(args, " "))
 	}
 	runGit("init")
 	runGit("config", "user.email", "t@example")
 	runGit("config", "user.name", "t")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n"), 0o644), "write baseline")
+	requireNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n"), 0o644), "write baseline")
 	runGit("add", ".")
 	runGit("commit", "-m", "init")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
+	requireNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
 
-	app := NewApp(erunUIDeps{})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{})
 
-	diff, err := app.LoadDirectoryDiff(local, uiDiffOptions{})
-	requireWorkspaceSyncNoError(t, err, "load directory diff")
+	diff, err := service.LoadDirectoryDiff(local, uimodel.DiffOptions{})
+	requireNoError(t, err, "load directory diff")
 	if diff.WorkingDirectory != local {
 		t.Fatalf("expected working dir %q, got %q", local, diff.WorkingDirectory)
 	}
@@ -192,21 +185,20 @@ func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
 func TestLoadDirectoryDiffRefusesAnUnusablePath(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a-file")
-	requireWorkspaceSyncNoError(t, os.WriteFile(file, []byte("x"), 0o644), "write file")
+	requireNoError(t, os.WriteFile(file, []byte("x"), 0o644), "write file")
 	missing := filepath.Join(dir, "not-there")
 
-	app := NewApp(erunUIDeps{})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{})
 
-	if _, err := app.LoadDirectoryDiff("", uiDiffOptions{}); err == nil {
+	if _, err := service.LoadDirectoryDiff("", uimodel.DiffOptions{}); err == nil {
 		t.Fatal("expected an empty path to be refused")
 	}
-	if _, err := app.LoadDirectoryDiff(missing, uiDiffOptions{}); err == nil {
+	if _, err := service.LoadDirectoryDiff(missing, uimodel.DiffOptions{}); err == nil {
 		t.Fatal("expected a missing directory to be refused")
 	} else if !strings.Contains(err.Error(), missing) {
 		t.Fatalf("refusal should name the path, got %q", err)
 	}
-	if _, err := app.LoadDirectoryDiff(file, uiDiffOptions{}); err == nil {
+	if _, err := service.LoadDirectoryDiff(file, uimodel.DiffOptions{}); err == nil {
 		t.Fatal("expected a file rather than a directory to be refused")
 	}
 }

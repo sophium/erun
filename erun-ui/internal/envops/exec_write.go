@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"errors"
@@ -12,29 +12,18 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// uiExecCommitInput.Branch is verified server-side and refused on mismatch.
-type uiExecCommitInput struct {
+// ExecCommitInput.Branch is verified server-side and refused on mismatch.
+type ExecCommitInput struct {
 	Branch  string `json:"branch"`
 	Message string `json:"message"`
 }
 
-type uiExecPushInput struct {
+type ExecPushInput struct {
 	Branch string `json:"branch"`
 	Remote string `json:"remote,omitempty"`
 }
 
-// withDefaultExecWriteDeps is split out to stay under the cyclomatic-complexity cap.
-func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
-	if deps.execCommit == nil {
-		deps.execCommit = execCommitViaMCP
-	}
-	if deps.execPush == nil {
-		deps.execPush = execPushViaMCP
-	}
-	return deps
-}
-
-func validateExecCommitInput(selection uimodel.Selection, input uiExecCommitInput) (branch, message string, err error) {
+func validateExecCommitInput(selection uimodel.Selection, input ExecCommitInput) (branch, message string, err error) {
 	if err := uimodel.ErrMissingTenantOrEnvironment("commit environment working tree", selection.Tenant, selection.Environment); err != nil {
 		return "", "", err
 	}
@@ -51,38 +40,38 @@ func validateExecCommitInput(selection uimodel.Selection, input uiExecCommitInpu
 
 // ExecCommit commits the selected environment's working tree immediately; there
 // is no preview.
-func (a *App) ExecCommit(selection uimodel.Selection, input uiExecCommitInput) (model.CommitWorkingTreeResult, error) {
+func (s *Service) ExecCommit(selection uimodel.Selection, input ExecCommitInput) (model.CommitWorkingTreeResult, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	branch, message, err := validateExecCommitInput(selection, input)
 	if err != nil {
 		return model.CommitWorkingTreeResult{}, err
 	}
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
 		return model.CommitWorkingTreeResult{}, err
 	}
-	ctx := a.context()
+	ctx := s.d.Context()
 	mcpPort := config.MCPPortForResult(result)
-	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return model.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
-			a.classifyMCPUnreachable(mcpPort),
+	if !s.d.CanReachMCPEndpoint(mcpPort) {
+		return model.CommitWorkingTreeResult{}, s.d.WrapMCPUnreachable(
+			s.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
 	}
-	endpoint := mcpEndpointForOpenResult(result)
-	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
-	commit, err := a.deps.execCommit(ctx, endpoint, bearer, branch, message)
-	if err != nil && isMCPDialFailure(err) {
-		return model.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+	endpoint := s.d.MCPEndpoint(result)
+	bearer := s.d.MCPBearer(result.Tenant, result.EnvConfig.Name)
+	commit, err := s.d.ExecCommit(ctx, endpoint, bearer, branch, message)
+	if err != nil && s.d.IsMCPDialFailure(err) {
+		return model.CommitWorkingTreeResult{}, s.d.WrapMCPUnreachable(s.classifyMCPUnreachable(mcpPort), err)
 	}
 	return commit, err
 }
 
 // ExecPush pushes the selected environment's current branch to its remote.
-func (a *App) ExecPush(selection uimodel.Selection, input uiExecPushInput) (model.PushWorkingTreeBranchResult, error) {
+func (s *Service) ExecPush(selection uimodel.Selection, input ExecPushInput) (model.PushWorkingTreeBranchResult, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)
 	if err := uimodel.ErrMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
@@ -91,26 +80,26 @@ func (a *App) ExecPush(selection uimodel.Selection, input uiExecPushInput) (mode
 	if branch == "" {
 		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
 		return model.PushWorkingTreeBranchResult{}, err
 	}
-	ctx := a.context()
+	ctx := s.d.Context()
 	mcpPort := config.MCPPortForResult(result)
-	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return model.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
-			a.classifyMCPUnreachable(mcpPort),
+	if !s.d.CanReachMCPEndpoint(mcpPort) {
+		return model.PushWorkingTreeBranchResult{}, s.d.WrapMCPUnreachable(
+			s.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
 	}
-	endpoint := mcpEndpointForOpenResult(result)
-	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
-	push, err := a.deps.execPush(ctx, endpoint, bearer, branch, strings.TrimSpace(input.Remote))
-	if err != nil && isMCPDialFailure(err) {
-		return model.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+	endpoint := s.d.MCPEndpoint(result)
+	bearer := s.d.MCPBearer(result.Tenant, result.EnvConfig.Name)
+	push, err := s.d.ExecPush(ctx, endpoint, bearer, branch, strings.TrimSpace(input.Remote))
+	if err != nil && s.d.IsMCPDialFailure(err) {
+		return model.PushWorkingTreeBranchResult{}, s.d.WrapMCPUnreachable(s.classifyMCPUnreachable(mcpPort), err)
 	}
 	return push, err
 }

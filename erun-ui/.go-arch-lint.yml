@@ -35,6 +35,8 @@ components:
     in: "headlessserver"
   internal-cloudctx:
     in: "internal/cloudctx"
+  internal-envops:
+    in: "internal/envops"
   internal-runtimeview:
     in: "internal/runtimeview"
   internal-settings:
@@ -52,6 +54,12 @@ deps:
       - internal-uimodel
     canUse:
       - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  internal-envops:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
       - github-com-sophium-erun-erun-common
   internal-runtimeview:
     mayDependOn:
@@ -75,6 +83,7 @@ deps:
     mayDependOn:
       - headlessserver
       - internal-cloudctx
+      - internal-envops
       - internal-runtimeview
       - internal-settings
       - internal-tenant

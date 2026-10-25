@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 
 func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *testing.T) {
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{
+	service := newTestService(Deps{
+		Store: fakeStore{
 			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
@@ -26,7 +26,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
+		ResolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != config.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
@@ -48,7 +48,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 		},
 	})
 
-	plan, err := app.ResolveUpgradePlan()
+	plan, err := service.ResolveUpgradePlan()
 	if err != nil {
 		t.Fatalf("ResolveUpgradePlan failed: %v", err)
 	}
@@ -70,8 +70,8 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) {
 	const tenantSnapshot = "1.0.90-snapshot-20260606090000"
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{
+	service := newTestService(Deps{
+		Store: fakeStore{
 			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
@@ -84,10 +84,10 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: disagreeingSnapshotRegistry(t, tenantSnapshot, defaultSnapshot),
+		ResolveImageRegistry: disagreeingSnapshotRegistry(t, tenantSnapshot, defaultSnapshot),
 	})
 
-	plan, err := app.ResolveUpgradePlan()
+	plan, err := service.ResolveUpgradePlan()
 	if err != nil {
 		t.Fatalf("ResolveUpgradePlan failed: %v", err)
 	}
@@ -146,8 +146,8 @@ func assertCandidateVersions(t *testing.T, candidates []model.UpgradeVersionCand
 
 func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T) {
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{
+	service := newTestService(Deps{
+		Store: fakeStore{
 			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
@@ -160,7 +160,7 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
+		ResolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
 				return model.RuntimeRegistryVersions{
 					LatestStable:   "1.0.85",
@@ -171,7 +171,7 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 		},
 	})
 
-	plan, err := app.ResolveUpgradePlan()
+	plan, err := service.ResolveUpgradePlan()
 	if err != nil {
 		t.Fatalf("ResolveUpgradePlan failed: %v", err)
 	}
@@ -185,8 +185,8 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 }
 
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{
+	service := newTestService(Deps{
+		Store: fakeStore{
 			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
@@ -199,7 +199,7 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
+		ResolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
 				return model.RuntimeRegistryVersions{}, errors.New("registry unreachable")
 			}
@@ -207,7 +207,7 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 		},
 	})
 
-	plan, err := app.ResolveUpgradePlan()
+	plan, err := service.ResolveUpgradePlan()
 	if err != nil {
 		t.Fatalf("ResolveUpgradePlan failed: %v", err)
 	}

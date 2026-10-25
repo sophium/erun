@@ -1,7 +1,6 @@
-package main
+package envops
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,7 +51,7 @@ func TestHostRevealCommandPerOS(t *testing.T) {
 	}
 	for _, c := range cases {
 		executable, args, err := hostRevealCommand(c.goos, c.target)
-		requireWorkspaceSyncNoError(t, err, c.goos+" reveal command")
+		requireNoError(t, err, c.goos+" reveal command")
 		if executable != c.executable {
 			t.Fatalf("%s: expected executable %q, got %q", c.goos, c.executable, executable)
 		}
@@ -65,21 +64,19 @@ func TestHostRevealCommandPerOS(t *testing.T) {
 func TestOpenHostPathPassesArgumentNeverShell(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "chip-migration-audit.xlsx")
-	requireWorkspaceSyncNoError(t, os.WriteFile(target, []byte("x"), 0o644), "write target")
+	requireNoError(t, os.WriteFile(target, []byte("x"), 0o644), "write target")
 
 	var gotExecutable string
 	var gotArgs []string
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{},
-		launchHostOpener: func(executable string, args []string) error {
+	service := newTestService(Deps{
+		LaunchHostOpener: func(executable string, args []string) error {
 			gotExecutable = executable
 			gotArgs = args
 			return nil
 		},
 	})
-	defer app.shutdown(context.Background())
 
-	if err := app.OpenHostPath(target); err != nil {
+	if err := service.OpenHostPath(target); err != nil {
 		t.Fatalf("OpenHostPath failed: %v", err)
 	}
 	if gotExecutable == "" {
@@ -91,27 +88,24 @@ func TestOpenHostPathPassesArgumentNeverShell(t *testing.T) {
 }
 
 func TestOpenHostPathRejectsMissingFile(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		store:            stubUIStore{},
-		launchHostOpener: func(string, []string) error { return nil },
+	service := newTestService(Deps{
+		LaunchHostOpener: func(string, []string) error { return nil },
 	})
-	defer app.shutdown(context.Background())
 
-	if err := app.OpenHostPath(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
+	if err := service.OpenHostPath(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
 		t.Fatal("expected a missing host file to error")
 	}
 }
 
 func TestResolveEnvironmentHostPathMapsPodWorktreeToMirror(t *testing.T) {
 	local := t.TempDir()
-	requireWorkspaceSyncNoError(t, os.MkdirAll(filepath.Join(local, "erun-ui"), 0o755), "mkdir")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "erun-ui", "app.go"), []byte("package main\n"), 0o644), "write file")
+	requireNoError(t, os.MkdirAll(filepath.Join(local, "erun-ui"), 0o755), "mkdir")
+	requireNoError(t, os.WriteFile(filepath.Join(local, "erun-ui", "app.go"), []byte("package main\n"), 0o644), "write file")
 
-	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: hostWorkspaceStore(local)})
 
-	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/erun-ui/app.go")
-	requireWorkspaceSyncNoError(t, err, "resolve pod path")
+	resolution, err := service.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/erun-ui/app.go")
+	requireNoError(t, err, "resolve pod path")
 	if resolution.Kind != "mirror" {
 		t.Fatalf("expected kind mirror, got %+v", resolution)
 	}
@@ -123,14 +117,13 @@ func TestResolveEnvironmentHostPathMapsPodWorktreeToMirror(t *testing.T) {
 func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	local := t.TempDir()
 	outputs := filepath.Join(local, workspace.WorkspaceSyncArtifactsSubdir)
-	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
-	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
+	requireNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
+	requireNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 
-	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: hostWorkspaceStore(local)})
 
-	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, core.DefaultRuntimeOutputsDir+"/erun-app.exe")
-	requireWorkspaceSyncNoError(t, err, "resolve pod path")
+	resolution, err := service.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, core.DefaultRuntimeOutputsDir+"/erun-app.exe")
+	requireNoError(t, err, "resolve pod path")
 	if resolution.Kind != "artifact" {
 		t.Fatalf("expected kind artifact, got %+v", resolution)
 	}
@@ -142,11 +135,10 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 // /etc/hosts must never resolve to the host file.
 func TestResolveEnvironmentHostPathNeverResolvesArbitraryPodPathToHost(t *testing.T) {
 	local := t.TempDir()
-	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: hostWorkspaceStore(local)})
 
-	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/etc/hosts")
-	requireWorkspaceSyncNoError(t, err, "resolve pod path")
+	resolution, err := service.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/etc/hosts")
+	requireNoError(t, err, "resolve pod path")
 	if resolution.Kind != "unresolved" {
 		t.Fatalf("expected /etc/hosts to stay unresolved, got %+v", resolution)
 	}
@@ -163,21 +155,19 @@ func TestResolveEnvironmentHostPathReportsNoWorkspaceWhenSyncDisabled(t *testing
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.Enabled = false
 	store.envs["frs/dev"] = env
-	app := NewApp(erunUIDeps{store: store})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{Store: store})
 
-	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/main.go")
-	requireWorkspaceSyncNoError(t, err, "resolve pod path")
+	resolution, err := service.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/main.go")
+	requireNoError(t, err, "resolve pod path")
 	if resolution.Kind != "unresolved" || resolution.Reason == "" {
 		t.Fatalf("expected an unresolved result with a reason, got %+v", resolution)
 	}
 }
 
 func TestResolveEnvironmentHostPathRequiresTenantAndEnvironment(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	defer app.shutdown(context.Background())
+	service := newTestService(Deps{})
 
-	if _, err := app.ResolveEnvironmentHostPath(uimodel.Selection{}, "/etc/hosts"); err == nil {
+	if _, err := service.ResolveEnvironmentHostPath(uimodel.Selection{}, "/etc/hosts"); err == nil {
 		t.Fatal("expected missing tenant/environment to error")
 	}
 }

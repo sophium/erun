@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"fmt"
@@ -46,8 +46,9 @@ func hostRevealCommand(goos, target string) (string, []string, error) {
 	}
 }
 
-// Release lets the opener outlive this process.
-func launchHostOpenerDetached(executable string, args []string) error {
+// LaunchHostOpenerDetached is the production LaunchHostOpener seam. Release lets
+// the opener outlive this process.
+func LaunchHostOpenerDetached(executable string, args []string) error {
 	cmd := exec.Command(executable, args...)
 	core.HideConsoleWindow(cmd)
 	if err := cmd.Start(); err != nil {
@@ -61,7 +62,7 @@ func launchHostOpenerDetached(executable string, args []string) error {
 
 // OpenHostPath opens a host path with the OS handler; pod paths must go through
 // ResolveEnvironmentHostPath first.
-func (a *App) OpenHostPath(hostPath string) error {
+func (s *Service) OpenHostPath(hostPath string) error {
 	hostPath = strings.TrimSpace(hostPath)
 	if hostPath == "" {
 		return fmt.Errorf("path is required")
@@ -73,11 +74,11 @@ func (a *App) OpenHostPath(hostPath string) error {
 	if err != nil {
 		return err
 	}
-	return a.deps.launchHostOpener(executable, args)
+	return s.d.LaunchHostOpener(executable, args)
 }
 
 // RevealHostPath opens the host file manager focused on the given path.
-func (a *App) RevealHostPath(hostPath string) error {
+func (s *Service) RevealHostPath(hostPath string) error {
 	hostPath = strings.TrimSpace(hostPath)
 	if hostPath == "" {
 		return fmt.Errorf("path is required")
@@ -89,12 +90,12 @@ func (a *App) RevealHostPath(hostPath string) error {
 	if err != nil {
 		return err
 	}
-	return a.deps.launchHostOpener(executable, args)
+	return s.d.LaunchHostOpener(executable, args)
 }
 
-// A pod path must never resolve to a same-named host file; "unresolved" is the
-// safe default.
-type podPathResolution struct {
+// PodPathResolution: a pod path must never resolve to a same-named host file;
+// "unresolved" is the safe default.
+type PodPathResolution struct {
 	// Kind is "mirror", "artifact", or "unresolved".
 	Kind     string `json:"kind"`
 	HostPath string `json:"hostPath,omitempty"`
@@ -103,18 +104,18 @@ type podPathResolution struct {
 
 // ResolveEnvironmentHostPath maps a pod-side terminal path onto its host
 // equivalent via the outputs mirror or host workspace, else unresolved.
-func (a *App) ResolveEnvironmentHostPath(selection uimodel.Selection, podPath string) (podPathResolution, error) {
+func (s *Service) ResolveEnvironmentHostPath(selection uimodel.Selection, podPath string) (PodPathResolution, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	podPath = strings.TrimSpace(podPath)
 	if err := uimodel.ErrMissingTenantOrEnvironment("resolve environment host path", selection.Tenant, selection.Environment); err != nil {
-		return podPathResolution{}, err
+		return PodPathResolution{}, err
 	}
 	if podPath == "" {
-		return podPathResolution{}, fmt.Errorf("path is required")
+		return PodPathResolution{}, fmt.Errorf("path is required")
 	}
-	result, hostRoot, err := a.resolveHostWorkspace(selection)
+	result, hostRoot, err := s.ResolveHostWorkspace(selection)
 	if err != nil {
-		return podPathResolution{Kind: "unresolved", Reason: fmt.Sprint(err)}, nil
+		return PodPathResolution{Kind: "unresolved", Reason: fmt.Sprint(err)}, nil
 	}
 	cleanPodPath := path.Clean(filepath.ToSlash(podPath))
 	if rel, ok := relUnderPodDir(cleanPodPath, core.DefaultRuntimeOutputsDir); ok {
@@ -132,7 +133,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uimodel.Selection, podPath st
 			"this path has not synced to the host workspace yet",
 		), nil
 	}
-	return podPathResolution{
+	return PodPathResolution{
 		Kind:   "unresolved",
 		Reason: "this path is inside the environment's pod and has no host equivalent",
 	}, nil
@@ -151,9 +152,9 @@ func relUnderPodDir(podPath, dir string) (string, bool) {
 	return strings.TrimPrefix(podPath, prefix), true
 }
 
-func resolveHostMirrorPath(kind, hostPath, missingReason string) podPathResolution {
+func resolveHostMirrorPath(kind, hostPath, missingReason string) PodPathResolution {
 	if _, err := os.Stat(hostPath); err != nil {
-		return podPathResolution{Kind: "unresolved", Reason: missingReason}
+		return PodPathResolution{Kind: "unresolved", Reason: missingReason}
 	}
-	return podPathResolution{Kind: kind, HostPath: hostPath}
+	return PodPathResolution{Kind: kind, HostPath: hostPath}
 }

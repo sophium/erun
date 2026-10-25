@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -281,7 +282,7 @@ func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig)
 		wg.Add(1)
 		go func(selection uimodel.Selection) {
 			defer wg.Done()
-			a.ensureEnvRuntimeWithin(selection, envEnsureForBrokenForward, orchestratorEdgeRepairBudget)
+			a.envops.EnsureRuntimeWithin(selection, envops.EnsureForBrokenForward, orchestratorEdgeRepairBudget)
 		}(selection)
 	}
 	wg.Wait()
@@ -298,7 +299,7 @@ func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConf
 			continue
 		}
 		port := a.orchestratorMCPPort(tenant, environment)
-		if port <= 0 || a.mcpEdgeAnswers(port) {
+		if port <= 0 || a.envops.MCPEdgeAnswers(port) {
 			continue
 		}
 		dead = append(dead, uimodel.Selection{Tenant: tenant, Environment: environment})

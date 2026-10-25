@@ -159,7 +159,7 @@ func (a *App) investigateWorkingDir(tenant, environment string) string {
 	if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
 		return ""
 	}
-	_, path, err := a.resolveHostWorkspace(uimodel.Selection{Tenant: tenant, Environment: environment})
+	_, path, err := a.envops.ResolveHostWorkspace(uimodel.Selection{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return ""
 	}

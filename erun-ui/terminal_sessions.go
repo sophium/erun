@@ -74,7 +74,7 @@ func formatOpenIDEError(ide, output string, err error) error {
 	return fmt.Errorf("open %s: %w", ide, err)
 }
 
-func (a *App) LoadDiff(selection uimodel.Selection, options uiDiffOptions) (model.DiffResult, error) {
+func (a *App) LoadDiff(selection uimodel.Selection, options uimodel.DiffOptions) (model.DiffResult, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
@@ -198,7 +198,7 @@ func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	}
 	managed.signalReady(readyErr)
 	if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
-		go a.startWorkspaceSyncForSelection(managed.selection)
+		go a.envops.StartWorkspaceSync(managed.selection)
 	}
 }
 

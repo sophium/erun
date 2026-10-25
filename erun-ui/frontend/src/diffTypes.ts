@@ -69,7 +69,7 @@ export interface DiffCommit {
   date: string;
 }
 
-// UIDiffReviewStatus mirrors main.uiDiffReviewStatus. state is a bare string
+// UIDiffReviewStatus mirrors envops.DiffReviewStatus. state is a bare string
 // (Wails widens it), so switch with a default. 'checking' is frontend-only, and
 // 'checking'/'unavailable' differ from 'none', a confirmed absence.
 export interface UIDiffReviewStatus {

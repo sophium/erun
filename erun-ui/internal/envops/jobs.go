@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"errors"
@@ -22,13 +22,13 @@ import (
 // unreachable, never as empty.
 
 // LoadEnvironmentJobs lists an environment's retained jobs, newest first.
-func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJob, error) {
+func (s *Service) LoadEnvironmentJobs(tenant, environment string) ([]EnvironmentJob, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load environment jobs", tenant, environment); err != nil {
 		return nil, err
 	}
-	result, useMCP, err := a.jobsReachability(tenant, environment)
+	result, useMCP, err := s.jobsReachability(tenant, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -39,20 +39,20 @@ func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJo
 		}
 		return environmentJobsToUI(jobs), nil
 	}
-	jobs, err := a.deps.loadEnvironmentJobs(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
+	jobs, err := s.d.LoadJobs(s.d.Context(), s.d.MCPEndpoint(result), s.d.MCPBearer(tenant, environment))
 	if err != nil {
-		return nil, a.wrapJobMCPErr(result, err)
+		return nil, s.wrapJobMCPErr(result, err)
 	}
 	return environmentJobsToUI(jobs), nil
 }
 
 // ReadEnvironmentJobOutput returns one page of a job's captured output.
-func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJobOutput, error) {
+func (s *Service) ReadEnvironmentJobOutput(input JobOutputInput) (EnvironmentJobOutput, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	environment := strings.TrimSpace(input.Environment)
 	id := strings.TrimSpace(input.ID)
 	if tenant == "" || environment == "" || id == "" {
-		return uiEnvironmentJobOutput{}, fmt.Errorf("tenant, environment, and job id are required")
+		return EnvironmentJobOutput{}, fmt.Errorf("tenant, environment, and job id are required")
 	}
 	maxBytes := input.MaxBytes
 	if maxBytes <= 0 {
@@ -65,32 +65,32 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 		Offset:      input.Offset,
 		MaxBytes:    maxBytes,
 	}
-	result, useMCP, err := a.jobsReachability(tenant, environment)
+	result, useMCP, err := s.jobsReachability(tenant, environment)
 	if err != nil {
-		return uiEnvironmentJobOutput{}, err
+		return EnvironmentJobOutput{}, err
 	}
 	if !useMCP {
 		page, err := jobspkg.ReadEnvironmentJobOutput(params)
 		if err != nil {
-			return uiEnvironmentJobOutput{}, err
+			return EnvironmentJobOutput{}, err
 		}
 		return jobOutputToUI(page), nil
 	}
-	page, err := a.deps.readEnvironmentJobOutput(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
+	page, err := s.d.ReadJobOutput(s.d.Context(), s.d.MCPEndpoint(result), s.d.MCPBearer(tenant, environment), params)
 	if err != nil {
-		return uiEnvironmentJobOutput{}, a.wrapJobMCPErr(result, err)
+		return EnvironmentJobOutput{}, s.wrapJobMCPErr(result, err)
 	}
 	return jobOutputToUI(page), nil
 }
 
 // CancelEnvironmentJob signals the job's work but leaves the supervisor alive to
 // record the outcome.
-func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, error) {
+func (s *Service) CancelEnvironmentJob(input CancelJobInput) (EnvironmentJob, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	environment := strings.TrimSpace(input.Environment)
 	id := strings.TrimSpace(input.ID)
 	if tenant == "" || environment == "" || id == "" {
-		return uiEnvironmentJob{}, fmt.Errorf("tenant, environment, and job id are required")
+		return EnvironmentJob{}, fmt.Errorf("tenant, environment, and job id are required")
 	}
 	params := model.CancelEnvironmentJobParams{
 		Tenant:      tenant,
@@ -98,27 +98,27 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 		ID:          id,
 		Signal:      strings.TrimSpace(input.Signal),
 	}
-	result, useMCP, err := a.jobsReachability(tenant, environment)
+	result, useMCP, err := s.jobsReachability(tenant, environment)
 	if err != nil {
-		return uiEnvironmentJob{}, err
+		return EnvironmentJob{}, err
 	}
 	if !useMCP {
 		cancel, err := jobspkg.CancelEnvironmentJob(core.Context{}, params)
 		if err != nil {
-			return uiEnvironmentJob{}, err
+			return EnvironmentJob{}, err
 		}
 		return environmentJobToUI(cancel.Job), nil
 	}
-	cancel, err := a.deps.cancelEnvironmentJob(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
+	cancel, err := s.d.CancelJob(s.d.Context(), s.d.MCPEndpoint(result), s.d.MCPBearer(tenant, environment), params)
 	if err != nil {
-		return uiEnvironmentJob{}, a.wrapJobMCPErr(result, err)
+		return EnvironmentJob{}, s.wrapJobMCPErr(result, err)
 	}
 	return environmentJobToUI(cancel.Job), nil
 }
 
 // jobsReachability picks the MCP edge, the local store, or an unreachable error.
-func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+func (s *Service) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})
@@ -126,36 +126,36 @@ func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, b
 		return config.OpenResult{}, false, err
 	}
 	mcpPort := config.MCPPortForResult(result)
-	if a.deps.canReachMCPEndpoint(mcpPort) {
+	if s.d.CanReachMCPEndpoint(mcpPort) {
 		return result, true, nil
 	}
-	if kind := a.classifyMCPUnreachable(mcpPort); kind == mcp.LocalMCPStaleForward {
-		return config.OpenResult{}, false, wrapMCPUnreachableErrorWithKind(kind, errors.New(mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
+	if kind := s.classifyMCPUnreachable(mcpPort); kind == mcp.LocalMCPStaleForward {
+		return config.OpenResult{}, false, s.d.WrapMCPUnreachable(kind, errors.New(mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort)))
 	}
 	return result, false, nil
 }
 
 // wrapJobMCPErr reports a dial failure as unreachable; other errors pass through.
-func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
-	if err == nil || !isMCPDialFailure(err) {
+func (s *Service) wrapJobMCPErr(result config.OpenResult, err error) error {
+	if err == nil || !s.d.IsMCPDialFailure(err) {
 		return err
 	}
 	mcpPort := config.MCPPortForResult(result)
-	return wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+	return s.d.WrapMCPUnreachable(s.classifyMCPUnreachable(mcpPort), err)
 }
 
 const defaultJobOutputPageBytes = 65536
 
-func environmentJobsToUI(jobs []jobstate.EnvironmentJob) []uiEnvironmentJob {
-	out := make([]uiEnvironmentJob, 0, len(jobs))
+func environmentJobsToUI(jobs []jobstate.EnvironmentJob) []EnvironmentJob {
+	out := make([]EnvironmentJob, 0, len(jobs))
 	for _, job := range jobs {
 		out = append(out, environmentJobToUI(job))
 	}
 	return out
 }
 
-func jobOutputToUI(page jobspkg.EnvironmentJobOutput) uiEnvironmentJobOutput {
-	return uiEnvironmentJobOutput{
+func jobOutputToUI(page jobspkg.EnvironmentJobOutput) EnvironmentJobOutput {
+	return EnvironmentJobOutput{
 		Job:        environmentJobToUI(page.Job),
 		Offset:     page.Offset,
 		NextOffset: page.NextOffset,
@@ -165,8 +165,8 @@ func jobOutputToUI(page jobspkg.EnvironmentJobOutput) uiEnvironmentJobOutput {
 	}
 }
 
-func environmentJobToUI(job jobstate.EnvironmentJob) uiEnvironmentJob {
-	out := uiEnvironmentJob{
+func environmentJobToUI(job jobstate.EnvironmentJob) EnvironmentJob {
+	out := EnvironmentJob{
 		ID:        job.ID,
 		Name:      job.Name,
 		State:     job.State,
@@ -183,7 +183,7 @@ func environmentJobToUI(job jobstate.EnvironmentJob) uiEnvironmentJob {
 		out.EndedAtUnix = job.EndedAt.Unix()
 	}
 	if job.Progress != nil {
-		out.Progress = &uiEnvironmentJobProgress{
+		out.Progress = &EnvironmentJobProgress{
 			Activity:    job.Progress.Activity,
 			LastMessage: job.Progress.LastMessage,
 			Turns:       job.Progress.Turns,

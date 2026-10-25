@@ -1,10 +1,9 @@
-package main
+package envops
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -31,15 +30,17 @@ func hostWorkspacePath(result config.OpenResult, findProjectRoot seam.ProjectFin
 	return ""
 }
 
-func (a *App) resolveHostWorkspace(selection uimodel.Selection) (config.OpenResult, string, error) {
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+// ResolveHostWorkspace returns the environment's host workspace, or an error
+// naming how to get one.
+func (s *Service) ResolveHostWorkspace(selection uimodel.Selection) (config.OpenResult, string, error) {
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
 		return config.OpenResult{}, "", err
 	}
-	path := hostWorkspacePath(result, a.deps.findProjectRoot)
+	path := hostWorkspacePath(result, s.d.FindProjectRoot)
 	if strings.TrimSpace(path) == "" {
 		return result, "", fmt.Errorf("environment %s/%s has no host workspace; enable workspace sync so its worktree mirrors to this machine", selection.Tenant, selection.Environment)
 	}
@@ -48,7 +49,7 @@ func (a *App) resolveHostWorkspace(selection uimodel.Selection) (config.OpenResu
 
 // LoadDirectoryDiff diffs a directory that belongs to no environment, with no
 // env resolution or MCP. The path is validated here so errors name it.
-func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (model.DiffResult, error) {
+func (s *Service) LoadDirectoryDiff(directory string, options uimodel.DiffOptions) (model.DiffResult, error) {
 	path := strings.TrimSpace(directory)
 	if path == "" {
 		return model.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
@@ -69,12 +70,12 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (model.
 
 // LoadHostDiff diffs the env's host workspace with host git, never dialing the
 // in-pod MCP, so it works while the pod is stopped.
-func (a *App) LoadHostDiff(selection uimodel.Selection, options uiDiffOptions) (model.DiffResult, error) {
+func (s *Service) LoadHostDiff(selection uimodel.Selection, options uimodel.DiffOptions) (model.DiffResult, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
 		return model.DiffResult{}, err
 	}
-	_, path, err := a.resolveHostWorkspace(selection)
+	_, path, err := s.ResolveHostWorkspace(selection)
 	if err != nil {
 		return model.DiffResult{}, err
 	}
@@ -86,7 +87,7 @@ func (a *App) LoadHostDiff(selection uimodel.Selection, options uiDiffOptions) (
 }
 
 // OpenHostIDE launches VS Code or IntelliJ against the env's host workspace.
-func (a *App) OpenHostIDE(selection uimodel.Selection, ide string) error {
+func (s *Service) OpenHostIDE(selection uimodel.Selection, ide string) error {
 	selection = uimodel.NormalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
 	if err := uimodel.ErrMissingTenantOrEnvironment("open host IDE", selection.Tenant, selection.Environment); err != nil {
@@ -95,40 +96,26 @@ func (a *App) OpenHostIDE(selection uimodel.Selection, ide string) error {
 	if ide != "vscode" && ide != "intellij" {
 		return fmt.Errorf("unsupported IDE %q", ide)
 	}
-	_, path, err := a.resolveHostWorkspace(selection)
+	_, path, err := s.ResolveHostWorkspace(selection)
 	if err != nil {
 		return err
 	}
-	executable, args, err := localOpenIDECommand(runtime.GOOS, ide, path)
-	if err != nil {
-		return err
-	}
-	ctx := a.context()
-	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
-		Dir:        path,
-		Executable: executable,
-		Args:       args,
-		Env:        []string{appSessionEnvVar + "=1"},
-	})
-	if err == nil {
-		return nil
-	}
-	return formatOpenIDEError(ide, output, err)
+	return s.d.OpenHostIDE(ide, path)
 }
 
-type hostArtifact struct {
+type HostArtifact struct {
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"modTime"`
 }
 
 // ListHostArtifacts lists artifacts sync mirrored from the pod's outputs dir.
-func (a *App) ListHostArtifacts(selection uimodel.Selection) ([]hostArtifact, error) {
+func (s *Service) ListHostArtifacts(selection uimodel.Selection) ([]HostArtifact, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("list host artifacts", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
-	_, path, err := a.resolveHostWorkspace(selection)
+	_, path, err := s.ResolveHostWorkspace(selection)
 	if err != nil {
 		return nil, err
 	}
@@ -137,13 +124,13 @@ func (a *App) ListHostArtifacts(selection uimodel.Selection) ([]hostArtifact, er
 	if err != nil {
 		return nil, err
 	}
-	artifacts := make([]hostArtifact, 0, len(rels))
+	artifacts := make([]HostArtifact, 0, len(rels))
 	for _, rel := range rels {
 		info, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
 		if statErr != nil {
 			continue
 		}
-		artifacts = append(artifacts, hostArtifact{
+		artifacts = append(artifacts, HostArtifact{
 			Name:    rel,
 			Size:    info.Size(),
 			ModTime: info.ModTime().UTC().Format(time.RFC3339),
@@ -154,7 +141,7 @@ func (a *App) ListHostArtifacts(selection uimodel.Selection) ([]hostArtifact, er
 
 // RunHostArtifact launches a synced artifact on the host, detached; relPath
 // must stay within the artifact directory.
-func (a *App) RunHostArtifact(selection uimodel.Selection, relPath string) error {
+func (s *Service) RunHostArtifact(selection uimodel.Selection, relPath string) error {
 	selection = uimodel.NormalizeSelection(selection)
 	relPath = strings.TrimSpace(relPath)
 	if err := uimodel.ErrMissingTenantOrEnvironment("run host artifact", selection.Tenant, selection.Environment); err != nil {
@@ -163,7 +150,7 @@ func (a *App) RunHostArtifact(selection uimodel.Selection, relPath string) error
 	if !workspace.SafeWorkspaceSyncPath(relPath) {
 		return fmt.Errorf("invalid artifact path %q", relPath)
 	}
-	_, path, err := a.resolveHostWorkspace(selection)
+	_, path, err := s.ResolveHostWorkspace(selection)
 	if err != nil {
 		return err
 	}
@@ -181,6 +168,6 @@ func (a *App) RunHostArtifact(selection uimodel.Selection, relPath string) error
 		return fmt.Errorf("artifact %q is a directory", relPath)
 	}
 	// An artifact may predate sync-side signing, so re-check at launch.
-	a.reportHostArtifactSigning(codesign.SignHostArtifact(exePath))
-	return a.deps.launchHostArtifact(exePath, dir)
+	s.reportHostArtifactSigning(codesign.SignHostArtifact(exePath))
+	return s.d.LaunchHostArtifact(exePath, dir)
 }

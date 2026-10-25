@@ -51,39 +51,6 @@ type uiEnvironment struct {
 	Node *runtimeview.NodeSnapshot `json:"node,omitempty"`
 }
 
-// uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
-type uiEnvironmentStopResult struct {
-	Tenant         string `json:"tenant"`
-	Environment    string `json:"environment"`
-	Release        string `json:"release"`
-	Namespace      string `json:"namespace"`
-	AlreadyStopped bool   `json:"alreadyStopped"`
-	// RemainingComponents names components the stop deliberately left running.
-	RemainingComponents []string `json:"remainingComponents,omitempty"`
-}
-
-// uiRuntimeRunState lets Stop be offered only when the Deployment wants pods.
-// On a failed read Present is false and Message is set; that is not "not deployed".
-type uiRuntimeRunState struct {
-	Tenant          string `json:"tenant"`
-	Environment     string `json:"environment"`
-	Present         bool   `json:"present"`
-	DesiredReplicas int    `json:"desiredReplicas"`
-	ReadyReplicas   int    `json:"readyReplicas"`
-	// Stopped is distinct from pods that exist but are not ready.
-	Stopped bool `json:"stopped"`
-	// RemainingComponents names what a stop would leave running.
-	RemainingComponents []string `json:"remainingComponents,omitempty"`
-	Message             string   `json:"message,omitempty"`
-}
-
-type uiDiffOptions struct {
-	Scope          string `json:"scope,omitempty"`
-	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target "" or "env" diffs the runtime workdir; "erun" the contribute clone.
-	Target string `json:"target,omitempty"`
-}
-
 type uiBuildDetails struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit,omitempty"`
@@ -103,71 +70,6 @@ type uiVersionNotice struct {
 type uiVersionSuggestions struct {
 	Suggestions []uiVersion       `json:"suggestions"`
 	Notices     []uiVersionNotice `json:"notices,omitempty"`
-}
-
-// uiExposureList: Configured false means exposure cannot apply, distinct from
-// Restricted and from an empty list. NotConfiguredReason separates a host env
-// from a project missing its platform: block.
-type uiExposureList struct {
-	Configured          bool               `json:"configured"`
-	Restricted          bool               `json:"restricted"`
-	Error               string             `json:"error,omitempty"`
-	Services            []uiExposedService `json:"services"`
-	NotConfiguredReason string             `json:"notConfiguredReason,omitempty"`
-}
-
-// uiExposureNotConfiguredReason enumerates uiExposureList.NotConfiguredReason values.
-const (
-	uiExposureNotConfiguredHostEnvironment = "host-environment"
-	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
-)
-
-// uiExposedService: TLSReady matters only for https.
-type uiExposedService struct {
-	Service           string `json:"service"`
-	Hostname          string `json:"hostname"`
-	Scheme            string `json:"scheme"`
-	BackendService    string `json:"backendService,omitempty"`
-	TLSReady          bool   `json:"tlsReady,omitempty"`
-	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
-}
-
-// uiEnvironmentServiceList mirrors uiExposureList's three states.
-type uiEnvironmentServiceList struct {
-	Configured          bool                   `json:"configured"`
-	Restricted          bool                   `json:"restricted"`
-	Error               string                 `json:"error,omitempty"`
-	Services            []uiEnvironmentService `json:"services"`
-	NotConfiguredReason string                 `json:"notConfiguredReason,omitempty"`
-}
-
-// uiEnvironmentService lists Ports so the picker can offer one.
-type uiEnvironmentService struct {
-	Name     string                     `json:"name"`
-	Type     string                     `json:"type,omitempty"`
-	Ports    []uiEnvironmentServicePort `json:"ports,omitempty"`
-	Hostname string                     `json:"hostname,omitempty"`
-	Scheme   string                     `json:"scheme,omitempty"`
-	// ExposedAs is the hostname label, not necessarily the Service name.
-	ExposedAs string `json:"exposedAs,omitempty"`
-}
-
-type uiEnvironmentServicePort struct {
-	Name string `json:"name,omitempty"`
-	Port int    `json:"port"`
-}
-
-// uiExposeServiceInput: empty BackendService derives <tenant>-<service>.
-type uiExposeServiceInput struct {
-	Service        string `json:"service"`
-	BackendService string `json:"backendService,omitempty"`
-	TargetIP       string `json:"targetIP"`
-	Port           int    `json:"port,omitempty"`
-}
-
-// uiUnexposeResult names the DNS record removed.
-type uiUnexposeResult struct {
-	WildcardName string `json:"wildcardName"`
 }
 
 type deleteEnvironmentResult struct {

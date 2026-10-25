@@ -1,34 +1,37 @@
-package main
+package envops
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func exposureTestApp(t *testing.T, projectRoot string) *App {
+func exposureTestService(t *testing.T, projectRoot string) *Service {
 	t.Helper()
-	return &App{
-		deps: erunUIDeps{
-			store: stubUIStore{
-				envs: map[string]config.EnvConfig{
-					"team/dev":  {KubernetesContext: "team-context"},
-					"team/host": {Type: config.EnvironmentTypeHost},
-				},
-			},
-			findProjectRoot: func() (string, string, error) {
-				if projectRoot == "" {
-					return "", "", fmt.Errorf("no project found")
-				}
-				return filepath.Base(projectRoot), projectRoot, nil
+	return newTestService(Deps{
+		Store: fakeStore{
+			envs: map[string]config.EnvConfig{
+				"team/dev":  {KubernetesContext: "team-context"},
+				"team/host": {Type: config.EnvironmentTypeHost},
 			},
 		},
-	}
+		FindProjectRoot: func() (string, string, error) {
+			if projectRoot == "" {
+				return "", "", fmt.Errorf("no project found")
+			}
+			return filepath.Base(projectRoot), projectRoot, nil
+		},
+	})
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func exposableProjectRoot(t *testing.T) string {
@@ -58,8 +61,8 @@ func stubKubectlOutput(t *testing.T, stdout, stderr string, exitCode int) {
 }
 
 func TestListEnvironmentExposuresNotConfiguredWithoutPlatformBlock(t *testing.T) {
-	app := exposureTestApp(t, "")
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	service := exposureTestService(t, "")
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,30 +75,30 @@ func TestListEnvironmentExposuresNotConfiguredWithoutPlatformBlock(t *testing.T)
 	if len(result.Services) != 0 {
 		t.Fatalf("expected no services, got %+v", result.Services)
 	}
-	if result.NotConfiguredReason != uiExposureNotConfiguredNoPlatformBlock {
-		t.Fatalf("expected NotConfiguredReason %q, got %q", uiExposureNotConfiguredNoPlatformBlock, result.NotConfiguredReason)
+	if result.NotConfiguredReason != ExposureNotConfiguredNoPlatformBlock {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", ExposureNotConfiguredNoPlatformBlock, result.NotConfiguredReason)
 	}
 }
 
 func TestListEnvironmentExposuresNotConfiguredForHostEnvironment(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "host"})
+	service := exposureTestService(t, exposableProjectRoot(t))
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "host"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Configured {
 		t.Fatal("expected Configured=false for a host environment")
 	}
-	if result.NotConfiguredReason != uiExposureNotConfiguredHostEnvironment {
-		t.Fatalf("expected NotConfiguredReason %q, got %q", uiExposureNotConfiguredHostEnvironment, result.NotConfiguredReason)
+	if result.NotConfiguredReason != ExposureNotConfiguredHostEnvironment {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", ExposureNotConfiguredHostEnvironment, result.NotConfiguredReason)
 	}
 }
 
 func TestListEnvironmentExposuresRestrictedOnForbidden(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, "", `Error from server (Forbidden): ingresses.networking.k8s.io is forbidden: User "x" cannot list resource "ingresses"`, 1)
 
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,10 +114,10 @@ func TestListEnvironmentExposuresRestrictedOnForbidden(t *testing.T) {
 }
 
 func TestListEnvironmentExposuresErrorOnOtherFailure(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, "", "Unable to connect to the server: dial tcp: i/o timeout", 1)
 
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,10 +133,10 @@ func TestListEnvironmentExposuresErrorOnOtherFailure(t *testing.T) {
 }
 
 func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, `{"items":[{"metadata":{"name":"expose-api"},"spec":{"rules":[{"host":"api.frs-prod.services.test"}]}}]}`, "", 0)
 
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +164,7 @@ func stubKubectlIngressAndCertificates(t *testing.T, ingressJSON, certificateJSO
 // cert-manager writes the tls block before issuance, so TLSReady must follow
 // the Certificate.
 func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlIngressAndCertificates(t,
 		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
 			"rules":[{"host":"web.frs-prod.services.test"}],
@@ -172,7 +175,7 @@ func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T)
 		]}}]}`,
 	)
 
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +192,7 @@ func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T)
 }
 
 func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlIngressAndCertificates(t,
 		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
 			"rules":[{"host":"web.frs-prod.services.test"}],
@@ -200,7 +203,7 @@ func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
 		]}}]}`,
 	)
 
-	result, err := app.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -214,15 +217,15 @@ func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
 }
 
 func TestExposeEnvironmentServiceRequiresServiceAndTargetIP(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
-	if _, err := app.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, uiExposeServiceInput{}); err == nil {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	if _, err := service.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, ExposeServiceInput{}); err == nil {
 		t.Fatal("expected an error when service and target IP are both missing")
 	}
 }
 
 func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
-	app := exposureTestApp(t, "")
-	_, err := app.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, uiExposeServiceInput{
+	service := exposureTestService(t, "")
+	_, err := service.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, ExposeServiceInput{
 		Service: "api", TargetIP: "127.0.0.1",
 	})
 	if err == nil {
@@ -243,7 +246,7 @@ func stubKubectlByResource(t *testing.T, serviceJSON, ingressJSON string) {
 }
 
 func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlByResource(t,
 		`{"items":[
 			{"metadata":{"name":"validation-agent-backend-api"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":8000,"protocol":"TCP"}]}},
@@ -255,7 +258,7 @@ func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
 		}}]}`,
 	)
 
-	result, err := app.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,12 +267,12 @@ func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
 	}
 	// Exposure matches through the Ingress backend, so off-convention names still
 	// count; team-mcp has no route.
-	want := []uiEnvironmentService{
-		{Name: "team-mcp", Type: "ClusterIP", Ports: []uiEnvironmentServicePort{{Port: 80}}},
+	want := []EnvironmentService{
+		{Name: "team-mcp", Type: "ClusterIP", Ports: []EnvironmentServicePort{{Port: 80}}},
 		{
 			Name:      "validation-agent-backend-api",
 			Type:      "ClusterIP",
-			Ports:     []uiEnvironmentServicePort{{Name: "http", Port: 8000}},
+			Ports:     []EnvironmentServicePort{{Name: "http", Port: 8000}},
 			Hostname:  "validator.team-dev.services.test",
 			Scheme:    "https",
 			ExposedAs: "validator",
@@ -281,10 +284,10 @@ func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
 }
 
 func TestListEnvironmentServicesRestrictedOnForbidden(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
+	service := exposureTestService(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, "", `Error from server (Forbidden): services is forbidden: User "x" cannot list resource "services"`, 1)
 
-	result, err := app.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -297,12 +300,12 @@ func TestListEnvironmentServicesRestrictedOnForbidden(t *testing.T) {
 }
 
 func TestListEnvironmentServicesNotConfiguredForHostEnvironment(t *testing.T) {
-	app := exposureTestApp(t, exposableProjectRoot(t))
-	result, err := app.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "host"})
+	service := exposureTestService(t, exposableProjectRoot(t))
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "host"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Configured || result.NotConfiguredReason != uiExposureNotConfiguredHostEnvironment {
+	if result.Configured || result.NotConfiguredReason != ExposureNotConfiguredHostEnvironment {
 		t.Fatalf("expected the host-environment reason, got %+v", result)
 	}
 }

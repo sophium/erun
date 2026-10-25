@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -24,9 +25,9 @@ func isolateJobsCache(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 }
 
-func jobsTestStore(t *testing.T) stubUIStore {
+func jobsTestStore(t *testing.T) fakeStore {
 	t.Helper()
-	return stubUIStore{
+	return fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
@@ -43,12 +44,10 @@ func jobsTestStore(t *testing.T) stubUIStore {
 func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 	isolateJobsCache(t)
 	var gotEndpoint string
-	app := NewApp(erunUIDeps{
-		store: jobsTestStore(t),
-		canReachMCPEndpoint: func(int) bool {
-			return true
-		},
-		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]jobstate.EnvironmentJob, error) {
+	service := newTestService(Deps{
+		Store:               jobsTestStore(t),
+		CanReachMCPEndpoint: func(int) bool { return true },
+		LoadJobs: func(_ context.Context, endpoint, _ string) ([]jobstate.EnvironmentJob, error) {
 			gotEndpoint = endpoint
 			return []jobstate.EnvironmentJob{
 				{ID: "finish-1350", Name: "Finish #1350 desktop jobs surface", State: jobspkg.EnvironmentJobStateRunning},
@@ -56,7 +55,7 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 		},
 	})
 
-	jobs, err := app.LoadEnvironmentJobs("erun", "ux")
+	jobs, err := service.LoadEnvironmentJobs("erun", "ux")
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJobs failed: %v", err)
 	}
@@ -70,25 +69,22 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 
 func TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty(t *testing.T) {
 	isolateJobsCache(t)
-	app := NewApp(erunUIDeps{
-		store: jobsTestStore(t),
-		canReachMCPEndpoint: func(int) bool {
-			return false
-		},
-		canConnectLocalPort: func(int) bool {
-			return true
-		},
+	service := newTestService(Deps{
+		Store:               jobsTestStore(t),
+		CanReachMCPEndpoint: func(int) bool { return false },
+		CanConnectLocalPort: func(int) bool { return true },
 	})
 
-	jobs, err := app.LoadEnvironmentJobs("erun", "ux")
+	jobs, err := service.LoadEnvironmentJobs("erun", "ux")
 	if err == nil {
 		t.Fatalf("expected an unreachable error for a stale forward, got jobs=%+v", jobs)
 	}
-	if !errors.Is(err, errMCPUnreachable) {
-		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	var unreachable unreachableError
+	if !errors.As(err, &unreachable) || !errors.Is(err, errMCPUnreachable) {
+		t.Fatalf("expected an unreachable error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
-		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
+	if unreachable.kind != mcp.LocalMCPStaleForward {
+		t.Fatalf("expected the stale-forward kind, got %v", unreachable.kind)
 	}
 }
 
@@ -103,17 +99,13 @@ func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 		t.Fatalf("attach investigate job: %v", err)
 	}
 
-	app := NewApp(erunUIDeps{
-		store: jobsTestStore(t),
-		canReachMCPEndpoint: func(int) bool {
-			return false
-		},
-		canConnectLocalPort: func(int) bool {
-			return false
-		},
+	service := newTestService(Deps{
+		Store:               jobsTestStore(t),
+		CanReachMCPEndpoint: func(int) bool { return false },
+		CanConnectLocalPort: func(int) bool { return false },
 	})
 
-	jobs, err := app.LoadEnvironmentJobs("erun", "ux")
+	jobs, err := service.LoadEnvironmentJobs("erun", "ux")
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJobs failed: %v", err)
 	}
@@ -154,16 +146,16 @@ func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
 }
 
 func TestJobReadsRequireTheirIdentifiers(t *testing.T) {
-	app := &App{}
-	if _, err := app.LoadEnvironmentJobs(" ", "build"); err == nil ||
+	service := newTestService(Deps{})
+	if _, err := service.LoadEnvironmentJobs(" ", "build"); err == nil ||
 		!strings.Contains(err.Error(), "tenant not set") {
 		t.Fatalf("blank tenant: %v", err)
 	}
-	if _, err := app.ReadEnvironmentJobOutput(uiJobOutputInput{Tenant: "t", Environment: "e"}); err == nil ||
+	if _, err := service.ReadEnvironmentJobOutput(JobOutputInput{Tenant: "t", Environment: "e"}); err == nil ||
 		!strings.Contains(err.Error(), "job id are required") {
 		t.Fatalf("blank job id: %v", err)
 	}
-	if _, err := app.CancelEnvironmentJob(uiCancelJobInput{Tenant: "t", Environment: "e"}); err == nil {
+	if _, err := service.CancelEnvironmentJob(CancelJobInput{Tenant: "t", Environment: "e"}); err == nil {
 		t.Fatal("cancel without a job id must be refused")
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func execWritePushTestStore(t *testing.T) erunUIStore {
+func execWritePushTestStore(t *testing.T) fakeStore {
 	t.Helper()
 	projectRoot := t.TempDir()
-	return stubUIStore{
+	return fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
@@ -30,17 +30,17 @@ func execWritePushTestStore(t *testing.T) erunUIStore {
 
 func TestExecCommitCallsMCPWithTheClaimedBranchAndMessage(t *testing.T) {
 	var gotEndpoint, gotBranch, gotMessage string
-	app := NewApp(erunUIDeps{
-		store:               execWritePushTestStore(t),
-		canConnectLocalPort: func(int) bool { return true },
-		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(_ context.Context, endpoint, _, branch, message string) (model.CommitWorkingTreeResult, error) {
+	service := newTestService(Deps{
+		Store:               execWritePushTestStore(t),
+		CanConnectLocalPort: func(int) bool { return true },
+		CanReachMCPEndpoint: func(int) bool { return true },
+		ExecCommit: func(_ context.Context, endpoint, _, branch, message string) (model.CommitWorkingTreeResult, error) {
 			gotEndpoint, gotBranch, gotMessage = endpoint, branch, message
 			return model.CommitWorkingTreeResult{Branch: branch, Commit: "abc123", Files: []string{"a.txt"}}, nil
 		},
 	})
 
-	result, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{
+	result, err := service.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, ExecCommitInput{
 		Branch: " feature/1348-x ", Message: " open the review ",
 	})
 	if err != nil {
@@ -58,17 +58,17 @@ func TestExecCommitCallsMCPWithTheClaimedBranchAndMessage(t *testing.T) {
 }
 
 func TestExecCommitRequiresAMessage(t *testing.T) {
-	app := NewApp(erunUIDeps{
-		store:               execWritePushTestStore(t),
-		canConnectLocalPort: func(int) bool { return true },
-		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
-			t.Fatal("execCommit must not be called without a message")
+	service := newTestService(Deps{
+		Store:               execWritePushTestStore(t),
+		CanConnectLocalPort: func(int) bool { return true },
+		CanReachMCPEndpoint: func(int) bool { return true },
+		ExecCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
+			t.Fatal("ExecCommit must not be called without a message")
 			return model.CommitWorkingTreeResult{}, nil
 		},
 	})
 
-	_, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "   "})
+	_, err := service.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, ExecCommitInput{Branch: "feature/1348-x", Message: "   "})
 	if err == nil || !strings.Contains(err.Error(), "commit message is required") {
 		t.Fatalf("expected a message-required error, got %v", err)
 	}
@@ -76,17 +76,17 @@ func TestExecCommitRequiresAMessage(t *testing.T) {
 
 func TestExecCommitReturnsUnreachableWhenPortClosed(t *testing.T) {
 	calls := 0
-	app := NewApp(erunUIDeps{
-		store:               execWritePushTestStore(t),
-		canConnectLocalPort: func(int) bool { return false },
-		canReachMCPEndpoint: func(int) bool { return false },
-		execCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
+	service := newTestService(Deps{
+		Store:               execWritePushTestStore(t),
+		CanConnectLocalPort: func(int) bool { return false },
+		CanReachMCPEndpoint: func(int) bool { return false },
+		ExecCommit: func(context.Context, string, string, string, string) (model.CommitWorkingTreeResult, error) {
 			calls++
 			return model.CommitWorkingTreeResult{}, nil
 		},
 	})
 
-	_, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "open the review"})
+	_, err := service.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, ExecCommitInput{Branch: "feature/1348-x", Message: "open the review"})
 	if err == nil || !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
@@ -97,17 +97,17 @@ func TestExecCommitReturnsUnreachableWhenPortClosed(t *testing.T) {
 
 func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 	var gotBranch, gotRemote string
-	app := NewApp(erunUIDeps{
-		store:               execWritePushTestStore(t),
-		canConnectLocalPort: func(int) bool { return true },
-		canReachMCPEndpoint: func(int) bool { return true },
-		execPush: func(_ context.Context, _, _, branch, remote string) (model.PushWorkingTreeBranchResult, error) {
+	service := newTestService(Deps{
+		Store:               execWritePushTestStore(t),
+		CanConnectLocalPort: func(int) bool { return true },
+		CanReachMCPEndpoint: func(int) bool { return true },
+		ExecPush: func(_ context.Context, _, _, branch, remote string) (model.PushWorkingTreeBranchResult, error) {
 			gotBranch, gotRemote = branch, remote
 			return model.PushWorkingTreeBranchResult{Branch: branch, Remote: "origin", Commit: "abc123"}, nil
 		},
 	})
 
-	result, err := app.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: " feature/1348-x "})
+	result, err := service.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, ExecPushInput{Branch: " feature/1348-x "})
 	if err != nil {
 		t.Fatalf("ExecPush failed: %v", err)
 	}
@@ -120,9 +120,9 @@ func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 }
 
 func TestExecPushRequiresABranch(t *testing.T) {
-	app := NewApp(erunUIDeps{store: execWritePushTestStore(t)})
+	service := newTestService(Deps{Store: execWritePushTestStore(t)})
 
-	_, err := app.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: "  "})
+	_, err := service.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, ExecPushInput{Branch: "  "})
 	if err == nil || !strings.Contains(err.Error(), "branch is required") {
 		t.Fatalf("expected a branch-required error, got %v", err)
 	}

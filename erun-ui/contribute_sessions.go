@@ -112,7 +112,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	a.recordTerminalActivity(selection)
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
-	go a.startWorkspaceSyncForSelection(selection)
+	go a.envops.StartWorkspaceSync(selection)
 	go a.cloudContexts.StartRefresher(selection)
 
 	tabName := "ERun contribute tab"

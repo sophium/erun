@@ -1,7 +1,6 @@
-package main
+package envops
 
 import (
-	"context"
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
@@ -10,7 +9,7 @@ import (
 )
 
 func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
@@ -19,9 +18,9 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 		},
 	}
 	var gotResult configpkg.OpenResult
-	app := NewApp(erunUIDeps{
-		store: store,
-		listAgentOutputs: func(result configpkg.OpenResult, _ model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error) {
+	service := newTestService(Deps{
+		Store: store,
+		ListAgentOutputs: func(result configpkg.OpenResult, _ model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error) {
 			gotResult = result
 			return model.RuntimeOutputsListResult{
 				Dir:     "/home/erun/.erun/outputs",
@@ -30,9 +29,8 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 			}, nil
 		},
 	})
-	defer app.shutdown(context.Background())
 
-	got, err := app.ListAgentOutputs(uimodel.Selection{Tenant: "erun", Environment: "local"})
+	got, err := service.ListAgentOutputs(uimodel.Selection{Tenant: "erun", Environment: "local"})
 	if err != nil {
 		t.Fatalf("ListAgentOutputs failed: %v", err)
 	}
@@ -45,17 +43,15 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 }
 
 func TestListAgentOutputsRequiresSelection(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	defer app.shutdown(context.Background())
-	if _, err := app.ListAgentOutputs(uimodel.Selection{}); err == nil {
+	service := newTestService(Deps{})
+	if _, err := service.ListAgentOutputs(uimodel.Selection{}); err == nil {
 		t.Fatal("expected an error when tenant/environment are missing")
 	}
 }
 
 func TestDownloadAgentOutputRequiresSelection(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	defer app.shutdown(context.Background())
-	if _, err := app.DownloadAgentOutput(uimodel.Selection{}, "report.pdf"); err == nil {
+	service := newTestService(Deps{})
+	if _, err := service.DownloadAgentOutput(uimodel.Selection{}, "report.pdf", func(string) (string, error) { return "", nil }); err == nil {
 		t.Fatal("expected an error when tenant/environment are missing")
 	}
 }

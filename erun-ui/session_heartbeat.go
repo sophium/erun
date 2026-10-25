@@ -37,7 +37,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			a.reconcileAISessionStatusesOnce()
 			// Re-enumerated every tick: an env linked while the app runs gets no sync worker
 			// otherwise. Idempotent once every linked env is syncing.
-			a.reconcileWorkspaceSyncForConfiguredEnvs()
+			a.envops.ReconcileConfiguredWorkspaceSyncs()
 			a.reconcileOrchestratorActivity()
 			// After reconcileOrchestratorActivity so shellRunning is this tick's report.
 			a.reconcileOrchestratorPacing()

@@ -1,4 +1,4 @@
-package main
+package envops
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-type uiEnvironmentInitializedPayload struct {
+type EnvironmentInitializedPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 }
@@ -15,79 +15,76 @@ func initEmittedKey(tenant, environment string) string {
 	return strings.TrimSpace(tenant) + "\x00" + strings.TrimSpace(environment)
 }
 
-// clearInitEmitted lets a retry or re-create fire the event again.
-func (a *App) clearInitEmitted(tenant, environment string) {
-	a.initEmittedMu.Lock()
-	delete(a.initEmitted, initEmittedKey(tenant, environment))
-	a.initEmittedMu.Unlock()
+// ClearInitEmitted lets a retry or re-create fire the event again.
+func (s *Service) ClearInitEmitted(tenant, environment string) {
+	s.initEmittedMu.Lock()
+	delete(s.initEmitted, initEmittedKey(tenant, environment))
+	s.initEmittedMu.Unlock()
 }
 
-// emitEnvironmentInitialized fires at most once per env: a Windows ConPTY
+// EnvironmentInitialized fires at most once per env: a Windows ConPTY
 // repaint re-sends the "==> Initialized" line and would loop create->deploy.
-func (a *App) emitEnvironmentInitialized(tenant, environment string) {
+func (s *Service) EnvironmentInitialized(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
 	key := initEmittedKey(tenant, environment)
-	a.initEmittedMu.Lock()
-	if a.initEmitted == nil {
-		a.initEmitted = make(map[string]struct{})
-	}
-	if _, done := a.initEmitted[key]; done {
-		a.initEmittedMu.Unlock()
+	s.initEmittedMu.Lock()
+	if _, done := s.initEmitted[key]; done {
+		s.initEmittedMu.Unlock()
 		return
 	}
-	a.initEmitted[key] = struct{}{}
-	a.initEmittedMu.Unlock()
-	a.emitEvent(uimodel.EnvironmentInitializedEvent, uiEnvironmentInitializedPayload{
+	s.initEmitted[key] = struct{}{}
+	s.initEmittedMu.Unlock()
+	s.d.Emit(uimodel.EnvironmentInitializedEvent, EnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
 }
 
-func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
+func (s *Service) EnvironmentInitFailed(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.clearInitEmitted(tenant, environment)
-	a.emitEvent(uimodel.EnvironmentInitFailedEvent, uiEnvironmentInitializedPayload{
+	s.ClearInitEmitted(tenant, environment)
+	s.d.Emit(uimodel.EnvironmentInitFailedEvent, EnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
 }
 
-// Tabs open on this signal so they never spawn against an undeployed runtime.
-func (a *App) emitEnvironmentDeployed(tenant, environment string) {
+// EnvironmentDeployed opens tabs on this signal so they never spawn against an undeployed runtime.
+func (s *Service) EnvironmentDeployed(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(uimodel.EnvironmentDeployedEvent, uiEnvironmentInitializedPayload{
+	s.d.Emit(uimodel.EnvironmentDeployedEvent, EnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
 }
 
-type uiDoctorCompletedPayload struct {
+type DoctorCompletedPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Success     bool   `json:"success"`
 	Message     string `json:"message,omitempty"`
 }
 
-// emitDoctorCompleted is `erun doctor`'s only completion signal.
-func (a *App) emitDoctorCompleted(tenant, environment string, success bool, message string) {
+// DoctorCompleted is `erun doctor`'s only completion signal.
+func (s *Service) DoctorCompleted(tenant, environment string, success bool, message string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(uimodel.DoctorCompletedEvent, uiDoctorCompletedPayload{
+	s.d.Emit(uimodel.DoctorCompletedEvent, DoctorCompletedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Success:     success,
@@ -95,22 +92,22 @@ func (a *App) emitDoctorCompleted(tenant, environment string, success bool, mess
 	})
 }
 
-type uiSSHDInitCompletedPayload struct {
+type SSHDInitCompletedPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Success     bool   `json:"success"`
 	Message     string `json:"message,omitempty"`
 }
 
-// emitSSHDInitCompleted is `erun sshd init`'s only completion signal; piped
+// SSHDInitCompleted is `erun sshd init`'s only completion signal; piped
 // commands never produce a PTY exit.
-func (a *App) emitSSHDInitCompleted(tenant, environment string, success bool, message string) {
+func (s *Service) SSHDInitCompleted(tenant, environment string, success bool, message string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(uimodel.SSHDInitCompletedEvent, uiSSHDInitCompletedPayload{
+	s.d.Emit(uimodel.SSHDInitCompletedEvent, SSHDInitCompletedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Success:     success,

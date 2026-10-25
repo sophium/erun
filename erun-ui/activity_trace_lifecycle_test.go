@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -75,7 +76,7 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("doctor-completed emitted %d times, want exactly 1", len(events))
 	}
-	payload, ok := events[0].(uiDoctorCompletedPayload)
+	payload, ok := events[0].(envops.DoctorCompletedPayload)
 	if !ok {
 		t.Fatalf("doctor-completed payload has unexpected type %T", events[0])
 	}
@@ -156,7 +157,7 @@ func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("sshd-init-completed emitted %d times, want exactly 1", len(events))
 	}
-	payload, ok := events[0].(uiSSHDInitCompletedPayload)
+	payload, ok := events[0].(envops.SSHDInitCompletedPayload)
 	if !ok {
 		t.Fatalf("sshd-init-completed payload has unexpected type %T", events[0])
 	}
@@ -211,32 +212,6 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	localHandler("==> Initializing erun/local")
 	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); !ok {
 		t.Fatal("Local-session init trace must register an init activity")
-	}
-}
-
-// A Windows ConPTY repaint re-sends "==> Initialized"; it must fire once per env.
-func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
-
-	app.emitEnvironmentInitialized("frs", "dev")
-	app.emitEnvironmentInitialized("frs", "dev")
-	app.emitEnvironmentInitialized("frs", "dev")
-	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 1 {
-		t.Fatalf("environment-initialized fired %d times for one env, want 1 (repaints must not re-fire)", got)
-	}
-
-	app.emitEnvironmentInitialized("frs", "other")
-	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 2 {
-		t.Fatalf("distinct env total = %d, want 2", got)
-	}
-
-	// Delete/failure resets, so a re-create fires again.
-	app.clearInitEmitted("frs", "dev")
-	app.emitEnvironmentInitialized("frs", "dev")
-	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 3 {
-		t.Fatalf("re-create after reset total = %d, want 3", got)
 	}
 }
 

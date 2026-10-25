@@ -42,7 +42,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (model.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint, _ string, options uimodel.DiffOptions) (model.DiffResult, error) {
 			gotEndpoint = endpoint
 			if options.Scope != "commit" || options.SelectedCommit != "abc123" {
 				t.Fatalf("unexpected diff options: %+v", options)
@@ -51,7 +51,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		},
 	})
 
-	result, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiDiffOptions{Scope: " commit ", SelectedCommit: " abc123 "})
+	result, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "local"}, uimodel.DiffOptions{Scope: " commit ", SelectedCommit: " abc123 "})
 	if err != nil {
 		t.Fatalf("LoadDiff failed: %v", err)
 	}
@@ -97,13 +97,13 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uimodel.DiffOptions) (model.DiffResult, error) {
 			loadCalls++
 			return model.DiffResult{}, nil
 		},
 	})
 
-	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uimodel.DiffOptions{})
 	if err == nil {
 		t.Fatalf("expected unreachable error when port is closed")
 	}
@@ -144,12 +144,12 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return false
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uimodel.DiffOptions) (model.DiffResult, error) {
 			return model.DiffResult{}, nil
 		},
 	})
 
-	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uimodel.DiffOptions{})
 	if err == nil {
 		t.Fatalf("expected unreachable error when the edge never answers")
 	}
@@ -191,12 +191,12 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uimodel.DiffOptions) (model.DiffResult, error) {
 			return model.DiffResult{}, errors.New("EOF")
 		},
 	})
 
-	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uimodel.DiffOptions{})
 	if err == nil {
 		t.Fatalf("expected dial failure to surface as unreachable")
 	}

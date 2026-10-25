@@ -18,6 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -174,13 +175,9 @@ func sweepUntilRebindSettles(t *testing.T, app *App) runtimeview.ActivityState {
 func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uimodel.Selection) runtimeview.ActivityState {
 	t.Helper()
 	state := app.runtime.ObserveActivity(selection)
-	key := selectionKey(selection)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		app.envEnsureMu.Lock()
-		_, inflight := app.envEnsureInflight[key]
-		app.envEnsureMu.Unlock()
-		if !inflight {
+		if !app.envops.EnsureInFlight(selection) {
 			return state
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -221,7 +218,7 @@ func TestDroppedForwardIsRestarted(t *testing.T) {
 	if got := probe.count(); got != 1 {
 		t.Fatalf("restarting one dropped forward took %d rebinds, want 1", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("a forward that was restarted reported %d outages, want 0", len(got))
 	}
 }
@@ -247,7 +244,7 @@ func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	app, emits := forwardRepairTestApp(t, probe, nil)
 	unopened := uimodel.Selection{Tenant: "erun", Environment: "fresh"}
 
-	for range forwardRepairAttempts + 2 {
+	for range envops.ForwardRepairAttempts + 2 {
 		state := sweepEnvUntilRebindSettles(t, app, unopened)
 		if state.Outage || state.CheckFailed {
 			t.Fatalf("a successful pod probe is neither an outage nor a failed check, got %+v", state)
@@ -259,7 +256,7 @@ func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	if got := probe.count(); got != 0 {
 		t.Fatalf("an environment with no recorded forward was rebound %d times, want 0", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("an environment with no recorded forward reported %d outages, want 0", len(got))
 	}
 }
@@ -325,13 +322,13 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for attempt := range forwardRepairAttempts {
+	for attempt := range envops.ForwardRepairAttempts {
 		if state := sweepUntilRebindSettles(t, app); state.Outage {
 			t.Fatalf("sweep %d diagnosed the forward while attempts remained", attempt+1)
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, envops.ForwardRepairAttempts)
 	}
 
 	for range 3 {
@@ -343,8 +340,8 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 			t.Fatal("a dropped forward is not reachable; the outage is what carries the row")
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, envops.ForwardRepairAttempts)
 	}
 
 	assertOneOutageNotification(t, emits, "is gone and nothing holds the port")
@@ -352,7 +349,7 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 
 func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault string) {
 	t.Helper()
-	notes := notificationsFromSource(emits, notificationSourceForwardOutage)
+	notes := notificationsFromSource(emits, envops.SourceForwardOutage)
 	if len(notes) != 1 {
 		t.Fatalf("outage notification posted %d times, want exactly 1 per episode", len(notes))
 	}
@@ -368,7 +365,7 @@ func TestUnrepairableStaleForwardReportsItsOwnFault(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 	assertOneOutageNotification(t, emits, "holds the local port but its edge never answers")
@@ -378,7 +375,7 @@ func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 
@@ -386,7 +383,7 @@ func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a forward that carries traffic again is not broken")
 	}
-	if got := len(clearedNotificationSources(emits, notificationSourceForwardOutage)); got != 1 {
+	if got := len(clearedNotificationSources(emits, envops.SourceForwardOutage)); got != 1 {
 		t.Fatalf("recovery cleared the outage notification %d times, want 1", got)
 	}
 
@@ -394,7 +391,7 @@ func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a fresh failure must be repaired before it is reported")
 	}
-	if got := probe.count(); got != forwardRepairAttempts+1 {
+	if got := probe.count(); got != envops.ForwardRepairAttempts+1 {
 		t.Fatalf("rebind count = %d, want a fresh episode's first attempt", got)
 	}
 }
@@ -416,7 +413,7 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 					return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 				})
 
-			for range forwardRepairAttempts + 2 {
+			for range envops.ForwardRepairAttempts + 2 {
 				if state := sweepUntilRebindSettles(t, app); state.Outage {
 					t.Fatal("a stopped environment is stopped, not an unreachable one")
 				}
@@ -424,7 +421,7 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 			if got := probe.count(); got != 0 {
 				t.Fatalf("a stopped environment was woken by %d rebinds, want 0", got)
 			}
-			if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+			if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 				t.Fatalf("a stopped environment reported %d outages, want 0", len(got))
 			}
 		})

@@ -177,11 +177,7 @@ func TestWireOrchestratorMCPRetriesAnEdgeRepairThatFailed(t *testing.T) {
 
 	app.wireOrchestratorMCP(orchestratorEdgeTestID, "Petios", spawnEdgeTestTarget())
 
-	key := selectionKey(uimodel.NormalizeSelection(uimodel.Selection{Tenant: "frs", Environment: "dev"}))
-	app.envEnsureMu.Lock()
-	_, stamped := app.envEnsureDone[key]
-	app.envEnsureMu.Unlock()
-	if stamped {
+	if _, stamped := app.envops.EnsureReachedAt(uimodel.Selection{Tenant: "frs", Environment: "dev"}); stamped {
 		t.Fatal("a failed rebind stamped the dedup window: the next launch would be suppressed for the whole TTL")
 	}
 
