@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -50,7 +51,9 @@ func generateWailsBindings(t *testing.T) (string, string) {
 	}
 	// go test puts its own GOROOT/bin first on PATH.
 	build := exec.Command("go", "build", "-buildvcs=false", "-tags", "bindings", "-o", bin, ".")
-	build.Env = append(os.Environ(), "GOFLAGS=")
+	// Under the test HOME the go command would fill a fresh, read-only module
+	// cache in a temp dir that is never removed.
+	build.Env = append(append(withoutEnvKeys(os.Environ(), testHomeKeys), realHomeEnv...), "GOFLAGS=")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build bindings generator: %v\n%s", err, out)
 	}
@@ -132,4 +135,15 @@ func normalizedBindingFieldLists(models, app string) string {
 	}
 	sort.Strings(functions)
 	return "# functions\n" + strings.Join(functions, "\n") + "\n\n# classes\n" + strings.Join(classes, "\n") + "\n"
+}
+
+func withoutEnvKeys(env, keys []string) []string {
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if !slices.Contains(keys, name) {
+			out = append(out, entry)
+		}
+	}
+	return out
 }

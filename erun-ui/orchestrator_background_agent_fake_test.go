@@ -16,10 +16,19 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	for _, key := range []string{"HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"} {
+	for _, key := range testHomeKeys {
+		if value, ok := os.LookupEnv(key); ok {
+			realHomeEnv = append(realHomeEnv, key+"="+value)
+		}
 		_ = os.Setenv(key, filepath.Join(home, key))
 	}
 }
+
+var testHomeKeys = []string{"HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"}
+
+// realHomeEnv is the developer's home before init replaced it, for a child go
+// command that must reuse the real module and build caches.
+var realHomeEnv []string
 
 type fakeClaudeAgents struct {
 	mu        sync.Mutex
