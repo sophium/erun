@@ -160,7 +160,7 @@ func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime runtimecf
 		t.Setenv(key, "")
 	}
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, runtime, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, withStubRuntime(runtime), nil))
 	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -285,7 +285,7 @@ func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	t.Cleanup(func() { mcpServerLogger = previous })
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, runtimecfg.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, withStubRuntime(runtimecfg.RuntimeConfig{}), nil))
 	t.Cleanup(httpServer.Close)
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`

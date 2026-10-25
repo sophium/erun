@@ -26,7 +26,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
 	"github.com/sophium/erun/erun-mcp/tools/shared/registrar"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
-	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
 	"github.com/sophium/erun/erun-mcp/tools/version"
 	"github.com/sophium/erun/erun-mcp/tools/whip"
@@ -55,7 +54,6 @@ func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsC
 	if err != nil {
 		return err
 	}
-	runtime = runtimedefaults.NormalizeRuntimeConfig(runtime)
 	recorder := toolmetrics.NewMetricsRecorder(runtime.Context.Tenant, runtime.Context.Environment)
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -216,7 +214,6 @@ var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 func newServer(info model.BuildInfo, runtime runtimecfg.RuntimeConfig, identity callerid.AuthIdentity, metrics *toolmetrics.MetricsRecorder) *mcp.Server {
 	info = core.NormalizeBuildInfo(info)
-	runtime = runtimedefaults.NormalizeRuntimeConfig(runtime)
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "erun",

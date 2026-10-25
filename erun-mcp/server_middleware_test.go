@@ -107,7 +107,7 @@ func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
 	t.Setenv(edgeauth.EnvTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, runtimecfg.RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, withStubRuntime(runtimecfg.RuntimeConfig{}), nil))
 	defer httpServer.Close()
 
 	preflight, err := http.NewRequest(http.MethodOptions, httpServer.URL+cfg.Path, nil)
