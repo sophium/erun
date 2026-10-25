@@ -9,10 +9,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 // Usage is read from the runtime container's cgroup v2 files over `kubectl exec`, since
@@ -48,7 +47,7 @@ const (
 // RunRuntimeUsage execs the reading script into the runtime container, and into the
 // erun-dind sidecar when present. The sidecar read and the pod-spec requests read fail
 // soft so the runtime reading is never lost.
-func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
@@ -56,10 +55,10 @@ func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 		return model.RuntimeUsage{}, err
 	}
 	usesDind := req.Type.UsesDindSidecar()
-	var dindResult kube.RemoteCommandResult
+	var dindResult model.RemoteCommandResult
 	var dindErr error
 	if usesDind {
-		dindResult, dindErr = diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, build.RuntimeDindContainerName, "usage-dind", script)
+		dindResult, dindErr = diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, model.RuntimeDindContainerName, "usage-dind", script)
 	}
 	// Read after the execs so a dry run traces actions in run order.
 	requests := readRuntimeUsageRequests(ctx, podRequests, req)
@@ -79,7 +78,7 @@ func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 // restart-reset cgroup counters cannot. Retained figures are scored against the current
 // limit, so raising runtimepod clears the peak warning.
 func applyRetainedUsageWarnings(usage model.RuntimeUsage) model.RuntimeUsage {
-	history, err := deploy.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
+	history, err := runtimeusage.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
 	if err != nil {
 		// No readable history means nothing observed yet, not a warning.
 		return usage
@@ -92,7 +91,7 @@ func applyRetainedUsageWarnings(usage model.RuntimeUsage) model.RuntimeUsage {
 	return usage
 }
 
-func retainedMemoryUsageWarnings(memory model.RuntimeMemoryUsage, history deploy.RuntimeUsageHistory) []string {
+func retainedMemoryUsageWarnings(memory model.RuntimeMemoryUsage, history runtimeusage.RuntimeUsageHistory) []string {
 	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
 		return nil
 	}
@@ -309,17 +308,17 @@ func runtimeBuildThrottleWarnings(dind *model.RuntimeDindUsage) []string {
 
 // runtimeBuildThrottleIsStarvation shares sizing's ratio but not its period floor.
 func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
-	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*deploy.RuntimeSizingThrottleRatio
+	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*runtimeusage.RuntimeSizingThrottleRatio
 }
 
 // scope prefixes warnings so runtime and erun-dind crossings are distinguishable.
 func runtimeMemoryUsageWarnings(scope string, memory model.RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
-		if memory.PercentOfLimit >= deploy.RuntimeUsageMemoryWarnPercent {
+		if memory.PercentOfLimit >= runtimeusage.RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), deploy.RuntimeUsageMemoryWarnPercent))
+				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), runtimeusage.RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)

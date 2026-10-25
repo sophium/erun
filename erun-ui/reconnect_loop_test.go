@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
 // A session whose pod keeps dying caps its respawns and emits one stop marker.
@@ -502,7 +502,7 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			session := newStubTerminalSession()
 			session.initialOutput = append(session.initialOutput,
-				[]byte(open.ShellSessionTakenOverNotice+"\n")...)
+				[]byte(appsession.ShellSessionTakenOverNotice+"\n")...)
 			sessionsMu.Lock()
 			sessions = append(sessions, session)
 			sessionsMu.Unlock()

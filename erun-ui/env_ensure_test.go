@@ -13,13 +13,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 )
 
 // deploymentAbsentErrorForTest builds ensureRuntimeDeployed's exact "is not deployed" error.
 func deploymentAbsentErrorForTest(tenant, environment string) error {
 	return fmt.Errorf("runtime for %s/%s %s %q not found in namespace %q); run `erun deploy %s %s` first",
-		tenant, environment, deploy.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
+		tenant, environment, kubecheck.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
 }
 
 func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App {

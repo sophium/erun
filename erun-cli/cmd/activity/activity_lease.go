@@ -17,7 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 	"github.com/spf13/cobra"
 )
 
@@ -421,7 +421,7 @@ func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	if !sample.HasCounters() {
 		return nil
 	}
-	history, err := deploy.LoadRuntimeUsageHistory(tenant, environment)
+	history, err := runtimeusage.LoadRuntimeUsageHistory(tenant, environment)
 	if err != nil {
 		return err
 	}

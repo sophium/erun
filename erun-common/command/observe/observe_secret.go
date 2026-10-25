@@ -5,7 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 // observeSecretItem reads only key names, never values.
@@ -16,12 +16,12 @@ type observeSecretItem struct {
 
 func fetchObservedSecretCheck(args []string, check model.ObserveSecretCheck) model.ObservedSecretCheck {
 	result := model.ObservedSecretCheck{Name: check.Name, Key: check.Key}
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
 		if clusterread.IsKubectlNotFound(stderr) {
 			return result
 		}
-		result.Error = deploy.KubectlErrorMessage(err, stderr).Error()
+		result.Error = observe.KubectlErrorMessage(err, stderr).Error()
 		return result
 	}
 	var secret observeSecretItem

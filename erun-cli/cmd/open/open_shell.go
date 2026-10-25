@@ -11,7 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/podwait"
+	"github.com/sophium/erun/erun-common/primitive/open/shell"
 	"golang.org/x/term"
 )
 
@@ -21,10 +22,10 @@ const desktopAppSessionEnvVar = orchestrator.DesktopSessionEnvVar
 
 func NewOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell seam.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
-		waitForShellDeployment = open.WaitForShellDeployment
+		waitForShellDeployment = podwait.WaitForShellDeployment
 	}
 	if execShell == nil {
-		execShell = open.ExecShell
+		execShell = shell.ExecShell
 	}
 
 	return func(ctx core.Context, req config.ShellLaunchParams) error {

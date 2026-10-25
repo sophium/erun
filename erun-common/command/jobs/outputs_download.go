@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -33,7 +34,7 @@ type runtimeOutputSource struct {
 
 // DownloadRuntimeOutput fetches one runtime-pod entry in bounded ranges and
 // checks it against the pod's digest; a directory arrives as a gzip tarball.
-func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params model.RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
+func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params model.RuntimeOutputDownloadParams, run seam.RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return model.RuntimeOutputResult{}, err
@@ -56,7 +57,7 @@ func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, param
 	return fetchRuntimeOutput(ctx, req, name, probe, run)
 }
 
-func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
+func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run seam.RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
 	out, err := run(req, probe)
 	if err != nil {
 		return model.RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, kube.FormatRemoteCommandStderr(out.Stderr), err)
@@ -80,7 +81,7 @@ func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, pr
 }
 
 // transferRuntimeOutput reports how far it got when a range fails.
-func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
+func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run seam.RuntimeOutputsRunner) ([]byte, error) {
 	if source.Size > MaxRuntimeOutputBytes {
 		return nil, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, source.Size, MaxRuntimeOutputBytes)
 	}
@@ -108,7 +109,7 @@ func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name 
 
 // readRuntimeOutputRange retries a failed or short read, so a truncated stream
 // is never assembled.
-func readRuntimeOutputRange(ctx core.Context, req config.ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
+func readRuntimeOutputRange(ctx core.Context, req config.ShellLaunchParams, sourcePath string, offset, length int64, run seam.RuntimeOutputsRunner) ([]byte, error) {
 	script := runtimeOutputRangeScript(sourcePath, offset, length)
 	var last error
 	for attempt := 1; attempt <= runtimeOutputChunkAttempts; attempt++ {
@@ -171,7 +172,7 @@ func gunzipRuntimeOutputChunk(data []byte) ([]byte, error) {
 
 // discardRuntimeOutputStagedArchive removes a staged directory archive even after
 // a failed transfer; a failed removal is only traced.
-func discardRuntimeOutputStagedArchive(ctx core.Context, req config.ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
+func discardRuntimeOutputStagedArchive(ctx core.Context, req config.ShellLaunchParams, stagedPath string, run seam.RuntimeOutputsRunner) {
 	script := "rm -f " + core.ShellQuote(stagedPath)
 	ctx.TraceBlock("outputs discard staged archive", script)
 	if _, err := run(req, script); err != nil {

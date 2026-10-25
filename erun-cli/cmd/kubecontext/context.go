@@ -13,11 +13,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewContextCmd(store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+func NewContextCmd(store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
 	return clicmd.NewCommandGroup(
 		"context",
 		"Manage ERun cloud Kubernetes contexts",
@@ -30,7 +31,7 @@ func NewContextCmd(store cloud.CloudContextStore, promptRunner prompt.PromptRunn
 	)
 }
 
-func newContextListCmd(store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextListCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	return &cobra.Command{
 		Use:          "list",
 		Short:        "List managed ERun cloud contexts",
@@ -42,7 +43,7 @@ func newContextListCmd(store cloud.CloudContextStore, deps cloud.CloudContextDep
 	}
 }
 
-func runContextListCommand(ctx core.Context, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) error {
+func runContextListCommand(ctx core.Context, store seam.CloudContextStore, deps cloud.CloudContextDependencies) error {
 	// Status isn't persisted, so refresh it from AWS.
 	result, err := cloud.RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
@@ -81,7 +82,7 @@ func WriteCloudContextList(ctx core.Context, result model.CloudContextListResult
 	return nil
 }
 
-func newContextInitCmd(store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextInitCmd(store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
 	var params model.InitCloudContextParams
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -109,7 +110,7 @@ func newContextInitCmd(store cloud.CloudContextStore, promptRunner prompt.Prompt
 	return cmd
 }
 
-func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
+func runContextInitCommand(ctx core.Context, store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
 	var err error
 	params.CloudProviderAlias, err = contextProviderAlias(store, selectRunner, params.CloudProviderAlias)
 	if err != nil {
@@ -132,15 +133,15 @@ func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, prom
 	return writeCloudContext(ctx, status)
 }
 
-func newContextStopCmd(store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	return newContextPowerCmd("stop", "Stop a managed ERun cloud context", false, store, deps, cloud.StopCloudContext)
 }
 
-func newContextStartCmd(store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextStartCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	return newContextPowerCmd("start", "Start a managed ERun cloud context", true, store, deps, cloud.StartCloudContext)
 }
 
-func newContextDisableAPIStopCmd(store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextDisableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	return newContextStopProtectionCmd(
 		"disable-api-stop",
 		"Lock a cloud context against stop calls (sets AWS DisableApiStop=true)",
@@ -149,7 +150,7 @@ func newContextDisableAPIStopCmd(store cloud.CloudContextStore, deps cloud.Cloud
 	)
 }
 
-func newContextEnableAPIStopCmd(store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextEnableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	return newContextStopProtectionCmd(
 		"enable-api-stop",
 		"Restore normal stop behaviour for a cloud context (sets AWS DisableApiStop=false)",
@@ -159,7 +160,7 @@ func newContextEnableAPIStopCmd(store cloud.CloudContextStore, deps cloud.CloudC
 }
 
 // Stop protection also holds off the idle monitor.
-func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextStopProtectionCmd(use, short string, enabled bool, store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
 		Short:        short,
@@ -181,7 +182,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.Cl
 	return cmd
 }
 
-func newContextPowerCmd(use, short string, supportsForce bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, cloud.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store seam.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, seam.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -204,7 +205,7 @@ func newContextPowerCmd(use, short string, supportsForce bool, store cloud.Cloud
 	return cmd
 }
 
-func contextProviderAlias(store cloud.CloudContextStore, selectRunner prompt.SelectRunner, alias string) (string, error) {
+func contextProviderAlias(store seam.CloudContextStore, selectRunner prompt.SelectRunner, alias string) (string, error) {
 	alias = strings.TrimSpace(alias)
 	if alias != "" {
 		return alias, nil

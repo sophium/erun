@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/components"
 )
 
 // A stopped environment's runtime Deployment is scaled to zero; PVCs survive. The intent is
@@ -102,7 +102,7 @@ type StopEnvironmentParams struct {
 // stop leaves running since on a platform-hosting env they are the platform. Read from config to
 // avoid a second cluster query.
 func StopRemainingComponents(result config.OpenResult) []string {
-	names := deploy.SelectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
+	names := components.SelectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
 	// Nil, not empty, so struct comparisons in tests stay meaningful.
 	if len(names) == 0 {
 		return nil

@@ -147,7 +147,7 @@ func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 
 func fakeExecutionForImage(imageName, tag, version string) dockerspec.BuildExecutionSpec {
 	return dockerspec.BuildExecutionSpec{
-		DockerPushes: []dockerspec.DockerPushSpec{
+		DockerPushes: []model.DockerPushSpec{
 			{Image: model.DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
 		},
 	}

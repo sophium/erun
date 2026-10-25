@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 )
 
 // OrchestratorLaunchSettingDefault is the CLI token that clears a model or effort, since ""
@@ -32,7 +32,7 @@ func ParseOrchestratorModelFlag(value string) (string, error) {
 }
 
 func ParseOrchestratorEffortFlag(value string) (string, error) {
-	return parseOrchestratorLaunchSettingFlag("effort", "one of "+strings.Join(open.ClaudeEffortLevels, ", "), value)
+	return parseOrchestratorLaunchSettingFlag("effort", "one of "+strings.Join(ailaunch.ClaudeEffortLevels, ", "), value)
 }
 
 func parseOrchestratorLaunchSettingFlag(setting, expected, value string) (string, error) {

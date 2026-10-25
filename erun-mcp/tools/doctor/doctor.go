@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -346,7 +346,7 @@ func firstNonBlank(values ...string) string {
 // writeDoctorDeployDiagnosis is read-only, so it runs under preview too; later
 // sections reuse its ClusterUnreachable instead of re-probing.
 func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (model.DeployDiagnosisResult, error) {
-	diagnosis := deploy.RunDeployDiagnosis(runCtx, req)
+	diagnosis := deploydiagnosis.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
 			return diagnosis, err

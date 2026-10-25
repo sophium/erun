@@ -14,8 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	diagnosispkg "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/spf13/cobra"
 )
 
@@ -107,7 +107,7 @@ func runDoctorCommand(ctx core.Context, resolveOpen func(model.OpenParams) (conf
 		return err
 	}
 
-	params, err := open.OpenParamsForArgs(args)
+	params, err := resolve.OpenParamsForArgs(args)
 	if err != nil {
 		return err
 	}
@@ -363,7 +363,7 @@ const deployDiagnosisGuidance = "If the release is stuck pending or an image fai
 
 // runDeployDiagnosis is read-only, so it runs under --dry-run too.
 func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (model.DeployDiagnosisResult, error) {
-	diagnosis := deploy.RunDeployDiagnosis(ctx, req)
+	diagnosis := diagnosispkg.RunDeployDiagnosis(ctx, req)
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
 		return diagnosis, err
 	}
@@ -410,7 +410,7 @@ func selectedDeployRecoveryActions(ctx core.Context, promptRunner prompt.PromptR
 	if dryRun || promptRunner == nil {
 		return nil, nil
 	}
-	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
+	action, ok := diagnosispkg.RecommendedDeployRecovery(diagnosis)
 	if !ok {
 		return nil, nil
 	}

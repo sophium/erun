@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -78,7 +78,7 @@ func agentJobWorktreeContender(jobsDir string, job jobstate.EnvironmentJob, now 
 	if err != nil {
 		return "", false
 	}
-	hostname := build.CurrentJobHostname()
+	hostname := jobhost.CurrentJobHostname()
 	for _, entry := range entries {
 		if other, live := agentJobWorktreeContenderCandidate(jobsDir, entry, job.ID, dir, now, hostname); live {
 			return other, true

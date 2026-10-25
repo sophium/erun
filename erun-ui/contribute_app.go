@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // contributeAppForward port-forwards the contribute clone's in-pod headless app to the host.
@@ -107,7 +107,7 @@ var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*ex
 }
 
 func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, []string, int, error) {
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

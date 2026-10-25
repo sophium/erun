@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 type certificateList struct {
@@ -172,24 +172,24 @@ func parseOwnedResourceList(raw []byte) ([]OwnedResourceItem, error) {
 }
 
 func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get %s: %w", kind, deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get %s: %w", kind, observe.KubectlErrorMessage(err, stderr))
 	}
 	return parseOwnedResourceList(raw)
 }
 
 // FetchObservedCertificates reads Certificates and walks the failure chain only for unready ones.
 func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]model.ObservedCertificate, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(certArgs)
+	raw, stderr, err := observe.RunObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get certificates: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get certificates: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	var list certificateList
 	if err := json.Unmarshal(raw, &list); err != nil {

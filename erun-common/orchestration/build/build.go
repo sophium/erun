@@ -8,7 +8,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
+	"github.com/sophium/erun/erun-common/primitive/build/linuxpkg"
+	"github.com/sophium/erun/erun-common/primitive/build/linuxpkgcheck"
+	"github.com/sophium/erun/erun-common/primitive/build/releasespec"
+	scriptpkg "github.com/sophium/erun/erun-common/primitive/build/script"
+	"github.com/sophium/erun/erun-common/primitive/build/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -16,10 +21,10 @@ import (
 func ResolveBuildExecution(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
-	buildpkg.RecommendBuildEnvIfMissing(ctx, findProjectRoot, target)
-	buildpkg.TraceConfiguredBuildPaths(ctx, findProjectRoot, target)
+	spec.RecommendBuildEnvIfMissing(ctx, findProjectRoot, target)
+	spec.TraceConfiguredBuildPaths(ctx, findProjectRoot, target)
 
-	if buildpkg.BuildEnvDisablesBuildScript(store, findProjectRoot, target) {
+	if spec.BuildEnvDisablesBuildScript(store, findProjectRoot, target) {
 		target.DisableBuildScriptDiscovery = true
 	}
 
@@ -28,7 +33,7 @@ func ResolveBuildExecution(ctx core.Context, store seam.DockerStore, findProject
 		return dockerspec.BuildExecutionSpec{}, err
 	}
 	if script != nil {
-		script.Env = buildpkg.BuildScriptEnv(target.VersionOverride)
+		script.Env = scriptpkg.BuildScriptEnv(target.VersionOverride)
 		return dockerspec.BuildExecutionSpec{Release: releaseSpec, Script: script}, nil
 	}
 
@@ -37,7 +42,7 @@ func ResolveBuildExecution(ctx core.Context, store seam.DockerStore, findProject
 		return dockerspec.BuildExecutionSpec{}, err
 	}
 
-	builds, err := buildpkg.ResolveCurrentDockerBuildSpecs(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+	builds, err := spec.ResolveCurrentDockerBuildSpecs(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil && !errors.Is(err, dockerspec.ErrDockerBuildContextNotFound) {
 		return dockerspec.BuildExecutionSpec{}, err
 	}
@@ -66,7 +71,7 @@ func BuildExecutionPlansWork(execution dockerspec.BuildExecutionSpec) bool {
 
 // finalizeBuildExecution resolves the chart source after promotion so final versions drive it.
 func finalizeBuildExecution(ctx core.Context, execution dockerspec.BuildExecutionSpec, noIncremental bool) (dockerspec.BuildExecutionSpec, error) {
-	execution, err := buildpkg.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
+	execution, err := fingerprint.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	if err != nil {
 		return dockerspec.BuildExecutionSpec{}, err
 	}
@@ -79,18 +84,18 @@ func finalizeBuildExecution(ctx core.Context, execution dockerspec.BuildExecutio
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *dockerspec.ScriptSpec, error) {
-	target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
+	target, releaseSpec, err := releasespec.ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
 		return model.DockerCommandTarget{}, nil, nil, err
 	}
-	script, err := buildpkg.ResolveProjectRootBuildScript(findProjectRoot, target)
+	script, err := scriptpkg.ResolveProjectRootBuildScript(findProjectRoot, target)
 	if err != nil {
 		return model.DockerCommandTarget{}, nil, nil, err
 	}
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []dockerspec.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
+func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []seam.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
 	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
@@ -100,7 +105,7 @@ func resolveLinuxPackagesForExecution(findProjectRoot seam.ProjectFinderFunc, re
 	if releaseSpec != nil {
 		return nil, nil
 	}
-	contexts, err := buildpkg.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	contexts, err := linuxpkg.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
 	if errors.Is(err, dockerspec.ErrLinuxPackageBuildNotFound) {
 		return nil, nil
 	}
@@ -112,17 +117,17 @@ func resolveLinuxPackagesForExecution(findProjectRoot seam.ProjectFinderFunc, re
 		return nil, err
 	}
 	packages := dockerspec.NewLinuxPackageSpecs(projectRoot, contexts)
-	if err := buildpkg.CheckLinuxPackagesBuildable(packages); err != nil {
+	if err := linuxpkgcheck.CheckLinuxPackagesBuildable(packages); err != nil {
 		return nil, err
 	}
 	if target.NoIncremental {
 		return packages, nil
 	}
-	return buildpkg.ApplyLinuxPackageReuse(packages), nil
+	return linuxpkgcheck.ApplyLinuxPackageReuse(packages), nil
 }
 
 func resolveBuildExecutionWithoutBuilds(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
-	script, err := buildpkg.ResolveNestedProjectBuildScript(findProjectRoot, target)
+	script, err := scriptpkg.ResolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return dockerspec.BuildExecutionSpec{}, err
 	}
@@ -134,11 +139,11 @@ func resolveBuildExecutionWithoutBuilds(findProjectRoot seam.ProjectFinderFunc, 
 	if dockerDir, ok, err := resolveProjectDockerModuleDir(findProjectRoot, target); err != nil {
 		return dockerspec.BuildExecutionSpec{}, err
 	} else if ok {
-		return dockerspec.BuildExecutionSpec{}, buildpkg.NewEmptyBuildPlanError(fmt.Sprintf(
+		return dockerspec.BuildExecutionSpec{}, spec.NewEmptyBuildPlanError(fmt.Sprintf(
 			"the project has a docker build module at %s, but this build resolved no images from it, and running %s instead would report success without building an image; re-run from the project root or select the component whose images you meant to build",
 			dockerDir, filepath.Join(filepath.Clean(script.Dir), script.Path)))
 	}
-	script.Env = buildpkg.BuildScriptEnv(target.VersionOverride)
+	script.Env = scriptpkg.BuildScriptEnv(target.VersionOverride)
 	return dockerspec.BuildExecutionSpec{Script: script}, nil
 }
 
@@ -162,14 +167,14 @@ func BuildExecutionUsesBuildScript(execution dockerspec.BuildExecutionSpec) bool
 // releaseDockerPushSpecs pushes every image, including version-pinned wrappers
 // missing from release.DockerImages whose charts still need them; unchanged
 // images are a cheap no-op.
-func releaseDockerPushSpecs(builds []dockerspec.DockerBuildSpec) []dockerspec.DockerPushSpec {
+func releaseDockerPushSpecs(builds []seam.DockerBuildSpec) []model.DockerPushSpec {
 	if len(builds) == 0 {
 		return nil
 	}
 
-	pushes := make([]dockerspec.DockerPushSpec, 0, len(builds))
+	pushes := make([]model.DockerPushSpec, 0, len(builds))
 	for _, build := range builds {
-		pushes = append(pushes, buildpkg.NewDockerPushSpec(build.ContextDir, build.Image))
+		pushes = append(pushes, spec.NewDockerPushSpec(build.ContextDir, build.Image))
 	}
 	return pushes
 }

@@ -13,12 +13,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/orchestration/execute"
-	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/release"
 	"github.com/spf13/cobra"
 )
 
-func NewReleaseCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) *cobra.Command {
+func NewReleaseCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, runGit seam.GitCommandRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push seam.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -43,7 +42,7 @@ func NewReleaseCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFun
 	return cmd
 }
 
-func runReleaseCommand(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, force bool, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) error {
+func runReleaseCommand(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, force bool, runGit seam.GitCommandRunnerFunc, buildDockerImage seam.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push seam.DockerPushFunc) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, model.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err

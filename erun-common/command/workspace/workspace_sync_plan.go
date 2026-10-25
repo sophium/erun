@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 // Distinct refusals: the operator's fix differs, though the empty mirror looks the same.
@@ -48,7 +48,7 @@ func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot seam.P
 	if localPath == "" {
 		return WorkspaceSyncParams{}, ErrWorkspaceSyncNoLocalPath
 	}
-	connection := open.SSHConnectionInfoForResult(result)
+	connection := sshconn.SSHConnectionInfoForResult(result)
 	return WorkspaceSyncParams{
 		HostAlias:  connection.HostAlias,
 		RemotePath: connection.WorkspacePath,

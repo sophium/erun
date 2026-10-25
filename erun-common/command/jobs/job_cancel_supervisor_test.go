@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -44,7 +44,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 		PID:         supervisor.Pid,
 		StartedAt:   time.Now(),
 		LastAliveAt: time.Now(),
-		Hostname:    build.CurrentJobHostname(),
+		Hostname:    jobhost.CurrentJobHostname(),
 		LogPath:     filepath.Join(dir, id+".log"),
 	}
 	if err := writeEnvironmentJob(dir, record); err != nil {

@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 )
 
 func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
@@ -40,13 +40,13 @@ func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) model.CloudProviderConfig {
 	t.Helper()
 	provider := testPlatformAliasProvider()
-	entry, err := deploy.RenderPlatformAliasEntry(provider)
+	entry, err := platformalias.RenderPlatformAliasEntry(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeAssetFile(t, boot.platformAliasEntryPath(), entry)
-	writeAssetFile(t, filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey), cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
-	writeAssetFile(t, filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey), "refresh-token-value")
+	writeAssetFile(t, filepath.Join(boot.platformAliasDir, platformalias.PlatformAliasSecretFileKey), cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
+	writeAssetFile(t, filepath.Join(boot.platformAliasDir, platformalias.PlatformAliasSecretTokenKey), "refresh-token-value")
 	return provider
 }
 

@@ -10,32 +10,32 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/linuxpkgcheck"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // Keep tests off the operator's package-test record and any real docker daemon
 // (linux/arm64 unless a test names another).
 func init() {
-	build.LinuxPackageTestRecordDir = func() (string, error) {
+	linuxpkgcheck.LinuxPackageTestRecordDir = func() (string, error) {
 		return "", errors.New("linux package test records are off in this test binary unless a test points them at its own directory")
 	}
-	build.LinuxPackageDaemonPlatform = func() (string, error) { return "linux/arm64", nil }
+	linuxpkgcheck.LinuxPackageDaemonPlatform = func() (string, error) { return "linux/arm64", nil }
 }
 
 func useLinuxPackageDaemonPlatform(t *testing.T, platform func() (string, error)) {
 	t.Helper()
-	previous := build.LinuxPackageDaemonPlatform
-	build.LinuxPackageDaemonPlatform = platform
-	t.Cleanup(func() { build.LinuxPackageDaemonPlatform = previous })
+	previous := linuxpkgcheck.LinuxPackageDaemonPlatform
+	linuxpkgcheck.LinuxPackageDaemonPlatform = platform
+	t.Cleanup(func() { linuxpkgcheck.LinuxPackageDaemonPlatform = previous })
 }
 
 func useLinuxPackageTestRecordDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "package-tests")
-	previous := build.LinuxPackageTestRecordDir
-	build.LinuxPackageTestRecordDir = func() (string, error) { return dir, nil }
-	t.Cleanup(func() { build.LinuxPackageTestRecordDir = previous })
+	previous := linuxpkgcheck.LinuxPackageTestRecordDir
+	linuxpkgcheck.LinuxPackageTestRecordDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { linuxpkgcheck.LinuxPackageTestRecordDir = previous })
 	return dir
 }
 
@@ -83,7 +83,7 @@ func reusablePackageProject(t *testing.T) (string, model.LinuxPackageSpec) {
 
 func reuseDecision(t *testing.T, pkg model.LinuxPackageSpec) model.LinuxPackageSpec {
 	t.Helper()
-	decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
+	decided := linuxpkgcheck.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
 	if decided.Fingerprint == "" {
 		t.Fatalf("the package was not fingerprinted: %q", decided.NoReuseReason)
 	}
@@ -94,7 +94,7 @@ func runChecksLogging(t *testing.T, packages []model.LinuxPackageSpec) (string, 
 	t.Helper()
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
-	err := build.RunLinuxPackageChecks(ctx, packages)
+	err := linuxpkgcheck.RunLinuxPackageChecks(ctx, packages)
 	return log.String(), err
 }
 
@@ -127,7 +127,7 @@ func TestLinuxPackageDryRunNeitherRunsNorRecords(t *testing.T) {
 	var log bytes.Buffer
 	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &log, &log)}
 	decided := reuseDecision(t, pkg)
-	if err := build.RunLinuxPackageChecks(ctx, []model.LinuxPackageSpec{decided}); err != nil {
+	if err := linuxpkgcheck.RunLinuxPackageChecks(ctx, []model.LinuxPackageSpec{decided}); err != nil {
 		t.Fatal(err)
 	}
 	if calls := readLines(t, dockerLog); len(calls) != 0 {
@@ -160,7 +160,7 @@ func TestLinuxPackageFingerprintTracksTheCheckStagesCopySources(t *testing.T) {
 			useLinuxPackageTestRecordDir(t)
 			root, pkg := reusablePackageProject(t)
 			before := reuseDecision(t, pkg)
-			if err := build.RecordLinuxPackageTestPass(before.Name, before.Fingerprint, before.Platform); err != nil {
+			if err := linuxpkgcheck.RecordLinuxPackageTestPass(before.Name, before.Fingerprint, before.Platform); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join(root, filepath.FromSlash(tc.rel))
@@ -185,7 +185,7 @@ func TestLinuxPackagePassIsPerPlatform(t *testing.T) {
 	if decided.Platform != "linux/arm64" {
 		t.Fatalf("platform = %q", decided.Platform)
 	}
-	if err := build.RecordLinuxPackageTestPass(decided.Name, decided.Fingerprint, decided.Platform); err != nil {
+	if err := linuxpkgcheck.RecordLinuxPackageTestPass(decided.Name, decided.Fingerprint, decided.Platform); err != nil {
 		t.Fatal(err)
 	}
 	useLinuxPackageDaemonPlatform(t, func() (string, error) { return "linux/amd64", nil })
@@ -200,11 +200,11 @@ func TestLinuxPackagePassIsKeyedByTheDaemonsPlatform(t *testing.T) {
 	previousArch := core.CurrentGOARCH
 	t.Cleanup(func() { core.CurrentGOARCH = previousArch })
 	core.CurrentGOARCH = func() string { return "arm64" }
-	useLinuxPackageDaemonPlatform(t, build.ReadDockerDaemonPlatform)
+	useLinuxPackageDaemonPlatform(t, linuxpkgcheck.ReadDockerDaemonPlatform)
 	dockerLog := filepath.Join(t.TempDir(), "docker.log")
 	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `echo "$*" >> '`+dockerLog+`'`+"\n"+`echo linux/amd64`))
 
-	decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg, pkg})
+	decided := linuxpkgcheck.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg, pkg})
 	for _, got := range decided {
 		if got.Platform != "linux/amd64" {
 			t.Fatalf("an amd64 daemon on an arm64 host must key the pass as linux/amd64, got %q (%s)", got.Platform, got.NoReuseReason)
@@ -225,9 +225,9 @@ func TestLinuxPackageWithoutTheDaemonsPlatformNeitherReusesNorRecords(t *testing
 		"silent":      "exit 0",
 	} {
 		t.Run(name, func(t *testing.T) {
-			useLinuxPackageDaemonPlatform(t, build.ReadDockerDaemonPlatform)
+			useLinuxPackageDaemonPlatform(t, linuxpkgcheck.ReadDockerDaemonPlatform)
 			t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, script))
-			decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
+			decided := linuxpkgcheck.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
 			if decided.Reuse || decided.Platform != "" || !strings.Contains(decided.NoReuseReason, "the docker daemon's platform could not be read") {
 				t.Fatalf("expected no reuse decision and a reason, got %+v (%q)", decided, decided.NoReuseReason)
 			}
@@ -253,7 +253,7 @@ func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	root, pkg := reusablePackageProject(t)
 	decided := reuseDecision(t, pkg)
-	if err := build.RecordLinuxPackageTestPass(decided.Name, decided.Fingerprint, decided.Platform); err != nil {
+	if err := linuxpkgcheck.RecordLinuxPackageTestPass(decided.Name, decided.Fingerprint, decided.Platform); err != nil {
 		t.Fatal(err)
 	}
 	pkgDir := filepath.Dir(pkg.DockerfilePath)

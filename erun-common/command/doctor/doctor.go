@@ -6,8 +6,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 )
 
 type DoctorInspectionResult struct {
@@ -53,7 +53,7 @@ func DoctorActionDescription(action model.DoctorAction) string {
 
 // RunDoctorInspection reads docker storage on the environment's build daemon,
 // refusing with DoctorDockerDaemonUnavailableError when there is none.
-func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
+func RunDoctorInspection(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorInspectionResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -67,7 +67,7 @@ func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerComm
 
 // RunDoctorAction prunes the environment's build daemon, with store readings
 // around the prune so a no-op prune is reported as one.
-func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action model.DoctorAction) (DoctorDockerResult, error) {
+func RunDoctorAction(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action model.DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorDockerResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}

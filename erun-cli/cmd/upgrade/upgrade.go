@@ -12,12 +12,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
 	"github.com/spf13/cobra"
 )
 
-func NewUpgradeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
+func NewUpgradeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc) *cobra.Command {
 	var versionOverride string
 	var tenant string
 	var environment string
@@ -153,7 +154,7 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) seam.UpgradeItemDeployer {
+func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc, force bool) seam.UpgradeItemDeployer {
 	return func(ctx core.Context, item model.UpgradePlanItem) error {
 		deployTarget := model.DeployTarget{
 			Tenant:          item.Tenant,
@@ -161,14 +162,14 @@ func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSave
 			VersionOverride: item.Target,
 			Force:           force,
 		}
-		specs, err := deploypkg.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+		specs, err := spec.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 		if err != nil {
 			return err
 		}
-		if err := deploypkg.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
+		if err := run.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
-		if err := deploypkg.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, deploypkg.ResolveDeployedHelmReleaseVersion); err != nil {
+		if err := runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion); err != nil {
 			return err
 		}
 		deploynotice.NoticeStaleRuntimePortForwards(ctx, specs)

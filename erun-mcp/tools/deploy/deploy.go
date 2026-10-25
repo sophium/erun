@@ -8,7 +8,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
@@ -51,7 +55,7 @@ func DeployTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 				return dockerspec.DockerBuildContextAtDir(workDir)
 			}
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
-				return deploy.KubernetesDeployContextAtDir(workDir), nil
+				return kubecheck.KubernetesDeployContextAtDir(workDir), nil
 			}
 
 			target := model.DeployTarget{
@@ -75,24 +79,24 @@ func DeployTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 
 			component := strings.TrimSpace(input.Component)
 			if component != "" {
-				execution, err := deploy.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
+				execution, err := spec.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
 				if err != nil {
 					return err
 				}
-				if err := deploy.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
+				if err := run.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, []deploy.DeploySpec{execution}, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+				return runtimeversion.PersistRuntimeVersionFromDeploySpecs(runCtx, []seam.DeploySpec{execution}, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 			}
 
-			executions, err := deploy.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			executions, err := spec.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
 			if err != nil {
 				return err
 			}
-			if err := deploy.RunDeploySpecs(runCtx, executions, runtime.DeployHelmChart); err != nil {
+			if err := run.RunDeploySpecs(runCtx, executions, runtime.DeployHelmChart); err != nil {
 				return err
 			}
-			return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+			return runtimeversion.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 		})
 		envelope, err := jobenvelope.RunJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err

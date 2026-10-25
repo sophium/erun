@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -86,7 +86,7 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (jobstate.Environm
 		PID:              os.Getpid(),
 		StartedAt:        time.Now(),
 		LeaseID:          environmentJobLeaseID(params.ID),
-		Hostname:         build.CurrentJobHostname(),
+		Hostname:         jobhost.CurrentJobHostname(),
 		StartedByJobID:   params.StartedByJobID,
 		Handoff:          params.Handoff,
 		LogPath:          logPath,

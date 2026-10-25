@@ -11,8 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
@@ -78,7 +80,7 @@ func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderF
 		return ListResult{}, err
 	}
 
-	effectiveResult, effectiveErr := open.ResolveOpen(store, params)
+	effectiveResult, effectiveErr := resolve.ResolveOpen(store, params)
 	configDir, configDirErr := configpkg.ERunConfigDir()
 	if configDirErr != nil {
 		return ListResult{}, configDirErr
@@ -326,7 +328,7 @@ func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, e
 		ContainerRegistries:      configpkg.EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
 		RuntimeVersionLine:       runtimeVersionLine,
-		ErunVersion:              deploy.ResolveErunVersion(env, runtimeVersionLine),
+		ErunVersion:              runtimeversion.ResolveErunVersion(env, runtimeVersionLine),
 		RuntimeImageLineMismatch: listRuntimeImageLineMismatch(env),
 		RuntimePod:               env.RuntimePod,
 		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
@@ -360,7 +362,7 @@ func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *model.Runti
 	if strings.TrimSpace(env.RuntimeVersion) == "" {
 		return nil
 	}
-	line := deploy.ResolveRuntimeVersionLine(tenant, env)
+	line := runtimeversion.ResolveRuntimeVersionLine(tenant, env)
 	return &line
 }
 
@@ -374,11 +376,11 @@ func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *model.RuntimeImageLi
 
 // EnvironmentRuntimeSizing returns the standing recommendation; sizing is advisory, so read failures are nil.
 func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *model.RuntimeSizingRecommendation {
-	history, err := deploy.LoadRuntimeUsageHistory(tenant, env.Name)
+	history, err := runtimeusage.LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return nil
 	}
-	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
+	recommendation, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
 	if !ok {
 		return nil
 	}
@@ -442,7 +444,7 @@ func NewListSSHResult(result configpkg.OpenResult) model.ListSSHResult {
 		return model.ListSSHResult{}
 	}
 
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	sync := result.EnvConfig.SSHD.WorkspaceSync
 	return model.ListSSHResult{
 		Enabled:                true,

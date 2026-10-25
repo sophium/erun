@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
 )
 
 // uiHostGatewayDefaults is the gateway the operator's Claude Code already uses.
@@ -20,7 +20,7 @@ type uiHostGatewayDefaults struct {
 // LoadHostGatewayDefaults reports the gateway this machine's Claude Code routes
 // through; no settings or no base URL is not an error, an unreadable file is.
 func (a *App) LoadHostGatewayDefaults() (uiHostGatewayDefaults, error) {
-	env, err := deploy.HostClaudeSettingsEnv()
+	env, err := gateway.HostClaudeSettingsEnv()
 	if err != nil {
 		return uiHostGatewayDefaults{}, err
 	}

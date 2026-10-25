@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 const (
@@ -16,9 +16,9 @@ const (
 	testGi = 1024 * testMi
 )
 
-func usageHistory(window time.Duration, samples int, latest model.RuntimeUsage) deploy.RuntimeUsageHistory {
+func usageHistory(window time.Duration, samples int, latest model.RuntimeUsage) runtimeusage.RuntimeUsageHistory {
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := deploy.RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
+	history := runtimeusage.RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
 	for i := 0; i < samples; i++ {
 		history.Samples = append(history.Samples, latest)
 	}
@@ -41,7 +41,7 @@ func verdictFor(t *testing.T, recommendation model.RuntimeSizingRecommendation, 
 
 type memoryDirectionCase struct {
 	name           string
-	history        deploy.RuntimeUsageHistory
+	history        runtimeusage.RuntimeUsageHistory
 	ceiling        model.NamespaceResourceQuota
 	wantAction     model.RuntimeSizingAction
 	wantConfidence model.RuntimeSizingConfidence
@@ -52,7 +52,7 @@ func runMemoryDirectionCases(t *testing.T, cases []memoryDirectionCase) {
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: testCase.history, Ceiling: testCase.ceiling})
+			recommendation, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: testCase.history, Ceiling: testCase.ceiling})
 			if !ok {
 				t.Fatal("expected a recommendation")
 			}
@@ -83,7 +83,7 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 	runMemoryDirectionCases(t, []memoryDirectionCase{
 		{
 			name: "a long window with too few samples recommends nothing",
-			history: func() deploy.RuntimeUsageHistory {
+			history: func() runtimeusage.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, 4, model.RuntimeUsage{Memory: model.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 1 * testGi
 				return h
@@ -100,7 +100,7 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 		},
 		{
 			name: "a peak just under the raise margin holds rather than shrinking",
-			history: func() deploy.RuntimeUsageHistory {
+			history: func() runtimeusage.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, model.RuntimeUsage{Memory: model.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 8 * testGi
 				return h
@@ -116,13 +116,13 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 
 	cases := []struct {
 		name          string
-		history       deploy.RuntimeUsageHistory
+		history       runtimeusage.RuntimeUsageHistory
 		wantAction    model.RuntimeSizingAction
 		wantSuggested string
 	}{
 		{
 			name: "too few scheduling periods recommends nothing",
-			history: func() deploy.RuntimeUsageHistory {
+			history: func() runtimeusage.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, model.RuntimeUsage{CPU: model.RuntimeCPUUsage{QuotaCores: 1}, Memory: model.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 500
 				h.ObservedPeakCPUMilli = 100
@@ -142,7 +142,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: testCase.history})
+			recommendation, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: testCase.history})
 			if !ok {
 				t.Fatal("expected a recommendation")
 			}
@@ -160,7 +160,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 // The peak is set in the first sample, which is then pushed out of the window.
 func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, model.RuntimeUsage{
+	history := AppendRuntimeUsageSample(runtimeusage.RuntimeUsageHistory{}, model.RuntimeUsage{
 		Memory: model.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 7 * testGi},
 		CPU:    model.RuntimeCPUUsage{UsageUsec: 900_000_000, Periods: 90000},
 	}, base)

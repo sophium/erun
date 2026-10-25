@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 // terraformDNS01ProviderRFC2136 switches the cluster-edge DNS-01 solver to
@@ -87,7 +87,7 @@ func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Re
 	args = append(args, "-n", requirement.Namespace, "get", "secret", requirement.SecretName, "-o", jsonPath)
 	ctx.TraceCommand("", "kubectl", args...)
 
-	output, stderr, err := deploy.RunObserveKubectl(args)
+	output, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
 		return "", terraformRFC2136ReadError(requirement, stderr, err)
 	}

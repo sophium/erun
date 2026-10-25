@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	diagnosispkg "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 )
 
 func agentCredentialDiagnosis(state model.RuntimeAgentCredentialState) model.DeployDiagnosisResult {
@@ -39,7 +39,7 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 	for _, want := range []string{
 		"Agent capability",
 		"UNAVAILABLE",
-		deploy.GatewayBaseURLEnv,
+		diagnosispkg.GatewayBaseURLEnv,
 		"https://openrouter.ai/api",
 		"predates the credential injection",
 		"erun deploy frs build",
@@ -96,7 +96,7 @@ func TestReportAgentCredentialsIsSilentUnderDryRun(t *testing.T) {
 
 func TestReportAgentCredentialsConfirmsAHealthyEnvironment(t *testing.T) {
 	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialConfigured))
-	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, deploy.GatewayBaseURLEnv) {
+	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, diagnosispkg.GatewayBaseURLEnv) {
 		t.Fatalf("report does not confirm a routed environment:\n%s", rendered)
 	}
 }

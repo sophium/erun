@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 )
 
 // remoteProvisionedSecrets is a struct so the two names cannot be swapped.
@@ -45,7 +45,7 @@ func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (s
 	if provisioned {
 		return name, nil
 	}
-	return deploy.ProvisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
+	return platformalias.ProvisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
 }
 
 // ensureRemoteRegistryCredentials fails init when a build- or deploy-role

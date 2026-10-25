@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/codesign"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // A host workspace is the local-agent worktree or the remote-agent sync mirror;
@@ -32,7 +32,7 @@ func hostWorkspacePath(result config.OpenResult, findProjectRoot seam.ProjectFin
 }
 
 func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, string, error) {
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

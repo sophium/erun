@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
@@ -16,7 +16,7 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a build that plans no work to fail instead of reporting success")
 	}
-	if !errors.Is(err, build.ErrBuildPlanEmpty) {
+	if !errors.Is(err, spec.ErrBuildPlanEmpty) {
 		t.Fatalf("expected ErrBuildPlanEmpty, got %T: %v", err, err)
 	}
 }

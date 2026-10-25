@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -260,7 +260,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		Claude:            claudeConfigToUI(config.Claude),
 		ClaudeDefaults:    claudeDefaultsForUI(gateway),
 		AITool:            strings.TrimSpace(config.AITool),
-		AILaunchSignature: open.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
+		AILaunchSignature: ailaunch.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart:          ports.RangeStart,
 			RangeEnd:            ports.RangeEnd,

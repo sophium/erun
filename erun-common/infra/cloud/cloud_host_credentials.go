@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -69,7 +70,7 @@ func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, re
 }
 
 // InspectHostAWSCredentials reports the pod profile's presence and expiry, never credential material.
-func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (model.HostCredentialsStatus, error) {
+func InspectHostAWSCredentials(ctx core.Context, runner seam.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (model.HostCredentialsStatus, error) {
 	status := model.HostCredentialsStatus{
 		Alias:   strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Profile: HostAWSCredentialsProfile,

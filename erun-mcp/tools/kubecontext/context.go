@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -108,7 +109,7 @@ func ContextStartTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *m
 	}
 }
 
-func contextPowerTool(runtime runtimecfg.RuntimeConfig, run func(core.Context, cloud.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
+func contextPowerTool(runtime runtimecfg.RuntimeConfig, run func(core.Context, seam.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
 			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")

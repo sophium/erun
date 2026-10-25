@@ -14,13 +14,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
+	"github.com/sophium/erun/erun-common/primitive/open/sshdsetup"
 	"github.com/spf13/cobra"
 )
 
-func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
+func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
 	target := model.OpenParams{}
@@ -104,7 +104,7 @@ func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.
 	return cmdCtx.WriteResult(synced)
 }
 
-func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	// The desktop's Local shell gives no PTY exit, so the activity entry and recorded outcome
 	// are its only completion signal.
 	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
@@ -116,7 +116,7 @@ func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPat
 	return nil
 }
 
-func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}
@@ -142,8 +142,8 @@ func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyP
 	return writeSSHDInitSummary(ctx, result, localConfig)
 }
 
-func validateSSHDInitDependencies(result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc) error {
-	if err := open.ValidateSSHDTarget(result); err != nil {
+func validateSSHDInitDependencies(result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc) error {
+	if err := sshdsetup.ValidateSSHDTarget(result); err != nil {
 		return err
 	}
 	if saveEnvConfig == nil {
@@ -203,12 +203,12 @@ func saveSSHDEnvConfig(ctx core.Context, result config.OpenResult, updatedEnv co
 	return saveEnvConfig(result.Tenant, updatedEnv)
 }
 
-func deploySSHDConfig(ctx core.Context, result config.OpenResult, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc) error {
+func deploySSHDConfig(ctx core.Context, result config.OpenResult, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc) error {
 	spec, err := resolveRuntimeDeploySpec(ctx, result, false)
 	if err != nil {
 		return err
 	}
-	return deploy.RunDeploySpec(ctx, spec, deployHelmChart)
+	return run.RunDeploySpec(ctx, spec, deployHelmChart)
 }
 
 func writeSSHDLocalConfig(ctx core.Context, result config.OpenResult, writeLocalConfig SSHDLocalConfigWriter) (sshdlink.SSHDLocalConfigResult, error) {
@@ -216,7 +216,7 @@ func writeSSHDLocalConfig(ctx core.Context, result config.OpenResult, writeLocal
 		return sshdlink.SSHDLocalConfigResult{}, nil
 	}
 	if ctx.DryRun {
-		info := open.SSHConnectionInfoForResult(result)
+		info := sshconn.SSHConnectionInfoForResult(result)
 		ctx.Trace(fmt.Sprintf("write ssh config host %s for %s/%s", info.HostAlias, result.Tenant, result.Environment))
 		return sshdlink.SSHDLocalConfigResult{}, nil
 	}
@@ -225,7 +225,7 @@ func writeSSHDLocalConfig(ctx core.Context, result config.OpenResult, writeLocal
 
 func writeSSHDInitSummary(ctx core.Context, result config.OpenResult, localConfig sshdlink.SSHDLocalConfigResult) error {
 	if ctx.Stdout != nil {
-		info := open.SSHConnectionInfoForResult(result)
+		info := sshconn.SSHConnectionInfoForResult(result)
 		if _, err := fmt.Fprintf(
 			ctx.Stdout,
 			"SSHD enabled for %s/%s\n  host: %s\n  config: %s\n  user: %s\n  local port: %d\n  workspace: %s\n",

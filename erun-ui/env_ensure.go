@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // envEnsureTTL lets one reconnect cover the burst of spawns an env (re)start produces.
@@ -117,7 +117,7 @@ func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEns
 			a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 		}
 	}()
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -168,7 +168,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 // runtimeCheckFoundDeploymentAbsent matches only ensureRuntimeDeployed's
 // "runtime is not deployed" error; any other failure is not evidence of absence.
 func runtimeCheckFoundDeploymentAbsent(err error) bool {
-	return err != nil && strings.Contains(err.Error(), deploy.KubernetesDeploymentAbsentMessageMarker)
+	return err != nil && strings.Contains(err.Error(), kubecheck.KubernetesDeploymentAbsentMessageMarker)
 }
 
 // surfaceEnvRuntimeStopped shows a stopped env as stopped and names the way back.

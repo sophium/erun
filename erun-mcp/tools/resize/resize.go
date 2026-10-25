@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
@@ -50,7 +50,7 @@ func ResizeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 				return dockerspec.DockerBuildContextAtDir(workDir)
 			}
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
-				return deploy.KubernetesDeployContextAtDir(workDir), nil
+				return kubecheck.KubernetesDeployContextAtDir(workDir), nil
 			}
 			_, err := lifecycle.RunRuntimeResize(runCtx, lifecycle.RuntimeResizeDependencies{
 				Store:                          runtime.Store,

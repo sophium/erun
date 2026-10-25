@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // runDeployOrchestration composes build/push/deploy primitives (the desktop may not use
@@ -110,7 +110,7 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, false
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

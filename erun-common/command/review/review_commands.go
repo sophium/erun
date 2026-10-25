@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/classify"
 )
 
 // RunReviewList lists reviews visible to the caller's tenant.
@@ -261,7 +261,7 @@ func RunReviewRecordBuild(ctx core.Context, store config.CloudReadStore, alias s
 	if strings.TrimSpace(params.Version) == "" {
 		return model.PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
 	}
-	if err := build.EnsureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
+	if err := classify.EnsureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
 		return model.PlatformBuild{}, err
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)

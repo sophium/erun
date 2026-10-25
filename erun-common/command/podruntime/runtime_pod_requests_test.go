@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // Kubernetes admits a pod on max(max over init containers, sum over containers).
@@ -83,8 +82,8 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "code1", Type: config.EnvironmentTypeLocalAgent}
-	containerRunner := func(_ config.ShellLaunchParams, _, _ string) (kube.RemoteCommandResult, error) {
-		return kube.RemoteCommandResult{Stdout: reading}, nil
+	containerRunner := func(_ config.ShellLaunchParams, _, _ string) (model.RemoteCommandResult, error) {
+		return model.RemoteCommandResult{Stdout: reading}, nil
 	}
 
 	t.Run("unreadable pod spec", func(t *testing.T) {

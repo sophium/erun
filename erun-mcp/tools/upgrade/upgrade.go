@@ -10,7 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
@@ -50,7 +53,7 @@ func UpgradeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 					return dockerspec.DockerBuildContextAtDir(workDir)
 				}
 				resolveDeployContext := func() (model.KubernetesDeployContext, error) {
-					return deploy.KubernetesDeployContextAtDir(workDir), nil
+					return kubecheck.KubernetesDeployContextAtDir(workDir), nil
 				}
 				deployTarget := model.DeployTarget{
 					Tenant:          item.Tenant,
@@ -59,14 +62,14 @@ func UpgradeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 					VersionOverride: item.Target,
 					Force:           target.Force,
 				}
-				specs, err := deploy.ResolveCurrentDeploySpecs(ctx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, deployTarget)
+				specs, err := spec.ResolveCurrentDeploySpecs(ctx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, deployTarget)
 				if err != nil {
 					return err
 				}
-				if err := deploy.RunDeploySpecs(ctx, specs, runtime.DeployHelmChart); err != nil {
+				if err := run.RunDeploySpecs(ctx, specs, runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+				return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 			}
 
 			result := lifecycle.RunUpgradePlan(runCtx, plan, deployer)

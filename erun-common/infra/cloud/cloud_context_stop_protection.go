@@ -7,11 +7,12 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // SetCloudContextStopProtection makes every stop be refused until cleared, to keep an
 // instance up while repairing it.
-func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, params model.CloudContextStopProtectionParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
+func SetCloudContextStopProtection(ctx core.Context, store seam.CloudContextStore, params model.CloudContextStopProtectionParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
 		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
@@ -51,7 +52,7 @@ func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, pa
 
 // DescribeCloudContextStopProtection reads one context's live stop protection; it costs
 // one AWS call, so it is kept out of the bulk refresh.
-func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStore, name string, deps CloudContextDependencies) (model.CloudContextStatus, error) {
+func DescribeCloudContextStopProtection(ctx core.Context, store seam.CloudContextStore, name string, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
 		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
@@ -98,7 +99,7 @@ func parseCloudContextStopProtectionOutput(out string) bool {
 	}
 }
 
-func ensureCloudContextHostStopProfileAssociation(ctx core.Context, store CloudContextStore, params model.CloudContextParams, deps CloudContextDependencies) error {
+func ensureCloudContextHostStopProfileAssociation(ctx core.Context, store seam.CloudContextStore, params model.CloudContextParams, deps CloudContextDependencies) error {
 	if store == nil {
 		return fmt.Errorf("store is required")
 	}

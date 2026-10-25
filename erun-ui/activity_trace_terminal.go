@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
 // feedActivityTraceFromTerminal feeds each complete PTY line to the trace handler.
@@ -25,7 +25,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 		// Another window re-attached this session, so its PTY exit must not reconnect.
-		if strings.TrimSpace(line) == open.ShellSessionTakenOverNotice {
+		if strings.TrimSpace(line) == appsession.ShellSessionTakenOverNotice {
 			a.markSessionTakenOver(managed)
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
 // ListRemoteAppSessions reports the live persistent sessions in the env's pod.
@@ -42,5 +42,5 @@ func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), 10*time.Second)
 	defer cancel()
 	_, _ = a.execInRuntimePod(ctx, selection,
-		open.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))
+		appsession.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))
 }

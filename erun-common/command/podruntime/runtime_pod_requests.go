@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 // RuntimePodRequestsRunnerFunc lets a transport inject a runner with its own deadline.
@@ -42,9 +42,9 @@ func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerF
 }
 
 func runPodRequestsKubectl(args []string) ([]byte, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("kubectl get pods: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("kubectl get pods: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	return raw, nil
 }
@@ -53,7 +53,7 @@ func parseRuntimePodRequests(raw []byte) (*model.RuntimeUsageRequests, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("kubectl returned no pod list for this environment's release")
 	}
-	list, ok := deploy.ParsePodStatusList(raw)
+	list, ok := observe.ParsePodStatusList(raw)
 	if !ok {
 		return nil, fmt.Errorf("unrecognized kubectl output")
 	}
@@ -73,8 +73,8 @@ func parseRuntimePodRequests(raw []byte) (*model.RuntimeUsageRequests, error) {
 }
 
 // During a rollout the Running pod wins; ties sort by name for a deterministic reading.
-func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatusItem, bool) {
-	running := make([]deploy.PodStatusItem, 0, len(items))
+func selectRuntimePodForRequests(items []observe.PodStatusItem) (observe.PodStatusItem, bool) {
+	running := make([]observe.PodStatusItem, 0, len(items))
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.Status.Phase), "Running") {
 			running = append(running, item)
@@ -85,7 +85,7 @@ func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatus
 		preferred = items
 	}
 	if len(preferred) == 0 {
-		return deploy.PodStatusItem{}, false
+		return observe.PodStatusItem{}, false
 	}
 	selected := preferred[0]
 	for _, item := range preferred[1:] {
@@ -98,7 +98,7 @@ func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatus
 
 // An unparseable quantity is an error, not a zero: understating the reservation is the
 // one wrong answer that matters.
-func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]model.KubernetesRequests, error) {
+func declaredContainerRequests(pod observe.PodStatusItem) (map[string]model.KubernetesRequests, error) {
 	var containers map[string]model.KubernetesRequests
 	for _, container := range pod.Spec.Containers {
 		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
@@ -113,7 +113,7 @@ func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]model.Kuber
 	return containers, nil
 }
 
-func effectivePodRequests(pod deploy.PodStatusItem) (model.KubernetesRequests, error) {
+func effectivePodRequests(pod observe.PodStatusItem) (model.KubernetesRequests, error) {
 	return EffectiveKubernetesPodRequests(
 		kubernetesContainerResources(pod.Spec.Containers),
 		kubernetesContainerResources(pod.Spec.InitContainers),
@@ -127,7 +127,7 @@ type KubernetesContainerResources struct {
 	Requests map[string]string
 }
 
-func kubernetesContainerResources(containers []deploy.SpecContainerEntry) []KubernetesContainerResources {
+func kubernetesContainerResources(containers []observe.SpecContainerEntry) []KubernetesContainerResources {
 	out := make([]KubernetesContainerResources, 0, len(containers))
 	for _, container := range containers {
 		out = append(out, KubernetesContainerResources{

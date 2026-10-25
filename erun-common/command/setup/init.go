@@ -14,8 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/helmrun"
+	"github.com/sophium/erun/erun-common/primitive/open/podwait"
 )
 
 var (
@@ -79,8 +79,8 @@ type BootstrapInitDependencies struct {
 	LoadProjectConfig          seam.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
 	WaitForRemoteRuntime       seam.RemoteRuntimeWaitFunc
-	RunRemoteCommand           kube.RemoteCommandRunnerFunc
-	DeployHelmChart            deploy.HelmChartDeployerFunc
+	RunRemoteCommand           seam.RemoteCommandRunnerFunc
+	DeployHelmChart            seam.HelmChartDeployerFunc
 	Sleep                      core.SleepFunc
 	// ProbeHostedRegistry defaults to a real probe when unset.
 	ProbeHostedRegistry HostedRegistryProbeFunc
@@ -97,7 +97,7 @@ type BootstrapRunner struct {
 
 type bootstrapRunState struct {
 	runner                BootstrapRunner
-	params                open.BootstrapInitParams
+	params                seam.BootstrapInitParams
 	result                BootstrapInitResult
 	detected              projectContext
 	tenants               []model.TenantConfig
@@ -114,14 +114,14 @@ type bootstrapRunState struct {
 	envConfigChanged      bool
 }
 
-func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params open.BootstrapInitParams) (BootstrapInitResult, error) {
+func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params seam.BootstrapInitParams) (BootstrapInitResult, error) {
 	return BootstrapRunner{
 		BootstrapInitDependencies: deps,
 		Context:                   deps.Context,
 	}.run(params)
 }
 
-func (s BootstrapRunner) run(params open.BootstrapInitParams) (BootstrapInitResult, error) {
+func (s BootstrapRunner) run(params seam.BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
 	state := bootstrapRunState{
 		runner: s,
@@ -352,7 +352,7 @@ func remoteHostConfigLabel(tenant, envName string) string {
 	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
 }
 
-func normalizeBootstrapParams(params open.BootstrapInitParams) open.BootstrapInitParams {
+func normalizeBootstrapParams(params seam.BootstrapInitParams) seam.BootstrapInitParams {
 	params.Tenant = strings.TrimSpace(params.Tenant)
 	params.SelectedTenant = strings.TrimSpace(params.SelectedTenant)
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
@@ -399,13 +399,13 @@ func (s BootstrapRunner) withStoreDefaults() BootstrapRunner {
 
 func (s BootstrapRunner) withRuntimeDefaults() BootstrapRunner {
 	if s.WaitForRemoteRuntime == nil {
-		s.WaitForRemoteRuntime = open.WaitForShellDeployment
+		s.WaitForRemoteRuntime = podwait.WaitForShellDeployment
 	}
 	if s.RunRemoteCommand == nil {
 		s.RunRemoteCommand = kube.RunRemoteCommand
 	}
 	if s.DeployHelmChart == nil {
-		s.DeployHelmChart = deploy.DeployHelmChart
+		s.DeployHelmChart = helmrun.DeployHelmChart
 	}
 	if s.Sleep == nil {
 		s.Sleep = time.Sleep
@@ -420,7 +420,7 @@ func (s BootstrapRunner) withLoggerDefaults() BootstrapRunner {
 	return s
 }
 
-func (s BootstrapRunner) confirmTenant(params open.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
+func (s BootstrapRunner) confirmTenant(params seam.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
 	if params.AutoApprove {
 		return true, nil
 	}
@@ -433,7 +433,7 @@ func (s BootstrapRunner) confirmTenant(params open.BootstrapInitParams, tenant, 
 	})
 }
 
-func (s BootstrapRunner) confirmEnvironment(params open.BootstrapInitParams, tenant, envName string) error {
+func (s BootstrapRunner) confirmEnvironment(params seam.BootstrapInitParams, tenant, envName string) error {
 	if params.AutoApprove {
 		return nil
 	}

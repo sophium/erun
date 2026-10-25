@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
 // hostOpenCommand passes the path as a discrete exec argument, never
@@ -123,7 +123,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 			"no matching file has synced to this environment's outputs yet",
 		), nil
 	}
-	podRoot := open.RemoteShellWorktreePath(cloud.ShellLaunchParamsFromResult(result))
+	podRoot := runtimeref.RemoteShellWorktreePath(cloud.ShellLaunchParamsFromResult(result))
 	if rel, ok := relUnderPodDir(cleanPodPath, podRoot); ok {
 		return resolveHostMirrorPath(
 			"mirror",

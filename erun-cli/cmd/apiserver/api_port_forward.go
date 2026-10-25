@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
 func NewAPIForwarder() portfwd.APIForwarder {
@@ -36,7 +36,7 @@ func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, erro
 		LocalPort:         localPort,
 	}
 
-	apiDeployment := open.APIDeploymentName(result.Tenant)
+	apiDeployment := runtimeref.APIDeploymentName(result.Tenant)
 	ctx.TraceCommand("", "kubectl", kube.KubectlGetDeploymentArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)...)
 
 	if ctx.DryRun {
@@ -82,7 +82,7 @@ func ensureAPIPortForwardDryRun(ctx core.Context, result config.OpenResult, stat
 	}
 	portfwd.PreviewClearRecordedPortForward(ctx, "api", portfwd.StateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
 	portfwd.PreviewSweepDeadPortForwardsMatching(ctx, "api", args, localPort)
-	apiDeployment := open.APIDeploymentName(result.Tenant)
+	apiDeployment := runtimeref.APIDeploymentName(result.Tenant)
 	ctx.Trace(fmt.Sprintf("open: port-forwarding service/%s if the check above finds the deployment present", apiDeployment))
 	return localPort, nil
 }
@@ -191,7 +191,7 @@ func kubectlAPIPortForwardArgs(result config.OpenResult, localPort int) []string
 	servicePort := config.APIServicePortForResult(result)
 	args = append(args,
 		"port-forward",
-		fmt.Sprintf("service/%s", open.APIDeploymentName(result.Tenant)),
+		fmt.Sprintf("service/%s", runtimeref.APIDeploymentName(result.Tenant)),
 		fmt.Sprintf("%d:%d", localPort, servicePort),
 		"--address", "127.0.0.1",
 	)

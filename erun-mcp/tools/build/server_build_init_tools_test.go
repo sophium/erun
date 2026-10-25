@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -39,7 +39,7 @@ func newComponentBuildFixture(t *testing.T) string {
 func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	projectRoot := newComponentBuildFixture(t)
 
-	var captured *dockerspec.DockerBuildSpec
+	var captured *seam.DockerBuildSpec
 	handler := BuildTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{
 			Environment: "dev",
@@ -49,7 +49,7 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 			t.Fatal("unexpected build script call: --component must resolve the docker context directly")
 			return nil
 		},
-		BuildDockerImage: func(spec dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
+		BuildDockerImage: func(spec seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 			captured = &spec
 			return nil
 		},

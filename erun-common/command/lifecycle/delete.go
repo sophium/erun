@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 type DeleteEnvironmentResult struct {
@@ -91,7 +91,7 @@ func removePortForwardStateFiles(ctx core.Context, tenant, environment string) e
 // A block that outlived its environment would connect to whichever env reuses the freed port.
 // Only removed while no other environment derives the same alias.
 func removeEnvironmentSSHConfigAlias(ctx core.Context, store seam.DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
-	alias := open.SSHHostAlias(tenant, environment)
+	alias := sshconn.SSHHostAlias(tenant, environment)
 	if alias == "" {
 		return nil
 	}
@@ -138,7 +138,7 @@ func sshAliasClaimedByOtherEnvironment(store seam.DeleteStore, tenant, environme
 		if name == "" || name == environment {
 			continue
 		}
-		if open.SSHHostAlias(tenant, name) == alias {
+		if sshconn.SSHHostAlias(tenant, name) == alias {
 			return true, nil
 		}
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/shell"
 )
 
 type openNoShellDialect string
@@ -225,7 +225,7 @@ func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect)
 		}
 		return strings.Join(commands, "\n") + "\n"
 	}
-	return open.LocalShellSetupScript(result)
+	return shell.LocalShellSetupScript(result)
 }
 
 func openNoShellHintPrefix(dialect openNoShellDialect) string {

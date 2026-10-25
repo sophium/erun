@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/diagnose"
 )
 
 // fakeKubernetesAPIServerForPod pins the kubeconfig namespace; libraryGetPod
@@ -90,7 +90,7 @@ func TestLibraryGetPodReadsContainerStatusAndSpec(t *testing.T) {
 	if !ok || !restarted || reason != "OOMKilled" || exitCode != 137 {
 		t.Fatalf("libraryJobSupervisorContainerRestart = (%v, %q, %d, ok=%v), want (true, OOMKilled, 137, true)", restarted, reason, exitCode, ok)
 	}
-	limit, found := build.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind")
+	limit, found := diagnose.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind")
 	if !found || limit != "8916Mi" {
 		t.Fatalf("libraryDockerBuildContainerMemoryLimit = (%q, %v), want (8916Mi, true)", limit, found)
 	}
@@ -116,7 +116,7 @@ func TestLibraryGetPodPropagatesNotFound(t *testing.T) {
 	if _, _, _, _, ok := libraryJobSupervisorContainerRestart("pod-a", "erun-devops"); ok {
 		t.Fatal("expected ok=false when the pod cannot be read, not a guessed answer")
 	}
-	if _, found := build.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind"); found {
+	if _, found := diagnose.LibraryDockerBuildContainerMemoryLimit("pod-a", "erun-dind"); found {
 		t.Fatal("expected found=false when the pod cannot be read, not a guessed answer")
 	}
 }

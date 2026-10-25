@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
 
@@ -88,7 +88,7 @@ func jetBrainsGatewayDoctorRepairForResult(result config.OpenResult) (jetBrainsG
 	if !ok {
 		return jetBrainsGatewayDoctorRepair{}, false, nil
 	}
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	configID := jetbrainsconfig.StableConfigID(info.HostAlias)
 	projectPath := strings.TrimSpace(info.WorkspacePath)
 	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, configID, projectPath)

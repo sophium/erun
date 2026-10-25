@@ -8,9 +8,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-func InitCloudContext(ctx core.Context, store CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
+func InitCloudContext(ctx core.Context, store seam.CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
 		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
@@ -53,7 +54,7 @@ func InitCloudContext(ctx core.Context, store CloudContextStore, params model.In
 	return model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
 }
 
-func initCloudContextConfig(store CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudProviderConfig, model.CloudContextConfig, error) {
+func initCloudContextConfig(store seam.CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudProviderConfig, model.CloudContextConfig, error) {
 	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
 	if err != nil {
 		return model.CloudProviderConfig{}, model.CloudContextConfig{}, err
@@ -75,7 +76,7 @@ func initCloudContextConfig(store CloudContextStore, params model.InitCloudConte
 	return provider, config, nil
 }
 
-func ensureInitCloudContextDoesNotExist(store CloudContextStore, name string) error {
+func ensureInitCloudContextDoesNotExist(store seam.CloudContextStore, name string) error {
 	existing, ok, err := findCloudContext(store, name)
 	if err != nil {
 		return err

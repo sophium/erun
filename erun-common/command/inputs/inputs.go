@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -24,13 +25,10 @@ type UploadRuntimeInputResult struct {
 	SHA256     string `json:"sha256"`
 }
 
-// RuntimeInputUploadRunner runs a /bin/sh script in the runtime pod with stdin streamed to it.
-type RuntimeInputUploadRunner func(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error)
-
 // UploadRuntimeInput streams a host file into the runtime pod over kubectl exec
 // stdin, so the bytes never touch the model's context or a command line.
 // It is host-only: the in-pod MCP edge has no path to the operator's filesystem.
-func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params model.UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
+func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params model.UploadRuntimeInputParams, run seam.RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
@@ -175,7 +173,7 @@ func kubectlRemoteExecStdinArgs(req config.ShellLaunchParams, script string) []s
 }
 
 // RunRemoteCommandWithStdin is the stdin-streaming counterpart of RunRemoteCommand.
-func RunRemoteCommandWithStdin(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error) {
+func RunRemoteCommandWithStdin(req config.ShellLaunchParams, script string, stdin io.Reader) (model.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", kubectlRemoteExecStdinArgs(req, script)...)
 	cmd.Stdin = stdin
 	var stdout bytes.Buffer
@@ -183,7 +181,7 @@ func RunRemoteCommandWithStdin(req config.ShellLaunchParams, script string, stdi
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return kube.RemoteCommandResult{
+	return model.RemoteCommandResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}, err

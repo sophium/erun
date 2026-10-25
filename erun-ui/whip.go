@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // WhipNow whips an explicit target list; an empty list is refused rather than
@@ -94,7 +94,7 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 // unreachable, not not-alive: a session may still run behind it.
 func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) model.WhipResult {
 	id := tenant + "/" + environment
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{Tenant: tenant, Environment: environment})
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return model.WhipResult{
 			Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},

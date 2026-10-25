@@ -17,8 +17,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
+	"github.com/sophium/erun/erun-common/primitive/open/shell"
 	"github.com/spf13/cobra"
 )
 
@@ -59,14 +60,14 @@ func resolveOpenTarget(
 	if err := refuseOpenForHostEnvironment(result); err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, err = open.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	result, err = shell.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -195,7 +196,7 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams,
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -208,7 +209,7 @@ func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, o
 		checkKubernetesDeployment: checkKubernetesDeployment,
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
-		resolveDeployedVersion:    deploy.ResolveDeployedHelmReleaseVersion,
+		resolveDeployedVersion:    runtimeversion.ResolveDeployedHelmReleaseVersion,
 		activateMCP:               activateMCP,
 		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
@@ -226,8 +227,8 @@ type resolvedOpenRunner struct {
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
 	checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error)
-	deployHelmChart           deploy.HelmChartDeployerFunc
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error)
+	deployHelmChart           seam.HelmChartDeployerFunc
 	resolveDeployedVersion    seam.HelmReleaseVersionResolverFunc
 	activateMCP               portfwd.MCPForwarder
 	activateAPI               portfwd.APIForwarder
@@ -421,7 +422,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 }
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams) {
-	if preview, err := open.PreviewShellLaunch(shellReq); err == nil {
+	if preview, err := shell.PreviewShellLaunch(shellReq); err == nil {
 		if len(preview.SeedArgs) > 0 {
 			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
 			r.ctx.Trace("open: SSH private key streamed to the runtime pod on stdin (kept off the command line)")
@@ -441,15 +442,15 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams
 func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
-		if errors.Is(err, open.ErrShellPodReplaced) {
+		if errors.Is(err, shell.ErrShellPodReplaced) {
 			continue
 		}
-		if errors.Is(err, open.ErrShellSessionTakenOver) {
+		if errors.Is(err, shell.ErrShellSessionTakenOver) {
 			// Another window took over this session; the notice stops the desktop's reconnect loop.
-			r.ctx.Info(open.ShellSessionTakenOverNotice)
+			r.ctx.Info(appsession.ShellSessionTakenOverNotice)
 			return nil
 		}
-		if !errors.Is(err, open.ErrShellReattachDeploy) {
+		if !errors.Is(err, shell.ErrShellReattachDeploy) {
 			return err
 		}
 		if r.runManagedDeploy == nil {

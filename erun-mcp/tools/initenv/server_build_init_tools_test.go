@@ -9,8 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -70,12 +69,12 @@ func stubGHCRDockerCredential(t *testing.T) {
 
 // fakeRemoteRepositoryStateRunner answers the registry-credential check
 // (recognized by its script content) as configured.
-func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpkg.ShellLaunchParams, string) (kube.RemoteCommandResult, error) {
-	return func(_ configpkg.ShellLaunchParams, script string) (kube.RemoteCommandResult, error) {
+func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpkg.ShellLaunchParams, string) (model.RemoteCommandResult, error) {
+	return func(_ configpkg.ShellLaunchParams, script string) (model.RemoteCommandResult, error) {
 		if strings.Contains(script, ".docker/config.json") {
-			return kube.RemoteCommandResult{Stdout: "1\n"}, nil
+			return model.RemoteCommandResult{Stdout: "1\n"}, nil
 		}
-		return kube.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
+		return model.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
 	}
 }
 
@@ -90,7 +89,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(deploy.HelmDeployParams) error {
+		DeployHelmChart: func(seam.HelmDeployParams) error {
 			return nil
 		},
 		WaitForRemoteRuntime: func(configpkg.ShellLaunchParams) error {
@@ -131,7 +130,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(params deploy.HelmDeployParams) error {
+		DeployHelmChart: func(params seam.HelmDeployParams) error {
 			deployedVersion = params.Version
 			return nil
 		},

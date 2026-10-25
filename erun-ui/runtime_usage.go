@@ -12,11 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 const runtimeUsageTimeout = 10 * time.Second
@@ -43,7 +42,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
 	}
-	result, err := open.ResolveOpen(store, model.OpenParams{
+	result, err := resolve.ResolveOpen(store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -63,8 +62,8 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 }
 
 // erun-common's RunRuntimeContainerCommand has no timeout; a UI probe needs one.
-func runtimeUsageRunner(ctx context.Context) diagnosis.RuntimeContainerCommandRunnerFunc {
-	return func(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
+func runtimeUsageRunner(ctx context.Context) seam.RuntimeContainerCommandRunnerFunc {
+	return func(req config.ShellLaunchParams, container, script string) (model.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
 		if kubernetesContext := strings.TrimSpace(req.KubernetesContext); kubernetesContext != "" {
 			args = append(args, "--context", kubernetesContext)
@@ -80,7 +79,7 @@ func runtimeUsageRunner(ctx context.Context) diagnosis.RuntimeContainerCommandRu
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		err := cmd.Run()
-		return kube.RemoteCommandResult{Stdout: stdout.String(), Stderr: stderr.String()}, err
+		return model.RemoteCommandResult{Stdout: stdout.String(), Stderr: stderr.String()}, err
 	}
 }
 

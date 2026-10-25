@@ -11,12 +11,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
+	targetpkg "github.com/sophium/erun/erun-common/primitive/deploy/target"
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
@@ -65,7 +67,7 @@ func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, fin
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
 			// Resolve the scope up front so failure traces name the env.
-			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
+			tenant, environment := targetpkg.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
@@ -98,24 +100,24 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
-	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, deployHelmChart seam.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
+	deploySpecs, err := spec.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
 		return err
 	}
 	ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
-	if err := deploy.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
+	if err := run.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
 		return err
 	}
-	if err := deploy.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion); err != nil {
+	if err := runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion); err != nil {
 		return err
 	}
 	deploynotice.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
 	return nil
 }
 
-func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
@@ -125,14 +127,14 @@ func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, 
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
-			deploySpec, err := deploy.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
+			deploySpec, err := spec.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
 			}
-			if err := deploy.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
+			if err := run.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
 				return err
 			}
-			return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, []deploy.DeploySpec{deploySpec}, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+			return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, []seam.DeploySpec{deploySpec}, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 		},
 	}
 	clicmd.AddDryRunFlag(cmd)

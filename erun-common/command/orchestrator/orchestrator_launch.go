@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 )
 
 // DefaultOrchestratorModel matches an environment agent's default model.
@@ -37,7 +37,7 @@ func ResolveOrchestratorLaunch(orchestrator config.OrchestratorConfig, catalog *
 	}
 	effort := strings.TrimSpace(orchestrator.Effort)
 	if effort == "" {
-		effort = open.DefaultClaudeEffort
+		effort = ailaunch.DefaultClaudeEffort
 	}
 	model := resolveOrchestratorModel(strings.TrimSpace(orchestrator.Model), gateway)
 	// The model is spliced unquoted into a shell line, so the resolved value is checked too.
@@ -47,7 +47,7 @@ func ResolveOrchestratorLaunch(orchestrator config.OrchestratorConfig, catalog *
 	return OrchestratorLaunch{
 		Model:       model,
 		Effort:      effort,
-		EffortFlags: open.ClaudeEffortFlags(effort),
+		EffortFlags: ailaunch.ClaudeEffortFlags(effort),
 		Gateway:     gateway,
 		Env:         orchestratorLaunchEnv(model, gateway),
 	}, nil
@@ -91,10 +91,10 @@ func ValidateOrchestratorLaunchSettings(orchestrator config.OrchestratorConfig, 
 			reason: "the gateway is turned on but no gateway catalog is configured",
 		}
 	}
-	if effort := strings.TrimSpace(orchestrator.Effort); effort != "" && !open.ValidClaudeEffort(effort) {
+	if effort := strings.TrimSpace(orchestrator.Effort); effort != "" && !ailaunch.ValidClaudeEffort(effort) {
 		return orchestratorLaunchSettingError{
 			kind:   orchestratorLaunchSettingBadEffort,
-			reason: fmt.Sprintf("invalid effort %q: must be one of %s", effort, strings.Join(open.ClaudeEffortLevels, ", ")),
+			reason: fmt.Sprintf("invalid effort %q: must be one of %s", effort, strings.Join(ailaunch.ClaudeEffortLevels, ", ")),
 		}
 	}
 	model := strings.TrimSpace(orchestrator.Model)

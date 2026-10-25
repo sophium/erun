@@ -9,16 +9,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/primitive/open/sshdsetup"
 )
 
-func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) sshdlink.SSHDActivator {
+func NewSSHDActivator(runRemoteCommand seam.RemoteCommandRunnerFunc) sshdlink.SSHDActivator {
 	return func(ctx core.Context, result config.OpenResult) error {
 		if !result.EnvConfig.SSHD.Enabled {
 			return nil
 		}
-		if err := open.ValidateSSHDTarget(result); err != nil {
+		if err := sshdsetup.ValidateSSHDTarget(result); err != nil {
 			return err
 		}
 

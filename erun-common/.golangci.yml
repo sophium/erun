@@ -218,6 +218,39 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: a primitive may import base/*, infra/* and primitive/shared/*, never another primitive; composing primitives is orchestration's job
+        primitive-deploy:
+          list-mode: lax
+          files: ["**/erun-common/primitive/deploy/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
+            - github.com/sophium/erun/erun-common/primitive/deploy/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: primitive/deploy/* may import base/*, infra/*, primitive/shared/* and its own siblings, never another primitive
+        primitive-build:
+          list-mode: lax
+          files: ["**/erun-common/primitive/build/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
+            - github.com/sophium/erun/erun-common/primitive/build/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: primitive/build/* may import base/*, infra/*, primitive/shared/* and its own siblings, never another primitive
+        primitive-open:
+          list-mode: lax
+          files: ["**/erun-common/primitive/open/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared/
+            - github.com/sophium/erun/erun-common/primitive/open/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: primitive/open/* may import base/*, infra/*, primitive/shared/* and its own siblings, never another primitive
         orchestration:
           list-mode: lax
           files: ["**/erun-common/orchestration/build/*.go", "**/erun-common/orchestration/clusterread/*.go", "**/erun-common/orchestration/deploy/*.go", "**/erun-common/orchestration/diagnosis/*.go"]

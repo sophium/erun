@@ -16,7 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
 
@@ -85,7 +85,7 @@ func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, host
 	if !ok {
 		return false, nil
 	}
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, jetbrainsconfig.StableConfigID(info.HostAlias), info.WorkspacePath)
 	if err != nil {
 		return false, err
@@ -247,7 +247,7 @@ func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS 
 	if !ok {
 		return nil
 	}
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	entry := jetbrainsconfig.ProjectEntry{
 		ConfigID:       jetbrainsconfig.StableConfigID(info.HostAlias),
 		HostAlias:      info.HostAlias,
@@ -339,7 +339,7 @@ func emitIntelliJManualOpenGuidance(ctx core.Context, result config.OpenResult) 
 	if out == nil {
 		return
 	}
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	_, _ = fmt.Fprintf(out,
 		"Opened IntelliJ IDEA locally.\n"+
 			"Complete the remote connection in IntelliJ:\n"+

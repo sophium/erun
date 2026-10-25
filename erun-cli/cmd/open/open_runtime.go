@@ -9,9 +9,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/defaultchart"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
+	"github.com/sophium/erun/erun-common/primitive/deploy/published"
+	"github.com/sophium/erun/erun-common/primitive/deploy/recovery"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
 func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParams) error {
@@ -32,27 +38,27 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParam
 	return r.deployRuntime(execution)
 }
 
-func (r *resolvedOpenRunner) resolveRuntimeExecution() (deploy.DeploySpec, error) {
+func (r *resolvedOpenRunner) resolveRuntimeExecution() (seam.DeploySpec, error) {
 	// Older envs pin Chart.yaml to the unpublished "1.0.0" placeholder.
 	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
 	if appVersion == "" {
 		appVersion = shared.CurrentBuildInfo().Version
 	}
-	if err := deploy.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
-		return deploy.DeploySpec{}, err
+	if err := defaultchart.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
+		return seam.DeploySpec{}, err
 	}
 	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
 	if err != nil {
-		return deploy.DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	execution, err = applyRuntimeDeployImageOverride(r.ctx, r.result, execution, r.options.RuntimeImage)
 	if err != nil {
-		return deploy.DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
 }
 
-func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution deploy.DeploySpec) (bool, error) {
+func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution seam.DeploySpec) (bool, error) {
 	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
@@ -63,7 +69,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 		Name:               config.RuntimeReleaseName(r.result.Tenant),
 		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
-		ExpectedRepoPath:   open.RemoteShellWorktreePath(shellReq),
+		ExpectedRepoPath:   runtimeref.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
 		ExpectedMCPPort:    config.MCPPortForResult(r.result),
 		ExpectedSSHPort:    config.SSHLocalPortForResult(r.result),
@@ -79,7 +85,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 	return !deployed, nil
 }
 
-func (r *resolvedOpenRunner) deployRuntime(execution deploy.DeploySpec) error {
+func (r *resolvedOpenRunner) deployRuntime(execution seam.DeploySpec) error {
 	if r.options.VSCode || r.options.IntelliJ {
 		if r.ctx.DryRun {
 			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun deploy %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
@@ -91,18 +97,18 @@ func (r *resolvedOpenRunner) deployRuntime(execution deploy.DeploySpec) error {
 		execution.Deploy.SSHDEnabled = true
 	}
 	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-	if err := deploy.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
+	if err := run.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
 	// The shared writer also persists RuntimeImage and heals to the running version on a cached no-op.
-	return deploy.PersistRuntimeVersionFromDeploySpecs(r.ctx, []deploy.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
+	return runtimeversion.PersistRuntimeVersionFromDeploySpecs(r.ctx, []seam.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
-func (r *resolvedOpenRunner) openHelmDeployer(execution deploy.DeploySpec) deploy.HelmChartDeployerFunc {
+func (r *resolvedOpenRunner) openHelmDeployer(execution seam.DeploySpec) seam.HelmChartDeployerFunc {
 	return helmrecovery.WrapHelmDeployWithReleaseRecovery(
 		r.promptRunner,
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
-		deploy.ClearHelmReleasePendingOperation,
+		recovery.ClearHelmReleasePendingOperation,
 	)
 }
 
@@ -129,7 +135,7 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 	}
 	if !present {
 		// The marker lets the desktop tell absence from an unresolved check across the CLI boundary.
-		return fmt.Errorf("runtime for %s/%s "+deploy.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
+		return fmt.Errorf("runtime for %s/%s "+kubecheck.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
 	return nil
@@ -200,11 +206,11 @@ func sshdExpectationForDeployment(result config.OpenResult) *bool {
 	return &expected
 }
 
-func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart deploy.HelmChartDeployerFunc) deploy.HelmChartDeployerFunc {
+func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart seam.HelmChartDeployerFunc) seam.HelmChartDeployerFunc {
 	if deployHelmChart == nil {
 		return nil
 	}
-	return func(params deploy.HelmDeployParams) error {
+	return func(params seam.HelmDeployParams) error {
 		return runWithSpinner(
 			ctx,
 			" deploying "+releaseName+" with helm",
@@ -217,19 +223,19 @@ func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployH
 }
 
 // applyRuntimeDeployImageOverride is ignored for repo-local charts, which own their image refs.
-func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution deploy.DeploySpec, runtimeImage string) (deploy.DeploySpec, error) {
+func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution seam.DeploySpec, runtimeImage string) (seam.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
 		return execution, nil
 	}
-	if !result.RemoteRepo() && !deploy.IsOCIChartReference(execution.Deploy.ChartPath) {
+	if !result.RemoteRepo() && !published.IsOCIChartReference(execution.Deploy.ChartPath) {
 		return execution, nil
 	}
 	result.EnvConfig.RuntimeImage = runtimeImage
-	return deploy.ResolvePublishedDevopsDeploySpec(ctx, result, "")
+	return published.ResolvePublishedDevopsDeploySpec(ctx, result, "")
 }
 
-func applyRuntimeDeployVersionOverride(execution deploy.DeploySpec, versionOverride string) deploy.DeploySpec {
+func applyRuntimeDeployVersionOverride(execution seam.DeploySpec, versionOverride string) seam.DeploySpec {
 	versionOverride = strings.TrimSpace(versionOverride)
 	if versionOverride == "" {
 		return execution

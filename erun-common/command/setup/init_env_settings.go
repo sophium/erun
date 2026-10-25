@@ -8,7 +8,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
 )
 
 // updateExistingEnvSettings applies only supplied settings, whatever the
@@ -18,7 +18,7 @@ func (s *bootstrapRunState) updateExistingEnvSettings() error {
 		return nil
 	}
 	s.applyEnvRuntimeVersion()
-	s.applyEnvSetting("runtime image", deploy.StripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
+	s.applyEnvSetting("runtime image", runtimeimage.StripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
 	// Recording the registry before this run's deploy is how re-init breaks a
 	// chart-resolution deadlock.
 	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)

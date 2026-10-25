@@ -19,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -27,9 +28,6 @@ import (
 const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 
 const outputDownloadArchiveFormat = "tar.gz"
-
-// RuntimeOutputsRunner runs a /bin/sh script in the env's runtime pod.
-type RuntimeOutputsRunner func(req config.ShellLaunchParams, script string) (kube.RemoteCommandResult, error)
 
 func resolveOutputsDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
@@ -41,7 +39,7 @@ func resolveOutputsDir(dir string) (string, error) {
 
 // ResolveRuntimeOutputs lists one runtime-pod directory, newest-first; a missing
 // directory is an empty result.
-func ResolveRuntimeOutputs(ctx core.Context, req config.ShellLaunchParams, params model.RuntimeOutputsParams, run RuntimeOutputsRunner) (model.RuntimeOutputsListResult, error) {
+func ResolveRuntimeOutputs(ctx core.Context, req config.ShellLaunchParams, params model.RuntimeOutputsParams, run seam.RuntimeOutputsRunner) (model.RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return model.RuntimeOutputsListResult{}, err

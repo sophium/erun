@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 // SSHEnvironmentAlias is an environment's derived ssh Host alias and local port. Only an
@@ -65,7 +65,7 @@ func newSSHAliasClaims(environments []SSHEnvironmentAlias) sshAliasClaims {
 }
 
 func (c sshAliasClaims) isOrphan(alias string) bool {
-	if alias == "" || !strings.HasPrefix(alias, open.SSHHostAliasPrefix) {
+	if alias == "" || !strings.HasPrefix(alias, sshconn.SSHHostAliasPrefix) {
 		return false
 	}
 	return !c.claimed[alias]

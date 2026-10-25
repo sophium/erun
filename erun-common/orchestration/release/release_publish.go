@@ -6,15 +6,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-common/primitive/shared/releaseflow"
 )
 
-func NewReleasePublisher(execution dockerspec.BuildExecutionSpec, deploySpecs []deploy.DeploySpec, runScript seam.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) releaseflow.ReleasePublisher {
+func NewReleasePublisher(execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) releaseflow.ReleasePublisher {
 	tags := make([]releaseflow.ReleasePublishTag, 0, len(execution.DockerPushes))
 	for _, pushInput := range execution.DockerPushes {
 		tags = append(tags, releaseflow.ReleasePublishTag{Tag: strings.TrimSpace(pushInput.Image.Tag), Insecure: pushInput.Image.Insecure})

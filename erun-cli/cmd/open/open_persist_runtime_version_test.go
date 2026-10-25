@@ -7,7 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // A cached no-op deploy mints an unpushed version, so open heals to the running one.
@@ -29,13 +28,13 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 			resolveDeployedVersion: resolver,
 		}
 	}
-	skipHelmExecution := deploy.DeploySpec{
+	skipHelmExecution := seam.DeploySpec{
 		Target: config.OpenResult{
 			Tenant:    tenant,
 			EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 		},
 		SkipHelm: true,
-		Deploy: deploy.HelmDeploySpec{
+		Deploy: seam.HelmDeploySpec{
 			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
@@ -89,10 +88,10 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 		}},
 		resolveDeployedVersion: func(core.Context, string, string, string) (string, error) { return version, nil },
 	}
-	execution := deploy.DeploySpec{
+	execution := seam.DeploySpec{
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
-		Deploy: deploy.HelmDeploySpec{
+		Deploy: seam.HelmDeploySpec{
 			ReleaseName:          config.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",

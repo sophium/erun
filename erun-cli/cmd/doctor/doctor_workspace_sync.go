@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 // runWorkspaceSyncDoctor diagnoses and optionally repairs a remote-agent env's host-side
@@ -65,7 +65,7 @@ func anyDoctorActionRequested(flags ...bool) bool {
 
 // diagnoseAndReportWorkspaceSync returns whether SSH reaches the pod; dry-run only traces.
 func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) (bool, error) {
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	mirror := textfmt.ValueOrNone(strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath))
 	if _, err := fmt.Fprintf(ctx.Stdout, "== Workspace sync (host mirror) ==\n  host alias: %s\n  mirror: %s\n", info.HostAlias, mirror); err != nil {
 		return false, err
@@ -157,7 +157,7 @@ func persistWorkspaceSyncKeyPath(ctx core.Context, configStore config.ConfigStor
 }
 
 func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult) error {
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("workspace-sync: write ssh config host %s for %s/%s", info.HostAlias, result.Tenant, result.Environment))
 		return nil
@@ -171,7 +171,7 @@ func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult
 }
 
 func reportWorkspaceSyncRepairOutcome(ctx core.Context, result config.OpenResult) error {
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	if ctx.DryRun {
 		ctx.TraceCommand("", "ssh", workspaceSyncReachArgs(info.HostAlias)...)
 		return nil

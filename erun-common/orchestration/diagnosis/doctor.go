@@ -7,17 +7,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
-)
-
-type (
-	RuntimeContainerCommandRunnerFunc func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error)
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 func ResolveDoctorTarget(store config.OpenStore, params model.OpenParams) (config.OpenResult, error) {
-	return open.ResolveOpen(store, params)
+	return resolve.ResolveOpen(store, params)
 }
 
 func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) kube.RemoteCommandPreview {
@@ -27,7 +24,7 @@ func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, scr
 	}
 }
 
-func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, container, label, script string) (kube.RemoteCommandResult, error) {
+func RunTracedRuntimeContainerCommand(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, container, label, script string) (model.RemoteCommandResult, error) {
 	preview := PreviewRuntimeContainerCommand(req, container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
@@ -36,7 +33,7 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerC
 	ctx.TraceCommand("", "kubectl", traceArgs...)
 	ctx.TraceBlock(label, script)
 	if ctx.DryRun {
-		return kube.RemoteCommandResult{}, nil
+		return model.RemoteCommandResult{}, nil
 	}
 	if runner == nil {
 		runner = RunRuntimeContainerCommand
@@ -48,14 +45,14 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerC
 	return result, nil
 }
 
-func RunRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
+func RunRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) (model.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return kube.RemoteCommandResult{
+	return model.RemoteCommandResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}, err

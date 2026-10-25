@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 
 // AppendRuntimeUsageSample folds one reading into the history; RuntimeUsage carries no
 // timestamp, so now is passed in.
-func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample model.RuntimeUsage, now time.Time) deploy.RuntimeUsageHistory {
+func AppendRuntimeUsageSample(history runtimeusage.RuntimeUsageHistory, sample model.RuntimeUsage, now time.Time) runtimeusage.RuntimeUsageHistory {
 	previous, hasPrevious := history.Latest()
 	// A cumulative counter going backwards means the container was replaced; an in-place
 	// restart keeps the pod name, so the hostname cannot tell.
@@ -90,8 +90,8 @@ func appendBoundedUsageSamples(samples []model.RuntimeUsage, sample model.Runtim
 	return trimmed
 }
 
-func SaveRuntimeUsageHistory(tenant, environment string, history deploy.RuntimeUsageHistory) error {
-	path, err := deploy.RuntimeUsageHistoryPath(tenant, environment)
+func SaveRuntimeUsageHistory(tenant, environment string, history runtimeusage.RuntimeUsageHistory) error {
+	path, err := runtimeusage.RuntimeUsageHistoryPath(tenant, environment)
 	if err != nil {
 		return err
 	}

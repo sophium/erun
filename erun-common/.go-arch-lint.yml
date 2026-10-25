@@ -116,12 +116,108 @@ components:
     in: "orchestration/execute"
   orchestration-release:
     in: "orchestration/release"
-  primitive-build:
-    in: "primitive/build"
-  primitive-deploy:
-    in: "primitive/deploy"
-  primitive-open:
-    in: "primitive/open"
+  primitive-build-classify:
+    in: "primitive/build/classify"
+  primitive-build-diagnose:
+    in: "primitive/build/diagnose"
+  primitive-build-dockercli:
+    in: "primitive/build/dockercli"
+  primitive-build-dockerimage:
+    in: "primitive/build/dockerimage"
+  primitive-build-fingerprint:
+    in: "primitive/build/fingerprint"
+  primitive-build-ignore:
+    in: "primitive/build/ignore"
+  primitive-build-jobhost:
+    in: "primitive/build/jobhost"
+  primitive-build-linuxpkg:
+    in: "primitive/build/linuxpkg"
+  primitive-build-linuxpkgcheck:
+    in: "primitive/build/linuxpkgcheck"
+  primitive-build-mtu:
+    in: "primitive/build/mtu"
+  primitive-build-order:
+    in: "primitive/build/order"
+  primitive-build-profile:
+    in: "primitive/build/profile"
+  primitive-build-progress:
+    in: "primitive/build/progress"
+  primitive-build-registrylogin:
+    in: "primitive/build/registrylogin"
+  primitive-build-releasespec:
+    in: "primitive/build/releasespec"
+  primitive-build-report:
+    in: "primitive/build/report"
+  primitive-build-run:
+    in: "primitive/build/run"
+  primitive-build-script:
+    in: "primitive/build/script"
+  primitive-build-spec:
+    in: "primitive/build/spec"
+  primitive-deploy-chartfiles:
+    in: "primitive/deploy/chartfiles"
+  primitive-deploy-chartref:
+    in: "primitive/deploy/chartref"
+  primitive-deploy-components:
+    in: "primitive/deploy/components"
+  primitive-deploy-defaultchart:
+    in: "primitive/deploy/defaultchart"
+  primitive-deploy-diagnosis:
+    in: "primitive/deploy/diagnosis"
+  primitive-deploy-gateway:
+    in: "primitive/deploy/gateway"
+  primitive-deploy-helmargs:
+    in: "primitive/deploy/helmargs"
+  primitive-deploy-helmrun:
+    in: "primitive/deploy/helmrun"
+  primitive-deploy-helmspec:
+    in: "primitive/deploy/helmspec"
+  primitive-deploy-kubecheck:
+    in: "primitive/deploy/kubecheck"
+  primitive-deploy-mcpauth:
+    in: "primitive/deploy/mcpauth"
+  primitive-deploy-observe:
+    in: "primitive/deploy/observe"
+  primitive-deploy-plan:
+    in: "primitive/deploy/plan"
+  primitive-deploy-platformalias:
+    in: "primitive/deploy/platformalias"
+  primitive-deploy-published:
+    in: "primitive/deploy/published"
+  primitive-deploy-recovery:
+    in: "primitive/deploy/recovery"
+  primitive-deploy-registrycopy:
+    in: "primitive/deploy/registrycopy"
+  primitive-deploy-run:
+    in: "primitive/deploy/run"
+  primitive-deploy-runtimeimage:
+    in: "primitive/deploy/runtimeimage"
+  primitive-deploy-runtimeusage:
+    in: "primitive/deploy/runtimeusage"
+  primitive-deploy-runtimeversion:
+    in: "primitive/deploy/runtimeversion"
+  primitive-deploy-spec:
+    in: "primitive/deploy/spec"
+  primitive-deploy-target:
+    in: "primitive/deploy/target"
+  primitive-open-ailaunch:
+    in: "primitive/open/ailaunch"
+  primitive-open-appsession:
+    in: "primitive/open/appsession"
+  primitive-open-inittarget:
+    in: "primitive/open/inittarget"
+  primitive-open-podwait:
+    in: "primitive/open/podwait"
+  primitive-open-resolve:
+    in: "primitive/open/resolve"
+  primitive-open-runtimeref:
+    in: "primitive/open/runtimeref"
+  primitive-open-shell:
+    in: "primitive/open/shell"
+  primitive-open-sshconn:
+    in: "primitive/open/sshconn"
+  primitive-open-sshdsetup:
+    in: "primitive/open/sshdsetup"
   primitive-push:
     in: "primitive/push"
   primitive-release:
@@ -180,8 +276,8 @@ deps:
       - base-seam
       - command-podruntime
       - infra-cloud
-      - primitive-deploy
-      - primitive-open
+      - primitive-deploy-gateway
+      - primitive-open-ailaunch
   command-doctor:
     mayDependOn:
       - base-config
@@ -192,8 +288,8 @@ deps:
       - infra-gitx
       - infra-remoteinit
       - orchestration-diagnosis
-      - primitive-build
-      - primitive-deploy
+      - primitive-deploy-diagnosis
+      - primitive-deploy-recovery
       - primitive-shared-cloudconfig
       - primitive-shared-diskheadroom
   command-e2e:
@@ -203,8 +299,9 @@ deps:
       - base-model
       - base-seam
       - orchestration-clusterread
-      - primitive-build
-      - primitive-deploy
+      - primitive-build-linuxpkg
+      - primitive-deploy-kubecheck
+      - primitive-deploy-runtimeversion
       - primitive-shared-dockerbuild
       - primitive-shared-dockerspec
   command-expose:
@@ -218,13 +315,14 @@ deps:
       - infra-mcpauth
       - infra-platformclient
       - orchestration-clusterread
-      - primitive-deploy
+      - primitive-deploy-helmspec
       - primitive-shared-opentarget
   command-inputs:
     mayDependOn:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-kube
   command-jobs:
     mayDependOn:
@@ -238,8 +336,8 @@ deps:
       - infra-gitx
       - infra-kube
       - infra-platformclient
-      - primitive-build
-      - primitive-open
+      - primitive-build-diagnose
+      - primitive-build-jobhost
       - primitive-shared-diskheadroom
       - primitive-shared-gitref
       - primitive-shared-jobexclusive
@@ -262,8 +360,16 @@ deps:
       - infra-registry
       - orchestration-clusterread
       - orchestration-diagnosis
-      - primitive-deploy
-      - primitive-open
+      - primitive-deploy-chartref
+      - primitive-deploy-components
+      - primitive-deploy-diagnosis
+      - primitive-deploy-run
+      - primitive-deploy-runtimeimage
+      - primitive-deploy-runtimeusage
+      - primitive-deploy-runtimeversion
+      - primitive-deploy-spec
+      - primitive-open-resolve
+      - primitive-open-sshconn
       - primitive-shared-gitref
       - primitive-shared-opentarget
   command-mergequeue:
@@ -280,7 +386,7 @@ deps:
       - base-core
       - base-model
       - orchestration-clusterread
-      - primitive-deploy
+      - primitive-deploy-observe
   command-orchestrator:
     mayDependOn:
       - base-config
@@ -290,7 +396,8 @@ deps:
       - command-ai
       - infra-activity
       - infra-kube
-      - primitive-open
+      - primitive-open-ailaunch
+      - primitive-open-appsession
       - primitive-shared-cloudconfig
       - primitive-shared-jobstate
     canUse:
@@ -301,10 +408,10 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-setup
       - infra-cloud
       - infra-platformclient
-      - primitive-open
     canUse:
       - github-com-adrg-xdg
   command-podruntime:
@@ -312,13 +419,16 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-doctor
       - infra-activity
       - infra-cloud
-      - infra-kube
       - orchestration-diagnosis
-      - primitive-build
-      - primitive-deploy
+      - primitive-build-mtu
+      - primitive-deploy-diagnosis
+      - primitive-deploy-observe
+      - primitive-deploy-platformalias
+      - primitive-deploy-runtimeusage
       - primitive-shared-cloudconfig
     canUse:
       - github-com-adrg-xdg
@@ -333,7 +443,7 @@ deps:
       - infra-gitx
       - infra-platformclient
       - infra-registry
-      - primitive-build
+      - primitive-build-classify
   command-setup:
     mayDependOn:
       - base-config
@@ -347,8 +457,15 @@ deps:
       - infra-platformclient
       - infra-registry
       - infra-remoteinit
-      - primitive-deploy
-      - primitive-open
+      - primitive-deploy-components
+      - primitive-deploy-helmrun
+      - primitive-deploy-mcpauth
+      - primitive-deploy-platformalias
+      - primitive-deploy-published
+      - primitive-deploy-run
+      - primitive-deploy-runtimeimage
+      - primitive-open-podwait
+      - primitive-open-runtimeref
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -360,7 +477,7 @@ deps:
       - base-seam
       - infra-kube
       - orchestration-clusterread
-      - primitive-deploy
+      - primitive-deploy-observe
       - primitive-shared-opentarget
       - primitive-shared-projectseam
   command-workspace:
@@ -371,7 +488,7 @@ deps:
       - base-seam
       - infra-codesign
       - infra-mcp
-      - primitive-open
+      - primitive-open-sshconn
   infra-activity:
     mayDependOn:
       - base-config
@@ -416,6 +533,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
     canUse:
       - github-com-adrg-xdg
       - k8s-io-api
@@ -456,8 +574,14 @@ deps:
       - base-model
       - base-seam
       - infra-helm
-      - primitive-build
-      - primitive-deploy
+      - primitive-build-fingerprint
+      - primitive-build-linuxpkg
+      - primitive-build-linuxpkgcheck
+      - primitive-build-releasespec
+      - primitive-build-run
+      - primitive-build-script
+      - primitive-build-spec
+      - primitive-deploy-chartfiles
       - primitive-push
       - primitive-shared-diskheadroom
       - primitive-shared-dockerbuild
@@ -467,22 +591,24 @@ deps:
       - base-config
       - base-core
       - base-model
-      - primitive-deploy
+      - primitive-deploy-observe
   orchestration-deploy:
     mayDependOn:
       - base-core
       - base-model
       - base-seam
-      - primitive-build
-      - primitive-deploy
+      - primitive-build-releasespec
+      - primitive-deploy-spec
+      - primitive-deploy-target
   orchestration-diagnosis:
     mayDependOn:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
       - infra-kube
-      - primitive-open
+      - primitive-open-resolve
   orchestration-execute:
     mayDependOn:
       - base-config
@@ -493,8 +619,10 @@ deps:
       - orchestration-build
       - orchestration-deploy
       - orchestration-release
-      - primitive-build
-      - primitive-deploy
+      - primitive-build-report
+      - primitive-build-run
+      - primitive-build-spec
+      - primitive-deploy-run
       - primitive-release
       - primitive-shared-dockerspec
       - primitive-shared-releaseflow
@@ -505,60 +633,323 @@ deps:
       - base-seam
       - infra-registry
       - orchestration-build
-      - primitive-build
-      - primitive-deploy
+      - primitive-deploy-registrycopy
+      - primitive-deploy-spec
       - primitive-push
       - primitive-shared-dockerregistry
       - primitive-shared-dockerspec
       - primitive-shared-releaseflow
-  primitive-build:
+  primitive-build-diagnose:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-kube
+      - primitive-build-jobhost
+      - primitive-shared-opentarget
+    canUse:
+      - k8s-io-api
+  primitive-build-dockercli:
+    mayDependOn:
+      - base-core
+  primitive-build-dockerimage:
+    mayDependOn:
+      - base-core
+      - base-model
+      - base-seam
+      - infra-registry
+      - primitive-build-diagnose
+      - primitive-build-dockercli
+      - primitive-build-mtu
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+  primitive-build-fingerprint:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-seam
+      - primitive-build-dockercli
+      - primitive-build-ignore
+      - primitive-build-order
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+  primitive-build-linuxpkg:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+  primitive-build-linuxpkgcheck:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - primitive-build-dockerimage
+      - primitive-build-fingerprint
+      - primitive-build-linuxpkg
+      - primitive-build-progress
+      - primitive-build-releasespec
+      - primitive-shared-dockerspec
+  primitive-build-mtu:
+    mayDependOn:
+      - base-core
+  primitive-build-order:
+    mayDependOn:
+      - base-seam
+      - primitive-shared-dockerspec
+  primitive-build-profile:
+    mayDependOn:
+      - base-core
+      - base-model
+  primitive-build-progress:
+    mayDependOn:
+      - base-core
+  primitive-build-registrylogin:
     mayDependOn:
       - base-config
       - base-core
       - base-model
       - base-seam
       - infra-cloud
-      - infra-gitx
-      - infra-helm
-      - infra-kube
-      - infra-platformclient
       - infra-registry
-      - primitive-shared-buildversion
       - primitive-shared-cloudconfig
-      - primitive-shared-diskheadroom
-      - primitive-shared-dockerbuild
       - primitive-shared-dockerregistry
+  primitive-build-releasespec:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-gitx
+      - primitive-build-ignore
+      - primitive-build-linuxpkg
+      - primitive-shared-buildversion
+      - primitive-shared-dockerbuild
       - primitive-shared-dockerspec
-      - primitive-shared-gitref
-      - primitive-shared-opentarget
       - primitive-shared-projectseam
       - primitive-shared-releaseflow
     canUse:
       - gopkg-in-yaml-v3
-      - k8s-io-api
-  primitive-deploy:
+  primitive-build-report:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-cloud
+      - infra-platformclient
+      - primitive-shared-gitref
+  primitive-build-run:
+    mayDependOn:
+      - base-core
+      - base-model
+      - base-seam
+      - infra-helm
+      - primitive-build-dockerimage
+      - primitive-build-order
+      - primitive-build-progress
+      - primitive-build-spec
+      - primitive-shared-diskheadroom
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+  primitive-build-script:
+    mayDependOn:
+      - base-core
+      - base-model
+      - base-seam
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+  primitive-build-spec:
     mayDependOn:
       - base-config
       - base-core
       - base-model
       - base-seam
-      - infra-activity
+      - primitive-build-ignore
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+  primitive-deploy-chartfiles:
+    mayDependOn:
+      - base-config
+      - base-model
+      - primitive-shared-dockerbuild
+    canUse:
+      - gopkg-in-yaml-v3
+  primitive-deploy-chartref:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+  primitive-deploy-components:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - primitive-deploy-chartref
+      - primitive-deploy-plan
+      - primitive-deploy-target
+      - primitive-shared-opentarget
+  primitive-deploy-defaultchart:
+    mayDependOn:
+      - base-config
+      - base-core
+  primitive-deploy-diagnosis:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - primitive-deploy-observe
+  primitive-deploy-gateway:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-seam
       - infra-cloud
+      - infra-kube
+      - primitive-deploy-helmargs
+  primitive-deploy-helmargs:
+    mayDependOn:
+      - base-config
+      - base-seam
+  primitive-deploy-helmrun:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
       - infra-helm
       - infra-kube
-      - infra-mcpauth
-      - infra-registry
-      - primitive-shared-cloudconfig
+      - primitive-deploy-chartfiles
+      - primitive-deploy-chartref
+      - primitive-deploy-helmargs
+      - primitive-deploy-observe
+      - primitive-deploy-recovery
+    canUse:
+      - github-com-adrg-xdg
+      - k8s-io-apimachinery
+  primitive-deploy-helmspec:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - infra-cloud
+      - infra-helm
+      - primitive-deploy-chartref
+      - primitive-deploy-helmargs
+  primitive-deploy-kubecheck:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-kube
+      - primitive-deploy-chartfiles
+      - primitive-deploy-helmargs
+      - primitive-deploy-observe
       - primitive-shared-dockerbuild
-      - primitive-shared-dockerregistry
-      - primitive-shared-dockerspec
-      - primitive-shared-jobstate
-      - primitive-shared-opentarget
+    canUse:
+      - gopkg-in-yaml-v3
+  primitive-deploy-mcpauth:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-kube
+      - infra-mcpauth
+  primitive-deploy-observe:
+    mayDependOn:
+      - base-core
+  primitive-deploy-plan:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+  primitive-deploy-platformalias:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-cloud
+      - infra-kube
+      - primitive-deploy-helmargs
+      - primitive-shared-cloudconfig
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
-      - k8s-io-apimachinery
-  primitive-open:
+  primitive-deploy-published:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-helm
+      - infra-registry
+      - primitive-deploy-chartref
+      - primitive-deploy-helmspec
+      - primitive-deploy-runtimeimage
+      - primitive-deploy-runtimeversion
+      - primitive-shared-dockerregistry
+      - primitive-shared-opentarget
+  primitive-deploy-recovery:
+    mayDependOn:
+      - base-core
+      - base-seam
+      - infra-helm
+  primitive-deploy-registrycopy:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-seam
+      - infra-helm
+      - primitive-deploy-chartfiles
+  primitive-deploy-run:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-cloud
+      - infra-helm
+      - infra-kube
+      - infra-registry
+      - primitive-deploy-chartref
+      - primitive-deploy-gateway
+      - primitive-deploy-helmargs
+      - primitive-deploy-helmrun
+      - primitive-deploy-mcpauth
+      - primitive-deploy-plan
+      - primitive-deploy-platformalias
+      - primitive-deploy-registrycopy
+      - primitive-deploy-runtimeversion
+      - primitive-shared-dockerregistry
+  primitive-deploy-runtimeimage:
+    mayDependOn:
+      - base-config
+      - base-core
+      - primitive-deploy-chartref
+  primitive-deploy-runtimeusage:
+    mayDependOn:
+      - base-config
+      - base-model
+      - infra-activity
+      - primitive-shared-jobstate
+  primitive-deploy-runtimeversion:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - base-seam
+      - infra-cloud
+      - primitive-deploy-chartref
+      - primitive-deploy-platformalias
+    canUse:
+      - github-com-adrg-xdg
+  primitive-deploy-spec:
     mayDependOn:
       - base-config
       - base-core
@@ -567,12 +958,94 @@ deps:
       - infra-activity
       - infra-cloud
       - infra-kube
+      - infra-registry
+      - primitive-deploy-chartfiles
+      - primitive-deploy-chartref
+      - primitive-deploy-components
+      - primitive-deploy-helmspec
+      - primitive-deploy-kubecheck
+      - primitive-deploy-mcpauth
+      - primitive-deploy-plan
+      - primitive-deploy-published
+      - primitive-deploy-target
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerregistry
+      - primitive-shared-dockerspec
+  primitive-deploy-target:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - infra-helm
+      - primitive-deploy-chartfiles
+      - primitive-deploy-kubecheck
+      - primitive-shared-dockerbuild
+      - primitive-shared-dockerspec
+      - primitive-shared-opentarget
+  primitive-open-ailaunch:
+    mayDependOn:
+      - base-config
+      - base-core
+    canUse:
+      - gopkg-in-yaml-v3
+  primitive-open-appsession:
+    mayDependOn:
+      - base-core
+      - base-model
+      - infra-activity
+  primitive-open-inittarget:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - primitive-open-resolve
+      - primitive-shared-opentarget
+  primitive-open-podwait:
+    mayDependOn:
+      - base-config
+      - base-model
+      - base-seam
+      - infra-cloud
+      - infra-kube
+      - primitive-shared-opentarget
+  primitive-open-resolve:
+    mayDependOn:
+      - base-config
+      - base-model
+      - primitive-shared-opentarget
+  primitive-open-runtimeref:
+    mayDependOn:
+      - base-config
+      - primitive-shared-opentarget
+  primitive-open-shell:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-cloud
+      - primitive-open-ailaunch
+      - primitive-open-appsession
+      - primitive-open-podwait
+      - primitive-open-resolve
+      - primitive-open-runtimeref
       - primitive-shared-opentarget
     canUse:
       - gopkg-in-yaml-v3
+  primitive-open-sshconn:
+    mayDependOn:
+      - base-config
+      - base-model
+      - infra-cloud
+      - primitive-open-runtimeref
+  primitive-open-sshdsetup:
+    mayDependOn:
+      - base-config
+      - primitive-shared-opentarget
   primitive-push:
     mayDependOn:
       - base-core
+      - base-model
       - base-seam
       - infra-helm
       - infra-registry
@@ -595,6 +1068,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
   primitive-shared-diskheadroom:
     mayDependOn:
@@ -622,6 +1096,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-helm
   primitive-shared-gitref:
     mayDependOn:

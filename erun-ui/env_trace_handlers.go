@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 const envTraceTailBytes = 64 * 1024
@@ -32,7 +32,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvTrace{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

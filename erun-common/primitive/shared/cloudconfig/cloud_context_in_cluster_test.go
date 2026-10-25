@@ -7,6 +7,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -34,7 +35,7 @@ func countingRunAWS(calls *int) func(core.Context, model.CloudProviderConfig, st
 	}
 }
 
-func inClusterPreflightStore(t *testing.T) cloud.CloudContextStore {
+func inClusterPreflightStore(t *testing.T) seam.CloudContextStore {
 	t.Helper()
 	injected, ok := ResolveInjectedRuntimeConfig(inClusterPodEnv())
 	if !ok {
