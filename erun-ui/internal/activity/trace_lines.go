@@ -1,13 +1,15 @@
-package main
+package activity
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
 
-	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
+
+// NotificationSourceDeployFailed tags the env notification a failed deploy posts.
+const NotificationSourceDeployFailed = "deploy-failed"
 
 // activityDeployingLineRe: a non-runtime component follows ` · `; an empty release means the runtime chart.
 var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?: · (\S+))?(?:\s+(\S+))?\s*$`)
@@ -71,161 +73,159 @@ func cleanActivityFailureLine(line string) string {
 	return strings.TrimSpace(cleaned)
 }
 
-// newActivityTraceLineHandler registers and finalizes activity entries from PTY
-// trace lines; the helm poller converges on the same entries by ID.
-func newActivityTraceLineHandler(app *App, selection uimodel.Selection, kind terminal.Kind) func(string) {
+// TraceLineHandler registers and finalizes activity entries from the trace lines
+// of a session of kind; the helm poller converges on the same entries by ID.
+func (s *Service) TraceLineHandler(selection uimodel.Selection, kind string) func(string) {
 	// Matches both "Deploy of <rel> failed" and "Deploy failed".
 	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	// Only the Local session that runs `erun init` owns the init lifecycle; a remote
 	// open re-prints it, and honoring that would loop deploy→reopen.
-	initTraceHonored := kind == terminal.KindLocal
+	initTraceHonored := kind == KindLocal
 	return func(line string) {
 		line = strings.TrimSpace(line)
 		// Buffer before dispatch so the finalizing line and preceding output are in
 		// Detail; subprocess callers have no other path into it.
-		if app.activityQueue != nil {
-			app.activityQueue.recordOutputLine(selection.Tenant, selection.Environment, line)
-		}
+		s.queue.recordOutputLine(selection.Tenant, selection.Environment, line)
 		switch {
-		case app.handleDeployTraceLine(selection, line):
-		case initTraceHonored && app.handleInitTraceLine(selection, line):
-		case app.handleCommandTraceLine(selection, line):
-		case app.handleDoctorTraceLine(selection, line):
-		case app.handleSSHDInitTraceLine(selection, line):
+		case s.handleDeployTraceLine(selection, line):
+		case initTraceHonored && s.handleInitTraceLine(selection, line):
+		case s.handleCommandTraceLine(selection, line):
+		case s.handleDoctorTraceLine(selection, line):
+		case s.handleSSHDInitTraceLine(selection, line):
 		case failedRe.MatchString(line):
-			app.finishActivityTracking(selection, activityQueueStatusFailed, cleanActivityFailureLine(line))
+			s.finishActivityTracking(selection, StatusFailed, cleanActivityFailureLine(line))
 		case errorRe.MatchString(line):
-			app.captureActivityErrorIfRunning(selection, line)
+			s.captureActivityErrorIfRunning(selection, line)
 		}
 	}
 }
 
 // handleDeployTraceLine reports whether it matched; the match order is part of the contract.
-func (a *App) handleDeployTraceLine(selection uimodel.Selection, line string) bool {
+func (s *Service) handleDeployTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
-		a.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
+		s.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
 		return true
 	}
 	if match := activityDeployedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSucceeded, "")
+		s.finishDeployByTenantEnv(selection, match[1], match[2], StatusSucceeded, "")
 		return true
 	}
 	if match := activitySkippingLineRe.FindStringSubmatch(line); match != nil {
-		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
+		s.finishDeployByTenantEnv(selection, match[1], match[2], StatusSkipped, line)
 		return true
 	}
 	if match := activityDeployFailedLineRe.FindStringSubmatch(line); match != nil {
 		reason := strings.TrimSpace(match[3])
 		// Surface it even when no `==> Deploying` started an entry.
-		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusFailed, reason)
-		a.surfaceDeployFailure(match[1], match[2], reason)
+		s.finishDeployByTenantEnv(selection, match[1], match[2], StatusFailed, reason)
+		s.surfaceDeployFailure(match[1], match[2], reason)
 		return true
 	}
 	return false
 }
 
 // surfaceDeployFailure's notification is env-tagged so the next deploy or reachability retires it.
-func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
+func (s *Service) surfaceDeployFailure(tenant, environment, reason string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEnvStatus(uimodel.Selection{Tenant: tenant, Environment: environment}, uimodel.EnvStatusFailed)
+	s.emitEnvStatus(uimodel.Selection{Tenant: tenant, Environment: environment}, uimodel.EnvStatusFailed)
 	message := fmt.Sprintf("Deploy of %s/%s failed.", tenant, environment)
 	if reason != "" {
 		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
 	}
-	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message, "")
+	s.emitEnvNotification("error", tenant, environment, NotificationSourceDeployFailed, message, "")
 }
 
-func (a *App) handleDoctorTraceLine(selection uimodel.Selection, line string) bool {
+func (s *Service) handleDoctorTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityDoctorLineRe.FindStringSubmatch(line); match != nil {
-		a.startDoctorFromTrace(selection, match[1], match[2])
+		s.startDoctorFromTrace(selection, match[1], match[2])
 		return true
 	}
 	if match := activityDoctorDoneLineRe.FindStringSubmatch(line); match != nil {
-		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		s.finishDoctorByTenantEnv(match[1], match[2], StatusSucceeded, "")
 		return true
 	}
 	if match := activityDoctorFailedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		s.finishDoctorByTenantEnv(match[1], match[2], StatusFailed, strings.TrimSpace(match[3]))
 		return true
 	}
 	return false
 }
 
-func (a *App) handleSSHDInitTraceLine(selection uimodel.Selection, line string) bool {
+func (s *Service) handleSSHDInitTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activitySSHDInitLineRe.FindStringSubmatch(line); match != nil {
-		a.startSSHDInitFromTrace(selection, match[1], match[2])
+		s.startSSHDInitFromTrace(selection, match[1], match[2])
 		return true
 	}
 	if match := activitySSHDInitDoneLineRe.FindStringSubmatch(line); match != nil {
-		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		s.finishSSHDInitByTenantEnv(match[1], match[2], StatusSucceeded, "")
 		return true
 	}
 	if match := activitySSHDInitFailedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		s.finishSSHDInitByTenantEnv(match[1], match[2], StatusFailed, strings.TrimSpace(match[3]))
 		return true
 	}
 	return false
 }
 
-func (a *App) handleInitTraceLine(selection uimodel.Selection, line string) bool {
+func (s *Service) handleInitTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
-		a.startInitFromTrace(selection, match[1], match[2])
+		s.startInitFromTrace(selection, match[1], match[2])
 		return true
 	}
 	if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
-		a.envops.EnvironmentInitialized(match[1], match[2])
+		s.finishInitByTenantEnv(match[1], match[2], StatusSucceeded, "")
+		s.d.EnvironmentInitialized(match[1], match[2])
 		return true
 	}
 	if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, cleanActivityFailureLine(line))
-		a.envops.EnvironmentInitFailed(match[1], match[2])
+		s.finishInitByTenantEnv(match[1], match[2], StatusFailed, cleanActivityFailureLine(line))
+		s.d.EnvironmentInitFailed(match[1], match[2])
 		return true
 	}
 	return false
 }
 
 // handleCommandTraceLine keys on the session selection; the match order is part of the contract.
-func (a *App) handleCommandTraceLine(selection uimodel.Selection, line string) bool {
+func (s *Service) handleCommandTraceLine(selection uimodel.Selection, line string) bool {
 	if activityBuildingLineRe.MatchString(line) {
-		a.startCommandFromTrace(selection, "build")
+		s.startCommandFromTrace(selection, "build")
 		return true
 	}
 	if activityBuiltLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "build", activityQueueStatusSucceeded, "")
+		s.finishCommandBySelection(selection, "build", StatusSucceeded, "")
 		return true
 	}
 	if activityBuildFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, cleanActivityFailureLine(line))
+		s.finishCommandBySelection(selection, "build", StatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityReleasingLineRe.MatchString(line) {
-		a.startCommandFromTrace(selection, "release")
+		s.startCommandFromTrace(selection, "release")
 		return true
 	}
 	if activityReleasedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "release", activityQueueStatusSucceeded, "")
+		s.finishCommandBySelection(selection, "release", StatusSucceeded, "")
 		return true
 	}
 	if activityReleaseFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, cleanActivityFailureLine(line))
+		s.finishCommandBySelection(selection, "release", StatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityPushingLineRe.MatchString(line) {
-		a.startCommandFromTrace(selection, "push")
+		s.startCommandFromTrace(selection, "push")
 		return true
 	}
 	if activityPushedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "push", activityQueueStatusSucceeded, "")
+		s.finishCommandBySelection(selection, "push", StatusSucceeded, "")
 		return true
 	}
 	if activityPushFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, cleanActivityFailureLine(line))
+		s.finishCommandBySelection(selection, "push", StatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	return false
@@ -235,16 +235,13 @@ func (a *App) handleCommandTraceLine(selection uimodel.Selection, line string) b
 // when several entries are active; deploy is the likeliest source.
 var activityCommandErrorPriority = []string{"deploy", "push", "build", "release", "init"}
 
-func (a *App) captureActivityErrorIfRunning(selection uimodel.Selection, line string) {
-	if a.activityQueue == nil {
-		return
-	}
+func (s *Service) captureActivityErrorIfRunning(selection uimodel.Selection, line string) {
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)
-	var entry activityQueueEntry
+	var entry Entry
 	found := false
 	for _, command := range activityCommandErrorPriority {
-		if e, ok := a.activityQueue.findActiveByCommand(command, tenant, environment); ok {
+		if e, ok := s.queue.findActiveByCommand(command, tenant, environment); ok {
 			entry, found = e, true
 			break
 		}
@@ -257,5 +254,5 @@ func (a *App) captureActivityErrorIfRunning(selection uimodel.Selection, line st
 	}
 	entry.Error = line
 	// The store has no generic field update, so re-patch the containers to persist the error.
-	a.activityQueue.updateContainers(entry.ID, entry.Containers)
+	s.queue.updateContainers(entry.ID, entry.Containers)
 }

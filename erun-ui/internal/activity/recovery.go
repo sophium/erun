@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"bytes"
@@ -10,8 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy/recovery"
 )
 
-// activityRecoveryResult's Output is shown verbatim, even on failure.
-type activityRecoveryResult struct {
+// RecoveryResult's Output is shown verbatim, even on failure.
+type RecoveryResult struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output"`
 	Error  string `json:"error,omitempty"`
@@ -19,8 +19,8 @@ type activityRecoveryResult struct {
 
 // RecoverPendingHelmRelease clears the pending-operation lock a killed deploy
 // leaves, which blocks every later deploy on that release.
-func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
-	entry, errResult := a.resolveRecoverableHelmEntry(id)
+func (s *Service) RecoverPendingHelmRelease(id string) RecoveryResult {
+	entry, errResult := s.resolveRecoverableHelmEntry(id)
 	if errResult != nil {
 		return *errResult
 	}
@@ -35,42 +35,39 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 	})
 	combined := combineRecoveryOutput(stdout.String(), stderr.String())
 	if err != nil {
-		return activityRecoveryResult{
+		return RecoveryResult{
 			OK:     false,
 			Output: combined,
 			Error:  fmt.Sprintf("clear pending helm release: %s", err.Error()),
 		}
 	}
-	if final, _, ok := a.activityQueue.forceDismiss(entry.ID); ok {
-		a.unlockTerminalsForActivity(final)
-		a.emitActivityState(final)
+	if final, _, ok := s.queue.forceDismiss(entry.ID); ok {
+		s.unlockTerminalsForActivity(final)
+		s.emitState(final)
 	}
-	return activityRecoveryResult{OK: true, Output: combined}
+	return RecoveryResult{OK: true, Output: combined}
 }
 
-func (a *App) resolveRecoverableHelmEntry(id string) (activityQueueEntry, *activityRecoveryResult) {
-	if a.activityQueue == nil {
-		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "activity queue is not initialized"}
-	}
+func (s *Service) resolveRecoverableHelmEntry(id string) (Entry, *RecoveryResult) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "activity id is required"}
+		return Entry{}, &RecoveryResult{OK: false, Error: "activity id is required"}
 	}
-	var entry activityQueueEntry
-	for _, candidate := range a.activityQueue.list() {
+	var entry Entry
+	for _, candidate := range s.queue.list() {
 		if candidate.ID == id {
 			entry = candidate
 			break
 		}
 	}
 	if entry.ID == "" {
-		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "activity not found"}
+		return Entry{}, &RecoveryResult{OK: false, Error: "activity not found"}
 	}
 	if entry.Source != "helm" {
-		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "recovery only applies to helm-source entries"}
+		return Entry{}, &RecoveryResult{OK: false, Error: "recovery only applies to helm-source entries"}
 	}
 	if strings.TrimSpace(entry.Release) == "" || strings.TrimSpace(entry.Namespace) == "" {
-		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "activity is missing release/namespace; nothing to recover"}
+		return Entry{}, &RecoveryResult{OK: false, Error: "activity is missing release/namespace; nothing to recover"}
 	}
 	return entry, nil
 }

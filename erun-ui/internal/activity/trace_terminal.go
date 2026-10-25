@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"fmt"
@@ -6,58 +6,52 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
-	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// feedActivityTraceFromTerminal feeds each complete PTY line to the trace handler.
-func (a *App) feedActivityTraceFromTerminal(managed *terminal.Session, chunk []byte) {
-	if managed == nil || a.activityQueue == nil || !terminalFeedsActivityTrace(managed) {
-		return
-	}
-	var lines []string
-	a.terminal.WithLock(func(*terminal.Locked) {
-		managed.ActivityTraceBuffer += stripActivityTraceANSI(string(chunk))
-		lines = drainActivityTraceLines(managed)
-	})
+// FeedTrace hands each complete PTY line of a session to the trace handler and
+// releases the session's ready gate on a setup-done line. It reports whether a
+// line said another window took the session over, so its PTY exit must not
+// reconnect.
+func (s *Service) FeedTrace(selection uimodel.Selection, kind string, lines []string, signalReady func(error)) bool {
 	if len(lines) == 0 {
-		return
-	}
-	handler := newActivityTraceLineHandler(a, managed.Selection, managed.Kind)
-	for _, line := range lines {
-		handler(line)
-		signalSessionReadyOnLine(managed, line)
-		// Another window re-attached this session, so its PTY exit must not reconnect.
-		if strings.TrimSpace(line) == appsession.ShellSessionTakenOverNotice {
-			a.terminal.MarkTakenOver(managed)
-		}
-	}
-}
-
-// terminalFeedsActivityTrace excludes orchestrator panes.
-func terminalFeedsActivityTrace(managed *terminal.Session) bool {
-	if managed.Selection.Tenant == "" || managed.Selection.Environment == "" {
 		return false
 	}
-	switch managed.Kind {
-	case terminal.KindLocal, terminal.KindOpen, terminal.KindAI, terminal.KindCommand,
-		terminal.KindContributeERun, terminal.KindContributeAI:
+	takenOver := false
+	handler := s.TraceLineHandler(selection, kind)
+	for _, line := range lines {
+		handler(line)
+		signalSessionReadyOnLine(signalReady, line)
+		if strings.TrimSpace(line) == appsession.ShellSessionTakenOverNotice {
+			takenOver = true
+		}
+	}
+	return takenOver
+}
+
+// FeedsTrace excludes orchestrator panes and sessions with no environment.
+func FeedsTrace(selection uimodel.Selection, kind string) bool {
+	if selection.Tenant == "" || selection.Environment == "" {
+		return false
+	}
+	switch kind {
+	case KindLocal, KindOpen, KindAI, KindCommand, KindContributeERun, KindContributeAI:
 		return true
-	case terminal.KindOrchestrator:
-		fallthrough
 	default:
 		return false
 	}
 }
 
-// drainActivityTraceLines keeps the trailing partial line buffered; caller holds the terminal lock.
-func drainActivityTraceLines(managed *terminal.Session) []string {
+// DrainTraceLines splits buffer into its complete lines and the trailing partial
+// line, which stays buffered.
+func DrainTraceLines(buffer string) (string, []string) {
 	lines := []string{}
 	for {
-		idx := strings.IndexByte(managed.ActivityTraceBuffer, '\n')
+		idx := strings.IndexByte(buffer, '\n')
 		if idx < 0 {
 			break
 		}
-		raw := managed.ActivityTraceBuffer[:idx]
+		raw := buffer[:idx]
 		// Keep the text after the last `\r` (spinner overwrites) once the trailing
 		// `\r` of `\r\n` is trimmed, matching what the user sees.
 		line := strings.TrimRight(raw, "\r")
@@ -65,9 +59,9 @@ func drainActivityTraceLines(managed *terminal.Session) []string {
 			line = line[r+1:]
 		}
 		lines = append(lines, line)
-		managed.ActivityTraceBuffer = managed.ActivityTraceBuffer[idx+1:]
+		buffer = buffer[idx+1:]
 	}
-	return lines
+	return buffer, lines
 }
 
 // sessionReady*Re release the action runner's gate; any match means setup is done.
@@ -79,8 +73,8 @@ var (
 	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)
 )
 
-func signalSessionReadyOnLine(managed *terminal.Session, line string) {
-	if managed == nil {
+func signalSessionReadyOnLine(signalReady func(error), line string) {
+	if signalReady == nil {
 		return
 	}
 	trimmed := strings.TrimSpace(line)
@@ -89,14 +83,14 @@ func signalSessionReadyOnLine(managed *terminal.Session, line string) {
 		sessionReadySkippedRe.MatchString(trimmed),
 		sessionReadyAttachedRe.MatchString(trimmed),
 		sessionReadyShellPromptRe.MatchString(trimmed):
-		managed.SignalReady(nil)
+		signalReady(nil)
 	case sessionReadyFailedRe.MatchString(trimmed):
-		managed.SignalReady(fmt.Errorf("%s", trimmed))
+		signalReady(fmt.Errorf("%s", trimmed))
 	}
 }
 
-// stripActivityTraceANSI strips only CSI sequences.
-func stripActivityTraceANSI(s string) string {
+// StripTraceANSI strips only CSI sequences.
+func StripTraceANSI(s string) string {
 	if !strings.Contains(s, "\x1b") {
 		return s
 	}

@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -11,23 +11,16 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func newRunnerTestApp(t *testing.T) *App {
-	t.Helper()
-	app := withTestTerminal(&App{})
-	app.activityQueue = newActivityQueueStore(nil, nil)
-	return app
-}
-
 func TestRunnerSerializesSameEnv(t *testing.T) {
-	app := newRunnerTestApp(t)
-	defer app.stopActionRunners()
+	service := newTestService(Deps{})
+	defer service.StopActionRunners()
 
 	var mu sync.Mutex
 	var sequence []int
 	gate := make(chan struct{})
 	for i := 0; i < 3; i++ {
 		// Distinct ids: Windows' coarse clock would give auto ids equal timestamps and dedup them.
-		_, err := app.enqueueDesktopAction(desktopAction{
+		_, err := service.enqueueDesktopAction(desktopAction{
 			id:        fmt.Sprintf("serialize-%d", i),
 			kind:      "open",
 			selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
@@ -79,14 +72,14 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 }
 
 func TestRunnerDifferentEnvsRunConcurrently(t *testing.T) {
-	app := newRunnerTestApp(t)
-	defer app.stopActionRunners()
+	service := newTestService(Deps{})
+	defer service.StopActionRunners()
 
 	bothStarted := make(chan struct{}, 2)
 	releaseA := make(chan struct{})
 	releaseB := make(chan struct{})
 
-	_, err := app.enqueueDesktopAction(desktopAction{
+	_, err := service.enqueueDesktopAction(desktopAction{
 		kind:      "open",
 		selection: uimodel.Selection{Tenant: "a", Environment: "dev"},
 		run: func(ctx context.Context) error {
@@ -98,7 +91,7 @@ func TestRunnerDifferentEnvsRunConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue A: %v", err)
 	}
-	_, err = app.enqueueDesktopAction(desktopAction{
+	_, err = service.enqueueDesktopAction(desktopAction{
 		kind:      "open",
 		selection: uimodel.Selection{Tenant: "b", Environment: "dev"},
 		run: func(ctx context.Context) error {
@@ -123,13 +116,13 @@ func TestRunnerDifferentEnvsRunConcurrently(t *testing.T) {
 }
 
 func TestRunnerCancelWaitingActionRemovesEntry(t *testing.T) {
-	app := newRunnerTestApp(t)
-	defer app.stopActionRunners()
+	service := newTestService(Deps{})
+	defer service.StopActionRunners()
 
 	gate := make(chan struct{})
 	firstStarted := make(chan struct{})
 
-	firstID, err := app.enqueueDesktopAction(desktopAction{
+	firstID, err := service.enqueueDesktopAction(desktopAction{
 		kind:      "open",
 		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
@@ -143,7 +136,7 @@ func TestRunnerCancelWaitingActionRemovesEntry(t *testing.T) {
 	}
 	<-firstStarted
 
-	secondID, err := app.enqueueDesktopAction(desktopAction{
+	secondID, err := service.enqueueDesktopAction(desktopAction{
 		kind:      "deploy",
 		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
@@ -155,33 +148,33 @@ func TestRunnerCancelWaitingActionRemovesEntry(t *testing.T) {
 		t.Fatalf("enqueue second: %v", err)
 	}
 
-	if !app.CancelWaitingAction(secondID) {
+	if !service.CancelWaitingAction(secondID) {
 		t.Fatalf("CancelWaitingAction(second) returned false; want true")
 	}
-	if app.CancelWaitingAction(secondID) {
+	if service.CancelWaitingAction(secondID) {
 		t.Fatalf("CancelWaitingAction(second) twice should be no-op")
 	}
 	close(gate)
 
 	if !waitFor(t, 2*time.Second, func() bool {
-		entry, ok := app.activityQueue.findByID(secondID)
-		return ok && entry.Status == activityQueueStatusCancelled
+		entry, ok := service.queue.findByID(secondID)
+		return ok && entry.Status == StatusCancelled
 	}) {
 		t.Fatalf("cancelled entry never reached cancelled status")
 	}
 	if !waitFor(t, 2*time.Second, func() bool {
-		entry, ok := app.activityQueue.findByID(firstID)
-		return ok && entry.Status == activityQueueStatusSucceeded
+		entry, ok := service.queue.findByID(firstID)
+		return ok && entry.Status == StatusSucceeded
 	}) {
 		t.Fatalf("first action never finalized as succeeded")
 	}
 }
 
 func TestRunnerActionErrorFinalizesAsFailed(t *testing.T) {
-	app := newRunnerTestApp(t)
-	defer app.stopActionRunners()
+	service := newTestService(Deps{})
+	defer service.StopActionRunners()
 
-	id, err := app.enqueueDesktopAction(desktopAction{
+	id, err := service.enqueueDesktopAction(desktopAction{
 		kind:      "open",
 		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
@@ -192,23 +185,23 @@ func TestRunnerActionErrorFinalizesAsFailed(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 	if !waitFor(t, 2*time.Second, func() bool {
-		entry, ok := app.activityQueue.findByID(id)
-		return ok && entry.Status == activityQueueStatusFailed
+		entry, ok := service.queue.findByID(id)
+		return ok && entry.Status == StatusFailed
 	}) {
 		t.Fatalf("entry never reached failed status")
 	}
-	entry, _ := app.activityQueue.findByID(id)
+	entry, _ := service.queue.findByID(id)
 	if entry.Error != "boom" {
 		t.Fatalf("error message lost: %q", entry.Error)
 	}
 }
 
 func TestRunnerCancelledRunningActionFinalizesAsCancelled(t *testing.T) {
-	app := newRunnerTestApp(t)
-	defer app.stopActionRunners()
+	service := newTestService(Deps{})
+	defer service.StopActionRunners()
 
 	started := make(chan struct{})
-	id, err := app.enqueueDesktopAction(desktopAction{
+	id, err := service.enqueueDesktopAction(desktopAction{
 		kind:      "open",
 		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
@@ -222,30 +215,18 @@ func TestRunnerCancelledRunningActionFinalizesAsCancelled(t *testing.T) {
 	}
 	<-started
 
-	app.actionQueueMu.Lock()
-	cancel := app.actionCancels[id]
-	app.actionQueueMu.Unlock()
+	service.actionQueueMu.Lock()
+	cancel := service.actionCancels[id]
+	service.actionQueueMu.Unlock()
 	if cancel == nil {
 		t.Fatalf("expected cancel func registered for running action")
 	}
 	cancel()
 
 	if !waitFor(t, 2*time.Second, func() bool {
-		entry, ok := app.activityQueue.findByID(id)
-		return ok && entry.Status == activityQueueStatusCancelled
+		entry, ok := service.queue.findByID(id)
+		return ok && entry.Status == StatusCancelled
 	}) {
 		t.Fatalf("ctx-cancelled action did not finalize as cancelled")
 	}
-}
-
-func waitFor(t *testing.T, timeout time.Duration, cond func() bool) bool {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return cond()
 }

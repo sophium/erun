@@ -18,6 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
@@ -118,8 +119,8 @@ type App struct {
 	// identity signs per-env MCP bearers; nil in unit tests.
 	identity *desktopIdentity
 
-	// edgeOutages, orchestrators, unmanagedPacingReason, the *SourceReported flags,
-	// activityPollersStop and closeConfirmed are guarded by the terminal lock
+	// edgeOutages, orchestrators, unmanagedPacingReason, the *SourceReported flags
+	// and closeConfirmed are guarded by the terminal lock
 	// (terminal.WithLock) until their concerns move out of main, so a section that
 	// reads them together with sessions stays one critical section.
 	edgeOutages   map[string]orchestratorEdgeOutage
@@ -129,18 +130,10 @@ type App struct {
 	// investigations has its own lock; never call into it while holding the terminal lock.
 	investigations *investigationRegistry
 	// skillsSourceReported warns once per run about unresolvable shipped skills.
-	skillsSourceReported      bool
-	agentsSourceReported      bool
-	activityQueue             *activityQueueStore
-	activityStatusPoller      func(activityQueueEntry)
-	activityPollersStop       chan struct{}
-	activityWatchedContextsMu sync.Mutex
-	activityWatchedContexts   map[string]struct{}
-	actionQueueMu             sync.Mutex
-	actionQueues              map[string]*envActionQueue
-	actionCancels             map[string]context.CancelFunc
-	contribute                *contributeStore
-	contributeApps            *contributeAppForwards
+	skillsSourceReported bool
+	agentsSourceReported bool
+	contribute           *contributeStore
+	contributeApps       *contributeAppForwards
 
 	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
 	closeConfirmed bool
@@ -163,6 +156,7 @@ type App struct {
 	runtime       *runtimeview.Service
 	envops        *envops.Service
 	terminal      *terminal.Service
+	activity      *activitysvc.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -214,15 +208,7 @@ func NewApp(deps erunUIDeps) *App {
 		return running
 	}
 	app.investigations.onExpire = app.finishExpiredInvestigation
-	app.activityQueue = newActivityQueueStore(
-		func(entry activityQueueEntry) {
-			app.emitActivityState(entry)
-		},
-		nil,
-	)
-	app.activityStatusPoller = func(entry activityQueueEntry) {
-		go app.pollActivityContainerStatuses(context.Background(), entry)
-	}
+	app.activity = app.newActivityService()
 	app.contribute = newContributeStore(deps.contributeStatePath)
 	app.tenant = tenantsvc.New(tenantsvc.Deps{
 		Store:                 deps.store,
@@ -343,9 +329,9 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(context.Context) {
 	a.settings.StopConfigWatcher()
-	a.stopActivityPollers()
+	a.activity.StopPollers()
 	a.cloudContexts.Stop()
-	a.stopActionRunners()
+	a.activity.StopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()

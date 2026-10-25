@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 
 const envTraceTailBytes = 64 * 1024
 
-// uiEnvTrace is the tail of the env's trace log, or the reason there is none.
-type uiEnvTrace struct {
+// EnvTrace is the tail of the env's trace log, or the reason there is none.
+type EnvTrace struct {
 	Available bool   `json:"available"`
 	Content   string `json:"content,omitempty"`
 	Path      string `json:"path"`
@@ -28,24 +28,24 @@ type uiEnvTrace struct {
 
 // LoadEnvTrace merges the host log (operator commands) with the in-pod log
 // (agent MCP actions). It must never mutate the env or hold it awake.
-func (a *App) LoadEnvTrace(selection uimodel.Selection) (uiEnvTrace, error) {
+func (s *Service) LoadEnvTrace(selection uimodel.Selection) (EnvTrace, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
-		return uiEnvTrace{}, err
+		return EnvTrace{}, err
 	}
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return uiEnvTrace{}, err
+		return EnvTrace{}, err
 	}
-	trace := uiEnvTrace{
+	trace := EnvTrace{
 		Path: "~/.erun/" + result.Tenant + "/" + result.Environment + "/trace.log",
 	}
 	content, hostIssue := hostEnvTraceTail(result)
 	if result.EnvConfig.RemoteWorktree() {
-		podContent, notice := a.podEnvTraceTail(result)
+		podContent, notice := s.podEnvTraceTail(result)
 		content = mergeStampedTraces(content, podContent)
 		trace.Notice = joinTraceNotices(notice, hostIssue)
 	} else {
@@ -66,7 +66,7 @@ func hostEnvTraceTail(result config.OpenResult) (string, string) {
 	if err != nil {
 		return "", err.Error()
 	}
-	content, err := tailFile(path, envTraceTailBytes)
+	content, err := TailFile(path, envTraceTailBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", ""
@@ -77,14 +77,14 @@ func hostEnvTraceTail(result config.OpenResult) (string, string) {
 }
 
 // Pod read failures degrade to a notice so the host side still renders.
-func (a *App) podEnvTraceTail(result config.OpenResult) (string, string) {
+func (s *Service) podEnvTraceTail(result config.OpenResult) (string, string) {
 	mcpPort := config.MCPPortForResult(result)
-	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
+	if mcpPort <= 0 || !s.d.CanReachMCPEndpoint(mcpPort) {
 		return "", "in-pod trace unavailable — open the environment to include it"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := a.deps.runPodRaw(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(result.Tenant, result.EnvConfig.Name), []string{
+	out, err := s.d.RunPodRaw(ctx, s.d.MCPEndpoint(result), s.d.MCPBearer(result.Tenant, result.EnvConfig.Name), []string{
 		"sh", "-c",
 		fmt.Sprintf("tail -c %d \"$HOME/.erun/%s/%s/trace.log\" 2>/dev/null || true", envTraceTailBytes, result.Tenant, result.Environment),
 	})
@@ -182,7 +182,8 @@ func joinTraceNotices(notices ...string) string {
 	return strings.Join(parts, "; ")
 }
 
-func tailFile(path string, maxBytes int64) (string, error) {
+// TailFile reads the last maxBytes of path, dropping a partial first line.
+func TailFile(path string, maxBytes int64) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err

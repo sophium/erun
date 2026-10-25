@@ -14,7 +14,7 @@ type uiState struct {
 	Message                  string                            `json:"message,omitempty"`
 	Build                    uiBuildDetails                    `json:"build"`
 	VersionSuggestions       []uiVersion                       `json:"versionSuggestions,omitempty"`
-	VersionSuggestionNotices []uiVersionNotice                 `json:"versionSuggestionNotices,omitempty"`
+	VersionSuggestionNotices []uimodel.VersionNotice           `json:"versionSuggestionNotices,omitempty"`
 	CloudProviders           []settingssvc.CloudProviderStatus `json:"cloudProviders,omitempty"`
 	// ConfigUnreadable distinguishes a failed config read from no environments.
 	ConfigUnreadable bool `json:"configUnreadable,omitempty"`
@@ -59,17 +59,11 @@ type uiBuildDetails struct {
 
 type uiVersion = registry.RuntimeVersionSuggestion
 
-// uiVersionNotice explains empty suggestions; Kind is "auth" or "unreachable".
-type uiVersionNotice struct {
-	Image string `json:"image"`
-	Kind  string `json:"kind"`
-}
-
 // uiVersionSuggestions is the version picker's read model: the deployable
 // version choices plus per-source notices for images that could not be listed.
 type uiVersionSuggestions struct {
-	Suggestions []uiVersion       `json:"suggestions"`
-	Notices     []uiVersionNotice `json:"notices,omitempty"`
+	Suggestions []uiVersion             `json:"suggestions"`
+	Notices     []uimodel.VersionNotice `json:"notices,omitempty"`
 }
 
 // orchestratorShellActivityPayload is emitted every tick so a missed event

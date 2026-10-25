@@ -22,8 +22,6 @@ func (a *App) emitAppNotification(kind, message string) {
 	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{Kind: kind, Message: message})
 }
 
-const notificationSourceDeployFailed = "deploy-failed"
-
 // notificationSourceOrchestratorEdgeUnreachable is posted per linked env, carrying that env's deploy action.
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
 
@@ -40,8 +38,8 @@ func (a *App) notifyCredentialRefreshFailure(selection uimodel.Selection, messag
 	a.emitEnvNotification("error", selection.Tenant, selection.Environment, notificationSourceCredentialRefreshFailed, message, "")
 }
 
-// emitEnvNotification posts an env-scoped notification that emitClearEnvNotification
-// can dismiss by (source, tenant, environment).
+// emitEnvNotification posts an env-scoped notification that a clear can dismiss
+// by (source, tenant, environment).
 func (a *App) emitEnvNotification(kind, tenant, environment, source, message, action string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -69,24 +67,6 @@ func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action
 	})
 }
 
-// emitClearEnvNotification dismisses an emitEnvNotification matching source, tenant, and environment.
-func (a *App) emitClearEnvNotification(tenant, environment, source string) {
-	a.emit(uimodel.AppNotificationClearEvent, uimodel.AppNotificationClearPayload{
-		Tenant:      tenant,
-		Environment: environment,
-		Source:      source,
-	})
-}
-
 func (a *App) emitEvent(name string, payload any) {
 	a.emit(name, payload)
-}
-
-// emitEnvStatus publishes the env's condition for the sidebar row; "" clears.
-func (a *App) emitEnvStatus(selection uimodel.Selection, status string) {
-	a.emitEvent(uimodel.EnvStatusEvent, uimodel.EnvStatusPayload{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-		Status:      status,
-	})
 }

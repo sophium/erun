@@ -30,3 +30,28 @@ func TestEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
 		t.Fatalf("re-create after reset total = %d, want 3", got)
 	}
 }
+
+// The Manage dialog shows the last doctor and sshd init outcome from these payloads.
+func TestDoctorAndSSHDInitCompletedCarryTheOutcome(t *testing.T) {
+	emits := newCapturedEmits()
+	service := newTestService(Deps{Emit: emits.fn()})
+
+	service.DoctorCompleted(" team ", "dev", false, "kubectl not reachable")
+	service.SSHDInitCompleted("team", "dev", true, "")
+
+	doctor := emits.events(uimodel.DoctorCompletedEvent)
+	if len(doctor) != 1 {
+		t.Fatalf("doctor-completed emitted %d times, want exactly 1", len(doctor))
+	}
+	want := DoctorCompletedPayload{Tenant: "team", Environment: "dev", Message: "kubectl not reachable"}
+	if payload, ok := doctor[0].(DoctorCompletedPayload); !ok || payload != want {
+		t.Fatalf("doctor-completed payload = %#v, want %#v", doctor[0], want)
+	}
+	sshd := emits.events(uimodel.SSHDInitCompletedEvent)
+	if len(sshd) != 1 {
+		t.Fatalf("sshd-init-completed emitted %d times, want exactly 1", len(sshd))
+	}
+	if payload, ok := sshd[0].(SSHDInitCompletedPayload); !ok || payload != (SSHDInitCompletedPayload{Tenant: "team", Environment: "dev", Success: true}) {
+		t.Fatalf("sshd-init-completed payload = %#v", sshd[0])
+	}
+}

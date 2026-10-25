@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"fmt"
@@ -8,32 +8,32 @@ import (
 	"time"
 )
 
-type activityQueueStatus string
+type Status string
 
 const (
-	activityQueueStatusWaiting   activityQueueStatus = "waiting"
-	activityQueueStatusRunning   activityQueueStatus = "running"
-	activityQueueStatusSucceeded activityQueueStatus = "succeeded"
-	activityQueueStatusFailed    activityQueueStatus = "failed"
-	activityQueueStatusSkipped   activityQueueStatus = "skipped"
-	activityQueueStatusCancelled activityQueueStatus = "cancelled"
+	StatusWaiting   Status = "waiting"
+	StatusRunning   Status = "running"
+	StatusSucceeded Status = "succeeded"
+	StatusFailed    Status = "failed"
+	StatusSkipped   Status = "skipped"
+	StatusCancelled Status = "cancelled"
 )
 
-func activityQueueStatusIsTerminal(s activityQueueStatus) bool {
+func statusIsTerminal(s Status) bool {
 	switch s {
-	case activityQueueStatusSucceeded,
-		activityQueueStatusFailed,
-		activityQueueStatusSkipped,
-		activityQueueStatusCancelled:
+	case StatusSucceeded,
+		StatusFailed,
+		StatusSkipped,
+		StatusCancelled:
 		return true
-	case activityQueueStatusWaiting, activityQueueStatusRunning:
+	case StatusWaiting, StatusRunning:
 		fallthrough
 	default:
 		return false
 	}
 }
 
-type activityQueueContainerStatus struct {
+type ContainerStatus struct {
 	Name     string `json:"name"`
 	Image    string `json:"image"`
 	Phase    string `json:"phase"`
@@ -43,26 +43,26 @@ type activityQueueContainerStatus struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// activityQueueEntry is a tracked long-running command, rebuilt each launch
+// Entry is a tracked long-running command, rebuilt each launch
 // from helm releases and live PTY sessions, never persisted.
-type activityQueueEntry struct {
-	ID                string                         `json:"id"`
-	Command           string                         `json:"command"`
-	Tenant            string                         `json:"tenant"`
-	Environment       string                         `json:"environment"`
-	Version           string                         `json:"version,omitempty"`
-	Release           string                         `json:"release,omitempty"`
-	Namespace         string                         `json:"namespace,omitempty"`
-	KubernetesContext string                         `json:"kubernetesContext,omitempty"`
-	Component         string                         `json:"component,omitempty"`
-	Image             string                         `json:"image,omitempty"`
-	Summary           string                         `json:"summary,omitempty"`
-	Status            activityQueueStatus            `json:"status"`
-	StartedAt         time.Time                      `json:"startedAt"`
-	EndedAt           *time.Time                     `json:"endedAt,omitempty"`
-	LastUpdated       time.Time                      `json:"lastUpdated"`
-	Containers        []activityQueueContainerStatus `json:"containers,omitempty"`
-	Error             string                         `json:"error,omitempty"`
+type Entry struct {
+	ID                string            `json:"id"`
+	Command           string            `json:"command"`
+	Tenant            string            `json:"tenant"`
+	Environment       string            `json:"environment"`
+	Version           string            `json:"version,omitempty"`
+	Release           string            `json:"release,omitempty"`
+	Namespace         string            `json:"namespace,omitempty"`
+	KubernetesContext string            `json:"kubernetesContext,omitempty"`
+	Component         string            `json:"component,omitempty"`
+	Image             string            `json:"image,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	Status            Status            `json:"status"`
+	StartedAt         time.Time         `json:"startedAt"`
+	EndedAt           *time.Time        `json:"endedAt,omitempty"`
+	LastUpdated       time.Time         `json:"lastUpdated"`
+	Containers        []ContainerStatus `json:"containers,omitempty"`
+	Error             string            `json:"error,omitempty"`
 	// Detail is the captured output behind a failed entry.
 	Detail string `json:"detail,omitempty"`
 	// Source is "helm", "shell", "trace", or "action"; it selects lifecycle rules.
@@ -75,15 +75,15 @@ type activityQueueEntry struct {
 	StartedRunningAt *time.Time `json:"startedRunningAt,omitempty"`
 }
 
-// activityQueueStore returns cloned snapshots for race-free emission. A single
+// queueStore returns cloned snapshots for race-free emission. A single
 // drain goroutine delivers notifications in the order the store applied them.
-type activityQueueStore struct {
+type queueStore struct {
 	mu       sync.Mutex
-	active   map[string]*activityQueueEntry
-	history  []*activityQueueEntry
+	active   map[string]*Entry
+	history  []*Entry
 	now      func() time.Time
-	notify   func(activityQueueEntry)
-	notifyCh chan activityQueueEntry
+	notify   func(Entry)
+	notifyCh chan Entry
 	// outputByID buffers recent output per active entry; finish copies the tail
 	// into Detail on failure. It never crosses the wire.
 	outputByID map[string][]string
@@ -100,23 +100,23 @@ const activityQueueOutputBufferLines = 200
 // activityQueueOutputLineMaxChars clips pathological lines.
 const activityQueueOutputLineMaxChars = 2000
 
-func newActivityQueueStore(notify func(activityQueueEntry), now func() time.Time) *activityQueueStore {
+func newQueueStore(notify func(Entry), now func() time.Time) *queueStore {
 	if now == nil {
 		now = time.Now
 	}
-	s := &activityQueueStore{
-		active:     make(map[string]*activityQueueEntry),
+	s := &queueStore{
+		active:     make(map[string]*Entry),
 		outputByID: make(map[string][]string),
 		now:        now,
 		notify:     notify,
-		notifyCh:   make(chan activityQueueEntry, activityQueueNotifyBuffer),
+		notifyCh:   make(chan Entry, activityQueueNotifyBuffer),
 	}
 	go s.runNotifyLoop()
 	return s
 }
 
 // runNotifyLoop drains even with a nil notify so the buffer never fills.
-func (s *activityQueueStore) runNotifyLoop() {
+func (s *queueStore) runNotifyLoop() {
 	for snapshot := range s.notifyCh {
 		if s.notify != nil {
 			s.notify(snapshot)
@@ -124,82 +124,82 @@ func (s *activityQueueStore) runNotifyLoop() {
 	}
 }
 
-func (s *activityQueueStore) list() []activityQueueEntry {
+func (s *queueStore) list() []Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snapshotLocked()
 }
 
-func (s *activityQueueStore) findActive(tenant, environment string) (activityQueueEntry, bool) {
+func (s *queueStore) findActive(tenant, environment string) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, entry := range s.active {
 		if entry.Tenant == tenant && entry.Environment == environment {
-			return *cloneActivityQueueEntry(entry), true
+			return *cloneEntry(entry), true
 		}
 	}
-	return activityQueueEntry{}, false
+	return Entry{}, false
 }
 
 // findActiveByCommand also keys on command so a deploy is not confused with a build for the same env.
-func (s *activityQueueStore) findActiveByCommand(command, tenant, environment string) (activityQueueEntry, bool) {
+func (s *queueStore) findActiveByCommand(command, tenant, environment string) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, entry := range s.active {
 		if entry.Command == command && entry.Tenant == tenant && entry.Environment == environment {
-			return *cloneActivityQueueEntry(entry), true
+			return *cloneEntry(entry), true
 		}
 	}
-	return activityQueueEntry{}, false
+	return Entry{}, false
 }
 
 // latestDeployFailed reports whether the env's latest deploy failed; reconnect
 // uses it to stop retrying an env whose pod will never come ready.
-func (s *activityQueueStore) latestDeployFailed(tenant, environment string) bool {
+func (s *queueStore) latestDeployFailed(tenant, environment string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, entry := range s.snapshotLocked() {
 		if entry.Command != "deploy" || entry.Tenant != tenant || entry.Environment != environment {
 			continue
 		}
-		return entry.Status == activityQueueStatusFailed
+		return entry.Status == StatusFailed
 	}
 	return false
 }
 
 // promoteToRunning returns false for an already-running entry.
-func (s *activityQueueStore) promoteToRunning(id string) (activityQueueEntry, bool) {
+func (s *queueStore) promoteToRunning(id string) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.active[id]
 	if !ok {
-		return activityQueueEntry{}, false
+		return Entry{}, false
 	}
-	if entry.Status != activityQueueStatusWaiting {
-		return *cloneActivityQueueEntry(entry), false
+	if entry.Status != StatusWaiting {
+		return *cloneEntry(entry), false
 	}
-	entry.Status = activityQueueStatusRunning
+	entry.Status = StatusRunning
 	now := s.now().UTC()
 	entry.StartedRunningAt = &now
 	entry.LastUpdated = now
-	snapshot := *cloneActivityQueueEntry(entry)
+	snapshot := *cloneEntry(entry)
 	s.notifyLocked(snapshot)
 	return snapshot, true
 }
 
 // start returns the existing entry for a duplicate ID so pollers and explicit
 // registration converge on one record.
-func (s *activityQueueStore) start(seed activityQueueEntry) (activityQueueEntry, bool) {
+func (s *queueStore) start(seed Entry) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if seed.ID == "" {
-		seed.ID = generateActivityQueueID(seed)
+		seed.ID = generateID(seed)
 	}
 	if existing, ok := s.active[seed.ID]; ok {
-		return *cloneActivityQueueEntry(existing), false
+		return *cloneEntry(existing), false
 	}
 	if seed.Status == "" {
-		seed.Status = activityQueueStatusRunning
+		seed.Status = StatusRunning
 	}
 	now := s.now().UTC()
 	if seed.StartedAt.IsZero() {
@@ -208,12 +208,12 @@ func (s *activityQueueStore) start(seed activityQueueEntry) (activityQueueEntry,
 	seed.LastUpdated = now
 	entry := seed
 	s.active[entry.ID] = &entry
-	snapshot := *cloneActivityQueueEntry(&entry)
+	snapshot := *cloneEntry(&entry)
 	s.notifyLocked(snapshot)
 	return snapshot, true
 }
 
-func (s *activityQueueStore) updateContainers(id string, containers []activityQueueContainerStatus) {
+func (s *queueStore) updateContainers(id string, containers []ContainerStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.active[id]
@@ -222,13 +222,13 @@ func (s *activityQueueStore) updateContainers(id string, containers []activityQu
 	}
 	entry.Containers = append(entry.Containers[:0:0], containers...)
 	entry.LastUpdated = s.now().UTC()
-	snapshot := *cloneActivityQueueEntry(entry)
+	snapshot := *cloneEntry(entry)
 	s.notifyLocked(snapshot)
 }
 
 // recordOutputLine buffers output into every active entry for the tenant/env,
 // since a line cannot be attributed to one command; no-op when none is active.
-func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) {
+func (s *queueStore) recordOutputLine(tenant, environment, line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(line) > activityQueueOutputLineMaxChars {
@@ -248,18 +248,18 @@ func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) 
 }
 
 // finish is idempotent to absorb duplicate deploy trace lines.
-func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMsg string) (activityQueueEntry, bool) {
+func (s *queueStore) finish(id string, status Status, errMsg string) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.active[id]
 	if !ok {
-		return activityQueueEntry{}, false
+		return Entry{}, false
 	}
 	entry.Status = status
 	if errMsg != "" {
 		entry.Error = errMsg
 	}
-	if status == activityQueueStatusFailed {
+	if status == StatusFailed {
 		if lines := s.outputByID[id]; len(lines) > 0 {
 			entry.Detail = strings.Join(lines, "\n")
 		}
@@ -269,17 +269,17 @@ func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMs
 	entry.EndedAt = &now
 	entry.LastUpdated = now
 	delete(s.active, id)
-	s.history = append([]*activityQueueEntry{entry}, s.history...)
+	s.history = append([]*Entry{entry}, s.history...)
 	if len(s.history) > activityQueueHistoryCapacity {
 		s.history = s.history[:activityQueueHistoryCapacity]
 	}
-	snapshot := *cloneActivityQueueEntry(entry)
+	snapshot := *cloneEntry(entry)
 	s.notifyLocked(snapshot)
 	return snapshot, true
 }
 
 // dismiss removes only finished entries; stuck active ones need forceDismiss.
-func (s *activityQueueStore) dismiss(id string) bool {
+func (s *queueStore) dismiss(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, entry := range s.history {
@@ -292,32 +292,32 @@ func (s *activityQueueStore) dismiss(id string) bool {
 }
 
 // forceDismiss removes an entry regardless of status and returns it for follow-up recovery.
-func (s *activityQueueStore) forceDismiss(id string) (entry activityQueueEntry, removedFromActive bool, ok bool) {
+func (s *queueStore) forceDismiss(id string) (entry Entry, removedFromActive bool, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, found := s.active[id]; found {
-		entry = *cloneActivityQueueEntry(existing)
+		entry = *cloneEntry(existing)
 		delete(s.active, id)
 		delete(s.outputByID, id)
 		return entry, true, true
 	}
 	for i, candidate := range s.history {
 		if candidate.ID == id {
-			entry = *cloneActivityQueueEntry(candidate)
+			entry = *cloneEntry(candidate)
 			s.history = append(s.history[:i], s.history[i+1:]...)
 			return entry, false, true
 		}
 	}
-	return activityQueueEntry{}, false, false
+	return Entry{}, false, false
 }
 
-func (s *activityQueueStore) snapshotLocked() []activityQueueEntry {
-	out := make([]activityQueueEntry, 0, len(s.active)+len(s.history))
+func (s *queueStore) snapshotLocked() []Entry {
+	out := make([]Entry, 0, len(s.active)+len(s.history))
 	for _, entry := range s.active {
-		out = append(out, *cloneActivityQueueEntry(entry))
+		out = append(out, *cloneEntry(entry))
 	}
 	for _, entry := range s.history {
-		out = append(out, *cloneActivityQueueEntry(entry))
+		out = append(out, *cloneEntry(entry))
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].StartedAt.After(out[j].StartedAt)
@@ -327,7 +327,7 @@ func (s *activityQueueStore) snapshotLocked() []activityQueueEntry {
 
 // notifyLocked requires s.mu. A full buffer drops the snapshot; re-emits and
 // periodic re-snapshots recover it.
-func (s *activityQueueStore) notifyLocked(snapshot activityQueueEntry) {
+func (s *queueStore) notifyLocked(snapshot Entry) {
 	if s.notify == nil {
 		return
 	}
@@ -337,13 +337,13 @@ func (s *activityQueueStore) notifyLocked(snapshot activityQueueEntry) {
 	}
 }
 
-func cloneActivityQueueEntry(e *activityQueueEntry) *activityQueueEntry {
+func cloneEntry(e *Entry) *Entry {
 	if e == nil {
 		return nil
 	}
 	out := *e
 	if e.Containers != nil {
-		out.Containers = append([]activityQueueContainerStatus(nil), e.Containers...)
+		out.Containers = append([]ContainerStatus(nil), e.Containers...)
 	}
 	if e.EndedAt != nil {
 		end := *e.EndedAt
@@ -352,11 +352,11 @@ func cloneActivityQueueEntry(e *activityQueueEntry) *activityQueueEntry {
 	return &out
 }
 
-func generateActivityQueueID(e activityQueueEntry) string {
-	return fmt.Sprintf("%s/%s/%s/%s@%d", sanitizeActivityQueueIDPart(e.Command), sanitizeActivityQueueIDPart(e.Tenant), sanitizeActivityQueueIDPart(e.Environment), sanitizeActivityQueueIDPart(e.Version), e.StartedAt.UnixNano())
+func generateID(e Entry) string {
+	return fmt.Sprintf("%s/%s/%s/%s@%d", sanitizeIDPart(e.Command), sanitizeIDPart(e.Tenant), sanitizeIDPart(e.Environment), sanitizeIDPart(e.Version), e.StartedAt.UnixNano())
 }
 
-func sanitizeActivityQueueIDPart(s string) string {
+func sanitizeIDPart(s string) string {
 	if s == "" {
 		return "_"
 	}

@@ -204,19 +204,21 @@ func (a *App) newTerminalService() *terminal.Service {
 		ClearInitEmitted:                func(tenant, environment string) { a.envops.ClearInitEmitted(tenant, environment) },
 		EnvironmentJobIDs:               a.environmentJobIDs,
 		EnqueueGated: func(selection uimodel.Selection, kind string, start terminal.GatedStart) (uimodel.StartSessionResult, error) {
-			return a.enqueueGatedSession(selection, gatedSessionKind(kind), gatedSessionStarter(start))
+			return a.activity.EnqueueGatedSession(selection, kind, gatedStart(start))
 		},
-		OnOutput:             a.feedActivityTraceFromTerminal,
-		RememberKubeContext:  a.rememberKubeContextForActivity,
-		LockIfDeployInFlight: a.lockNewlyJoinedSessionIfDeployInFlight,
-		LatestDeployFailed: func(tenant, environment string) bool {
-			return a.activityQueue != nil && a.activityQueue.latestDeployFailed(tenant, environment)
+		OnOutput:                   a.feedActivityTraceFromTerminal,
+		RememberKubeContext:        func(name string) { a.activity.RememberKubeContext(name) },
+		LockIfDeployInFlight:       func(selection uimodel.Selection, serial int) { a.activity.LockIfDeployInFlight(selection, serial) },
+		LatestDeployFailed:         func(tenant, environment string) bool { return a.activity.LatestDeployFailed(tenant, environment) },
+		AppendMCPAuthPublicKeyFlag: a.appendMCPAuthPublicKeyFlag,
+		RunDeployOrchestration: func(ctx context.Context, selection uimodel.Selection, result config.OpenResult, force bool) error {
+			return a.activity.RunDeployOrchestration(ctx, selection, result, force)
 		},
-		AppendMCPAuthPublicKeyFlag:    a.appendMCPAuthPublicKeyFlag,
-		RunDeployOrchestration:        a.runDeployOrchestration,
-		MaybeStartDeployOrchestration: a.maybeStartDeployOrchestration,
-		RearmOrchestratorPacing:       a.rearmOrchestratorPacing,
-		OrchestratorRegisteredLocked:  func(id string) bool { return a.orchestrators[id] != nil },
+		MaybeStartDeployOrchestration: func(selection uimodel.Selection, force bool) (uimodel.StartSessionResult, bool) {
+			return a.activity.MaybeStartDeployOrchestration(selection, force)
+		},
+		RearmOrchestratorPacing:      a.rearmOrchestratorPacing,
+		OrchestratorRegisteredLocked: func(id string) bool { return a.orchestrators[id] != nil },
 	})
 }
 

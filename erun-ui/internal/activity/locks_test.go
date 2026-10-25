@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"strings"
@@ -6,31 +6,23 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func newTestAppForActivityQueue(t *testing.T) *App {
-	t.Helper()
-	app := withTestTerminal(&App{})
-	app.activityQueue = newActivityQueueStore(nil, nil)
-	return withTestEnvops(app)
-}
-
 func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
-	aiSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 2, Kind: terminal.KindAI}
-	localSession := &terminal.Session{Selection: selection, Key: "local\x00team\x00dev", Serial: 3, Kind: terminal.KindLocal}
+	envSession := Session{Selection: selection, Serial: 1, Kind: KindOpen}
+	aiSession := Session{Selection: selection, Serial: 2, Kind: KindAI}
+	localSession := Session{Selection: selection, Serial: 3, Kind: KindLocal}
 	otherSelection := uimodel.Selection{Tenant: "other", Environment: "dev", Version: "1.0.0"}
-	unrelated := &terminal.Session{Selection: otherSelection, Key: "env\x00other\x00dev", Serial: 4, Kind: terminal.KindOpen}
-	setTestSession(app, envSession.Key, envSession)
-	setTestSession(app, aiSession.Key, aiSession)
-	setTestSession(app, localSession.Key, localSession)
-	setTestSession(app, unrelated.Key, unrelated)
+	unrelated := Session{Selection: otherSelection, Serial: 4, Kind: KindOpen}
+	app.sessions.add(envSession)
+	app.sessions.add(aiSession)
+	app.sessions.add(localSession)
+	app.sessions.add(unrelated)
 
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	entry, _ := app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "team",
 		Environment: "dev",
@@ -39,30 +31,29 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	})
 	app.lockTerminalsForActivity(entry)
 
-	if envSession.LockedByActivity != entry.ID {
-		t.Fatalf("env session not locked: %q want %q", envSession.LockedByActivity, entry.ID)
+	if app.sessions.lockedBy(envSession.Serial) != entry.ID {
+		t.Fatalf("env session not locked: %q want %q", app.sessions.lockedBy(envSession.Serial), entry.ID)
 	}
-	if aiSession.LockedByActivity != entry.ID {
-		t.Fatalf("ai session not locked: %q", aiSession.LockedByActivity)
+	if app.sessions.lockedBy(aiSession.Serial) != entry.ID {
+		t.Fatalf("ai session not locked: %q", app.sessions.lockedBy(aiSession.Serial))
 	}
-	if localSession.LockedByActivity != "" {
-		t.Fatalf("local session unexpectedly locked: %q", localSession.LockedByActivity)
+	if app.sessions.lockedBy(localSession.Serial) != "" {
+		t.Fatalf("local session unexpectedly locked: %q", app.sessions.lockedBy(localSession.Serial))
 	}
-	if unrelated.LockedByActivity != "" {
-		t.Fatalf("unrelated tenant locked: %q", unrelated.LockedByActivity)
+	if app.sessions.lockedBy(unrelated.Serial) != "" {
+		t.Fatalf("unrelated tenant locked: %q", app.sessions.lockedBy(unrelated.Serial))
 	}
 }
 
 // Starting a deploy acts on any outstanding env-scoped warning.
 func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
+	app := newHarness(Deps{})
+	emits := app.emits
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
-	setTestSession(app, envSession.Key, envSession)
+	envSession := Session{Selection: selection, Serial: 1, Kind: KindOpen}
+	app.sessions.add(envSession)
 
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	entry, _ := app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "team",
 		Environment: "dev",
@@ -85,11 +76,10 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 }
 
 func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
+	app := newHarness(Deps{})
+	emits := app.emits
 	selection := uimodel.Selection{Tenant: "frs", Environment: "local"}
-	onLine := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	onLine := app.TraceLineHandler(selection, KindLocal)
 
 	onLine(`==> Deploy failed frs/local: values file not found for environment "local"`)
 
@@ -102,8 +92,8 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
 	if note.Kind != "error" || note.Tenant != "frs" || note.Environment != "local" ||
-		note.Source != notificationSourceDeployFailed {
-		t.Fatalf("notification = %+v, want error frs/local %q", note, notificationSourceDeployFailed)
+		note.Source != NotificationSourceDeployFailed {
+		t.Fatalf("notification = %+v, want error frs/local %q", note, NotificationSourceDeployFailed)
 	}
 	if !strings.Contains(note.Message, "Deploy of frs/local failed") ||
 		!strings.Contains(note.Message, "values file not found") {
@@ -115,16 +105,15 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 }
 
 func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
-	other := &terminal.Session{
+	app := newHarness(Deps{})
+	emits := app.emits
+	other := Session{
 		Selection: uimodel.Selection{Tenant: "other", Environment: "dev"},
-		Key:       "env\x00other\x00dev", Serial: 1, Kind: terminal.KindOpen,
+		Serial:    1, Kind: KindOpen,
 	}
-	setTestSession(app, other.Key, other)
+	app.sessions.add(other)
 
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	entry, _ := app.queue.start(Entry{
 		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
 	})
 	app.lockTerminalsForActivity(entry)
@@ -135,69 +124,61 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 }
 
 func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
+	app := newHarness(Deps{})
+	emits := app.emits
 
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	entry, _ := app.queue.start(Entry{
 		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
 	})
 
-	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 7, Kind: terminal.KindAI}
-	l, unlock := lockTerminalForTest(app)
-	l.Register(joinSession)
-	unlock()
+	joinSession := Session{Selection: selection, Serial: 7, Kind: KindAI}
+	app.sessions.add(joinSession)
 
-	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.Serial)
+	app.LockIfDeployInFlight(selection, joinSession.Serial)
 
-	if joinSession.LockedByActivity != entry.ID {
-		t.Fatalf("joinSession.lockedByActivity = %q, want %q", joinSession.LockedByActivity, entry.ID)
+	if app.sessions.lockedBy(joinSession.Serial) != entry.ID {
+		t.Fatalf("joinSession.lockedByActivity = %q, want %q", app.sessions.lockedBy(joinSession.Serial), entry.ID)
 	}
-	if got := len(emits.events(activityQueueLockEvent)); got != 1 {
+	if got := len(emits.events(lockEvent)); got != 1 {
 		t.Fatalf("lock events emitted = %d, want 1", got)
 	}
 }
 
 func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	emits := newCapturedEmits()
-	app.SetEmitter(emits.fn())
+	app := newHarness(Deps{})
+	emits := app.emits
 
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 7, Kind: terminal.KindAI}
-	l, unlock := lockTerminalForTest(app)
-	l.Register(joinSession)
-	unlock()
+	joinSession := Session{Selection: selection, Serial: 7, Kind: KindAI}
+	app.sessions.add(joinSession)
 
-	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.Serial)
+	app.LockIfDeployInFlight(selection, joinSession.Serial)
 
-	if joinSession.LockedByActivity != "" {
-		t.Fatalf("joinSession.lockedByActivity = %q, want empty", joinSession.LockedByActivity)
+	if app.sessions.lockedBy(joinSession.Serial) != "" {
+		t.Fatalf("joinSession.lockedByActivity = %q, want empty", app.sessions.lockedBy(joinSession.Serial))
 	}
-	if got := len(emits.events(activityQueueLockEvent)); got != 0 {
+	if got := len(emits.events(lockEvent)); got != 0 {
 		t.Fatalf("lock events emitted = %d, want 0", got)
 	}
 }
 
 // The overlay has no fallback, so every Locked=true event needs a Reason.
 func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
-	setTestSession(app, envSession.Key, envSession)
-
-	var emitted []activityLockEvent
-	app.SetEmitter(func(name string, data ...any) {
-		if name != activityQueueLockEvent || len(data) == 0 {
+	var emitted []lockPayload
+	app := newHarness(Deps{Emit: func(name string, data ...any) {
+		if name != lockEvent || len(data) == 0 {
 			return
 		}
-		if ev, ok := data[0].(activityLockEvent); ok {
+		if ev, ok := data[0].(lockPayload); ok {
 			emitted = append(emitted, ev)
 		}
-	})
+	}})
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := Session{Selection: selection, Serial: 1, Kind: KindOpen}
+	app.sessions.add(envSession)
 
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	entry, _ := app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "team",
 		Environment: "dev",
@@ -207,10 +188,8 @@ func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 
 	app.lockTerminalsForActivity(entry)
 
-	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 2, Kind: terminal.KindAI}
-	l, unlock := lockTerminalForTest(app)
-	l.Register(joinSession)
-	unlock()
+	joinSession := Session{Selection: selection, Serial: 2, Kind: KindAI}
+	app.sessions.add(joinSession)
 	app.lockTerminalForActivity(joinSession.Serial, entry)
 
 	if len(emitted) == 0 {
@@ -232,19 +211,19 @@ func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 }
 
 func TestUnlockTerminalsForActivityClearsMatchingLocks(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
-	setTestSession(app, envSession.Key, envSession)
-	entry, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	envSession := Session{Selection: selection, Serial: 1, Kind: KindOpen}
+	app.sessions.add(envSession)
+	entry, _ := app.queue.start(Entry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
 	app.lockTerminalsForActivity(entry)
-	if envSession.LockedByActivity == "" {
+	if app.sessions.lockedBy(envSession.Serial) == "" {
 		t.Fatal("session not locked at start")
 	}
-	final, _ := app.activityQueue.finish(entry.ID, activityQueueStatusSucceeded, "")
+	final, _ := app.queue.finish(entry.ID, StatusSucceeded, "")
 	app.unlockTerminalsForActivity(final)
-	if envSession.LockedByActivity != "" {
-		t.Fatalf("session still locked after unlock: %q", envSession.LockedByActivity)
+	if app.sessions.lockedBy(envSession.Serial) != "" {
+		t.Fatalf("session still locked after unlock: %q", app.sessions.lockedBy(envSession.Serial))
 	}
 }
 
@@ -278,8 +257,8 @@ func TestReleaseNameForTenant(t *testing.T) {
 
 // Pods can be Ready before helm --wait returns, so the poller must not finalize.
 func TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	entry, _ := app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -288,23 +267,23 @@ func TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods(t *testing.T) {
 		Source:      "trace",
 	})
 
-	allReady := []activityQueueContainerStatus{
+	allReady := []ContainerStatus{
 		{Name: "erun-devops", Phase: "Running", Ready: true},
 		{Name: "erun-dind", Phase: "Running", Ready: true},
 		{Name: "erun-mcp", Phase: "Running", Ready: true},
 	}
 	for i := 0; i < 5; i++ {
-		app.activityQueue.updateContainers(entry.ID, allReady)
+		app.queue.updateContainers(entry.ID, allReady)
 	}
 
-	if _, stillActive := app.activityQueue.findActive("erun", "local"); !stillActive {
+	if _, stillActive := app.queue.findActive("erun", "local"); !stillActive {
 		t.Fatal("trace-source entry must remain active even when every container reports Ready")
 	}
 }
 
 func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	entry, _ := app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	entry, _ := app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -314,7 +293,7 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 	if !app.ForceDismissActivity(entry.ID) {
 		t.Fatal("ForceDismissActivity should return true for an active entry")
 	}
-	if _, ok := app.activityQueue.findActive("erun", "local"); ok {
+	if _, ok := app.queue.findActive("erun", "local"); ok {
 		t.Fatal("entry should be removed from active after force dismiss")
 	}
 	if app.ForceDismissActivity(entry.ID) {
@@ -324,7 +303,7 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 
 // With a separately stated chart, appVersion is the chart's version, not the runtime's.
 func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"petios": {Name: "petios"}},
 		envs: map[string]config.EnvConfig{
 			"petios/develop": {
@@ -338,7 +317,7 @@ func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	app := newTestService(Deps{Store: store})
 	release := helmReleaseSnapshot{Name: "petios-devops", AppVersion: "1.0.178"}
 
 	if got := app.observedRuntimeVersion("petios", "develop", release); got != "1.0.322-snapshot-20260813072257" {

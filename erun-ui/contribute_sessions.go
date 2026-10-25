@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -18,9 +19,9 @@ func (a *App) StartContributeSession(selection uimodel.Selection, slot, cols, ro
 	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
 		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
+	return a.activity.EnqueueGatedSession(selection, activitysvc.GatedContributeERun, gatedStart(func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, false)
-	})
+	}))
 }
 
 // StartContributeAISession is StartContributeSession with the env's AI assistant.
@@ -29,9 +30,9 @@ func (a *App) StartContributeAISession(selection uimodel.Selection, slot, cols, 
 	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
 		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
+	return a.activity.EnqueueGatedSession(selection, activitysvc.GatedContributeAI, gatedStart(func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, true)
-	})
+	}))
 }
 
 func (a *App) runContributeSession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int, withAI bool) (uimodel.StartSessionResult, *terminal.Session, error) {
@@ -107,7 +108,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	})
 
 	a.terminal.RecordActivity(selection)
-	a.rememberKubeContextForActivity(selection.KubernetesContext)
+	a.activity.RememberKubeContext(selection.KubernetesContext)
 	go a.terminal.Stream(managed)
 	go a.envops.StartWorkspaceSync(selection)
 	go a.cloudContexts.StartRefresher(selection)

@@ -33,6 +33,8 @@ exclude:
 components:
   headlessserver:
     in: "headlessserver"
+  internal-activity:
+    in: "internal/activity"
   internal-cloudctx:
     in: "internal/cloudctx"
   internal-envops:
@@ -51,6 +53,11 @@ components:
     in: "."
 
 deps:
+  internal-activity:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-sophium-erun-erun-common
   internal-cloudctx:
     mayDependOn:
       - internal-uimodel
@@ -93,6 +100,7 @@ deps:
   root:
     mayDependOn:
       - headlessserver
+      - internal-activity
       - internal-cloudctx
       - internal-envops
       - internal-runtimeview

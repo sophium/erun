@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -14,37 +14,36 @@ import (
 
 // resolveActivityKubeContext prefers the selection's context, falling back to the
 // env config's so pollers never target kubectl's current-context.
-func (a *App) resolveActivityKubeContext(selection uimodel.Selection, tenant, environment string) string {
+func (s *Service) resolveActivityKubeContext(selection uimodel.Selection, tenant, environment string) string {
 	if ctx := strings.TrimSpace(selection.KubernetesContext); ctx != "" {
 		return ctx
 	}
-	if a.deps.store == nil {
-		return ""
-	}
-	envConfig, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	envConfig, _, err := s.d.Store.LoadEnvConfig(tenant, environment)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(envConfig.KubernetesContext)
 }
 
-// pollActivityContainerStatuses is display-only and never finalizes: pods can
+// startStatusPoller polls the entry's containers until it leaves the active set.
+func (s *Service) startStatusPoller(entry Entry) {
+	go s.pollContainerStatuses(context.Background(), entry)
+}
+
+// pollContainerStatuses is display-only and never finalizes: pods can
 // report Ready before helm --wait returns.
-func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) {
-	if a.activityQueue == nil {
-		return
-	}
-	ticker := time.NewTicker(activityQueuePollInterval)
+func (s *Service) pollContainerStatuses(ctx context.Context, entry Entry) {
+	ticker := time.NewTicker(containerPollInterval)
 	defer ticker.Stop()
 	pollOnce := func() bool {
-		if _, ok := a.activityQueue.findActive(entry.Tenant, entry.Environment); !ok {
+		if _, ok := s.queue.findActive(entry.Tenant, entry.Environment); !ok {
 			return false
 		}
-		statuses, err := a.fetchActivityContainerStatuses(ctx, entry)
+		statuses, err := s.d.FetchContainerStatuses(ctx, entry)
 		if err != nil {
 			return true
 		}
-		a.activityQueue.updateContainers(entry.ID, statuses)
+		s.queue.updateContainers(entry.ID, statuses)
 		return true
 	}
 	if !pollOnce() {
@@ -62,8 +61,9 @@ func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQ
 	}
 }
 
-// fetchActivityContainerStatuses errors on a kubectl outage so the frontend keeps the last-known state.
-func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) ([]activityQueueContainerStatus, error) {
+// FetchContainerStatusesViaKubectl reads the entry's release pods; it errors on a
+// kubectl outage so the frontend keeps the last-known state.
+func FetchContainerStatusesViaKubectl(ctx context.Context, entry Entry) ([]ContainerStatus, error) {
 	args := []string{"get", "pods", "-l", "app=" + entry.Release, "-o", "json"}
 	if strings.TrimSpace(entry.KubernetesContext) != "" {
 		args = append([]string{"--context", entry.KubernetesContext}, args...)
@@ -117,12 +117,12 @@ type kubectlContainerStatus struct {
 	} `json:"state"`
 }
 
-func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus, error) {
+func parseActivityContainerStatuses(raw []byte) ([]ContainerStatus, error) {
 	var parsed kubectlPodList
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
 	}
-	out := make([]activityQueueContainerStatus, 0)
+	out := make([]ContainerStatus, 0)
 	seen := make(map[string]bool)
 	for _, item := range parsed.Items {
 		// Spec containers carry images before Status reports them.
@@ -141,12 +141,12 @@ func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus,
 	return out, nil
 }
 
-func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[string]string) activityQueueContainerStatus {
+func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[string]string) ContainerStatus {
 	image := strings.TrimSpace(cs.Image)
 	if image == "" {
 		image = imageByName[cs.Name]
 	}
-	status := activityQueueContainerStatus{
+	status := ContainerStatus{
 		Name:     cs.Name,
 		Image:    image,
 		Ready:    cs.Ready,
@@ -172,7 +172,7 @@ func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[s
 	return status
 }
 
-func activityTargetForRuntime(entry activityQueueEntry) string {
+func activityTargetForRuntime(entry Entry) string {
 	target := strings.TrimSpace(entry.Tenant) + "/" + strings.TrimSpace(entry.Environment)
 	if version := strings.TrimSpace(entry.Version); version != "" {
 		target += " " + version

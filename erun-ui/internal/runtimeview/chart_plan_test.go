@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestResolveRuntimeChartPlan(t *testing.T) {
@@ -22,13 +23,13 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 		tags        map[string][]string
 		listErr     error
 		localChart  bool
-		want        ChartPlan
+		want        uimodel.ChartPlan
 	}{
 		{
 			name:        "a stated chart is taken at its word, at its own version",
 			environment: "stated",
 			listErr:     errors.New("no registry should be read"),
-			want: ChartPlan{
+			want: uimodel.ChartPlan{
 				Reference: "oci://ghcr.io/sophium/charts/erun-devops",
 				Version:   "1.0.178",
 				Chart:     "erun-devops",
@@ -39,7 +40,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			name:        "the tenant's own umbrella wins when published at the version",
 			environment: "plain",
 			tags:        map[string][]string{"charts/acme-devops": {snapshot}},
-			want: ChartPlan{
+			want: uimodel.ChartPlan{
 				Reference: "oci://ghcr.io/sophium/charts/acme-devops",
 				Version:   snapshot,
 				Chart:     "acme-devops",
@@ -50,7 +51,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			name:        "the canonical chart is the fallback",
 			environment: "plain",
 			tags:        map[string][]string{"charts/erun-devops": {snapshot}},
-			want: ChartPlan{
+			want: uimodel.ChartPlan{
 				Reference: "oci://ghcr.io/sophium/charts/erun-devops",
 				Version:   snapshot,
 				Chart:     "erun-devops",
@@ -61,7 +62,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			name:        "neither chart at the version is a definite miss",
 			environment: "plain",
 			tags:        map[string][]string{"charts/erun-devops": {"1.0.178"}},
-			want: ChartPlan{
+			want: uimodel.ChartPlan{
 				Reference: "oci://ghcr.io/sophium/charts/erun-devops",
 				Version:   snapshot,
 				Chart:     "erun-devops",
@@ -73,7 +74,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			name:        "a registry that cannot be read is unknown, never missing",
 			environment: "plain",
 			listErr:     errors.New("unauthorized"),
-			want: ChartPlan{
+			want: uimodel.ChartPlan{
 				Reference: "oci://ghcr.io/sophium/charts/erun-devops",
 				Version:   snapshot,
 				Chart:     "erun-devops",
@@ -86,7 +87,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 			environment: "plain",
 			listErr:     errors.New("no registry should be read"),
 			localChart:  true,
-			want:        ChartPlan{Version: snapshot, Source: "local"},
+			want:        uimodel.ChartPlan{Version: snapshot, Source: "local"},
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

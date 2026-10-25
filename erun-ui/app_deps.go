@@ -17,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
@@ -330,7 +331,7 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 		deps.contributeStatePath = defaultContributeStatePath()
 	}
 	if deps.interruptedActivityPath == "" {
-		deps.interruptedActivityPath = defaultInterruptedActivityPath()
+		deps.interruptedActivityPath = activitysvc.DefaultInterruptedActivityPath()
 	}
 	if deps.desktopControlMarkerPath == "" {
 		deps.desktopControlMarkerPath = core.DefaultDesktopControlMarkerPath()

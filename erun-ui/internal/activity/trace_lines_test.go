@@ -1,34 +1,34 @@
-package main
+package activity
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	app.queue.start(Entry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	handler := app.TraceLineHandler(selection, KindLocal)
 	handler("==> Deployed team/dev 1.0.0 in 12s")
-	if _, ok := app.activityQueue.findActive("team", "dev"); ok {
+	if _, ok := app.queue.findActive("team", "dev"); ok {
 		t.Fatal("entry should be finished after ==> Deployed")
 	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry, got %+v", all)
 	}
 
-	app2 := newTestAppForActivityQueue(t)
-	app2.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
-	handler2 := newActivityTraceLineHandler(app2, selection, terminal.KindLocal)
+	app2 := newHarness(Deps{})
+	app2.queue.start(Entry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	handler2 := app2.TraceLineHandler(selection, KindLocal)
 	handler2("Error: UPGRADE FAILED: timeout")
 	handler2("==> Deploy failed after 2m0s")
-	all2 := app2.activityQueue.list()
-	if len(all2) != 1 || all2[0].Status != activityQueueStatusFailed {
+	all2 := app2.queue.list()
+	if len(all2) != 1 || all2[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all2)
 	}
 	if !strings.Contains(all2[0].Error, "Deploy failed") && !strings.Contains(all2[0].Error, "UPGRADE FAILED") {
@@ -38,14 +38,14 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
 	// Coupled to the CLI's failure-line wording.
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	app.queue.start(Entry{Command: "deploy", Tenant: "team", Environment: "dev"})
+	handler := app.TraceLineHandler(selection, KindLocal)
 	handler("Error: UPGRADE FAILED: timeout")
 	handler("==> Deploy of team-devops failed after 2m0s")
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 }
@@ -61,11 +61,11 @@ func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 	handler("==> Deploying erun/local · erun-backend-postgres 18.3")
-	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+	entry, ok := app.queue.findActiveByCommand("deploy", "erun", "local")
 	if !ok {
 		t.Fatal("expected a deploy entry after the component ==> Deploying line")
 	}
@@ -81,11 +81,11 @@ func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 	handler("==> Deploying erun/local 1.0.0")
-	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+	entry, ok := app.queue.findActiveByCommand("deploy", "erun", "local")
 	if !ok {
 		t.Fatal("expected a deploy entry after the runtime ==> Deploying line")
 	}
@@ -102,8 +102,8 @@ func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testi
 
 func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 	// A selection-less tab must still finalize via the tenant/env parsed from the line.
-	app := newTestAppForActivityQueue(t)
-	app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "ux",
@@ -111,42 +111,42 @@ func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 		Source:      "trace",
 	})
 	emptySelection := uimodel.Selection{}
-	handler := newActivityTraceLineHandler(app, emptySelection, terminal.KindLocal)
+	handler := app.TraceLineHandler(emptySelection, KindLocal)
 	handler("==> Deployed erun/ux 1.0.51-snapshot-20260508135009 in 52s")
-	if _, ok := app.activityQueue.findActive("erun", "ux"); ok {
+	if _, ok := app.queue.findActive("erun", "ux"); ok {
 		t.Fatal("entry should be finished from line tenant/env even with empty selection")
 	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry, got %+v", all)
 	}
 }
 
 func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 	// `==> Skipping` must also finalize from the parsed tenant/env.
-	app := newTestAppForActivityQueue(t)
-	app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "ux",
 		Source:      "trace",
 	})
-	handler := newActivityTraceLineHandler(app, uimodel.Selection{}, terminal.KindLocal)
+	handler := app.TraceLineHandler(uimodel.Selection{}, KindLocal)
 	handler("==> Skipping erun/ux 1.0.51 (identical deploy already in progress)")
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSkipped {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSkipped {
 		t.Fatalf("expected one skipped entry, got %+v", all)
 	}
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
 	// Build traces carry no tenant/env, so the handler keys off the selection.
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Building")
-	entry, ok := app.activityQueue.findActiveByCommand("build", "erun", "local")
+	entry, ok := app.queue.findActiveByCommand("build", "erun", "local")
 	if !ok {
 		t.Fatal("expected build entry to be active after ==> Building")
 	}
@@ -155,25 +155,25 @@ func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
 	}
 
 	handler("==> Built in 42s")
-	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); ok {
+	if _, ok := app.queue.findActiveByCommand("build", "erun", "local"); ok {
 		t.Fatal("expected build entry to be finished after ==> Built")
 	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry, got %+v", all)
 	}
 }
 
 func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Building")
 	handler("==> Build failed after 5s")
 
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 	if !strings.Contains(all[0].Error, "Build failed") {
@@ -183,16 +183,16 @@ func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 
 // The handler must record Detail for subprocess callers with no PTY.
 func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Building")
 	handler("./main.go:12:2: undefined: fmt.Sprintfff")
 	handler("==> Build failed after 3m12s")
 
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 	if !strings.Contains(all[0].Detail, "undefined: fmt.Sprintfff") {
@@ -205,33 +205,33 @@ func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
 
 // A bare deploy-failure line must finalize the deploy, never a concurrent build.
 func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Building")
-	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+	if _, ok := app.queue.findActiveByCommand("build", "erun", "local"); !ok {
 		t.Fatal("expected an active build entry")
 	}
-	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "local"})
+	app.queue.start(Entry{Command: "deploy", Tenant: "erun", Environment: "local"})
 
 	handler("Error: UPGRADE FAILED: timeout")
 	handler("==> Deploy failed after 4s")
 
-	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+	if _, ok := app.queue.findActiveByCommand("build", "erun", "local"); !ok {
 		t.Fatal("the still-running build entry must not have been finalized by the deploy failure")
 	}
-	if _, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local"); ok {
+	if _, ok := app.queue.findActiveByCommand("deploy", "erun", "local"); ok {
 		t.Fatal("the deploy entry should have been finalized")
 	}
-	all := app.activityQueue.list()
-	var deployEntry *activityQueueEntry
+	all := app.queue.list()
+	var deployEntry *Entry
 	for i := range all {
 		if all[i].Command == "deploy" {
 			deployEntry = &all[i]
 		}
 	}
-	if deployEntry == nil || deployEntry.Status != activityQueueStatusFailed {
+	if deployEntry == nil || deployEntry.Status != StatusFailed {
 		t.Fatalf("expected a failed deploy entry in history, got %+v", all)
 	}
 	if !strings.Contains(deployEntry.Error, "UPGRADE FAILED") && !strings.Contains(deployEntry.Detail, "UPGRADE FAILED") {
@@ -241,21 +241,21 @@ func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActiv
 
 func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	// An empty tenant/env entry would light up every sidebar row.
-	app := newTestAppForActivityQueue(t)
-	handler := newActivityTraceLineHandler(app, uimodel.Selection{}, terminal.KindLocal)
+	app := newHarness(Deps{})
+	handler := app.TraceLineHandler(uimodel.Selection{}, KindLocal)
 	handler("==> Building")
-	if len(app.activityQueue.list()) != 0 {
-		t.Fatalf("expected no entries registered without a selection, got %+v", app.activityQueue.list())
+	if len(app.queue.list()) != 0 {
+		t.Fatalf("expected no entries registered without a selection, got %+v", app.queue.list())
 	}
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindOpen)
+	handler := app.TraceLineHandler(selection, KindOpen)
 
 	handler("==> Releasing 1.4.2")
-	entry, ok := app.activityQueue.findActiveByCommand("release", "erun", "local")
+	entry, ok := app.queue.findActiveByCommand("release", "erun", "local")
 	if !ok {
 		t.Fatal("expected release entry to be active after ==> Releasing")
 	}
@@ -264,25 +264,25 @@ func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
 	}
 
 	handler("==> Released 1.4.2 in 12s")
-	if _, ok := app.activityQueue.findActiveByCommand("release", "erun", "local"); ok {
+	if _, ok := app.queue.findActiveByCommand("release", "erun", "local"); ok {
 		t.Fatal("expected release entry to be finished after ==> Released")
 	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry, got %+v", all)
 	}
 }
 
 func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Releasing 1.4.2")
 	handler("==> Release failed after 5s")
 
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 	if !strings.Contains(all[0].Error, "Release failed") {
@@ -291,35 +291,35 @@ func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesPush(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindOpen)
+	handler := app.TraceLineHandler(selection, KindOpen)
 
 	handler("==> Pushing")
-	if _, ok := app.activityQueue.findActiveByCommand("push", "erun", "local"); !ok {
+	if _, ok := app.queue.findActiveByCommand("push", "erun", "local"); !ok {
 		t.Fatal("expected push entry to be active after ==> Pushing")
 	}
 
 	handler("==> Pushed in 8s")
-	if _, ok := app.activityQueue.findActiveByCommand("push", "erun", "local"); ok {
+	if _, ok := app.queue.findActiveByCommand("push", "erun", "local"); ok {
 		t.Fatal("expected push entry to be finished after ==> Pushed")
 	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry, got %+v", all)
 	}
 }
 
 func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
+	handler := app.TraceLineHandler(selection, KindLocal)
 
 	handler("==> Pushing")
 	handler("==> Push failed after 3s")
 
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 	if !strings.Contains(all[0].Error, "Push failed") {
@@ -329,13 +329,13 @@ func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 
 func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 	// Every session kind registers from `==> Deploying`.
-	cases := []terminal.Kind{terminal.KindLocal, terminal.KindCommand, terminal.KindOpen, terminal.KindAI}
+	cases := []string{KindLocal, KindCommand, KindOpen, KindAI}
 	for _, kind := range cases {
-		app := newTestAppForActivityQueue(t)
+		app := newHarness(Deps{})
 		selection := uimodel.Selection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
-		handler := newActivityTraceLineHandler(app, selection, kind)
+		handler := app.TraceLineHandler(selection, kind)
 		handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
-		entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+		entry, ok := app.queue.findActiveByCommand("deploy", "erun", "local")
 		if !ok {
 			t.Fatalf("kind %q: expected deploy auto-registered from trace", kind)
 		}
@@ -348,46 +348,65 @@ func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 	}
 }
 
-// Output must be buffered before the failure line finalizes the entry.
-func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+// Output must be buffered before the failure line finalizes the entry, across
+// chunks that split lines anywhere.
+func TestFeedTraceCapturesFailureDetail(t *testing.T) {
+	app := newHarness(Deps{})
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	managed := &terminal.Session{Selection: selection, Kind: terminal.KindLocal, Key: "local\x00team\x00dev", Serial: 1}
-	setTestSession(app, managed.Key, managed)
 
 	// Seeded directly: the trace start path needs env config this test does not stage.
-	app.activityQueue.start(activityQueueEntry{
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "team",
 		Environment: "dev",
 		Version:     "1.0.0",
 	})
 
-	feed := func(s string) { app.feedActivityTraceFromTerminal(managed, []byte(s)) }
-	feed("helm upgrade --install team-devops ./chart\r\n")
-	feed("Error: UPGRADE FAILED: timed out waiting for the condition\r\n")
-	feed("==> Deploy failed after 4s\r\n")
+	buffer := ""
+	var readyErr error
+	feed := func(chunk string) {
+		var lines []string
+		buffer, lines = DrainTraceLines(buffer + StripTraceANSI(chunk))
+		app.FeedTrace(selection, KindLocal, lines, func(err error) { readyErr = err })
+	}
+	feed("helm upgrade --install team-devops ./chart\r\nError: UPGRADE ")
+	feed("FAILED: timed out waiting for the condition\r\n")
+	feed("\x1b[31m==> Deploy failed after 4s\x1b[0m\r\n")
 
-	if _, ok := app.activityQueue.findActive("team", "dev"); ok {
+	if _, ok := app.queue.findActive("team", "dev"); ok {
 		t.Fatal("entry should be finalized out of active after the failure line")
 	}
-	var failed *activityQueueEntry
-	for _, entry := range app.activityQueue.list() {
-		if entry.Tenant == "team" && entry.Environment == "dev" {
-			e := entry
-			failed = &e
-			break
-		}
-	}
-	if failed == nil {
-		t.Fatal("expected a finalized entry for team/dev")
-	}
-	if failed.Status != activityQueueStatusFailed {
-		t.Fatalf("status = %q, want failed", failed.Status)
+	all := app.queue.list()
+	if len(all) != 1 || all[0].Status != StatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
 	}
 	for _, want := range []string{"helm upgrade --install", "UPGRADE FAILED", "==> Deploy failed after 4s"} {
-		if !strings.Contains(failed.Detail, want) {
-			t.Fatalf("Detail missing %q, got %q", want, failed.Detail)
+		if !strings.Contains(all[0].Detail, want) {
+			t.Fatalf("Detail missing %q, got %q", want, all[0].Detail)
 		}
+	}
+	if readyErr == nil {
+		t.Fatal("the failure line must release the session's ready gate with its error")
+	}
+}
+
+func TestFeedTraceReportsATakenOverSession(t *testing.T) {
+	app := newHarness(Deps{})
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
+	if app.FeedTrace(selection, KindOpen, []string{"plain output"}, nil) {
+		t.Fatal("ordinary output must not read as a takeover")
+	}
+	if !app.FeedTrace(selection, KindOpen, []string{appsession.ShellSessionTakenOverNotice}, nil) {
+		t.Fatal("the takeover notice must be reported")
+	}
+}
+
+func TestDrainTraceLinesKeepsThePartialLineAndTheLastOverwrite(t *testing.T) {
+	rest, lines := DrainTraceLines("spinner 1\rspinner 2\r\ndone\npartial")
+	if rest != "partial" {
+		t.Fatalf("rest = %q, want the trailing partial line", rest)
+	}
+	if len(lines) != 2 || lines[0] != "spinner 2" || lines[1] != "done" {
+		t.Fatalf("lines = %q, want the text after the last overwrite", lines)
 	}
 }

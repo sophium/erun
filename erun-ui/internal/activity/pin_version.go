@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -16,22 +16,22 @@ import (
 
 // The desktop shells `erun pin` so CLI, MCP and UI share one re-pin engine.
 
-// uiPinPlan is a resolved pin plan, with per-site current and target versions.
-type uiPinPlan struct {
-	Tenant      string      `json:"tenant"`
-	Environment string      `json:"environment"`
-	Target      string      `json:"target"`
-	Previous    string      `json:"previous,omitempty"`
-	Sites       []uiPinSite `json:"sites"`
+// PinPlan is a resolved pin plan, with per-site current and target versions.
+type PinPlan struct {
+	Tenant      string    `json:"tenant"`
+	Environment string    `json:"environment"`
+	Target      string    `json:"target"`
+	Previous    string    `json:"previous,omitempty"`
+	Sites       []PinSite `json:"sites"`
 	// Skipped lists references deliberately left on another release line.
-	Skipped   []string         `json:"skipped,omitempty"`
-	Changed   int              `json:"changed"`
-	Aligned   bool             `json:"aligned"`
-	Available []string         `json:"available,omitempty"`
-	Notice    *uiVersionNotice `json:"notice,omitempty"`
+	Skipped   []string               `json:"skipped,omitempty"`
+	Changed   int                    `json:"changed"`
+	Aligned   bool                   `json:"aligned"`
+	Available []string               `json:"available,omitempty"`
+	Notice    *uimodel.VersionNotice `json:"notice,omitempty"`
 }
 
-type uiPinSite struct {
+type PinSite struct {
 	Kind    string `json:"kind"`
 	Label   string `json:"label"`
 	Current string `json:"current"`
@@ -40,26 +40,26 @@ type uiPinSite struct {
 }
 
 // PreviewPinVersion resolves a re-pin without writing; empty target means latest stable.
-func (a *App) PreviewPinVersion(selection uimodel.Selection, target string) (uiPinPlan, error) {
-	return a.runPinCommand(selection, target, true, false)
+func (s *Service) PreviewPinVersion(selection uimodel.Selection, target string) (PinPlan, error) {
+	return s.runPinCommand(selection, target, true, false)
 }
 
 // ApplyPinVersion performs the re-pin and reports what moved.
-func (a *App) ApplyPinVersion(selection uimodel.Selection, target string) (uiPinPlan, error) {
-	return a.runPinCommand(selection, target, false, false)
+func (s *Service) ApplyPinVersion(selection uimodel.Selection, target string) (PinPlan, error) {
+	return s.runPinCommand(selection, target, false, false)
 }
 
 // RevertPinVersion pins back to the version recorded before the last re-pin.
-func (a *App) RevertPinVersion(selection uimodel.Selection) (uiPinPlan, error) {
-	return a.runPinCommand(selection, "", false, true)
+func (s *Service) RevertPinVersion(selection uimodel.Selection) (PinPlan, error) {
+	return s.runPinCommand(selection, "", false, true)
 }
 
-func (a *App) runPinCommand(selection uimodel.Selection, target string, preview, revert bool) (uiPinPlan, error) {
+func (s *Service) runPinCommand(selection uimodel.Selection, target string, preview, revert bool) (PinPlan, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("run pin command", selection.Tenant, selection.Environment); err != nil {
-		return uiPinPlan{}, err
+		return PinPlan{}, err
 	}
-	ctx := a.context()
+	ctx := s.d.Context()
 
 	args := []string{"pin", selection.Tenant, selection.Environment, "--output", "json"}
 	if preview {
@@ -72,16 +72,16 @@ func (a *App) runPinCommand(selection uimodel.Selection, target string, preview,
 		args = append(args, "--version", strings.TrimSpace(target))
 	}
 
-	plan, err := runPinCLI(ctx, a.deps.resolveCLIPath(), args)
+	plan, err := runPinCLI(ctx, s.d.ResolveCLIPath(), args)
 	if err != nil {
-		return uiPinPlan{}, err
+		return PinPlan{}, err
 	}
 	plan.Tenant, plan.Environment = selection.Tenant, selection.Environment
 	return plan, nil
 }
 
 // runPinCLI runs the CLI: JSON on stdout, human trace on stderr.
-func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, error) {
+func runPinCLI(ctx context.Context, cliPath string, args []string) (PinPlan, error) {
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	core.HideConsoleWindow(cmd)
 	core.BoundCommandWait(cmd)
@@ -92,14 +92,14 @@ func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, e
 	stdout, err := cmd.Output()
 	if err != nil {
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {
-			return uiPinPlan{}, fmt.Errorf("%s", lastMeaningfulLine(detail))
+			return PinPlan{}, fmt.Errorf("%s", lastMeaningfulLine(detail))
 		}
-		return uiPinPlan{}, err
+		return PinPlan{}, err
 	}
 
 	var resolved model.PinPlan
 	if unmarshalErr := json.Unmarshal(stdout, &resolved); unmarshalErr != nil {
-		return uiPinPlan{}, fmt.Errorf("read the pin result: %w", unmarshalErr)
+		return PinPlan{}, fmt.Errorf("read the pin result: %w", unmarshalErr)
 	}
 	return toUIPinPlan(resolved), nil
 }
@@ -116,17 +116,17 @@ func lastMeaningfulLine(detail string) string {
 	return strings.TrimSpace(detail)
 }
 
-func toUIPinPlan(plan model.PinPlan) uiPinPlan {
-	out := uiPinPlan{
+func toUIPinPlan(plan model.PinPlan) PinPlan {
+	out := PinPlan{
 		Tenant:      plan.Tenant,
 		Environment: plan.Environment,
 		Target:      plan.Target,
 		Previous:    plan.Previous,
-		Sites:       make([]uiPinSite, 0, len(plan.Sites)),
+		Sites:       make([]PinSite, 0, len(plan.Sites)),
 		Skipped:     plan.Skipped,
 	}
 	for _, site := range plan.Sites {
-		out.Sites = append(out.Sites, uiPinSite{
+		out.Sites = append(out.Sites, PinSite{
 			Kind:    string(site.Kind),
 			Label:   pinSiteLabel(site),
 			Current: site.Current,
@@ -156,13 +156,13 @@ func pinSiteLabel(site model.PinSite) string {
 }
 
 // ListPinnableVersions lists the published versions the environment can pin to.
-func (a *App) ListPinnableVersions(selection uimodel.Selection) ([]string, error) {
+func (s *Service) ListPinnableVersions(selection uimodel.Selection) ([]string, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("list pinnable versions", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
-	ctx := a.context()
-	cmd := exec.CommandContext(ctx, a.deps.resolveCLIPath(), "pin", selection.Tenant, selection.Environment, "--list", "--output", "json")
+	ctx := s.d.Context()
+	cmd := exec.CommandContext(ctx, s.d.ResolveCLIPath(), "pin", selection.Tenant, selection.Environment, "--list", "--output", "json")
 	core.HideConsoleWindow(cmd)
 	core.BoundCommandWait(cmd)
 	var stderr strings.Builder
@@ -181,34 +181,34 @@ func (a *App) ListPinnableVersions(selection uimodel.Selection) ([]string, error
 	return versions.Tags, nil
 }
 
-// uiPinRepoCheckoutStatus reports whether `erun pin` can resolve a local checkout.
-type uiPinRepoCheckoutStatus struct {
+// PinCheckoutStatus reports whether `erun pin` can resolve a local checkout.
+type PinCheckoutStatus struct {
 	Resolvable bool   `json:"resolvable"`
 	Reason     string `json:"reason,omitempty"`
 }
 
 // PinRepoCheckoutStatus mirrors the CLI's resolvePinProjectRoot: a remote-worktree env
 // needs a same-tenant sibling with a local checkout.
-func (a *App) PinRepoCheckoutStatus(selection uimodel.Selection) (uiPinRepoCheckoutStatus, error) {
+func (s *Service) PinRepoCheckoutStatus(selection uimodel.Selection) (PinCheckoutStatus, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("resolve pin repo checkout status", selection.Tenant, selection.Environment); err != nil {
-		return uiPinRepoCheckoutStatus{}, err
+		return PinCheckoutStatus{}, err
 	}
-	target, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	target, _, err := s.d.Store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiPinRepoCheckoutStatus{}, err
+		return PinCheckoutStatus{}, err
 	}
 	if !target.RemoteWorktree() {
-		return uiPinRepoCheckoutStatus{Resolvable: true}, nil
+		return PinCheckoutStatus{Resolvable: true}, nil
 	}
-	siblings, err := a.deps.store.ListEnvConfigs(selection.Tenant)
+	siblings, err := s.d.Store.ListEnvConfigs(selection.Tenant)
 	if err != nil {
-		return uiPinRepoCheckoutStatus{}, err
+		return PinCheckoutStatus{}, err
 	}
 	if _, ok := config.TenantLocalCheckoutRoot(siblings); ok {
-		return uiPinRepoCheckoutStatus{Resolvable: true}, nil
+		return PinCheckoutStatus{Resolvable: true}, nil
 	}
-	return uiPinRepoCheckoutStatus{
+	return PinCheckoutStatus{
 		Resolvable: false,
 		Reason: fmt.Sprintf(
 			"%s/%s has no local checkout of its repo on this machine, and no other %s environment does either. "+

@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -40,10 +39,7 @@ func envActionQueueKey(selection uimodel.Selection) string {
 
 // enqueueDesktopAction errors only on setup failures; action errors surface in
 // the entry's terminal status.
-func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
-	if a == nil || a.activityQueue == nil {
-		return "", errors.New("activity queue not initialized")
-	}
+func (s *Service) enqueueDesktopAction(action desktopAction) (string, error) {
 	if strings.TrimSpace(action.kind) == "" {
 		return "", errors.New("action kind is required")
 	}
@@ -52,17 +48,17 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 	}
 	now := time.Now().UTC()
 	if strings.TrimSpace(action.id) == "" {
-		seedForID := activityQueueEntry{
+		seedForID := Entry{
 			Command:     action.kind,
 			Tenant:      action.selection.Tenant,
 			Environment: action.selection.Environment,
 			Version:     action.selection.Version,
 			StartedAt:   now,
 		}
-		action.id = generateActivityQueueID(seedForID)
+		action.id = generateID(seedForID)
 	}
 	enq := now
-	entry, fresh := a.activityQueue.start(activityQueueEntry{
+	entry, fresh := s.queue.start(Entry{
 		ID:                action.id,
 		Command:           action.kind,
 		ActionKind:        action.kind,
@@ -73,7 +69,7 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 		Namespace:         namespaceForTenantEnv(action.selection.Tenant, action.selection.Environment),
 		KubernetesContext: strings.TrimSpace(action.selection.KubernetesContext),
 		Summary:           summaryForAction(action),
-		Status:            activityQueueStatusWaiting,
+		Status:            StatusWaiting,
 		Source:            "action",
 		EnqueuedAt:        &enq,
 		StartedAt:         enq,
@@ -82,14 +78,14 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 		// Duplicate of an in-flight entry: collapse onto it.
 		return entry.ID, nil
 	}
-	a.rememberKubeContextForActivity(action.selection.KubernetesContext)
+	s.RememberKubeContext(action.selection.KubernetesContext)
 
-	queue := a.ensureEnvActionQueue(envActionQueueKey(action.selection))
+	queue := s.ensureEnvActionQueue(envActionQueueKey(action.selection))
 	select {
 	case queue.pending <- &action:
 		return action.id, nil
 	default:
-		a.activityQueue.finish(action.id, activityQueueStatusFailed, "desktop action queue is full")
+		s.queue.finish(action.id, StatusFailed, "desktop action queue is full")
 		return action.id, fmt.Errorf("action queue full for %s", envActionQueueKey(action.selection))
 	}
 }
@@ -112,168 +108,164 @@ func summaryForAction(action desktopAction) string {
 	return action.kind + " " + tenant + "/" + env
 }
 
-func (a *App) ensureEnvActionQueue(key string) *envActionQueue {
-	a.actionQueueMu.Lock()
-	defer a.actionQueueMu.Unlock()
-	if a.actionQueues == nil {
-		a.actionQueues = make(map[string]*envActionQueue)
+func (s *Service) ensureEnvActionQueue(key string) *envActionQueue {
+	s.actionQueueMu.Lock()
+	defer s.actionQueueMu.Unlock()
+	if s.actionQueues == nil {
+		s.actionQueues = make(map[string]*envActionQueue)
 	}
-	queue, ok := a.actionQueues[key]
+	queue, ok := s.actionQueues[key]
 	if ok {
 		return queue
 	}
 	queue = &envActionQueue{pending: make(chan *desktopAction, desktopActionQueueDepth)}
-	a.actionQueues[key] = queue
-	go a.runEnvActionWorker(key, queue)
+	s.actionQueues[key] = queue
+	go s.runEnvActionWorker(key, queue)
 	return queue
 }
 
-func (a *App) runEnvActionWorker(key string, queue *envActionQueue) {
+func (s *Service) runEnvActionWorker(key string, queue *envActionQueue) {
 	for action := range queue.pending {
-		a.executeDesktopAction(action)
+		s.executeDesktopAction(action)
 	}
 	_ = key
 }
 
-func (a *App) executeDesktopAction(action *desktopAction) {
-	if a == nil || a.activityQueue == nil {
-		return
-	}
-	current, ok := a.activityQueue.findByID(action.id)
+func (s *Service) executeDesktopAction(action *desktopAction) {
+	current, ok := s.queue.findByID(action.id)
 	if !ok {
 		// Force-dismissed before its turn.
 		return
 	}
-	if current.Status == activityQueueStatusCancelled || activityQueueStatusIsTerminal(current.Status) {
+	if current.Status == StatusCancelled || statusIsTerminal(current.Status) {
 		return
 	}
-	promoted, ok := a.activityQueue.promoteToRunning(action.id)
+	promoted, ok := s.queue.promoteToRunning(action.id)
 	if !ok {
 		return
 	}
 	// Re-emit for a dropped event or late-mounted frontend; the frontend dedupes.
-	a.emitActivityState(promoted)
-	a.lockTerminalsForActivity(promoted)
-	a.startActivityStatusPollerForAction(action, current)
-	ctx, cancel := context.WithCancel(a.context())
-	a.registerCancel(action.id, cancel)
-	defer a.clearCancel(action.id)
+	s.emitState(promoted)
+	s.lockTerminalsForActivity(promoted)
+	s.startActivityStatusPollerForAction(action, current)
+	ctx, cancel := context.WithCancel(s.d.Context())
+	s.registerCancel(action.id, cancel)
+	defer s.clearCancel(action.id)
 	defer cancel()
 
 	err := action.run(ctx)
 
 	status, errMsg := desktopActionTerminalStatus(err)
-	if final, finished := a.activityQueue.finish(action.id, status, errMsg); finished {
-		a.unlockTerminalsForActivity(final)
+	if final, finished := s.queue.finish(action.id, status, errMsg); finished {
+		s.unlockTerminalsForActivity(final)
 	}
 }
 
-func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry activityQueueEntry) {
+func (s *Service) startActivityStatusPollerForAction(action *desktopAction, entry Entry) {
 	if action.kind != "deploy" && action.kind != "force-deploy" {
 		return
 	}
-	if a.activityStatusPoller == nil {
-		return
-	}
-	a.activityStatusPoller(entry)
+	s.startStatusPoller(entry)
 }
 
-func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
+func desktopActionTerminalStatus(err error) (Status, string) {
 	if err == nil {
-		return activityQueueStatusSucceeded, ""
+		return StatusSucceeded, ""
 	}
 	if errors.Is(err, context.Canceled) {
-		return activityQueueStatusCancelled, "cancelled"
+		return StatusCancelled, "cancelled"
 	}
-	return activityQueueStatusFailed, err.Error()
+	return StatusFailed, err.Error()
 }
 
 // Only waiting cancellation is exposed; running cancellation is plumbed for later.
-func (a *App) registerCancel(id string, cancel context.CancelFunc) {
-	a.actionQueueMu.Lock()
-	defer a.actionQueueMu.Unlock()
-	if a.actionCancels == nil {
-		a.actionCancels = make(map[string]context.CancelFunc)
+func (s *Service) registerCancel(id string, cancel context.CancelFunc) {
+	s.actionQueueMu.Lock()
+	defer s.actionQueueMu.Unlock()
+	if s.actionCancels == nil {
+		s.actionCancels = make(map[string]context.CancelFunc)
 	}
-	a.actionCancels[id] = cancel
+	s.actionCancels[id] = cancel
 }
 
-func (a *App) clearCancel(id string) {
-	a.actionQueueMu.Lock()
-	defer a.actionQueueMu.Unlock()
-	delete(a.actionCancels, id)
+func (s *Service) clearCancel(id string) {
+	s.actionQueueMu.Lock()
+	defer s.actionQueueMu.Unlock()
+	delete(s.actionCancels, id)
 }
 
 // CancelWaitingAction cancels a queued action; returns false once it has started.
-func (a *App) CancelWaitingAction(id string) bool {
-	if a == nil || a.activityQueue == nil {
-		return false
-	}
+func (s *Service) CancelWaitingAction(id string) bool {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return false
 	}
-	entry, ok := a.activityQueue.findByID(id)
+	entry, ok := s.queue.findByID(id)
 	if !ok {
 		return false
 	}
-	if entry.Status != activityQueueStatusWaiting {
+	if entry.Status != StatusWaiting {
 		return false
 	}
-	if final, finished := a.activityQueue.finish(id, activityQueueStatusCancelled, "cancelled before start"); finished {
-		a.unlockTerminalsForActivity(final)
+	if final, finished := s.queue.finish(id, StatusCancelled, "cancelled before start"); finished {
+		s.unlockTerminalsForActivity(final)
 		// The worker skips the queued action because its entry is now terminal.
 		return true
 	}
 	return false
 }
 
-func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
+func (s *queueStore) findByID(id string) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if entry, ok := s.active[id]; ok {
-		return *cloneActivityQueueEntry(entry), true
+		return *cloneEntry(entry), true
 	}
 	for _, entry := range s.history {
 		if entry.ID == id {
-			return *cloneActivityQueueEntry(entry), true
+			return *cloneEntry(entry), true
 		}
 	}
-	return activityQueueEntry{}, false
+	return Entry{}, false
 }
 
-type gatedSessionStarter func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error)
+// Readiness is a started session the runner's gate waits on.
+type Readiness interface {
+	WaitReady(ctx context.Context, timeout time.Duration) error
+}
+
+// GatedStart starts a session once the per-env action runner admits it; the
+// session it returns gates the runner until it is ready, and a nil one gates nothing.
+type GatedStart func(ctx context.Context) (uimodel.StartSessionResult, Readiness, error)
 
 // gatedSessionMaxSetup is a safety net so the queue drains if every ready marker
 // is missed; it spans a cold build+deploy.
 const gatedSessionMaxSetup = 6 * time.Minute
 
-// gatedSessionKind's entry stays running only while its terminal is being established.
-type gatedSessionKind string
-
+// A gated kind's entry stays running only while its terminal is being established.
 const (
-	gatedSessionKindOpen           gatedSessionKind = "open"
-	gatedSessionKindAI             gatedSessionKind = "ai"
-	gatedSessionKindContributeERun gatedSessionKind = "contribute-erun"
-	gatedSessionKindContributeAI   gatedSessionKind = "contribute-ai"
+	GatedOpen           = "open"
+	GatedAI             = "ai"
+	GatedContributeERun = "contribute-erun"
+	GatedContributeAI   = "contribute-ai"
 )
 
 func isGatedSessionKind(kind string) bool {
-	switch gatedSessionKind(kind) {
-	case gatedSessionKindOpen, gatedSessionKindAI, gatedSessionKindContributeERun, gatedSessionKindContributeAI:
+	switch kind {
+	case GatedOpen, GatedAI, GatedContributeERun, GatedContributeAI:
 		return true
 	}
 	return false
 }
 
-func isGatedSessionSetupEntry(entry activityQueueEntry) bool {
+func isGatedSessionSetupEntry(entry Entry) bool {
 	return entry.Source == "action" && isGatedSessionKind(entry.ActionKind)
 }
 
-// enqueueGatedSession blocks until the session is created, then holds the gate
+// EnqueueGatedSession blocks until the session is created, then holds the gate
 // until it signals ready.
-func (a *App) enqueueGatedSession(selection uimodel.Selection, kind gatedSessionKind, start gatedSessionStarter) (uimodel.StartSessionResult, error) {
-	if !isGatedSessionKind(string(kind)) {
+func (s *Service) EnqueueGatedSession(selection uimodel.Selection, kind string, start GatedStart) (uimodel.StartSessionResult, error) {
+	if !isGatedSessionKind(kind) {
 		return uimodel.StartSessionResult{}, fmt.Errorf("unregistered gated session kind %q", kind)
 	}
 	type spawnOutcome struct {
@@ -282,10 +274,10 @@ func (a *App) enqueueGatedSession(selection uimodel.Selection, kind gatedSession
 	}
 	ready := make(chan spawnOutcome, 1)
 
-	if _, err := a.enqueueDesktopAction(desktopAction{
-		kind:      string(kind),
+	if _, err := s.enqueueDesktopAction(desktopAction{
+		kind:      kind,
 		selection: selection,
-		summary:   string(kind) + " " + strings.TrimSpace(selection.Tenant+"/"+selection.Environment),
+		summary:   kind + " " + strings.TrimSpace(selection.Tenant+"/"+selection.Environment),
 		run: func(ctx context.Context) error {
 			result, managed, startErr := start(ctx)
 			ready <- spawnOutcome{result: result, err: startErr}
@@ -310,13 +302,14 @@ func (a *App) enqueueGatedSession(selection uimodel.Selection, kind gatedSession
 	return outcome.result, outcome.err
 }
 
-func (a *App) stopActionRunners() {
-	a.actionQueueMu.Lock()
-	queues := a.actionQueues
-	a.actionQueues = nil
-	cancels := a.actionCancels
-	a.actionCancels = nil
-	a.actionQueueMu.Unlock()
+// StopActionRunners closes every per-env queue and cancels the running actions.
+func (s *Service) StopActionRunners() {
+	s.actionQueueMu.Lock()
+	queues := s.actionQueues
+	s.actionQueues = nil
+	cancels := s.actionCancels
+	s.actionCancels = nil
+	s.actionQueueMu.Unlock()
 	for _, queue := range queues {
 		close(queue.pending)
 	}

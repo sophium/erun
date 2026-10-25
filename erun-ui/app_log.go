@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 )
 
 // The desktop is launched detached, so stderr goes nowhere; log.SetOutput also
@@ -122,7 +124,7 @@ func (a *App) LoadAppLog() (uiAppLog, error) {
 		return uiAppLog{}, err
 	}
 	result := uiAppLog{Path: path}
-	content, err := tailFile(path, appLogTailBytes)
+	content, err := activitysvc.TailFile(path, appLogTailBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			result.Reason = "no log captured yet"

@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"testing"
@@ -7,8 +7,8 @@ import (
 
 // At deploy start the prior release still reads "deployed" with the old version.
 func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -26,21 +26,21 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
 		Updated:    helmUpdatedNow(t),
 	})
 
-	entry, ok := app.activityQueue.findActive("erun", "local")
+	entry, ok := app.queue.findActive("erun", "local")
 	if !ok {
 		t.Fatal("entry must remain active when helm reports a different AppVersion as deployed")
 	}
-	if entry.Status != activityQueueStatusRunning {
+	if entry.Status != StatusRunning {
 		t.Fatalf("entry status = %q, want running", entry.Status)
 	}
 }
 
 // Same-version redeploys need the Updated freshness check.
 func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
+	app := newHarness(Deps{})
 	now := time.Now()
-	app.activityQueue.now = func() time.Time { return now }
-	app.activityQueue.start(activityQueueEntry{
+	app.queue.now = func() time.Time { return now }
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -59,18 +59,18 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
 		Updated:    staleUpdated.Format("2006-01-02 15:04:05.999999999 -0700 MST"),
 	})
 
-	entry, ok := app.activityQueue.findActive("erun", "local")
+	entry, ok := app.queue.findActive("erun", "local")
 	if !ok {
 		t.Fatal("entry must remain active when helm 'deployed' Updated predates entry.StartedAt")
 	}
-	if entry.Status != activityQueueStatusRunning {
+	if entry.Status != StatusRunning {
 		t.Fatalf("entry status = %q, want running", entry.Status)
 	}
 }
 
 func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -88,19 +88,19 @@ func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
 		Updated:    helmUpdatedNow(t),
 	})
 
-	if _, stillActive := app.activityQueue.findActive("erun", "local"); stillActive {
+	if _, stillActive := app.queue.findActive("erun", "local"); stillActive {
 		t.Fatal("entry should be finalized when version matches and Updated is fresh")
 	}
-	history := app.activityQueue.list()
-	if len(history) != 1 || history[0].Status != activityQueueStatusSucceeded {
+	history := app.queue.list()
+	if len(history) != 1 || history[0].Status != StatusSucceeded {
 		t.Fatalf("expected one succeeded entry in history, got %+v", history)
 	}
 }
 
 // The version gate applies only to "deployed".
 func TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	app.activityQueue.start(activityQueueEntry{
+	app := newHarness(Deps{})
+	app.queue.start(Entry{
 		Command:     "deploy",
 		Tenant:      "erun",
 		Environment: "local",
@@ -117,11 +117,11 @@ func TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion(t *testing
 		AppVersion: "1.0.50-snapshot-prior",
 	})
 
-	if _, stillActive := app.activityQueue.findActive("erun", "local"); stillActive {
+	if _, stillActive := app.queue.findActive("erun", "local"); stillActive {
 		t.Fatal("entry should be finalized when helm reports failed")
 	}
-	history := app.activityQueue.list()
-	if len(history) != 1 || history[0].Status != activityQueueStatusFailed {
+	history := app.queue.list()
+	if len(history) != 1 || history[0].Status != StatusFailed {
 		t.Fatalf("expected one failed entry in history, got %+v", history)
 	}
 }

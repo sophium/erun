@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"testing"
@@ -8,15 +8,13 @@ import (
 )
 
 func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
-	app := &App{
-		deps: erunUIDeps{
-			store: stubUIStore{
-				envs: map[string]config.EnvConfig{
-					"team/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: t.TempDir()},
-				},
+	app := newTestService(Deps{
+		Store: fakeStore{
+			envs: map[string]config.EnvConfig{
+				"team/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: t.TempDir()},
 			},
 		},
-	}
+	})
 	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -29,16 +27,14 @@ func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 // A sourceless runtime env resolves through a sibling's checkout of the shared repo.
 func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 	checkout := t.TempDir()
-	app := &App{
-		deps: erunUIDeps{
-			store: stubUIStore{
-				envs: map[string]config.EnvConfig{
-					"frs/dev":  {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: checkout},
-					"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
-				},
+	app := newTestService(Deps{
+		Store: fakeStore{
+			envs: map[string]config.EnvConfig{
+				"frs/dev":  {Name: "dev", Type: config.EnvironmentTypeLocalAgent, LocalRepoPath: checkout},
+				"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
 			},
 		},
-	}
+	})
 	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -49,15 +45,13 @@ func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 }
 
 func TestPinRepoCheckoutStatusRefusesASourcelessEnvWithNoTenantCheckout(t *testing.T) {
-	app := &App{
-		deps: erunUIDeps{
-			store: stubUIStore{
-				envs: map[string]config.EnvConfig{
-					"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
-				},
+	app := newTestService(Deps{
+		Store: fakeStore{
+			envs: map[string]config.EnvConfig{
+				"frs/prod": {Name: "prod", Type: config.EnvironmentTypeRuntime},
 			},
 		},
-	}
+	})
 	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("status: %v", err)

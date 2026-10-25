@@ -6,30 +6,17 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// ChartPlan is the runtime chart a deploy at the chosen version would
-// install; the picked version may name an image with no chart at that version.
-type ChartPlan struct {
-	Reference string `json:"reference"`
-	Version   string `json:"version"`
-	Chart     string `json:"chart"`
-	// Source is "stated", "tenant", "canonical" or "local".
-	Source string `json:"source"`
-	// Missing means the registry positively answered "no chart"; an unreadable
-	// registry sets Unknown instead, so a guess never blocks a deploy.
-	Missing bool `json:"missing"`
-	Unknown bool `json:"unknown"`
-}
-
 // ResolveRuntimeChartPlan mirrors the deploy's resolution order so the tab and the deploy cannot drift.
-func (s *Service) ResolveRuntimeChartPlan(tenant, environment, version string, runtimeIsLocalChart bool) ChartPlan {
+func (s *Service) ResolveRuntimeChartPlan(tenant, environment, version string, runtimeIsLocalChart bool) uimodel.ChartPlan {
 	version = strings.TrimSpace(version)
 	if version == "" {
-		return ChartPlan{}
+		return uimodel.ChartPlan{}
 	}
 	if runtimeIsLocalChart {
-		return ChartPlan{Source: "local", Version: version}
+		return uimodel.ChartPlan{Source: "local", Version: version}
 	}
 	if plan, stated := s.statedRuntimeChartPlan(tenant, environment, version); stated {
 		return plan
@@ -37,20 +24,20 @@ func (s *Service) ResolveRuntimeChartPlan(tenant, environment, version string, r
 	return s.probedRuntimeChartPlan(tenant, environment, version)
 }
 
-func (s *Service) statedRuntimeChartPlan(tenant, environment, version string) (ChartPlan, bool) {
+func (s *Service) statedRuntimeChartPlan(tenant, environment, version string) (uimodel.ChartPlan, bool) {
 	env, _, err := s.d.Store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return ChartPlan{}, false
+		return uimodel.ChartPlan{}, false
 	}
 	stated := strings.TrimSpace(env.RuntimeChart)
 	if stated == "" {
-		return ChartPlan{}, false
+		return uimodel.ChartPlan{}, false
 	}
 	reference, statedVersion := chartref.SplitChartReference(stated)
 	if statedVersion == "" {
 		statedVersion = version
 	}
-	return ChartPlan{
+	return uimodel.ChartPlan{
 		Reference: reference,
 		Version:   statedVersion,
 		Chart:     chartref.ChartNameFromReference(reference),
@@ -58,7 +45,7 @@ func (s *Service) statedRuntimeChartPlan(tenant, environment, version string) (C
 	}, true
 }
 
-func (s *Service) probedRuntimeChartPlan(tenant, environment, version string) ChartPlan {
+func (s *Service) probedRuntimeChartPlan(tenant, environment, version string) uimodel.ChartPlan {
 	registry := strings.TrimSpace(s.d.RuntimeRegistryNamespace(tenant, environment))
 	if registry == "" {
 		registry = config.DefaultContainerRegistry
@@ -71,13 +58,13 @@ func (s *Service) probedRuntimeChartPlan(tenant, environment, version string) Ch
 	if tenantChart := config.RuntimeReleaseName(tenant); tenantChart != config.DevopsComponentName {
 		published, known := s.probePublishedChart(tenant, environment, version, tenantChart)
 		if published {
-			return ChartPlan{Reference: repo(tenantChart), Version: version, Chart: tenantChart, Source: "tenant"}
+			return uimodel.ChartPlan{Reference: repo(tenantChart), Version: version, Chart: tenantChart, Source: "tenant"}
 		}
 		unknown = !known
 	}
 
 	canonical := config.DevopsComponentName
-	plan := ChartPlan{Reference: repo(canonical), Version: version, Chart: canonical, Source: "canonical"}
+	plan := uimodel.ChartPlan{Reference: repo(canonical), Version: version, Chart: canonical, Source: "canonical"}
 	published, known := s.probePublishedChart(tenant, environment, version, canonical)
 	switch {
 	case published:

@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,29 +15,28 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
-	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// runDeployOrchestration composes build/push/deploy primitives (the desktop may not use
+// RunDeployOrchestration composes build/push/deploy primitives (the desktop may not use
 // `build --deploy`, per erun-ui/AGENTS.md), threading the minted version so what deploys is what was built.
-func (a *App) runDeployOrchestration(ctx context.Context, selection uimodel.Selection, result config.OpenResult, force bool) error {
-	cli := a.deps.resolveCLIPath()
-	dir := terminal.ResolveStartDir(result.RepoPath)
-	onLine := newActivityTraceLineHandler(a, selection, terminal.KindLocal)
+func (s *Service) RunDeployOrchestration(ctx context.Context, selection uimodel.Selection, result config.OpenResult, force bool) error {
+	cli := s.d.ResolveCLIPath()
+	dir := s.d.StartDir(result.RepoPath)
+	onLine := s.TraceLineHandler(selection, KindLocal)
 
 	if result.EnvConfig.ResolvedType() == config.EnvironmentTypeLocalAgent {
-		return a.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
+		return s.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
 	}
-	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
+	return s.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
 }
 
-func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
+func (s *Service) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
 	buildArgs := []string{"build", "--output", "json"}
 	if force {
 		buildArgs = append(buildArgs, "--no-incremental")
 	}
-	out, err := runErunCaptured(ctx, cli, dir, onLine, buildArgs...)
+	out, err := s.runErunCaptured(ctx, cli, dir, onLine, buildArgs...)
 	if err != nil {
 		return err
 	}
@@ -46,53 +44,36 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 	if version == "" {
 		return fmt.Errorf("build did not report a version to deploy")
 	}
-	if _, err := runErunCaptured(ctx, cli, dir, onLine, "push", "--version", version); err != nil {
+	if _, err := s.runErunCaptured(ctx, cli, dir, onLine, "push", "--version", version); err != nil {
 		return err
 	}
 	deployArgs := []string{"deploy", selection.Tenant, selection.Environment, "--version", version}
 	if force {
 		deployArgs = append(deployArgs, "--force")
 	}
-	deployArgs = terminal.AppendDeployComponentsFlag(deployArgs, selection)
-	deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
-	_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
+	deployArgs = s.d.AppendDeployComponents(deployArgs, selection)
+	deployArgs = s.d.AppendMCPAuthPublicKeyFlag(deployArgs)
+	_, err = s.runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
 	return err
 }
 
-func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
+func (s *Service) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
 	args := []string{"deploy", selection.Tenant, selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	} else {
 		args = append(args, "--current")
 	}
-	if image := terminal.DeployRuntimeImageOverride(selection); image != "" {
+	if image := s.d.RuntimeImageOverride(selection); image != "" {
 		args = append(args, "--runtime-image", image)
 	}
 	if force {
 		args = append(args, "--force")
 	}
-	args = terminal.AppendDeployComponentsFlag(args, selection)
-	args = a.appendMCPAuthPublicKeyFlag(args)
-	_, err := runErunCaptured(ctx, cli, dir, onLine, args...)
+	args = s.d.AppendDeployComponents(args, selection)
+	args = s.d.AppendMCPAuthPublicKeyFlag(args)
+	_, err := s.runErunCaptured(ctx, cli, dir, onLine, args...)
 	return err
-}
-
-// appendMCPAuthPublicKeyFlag requires the desktop-signed MCP bearer; on failure it
-// omits the flag, since an unauthenticated env is recoverable and a blocked deploy is not.
-func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
-	if a.identity == nil {
-		return args
-	}
-	path, err := a.identity.ensurePublicKeyPath()
-	if err != nil {
-		log.Printf("erun-app: resolve MCP auth public key for deploy: %v", err)
-		return args
-	}
-	if path == "" {
-		return args
-	}
-	return append(args, "--mcp-auth-public-key", path)
 }
 
 // deployNeedsBuildOrchestration: local-agent envs (and forced deploys) rebuild; runtime
@@ -105,14 +86,14 @@ func deployNeedsBuildOrchestration(result config.OpenResult, version string, for
 	return force || strings.TrimSpace(version) == ""
 }
 
-// maybeStartDeployOrchestration returns false for envs that use in-shell `erun deploy` instead.
-func (a *App) maybeStartDeployOrchestration(selection uimodel.Selection, force bool) (uimodel.StartSessionResult, bool) {
+// MaybeStartDeployOrchestration returns false for envs that use in-shell `erun deploy` instead.
+func (s *Service) MaybeStartDeployOrchestration(selection uimodel.Selection, force bool) (uimodel.StartSessionResult, bool) {
 	selection = uimodel.NormalizeSelection(selection)
-	// a.ctx is nil in unit tests; never fall back to the real CLI and config there.
-	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
+	// Startup has not run in unit tests; never fall back to the real CLI and config there.
+	if !s.d.Started() || selection.Tenant == "" || selection.Environment == "" {
 		return uimodel.StartSessionResult{}, false
 	}
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -120,10 +101,10 @@ func (a *App) maybeStartDeployOrchestration(selection uimodel.Selection, force b
 		return uimodel.StartSessionResult{}, false
 	}
 	go func() {
-		ctx := a.context()
+		ctx := s.d.Context()
 		// Detached from any PTY, so surface failures explicitly unless the app is shutting down.
-		if err := a.runDeployOrchestration(ctx, selection, result, force); err != nil && ctx.Err() == nil {
-			a.surfaceDeployFailure(selection.Tenant, selection.Environment, deployOrchestrationFailureReason(err))
+		if err := s.RunDeployOrchestration(ctx, selection, result, force); err != nil && ctx.Err() == nil {
+			s.surfaceDeployFailure(selection.Tenant, selection.Environment, deployOrchestrationFailureReason(err))
 		}
 	}()
 	return uimodel.StartSessionResult{Selection: selection, Orchestrated: true}, true
@@ -153,7 +134,7 @@ func truncateFailureReasonTail(msg string, maxLen int) string {
 }
 
 // runErunCaptured returns stdout (the `--output json` result) and forwards stderr lines to onLine.
-func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(string), args ...string) (string, error) {
+func (s *Service) runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(string), args ...string) (string, error) {
 	if strings.TrimSpace(cliPath) == "" {
 		cliPath = "erun"
 	}
@@ -161,7 +142,7 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 	core.HideConsoleWindow(cmd)
 	core.BoundCommandWait(cmd)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), appSessionEnvVar+"=1")
+	cmd.Env = append(os.Environ(), s.d.AppSessionEnv)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err

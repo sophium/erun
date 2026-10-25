@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
@@ -44,10 +46,10 @@ func restartTestApp(t *testing.T) (*App, string) {
 // The quit is driven through beforeClose, as Wails drives it, so the real decision is asserted.
 func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
 	app, _ := restartTestApp(t)
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:      "deploy-1",
 		Command: "deploy",
-		Status:  activityQueueStatusRunning,
+		Status:  activitysvc.StatusRunning,
 	})
 
 	quitLanded := false

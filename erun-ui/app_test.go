@@ -253,20 +253,6 @@ func (s *stubTerminalSession) Close() error {
 
 // withTestEnvops gives a hand-built App the envops service NewApp would build,
 // for tests that construct App directly and reach an environment operation.
-func withTestEnvops(app *App) *App {
-	if app.deps.store == nil {
-		app.deps.store = stubUIStore{}
-	}
-	if app.terminal == nil {
-		withTestTerminal(app)
-	}
-	if app.deps.workspaceSyncInterval <= 0 {
-		app.deps.workspaceSyncInterval = time.Hour
-	}
-	app.envops = app.newEnvopsService()
-	return app
-}
-
 // withTestTerminal gives a hand-built App the terminal service NewApp would build.
 func withTestTerminal(app *App) *App {
 	store := app.deps.store

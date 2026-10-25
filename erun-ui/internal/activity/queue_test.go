@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"fmt"
@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-func newTestActivityQueueStore(t *testing.T) *activityQueueStore {
+func newTestQueueStore(t *testing.T) *queueStore {
 	t.Helper()
-	return newActivityQueueStore(nil, func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) })
+	return newQueueStore(nil, func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) })
 }
 
 func TestDeployQueueStartTracksEntry(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	seed := activityQueueEntry{
+	store := newTestQueueStore(t)
+	seed := Entry{
 		Tenant:      "team",
 		Environment: "dev",
 		Version:     "1.0.0",
@@ -24,7 +24,7 @@ func TestDeployQueueStartTracksEntry(t *testing.T) {
 	if !fresh {
 		t.Fatalf("expected fresh entry, got join")
 	}
-	if entry.Status != activityQueueStatusRunning {
+	if entry.Status != StatusRunning {
 		t.Fatalf("status = %q, want running", entry.Status)
 	}
 	if entry.ID == "" {
@@ -37,8 +37,8 @@ func TestDeployQueueStartTracksEntry(t *testing.T) {
 }
 
 func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	seed := activityQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"}
+	store := newTestQueueStore(t)
+	seed := Entry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"}
 	first, fresh := store.start(seed)
 	if !fresh {
 		t.Fatal("first call should be fresh")
@@ -53,15 +53,15 @@ func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
 }
 
 func TestLatestDeployFailed(t *testing.T) {
-	store := newTestActivityQueueStore(t)
+	store := newTestQueueStore(t)
 	base := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 
 	if store.latestDeployFailed("petios", "rihards-develop") {
 		t.Fatal("no deploy recorded: want false")
 	}
 
-	failed, _ := store.start(activityQueueEntry{ID: "d1", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base})
-	if _, ok := store.finish(failed.ID, activityQueueStatusFailed, "helm release failed"); !ok {
+	failed, _ := store.start(Entry{ID: "d1", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base})
+	if _, ok := store.finish(failed.ID, StatusFailed, "helm release failed"); !ok {
 		t.Fatal("finish failed deploy returned ok=false")
 	}
 	if !store.latestDeployFailed("petios", "rihards-develop") {
@@ -69,7 +69,7 @@ func TestLatestDeployFailed(t *testing.T) {
 	}
 
 	// A newer non-deploy activity must not change the verdict.
-	store.start(activityQueueEntry{ID: "o1", Command: "open", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(time.Minute)})
+	store.start(Entry{ID: "o1", Command: "open", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(time.Minute)})
 	if !store.latestDeployFailed("petios", "rihards-develop") {
 		t.Fatal("newer non-deploy activity must be ignored: want true")
 	}
@@ -80,8 +80,8 @@ func TestLatestDeployFailed(t *testing.T) {
 	}
 
 	// A newer deploy that succeeded (recovery) clears it.
-	recovered, _ := store.start(activityQueueEntry{ID: "d2", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(2 * time.Minute)})
-	if _, ok := store.finish(recovered.ID, activityQueueStatusSucceeded, ""); !ok {
+	recovered, _ := store.start(Entry{ID: "d2", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(2 * time.Minute)})
+	if _, ok := store.finish(recovered.ID, StatusSucceeded, ""); !ok {
 		t.Fatal("finish recovered deploy returned ok=false")
 	}
 	if store.latestDeployFailed("petios", "rihards-develop") {
@@ -90,11 +90,11 @@ func TestLatestDeployFailed(t *testing.T) {
 }
 
 func TestDeployQueueFinishMovesToHistory(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if final, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if final, ok := store.finish(entry.ID, StatusSucceeded, ""); !ok {
 		t.Fatal("finish returned ok=false")
-	} else if final.Status != activityQueueStatusSucceeded {
+	} else if final.Status != StatusSucceeded {
 		t.Fatalf("status = %q, want succeeded", final.Status)
 	}
 	if _, ok := store.findActive("t", "e"); ok {
@@ -110,20 +110,20 @@ func TestDeployQueueFinishMovesToHistory(t *testing.T) {
 }
 
 func TestDeployQueueFinishIsIdempotent(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if _, ok := store.finish(entry.ID, activityQueueStatusFailed, "x"); !ok {
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if _, ok := store.finish(entry.ID, StatusFailed, "x"); !ok {
 		t.Fatal("first finish failed")
 	}
-	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); ok {
+	if _, ok := store.finish(entry.ID, StatusSucceeded, ""); ok {
 		t.Fatal("second finish should be a no-op (return false)")
 	}
 }
 
 func TestDeployQueueDismissRemovesFromHistory(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if _, ok := store.finish(entry.ID, StatusSucceeded, ""); !ok {
 		t.Fatal("finish failed")
 	}
 	if !store.dismiss(entry.ID) {
@@ -135,20 +135,20 @@ func TestDeployQueueDismissRemovesFromHistory(t *testing.T) {
 }
 
 func TestDeployQueueDismissDoesNotRemoveActive(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
 	if store.dismiss(entry.ID) {
 		t.Fatal("dismiss should refuse active entry")
 	}
 }
 
 func TestDeployQueueFailureCapturesOutputDetail(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1"})
 	store.recordOutputLine("t", "e", "helm upgrade --install t-devops ./chart")
 	store.recordOutputLine("t", "e", "Error: UPGRADE FAILED: timed out waiting for the condition")
 	store.recordOutputLine("t", "e", "==> Deploy failed after 4s")
-	final, ok := store.finish(entry.ID, activityQueueStatusFailed, "==> Deploy failed after 4s")
+	final, ok := store.finish(entry.ID, StatusFailed, "==> Deploy failed after 4s")
 	if !ok {
 		t.Fatal("finish returned ok=false")
 	}
@@ -160,23 +160,23 @@ func TestDeployQueueFailureCapturesOutputDetail(t *testing.T) {
 }
 
 func TestDeployQueueSuccessOmitsOutputDetail(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1"})
 	store.recordOutputLine("t", "e", "helm upgrade --install t-devops ./chart")
-	final, _ := store.finish(entry.ID, activityQueueStatusSucceeded, "")
+	final, _ := store.finish(entry.ID, StatusSucceeded, "")
 	if final.Detail != "" {
 		t.Fatalf("succeeded entry must not carry Detail, got %q", final.Detail)
 	}
 }
 
 func TestDeployQueueOutputBufferCapsToRecentLines(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1"})
 	total := activityQueueOutputBufferLines + 50
 	for i := 0; i < total; i++ {
 		store.recordOutputLine("t", "e", fmt.Sprintf("line-%d", i))
 	}
-	final, _ := store.finish(entry.ID, activityQueueStatusFailed, "fail")
+	final, _ := store.finish(entry.ID, StatusFailed, "fail")
 	lines := strings.Split(final.Detail, "\n")
 	if len(lines) != activityQueueOutputBufferLines {
 		t.Fatalf("buffered %d lines, want cap %d", len(lines), activityQueueOutputBufferLines)
@@ -190,17 +190,17 @@ func TestDeployQueueOutputBufferCapsToRecentLines(t *testing.T) {
 }
 
 func TestDeployQueueRecordOutputLineClipsLongLines(t *testing.T) {
-	store := newTestActivityQueueStore(t)
-	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store := newTestQueueStore(t)
+	entry, _ := store.start(Entry{Tenant: "t", Environment: "e", Version: "1"})
 	store.recordOutputLine("t", "e", strings.Repeat("x", activityQueueOutputLineMaxChars+500))
-	final, _ := store.finish(entry.ID, activityQueueStatusFailed, "fail")
+	final, _ := store.finish(entry.ID, StatusFailed, "fail")
 	if len(final.Detail) != activityQueueOutputLineMaxChars {
 		t.Fatalf("line not clipped: len=%d want %d", len(final.Detail), activityQueueOutputLineMaxChars)
 	}
 }
 
 func TestDeployQueueRecordOutputLineIgnoresInactiveSelection(t *testing.T) {
-	store := newTestActivityQueueStore(t)
+	store := newTestQueueStore(t)
 	store.recordOutputLine("ghost", "env", "orphan output")
 	if len(store.list()) != 0 {
 		t.Fatal("recording for an inactive selection should not create entries")
@@ -244,10 +244,10 @@ func TestParseDeployContainerStatusesExtractsRunningWaitingTerminated(t *testing
 }
 
 func TestStripDeployTraceANSI(t *testing.T) {
-	if got := stripActivityTraceANSI("\x1b[31m==> Deployed team/dev\x1b[0m"); got != "==> Deployed team/dev" {
+	if got := StripTraceANSI("\x1b[31m==> Deployed team/dev\x1b[0m"); got != "==> Deployed team/dev" {
 		t.Fatalf("unexpected: %q", got)
 	}
-	if got := stripActivityTraceANSI("plain text"); got != "plain text" {
+	if got := StripTraceANSI("plain text"); got != "plain text" {
 		t.Fatalf("unexpected: %q", got)
 	}
 }

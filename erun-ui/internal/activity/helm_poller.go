@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -20,30 +21,27 @@ type helmReleaseSnapshot struct {
 	Updated    string `json:"updated"`
 }
 
-func (a *App) runHelmReleasePoller(stop <-chan struct{}) {
+func (s *Service) runHelmReleasePoller(stop <-chan struct{}) {
 	ticker := time.NewTicker(activityPollerInterval)
 	defer ticker.Stop()
-	a.reconcileHelmReleasesOnce()
+	s.reconcileHelmReleasesOnce()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
-			a.reconcileHelmReleasesOnce()
+			s.reconcileHelmReleasesOnce()
 		}
 	}
 }
 
 // One context's errors are swallowed so it cannot stall the rest.
-func (a *App) reconcileHelmReleasesOnce() {
-	if a.activityQueue == nil {
-		return
-	}
-	contexts := a.watchedKubeContexts()
+func (s *Service) reconcileHelmReleasesOnce() {
+	contexts := s.watchedKubeContexts()
 	if len(contexts) == 0 {
 		return
 	}
-	ctx := a.context()
+	ctx := s.d.Context()
 	for _, kubeContext := range contexts {
 		releases, err := listTenantDevopsHelmReleases(ctx, kubeContext)
 		if err != nil {
@@ -51,10 +49,10 @@ func (a *App) reconcileHelmReleasesOnce() {
 		}
 		seen := make(map[string]struct{}, len(releases))
 		for _, release := range releases {
-			a.applyHelmReleaseSnapshot(kubeContext, release)
+			s.applyHelmReleaseSnapshot(kubeContext, release)
 			seen[helmReleaseKey(release.Namespace, release.Name)] = struct{}{}
 		}
-		a.finalizeMissingHelmReleasesForContext(kubeContext, seen)
+		s.finalizeMissingHelmReleasesForContext(kubeContext, seen)
 	}
 }
 
@@ -95,18 +93,18 @@ func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]he
 	return releases, nil
 }
 
-func (a *App) applyHelmReleaseSnapshot(kubeContext string, release helmReleaseSnapshot) {
+func (s *Service) applyHelmReleaseSnapshot(kubeContext string, release helmReleaseSnapshot) {
 	tenant, environment, ok := splitTenantDevopsRelease(release.Name, release.Namespace)
 	if !ok {
 		return
 	}
 	switch normalizeHelmStatus(release.Status) {
 	case "pending-install", "pending-upgrade", "pending-rollback", "uninstalling":
-		a.upsertHelmActivity(tenant, environment, kubeContext, release)
+		s.upsertHelmActivity(tenant, environment, kubeContext, release)
 	case "deployed":
-		a.finishHelmDeployedIfActive(tenant, environment, release)
+		s.finishHelmDeployedIfActive(tenant, environment, release)
 	case "failed":
-		a.finishHelmActivityIfActive(tenant, environment, activityQueueStatusFailed, "helm release failed")
+		s.finishHelmActivityIfActive(tenant, environment, StatusFailed, "helm release failed")
 	}
 }
 
@@ -115,27 +113,24 @@ const helmDeployedFreshnessSkew = 60 * time.Second
 
 // finishHelmDeployedIfActive finalizes only the tracked deploy: version match
 // rejects a stale release, freshness catches same-version redeploys.
-func (a *App) finishHelmDeployedIfActive(tenant, environment string, release helmReleaseSnapshot) {
-	if a.activityQueue == nil {
-		return
-	}
-	active, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment)
+func (s *Service) finishHelmDeployedIfActive(tenant, environment string, release helmReleaseSnapshot) {
+	active, ok := s.queue.findActiveByCommand("deploy", tenant, environment)
 	if !ok {
 		return
 	}
-	if !helmDeployedSnapshotMatchesEntry(release, a.observedRuntimeVersion(tenant, environment, release), active) {
+	if !helmDeployedSnapshotMatchesEntry(release, s.observedRuntimeVersion(tenant, environment, release), active) {
 		return
 	}
-	if final, finished := a.activityQueue.finish(active.ID, activityQueueStatusSucceeded, ""); finished {
-		a.unlockTerminalsForActivity(final)
+	if final, finished := s.queue.finish(active.ID, StatusSucceeded, ""); finished {
+		s.unlockTerminalsForActivity(final)
 	}
 }
 
 // observedRuntimeVersion is the release's appVersion (the chart's), unless the
 // env states its runtime chart separately, where the recorded runtime version wins.
-func (a *App) observedRuntimeVersion(tenant, environment string, release helmReleaseSnapshot) string {
+func (s *Service) observedRuntimeVersion(tenant, environment string, release helmReleaseSnapshot) string {
 	observed := strings.TrimSpace(release.AppVersion)
-	env, ok := a.lookupEnvConfig(tenant, environment)
+	env, ok := s.lookupEnvConfig(tenant, environment)
 	if !ok || strings.TrimSpace(env.RuntimeChart) == "" {
 		return observed
 	}
@@ -145,7 +140,26 @@ func (a *App) observedRuntimeVersion(tenant, environment string, release helmRel
 	return observed
 }
 
-func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, observed string, entry activityQueueEntry) bool {
+// lookupEnvConfig matches the environment name case-insensitively, as the sidebar lists it.
+func (s *Service) lookupEnvConfig(tenant, environment string) (config.EnvConfig, bool) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return config.EnvConfig{}, false
+	}
+	envs, err := s.d.Store.ListEnvConfigs(tenant)
+	if err != nil {
+		return config.EnvConfig{}, false
+	}
+	for _, env := range envs {
+		if strings.EqualFold(strings.TrimSpace(env.Name), environment) {
+			return env, true
+		}
+	}
+	return config.EnvConfig{}, false
+}
+
+func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, observed string, entry Entry) bool {
 	expected := strings.TrimSpace(entry.Version)
 	observed = strings.TrimSpace(observed)
 	if expected == "" || observed == "" || expected != observed {
@@ -185,18 +199,15 @@ func parseHelmUpdated(value string) (time.Time, bool) {
 }
 
 // The entry ID derives from tenant/env/version so the poller and trace handler converge on one entry.
-func (a *App) upsertHelmActivity(tenant, environment, kubeContext string, release helmReleaseSnapshot) {
-	if a.activityQueue == nil {
+func (s *Service) upsertHelmActivity(tenant, environment, kubeContext string, release helmReleaseSnapshot) {
+	if _, ok := s.queue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
-	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
-		return
-	}
-	entry, fresh := a.activityQueue.start(activityQueueEntry{
+	entry, fresh := s.queue.start(Entry{
 		Command:           "deploy",
 		Tenant:            tenant,
 		Environment:       environment,
-		Version:           a.observedRuntimeVersion(tenant, environment, release),
+		Version:           s.observedRuntimeVersion(tenant, environment, release),
 		Release:           release.Name,
 		Namespace:         release.Namespace,
 		KubernetesContext: kubeContext,
@@ -206,33 +217,25 @@ func (a *App) upsertHelmActivity(tenant, environment, kubeContext string, releas
 	if !fresh {
 		return
 	}
-	a.lockTerminalsForActivity(entry)
-	if a.activityStatusPoller != nil {
-		a.activityStatusPoller(entry)
-	}
+	s.lockTerminalsForActivity(entry)
+	s.startStatusPoller(entry)
 }
 
 // Idempotent: other paths may finalize first.
-func (a *App) finishHelmActivityIfActive(tenant, environment string, status activityQueueStatus, errMsg string) {
-	if a.activityQueue == nil {
-		return
-	}
-	active, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment)
+func (s *Service) finishHelmActivityIfActive(tenant, environment string, status Status, errMsg string) {
+	active, ok := s.queue.findActiveByCommand("deploy", tenant, environment)
 	if !ok {
 		return
 	}
-	if final, finished := a.activityQueue.finish(active.ID, status, errMsg); finished {
-		a.unlockTerminalsForActivity(final)
+	if final, finished := s.queue.finish(active.ID, status, errMsg); finished {
+		s.unlockTerminalsForActivity(final)
 	}
 }
 
 // finalizeMissingHelmReleasesForContext finalizes entries whose release was deleted mid-deploy.
-func (a *App) finalizeMissingHelmReleasesForContext(kubeContext string, seen map[string]struct{}) {
-	if a.activityQueue == nil {
-		return
-	}
-	for _, entry := range a.activityQueue.list() {
-		if entry.Status != activityQueueStatusRunning {
+func (s *Service) finalizeMissingHelmReleasesForContext(kubeContext string, seen map[string]struct{}) {
+	for _, entry := range s.queue.list() {
+		if entry.Status != StatusRunning {
 			continue
 		}
 		if entry.Command != "deploy" || entry.Source != "helm" {
@@ -248,8 +251,8 @@ func (a *App) finalizeMissingHelmReleasesForContext(kubeContext string, seen map
 		if time.Since(entry.StartedAt) < 2*activityPollerInterval {
 			continue
 		}
-		if final, finished := a.activityQueue.finish(entry.ID, activityQueueStatusFailed, "helm release no longer exists"); finished {
-			a.unlockTerminalsForActivity(final)
+		if final, finished := s.queue.finish(entry.ID, StatusFailed, "helm release no longer exists"); finished {
+			s.unlockTerminalsForActivity(final)
 		}
 	}
 }

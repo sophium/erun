@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
@@ -153,7 +154,7 @@ func (a *App) newEnvopsService() *envops.Service {
 			return a.deps.ensureSSHD(ctx, result)
 		},
 		ReconnectLineHandler: func(selection uimodel.Selection) func(string) {
-			return newActivityTraceLineHandler(a, selection, terminal.KindOpen)
+			return a.activity.TraceLineHandler(selection, activitysvc.KindOpen)
 		},
 		DeployInFlight: func(selection uimodel.Selection) bool {
 			return a.terminal.DeployInFlight(selection)

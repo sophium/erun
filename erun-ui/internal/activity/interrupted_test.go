@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"os"
@@ -8,9 +8,9 @@ import (
 
 func TestConsumeInterruptedActivityNoticeReadsAndClears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "interrupted-activity.json")
-	app := NewApp(erunUIDeps{interruptedActivityPath: path})
+	app := newTestService(Deps{InterruptedActivityPath: func() string { return path }})
 
-	if err := writeInterruptedActivityRecord(path, []activityQueueEntry{
+	if err := writeInterruptedActivityRecord(path, []Entry{
 		{ID: "release-1", Command: "release", Tenant: "acme", Environment: "prod"},
 	}); err != nil {
 		t.Fatalf("writeInterruptedActivityRecord failed: %v", err)
@@ -33,7 +33,8 @@ func TestConsumeInterruptedActivityNoticeReadsAndClears(t *testing.T) {
 }
 
 func TestConsumeInterruptedActivityNoticeNoFile(t *testing.T) {
-	app := NewApp(erunUIDeps{interruptedActivityPath: filepath.Join(t.TempDir(), "missing.json")})
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	app := newTestService(Deps{InterruptedActivityPath: func() string { return missing }})
 	if entries := app.ConsumeInterruptedActivityNotice(); entries != nil {
 		t.Fatalf("expected nil when no record exists, got %+v", entries)
 	}

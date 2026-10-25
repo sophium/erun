@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"context"
@@ -15,8 +15,7 @@ import (
 // runtime, never its working-tree chart directories.
 func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
-		config:  &configpkg.ERunConfig{},
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
@@ -35,9 +34,9 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		"charts/frs-powerdns":         {"1.0.0"},
 		"charts/frs-docs":             {"1.0.0"},
 	}
-	app := NewApp(erunUIDeps{
-		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
+	app := newTestService(Deps{
+		Store: store,
+		ResolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
@@ -82,8 +81,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 // The registry probe cannot be driven from headless Playwright, so filtering is asserted here.
 func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
-		config:  &configpkg.ERunConfig{},
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
@@ -99,9 +97,9 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		"charts/frs-backend-postgres": {"1.0.112"},
 		"charts/frs-backend-api":      {"1.0.112"},
 	}
-	app := NewApp(erunUIDeps{
-		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
+	app := newTestService(Deps{
+		Store: store,
+		ResolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
@@ -137,8 +135,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 // The runtime row must name the chart resolvePublishedRuntimeChartReference installs.
 func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
-		config:  &configpkg.ERunConfig{},
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
@@ -152,9 +149,9 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 	}
 	runtimePublishedChart := func(t *testing.T, tags map[string][]string) string {
 		t.Helper()
-		app := NewApp(erunUIDeps{
-			store: store,
-			resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
+		app := newTestService(Deps{
+			Store: store,
+			ResolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 				return model.RuntimeRegistryVersions{Tags: tags[repository]}, nil
 			},
 		})

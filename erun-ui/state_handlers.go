@@ -101,7 +101,7 @@ func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	return ""
 }
 
-func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environment string) ([]uiVersion, []uiVersionNotice) {
+func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environment string) ([]uiVersion, []uimodel.VersionNotice) {
 	tenant = strings.TrimSpace(tenant)
 	defaultImage := config.DefaultContainerRegistry + "/" + config.DefaultRuntimeImageName
 	if tenant == "" {
@@ -111,7 +111,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 
 	tenantImage := config.RuntimeReleaseName(tenant)
 	suggestions := make([]uiVersion, 0, 8)
-	notices := make([]uiVersionNotice, 0, 4)
+	notices := make([]uimodel.VersionNotice, 0, 4)
 	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
 		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
 		got, notice := a.suggestionsForImage(info, tenant, image, registry, tenant)
@@ -128,10 +128,10 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 }
 
 // suggestionsForImage returns a notice rather than dropping the source when listing fails.
-func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
+func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uimodel.VersionNotice) {
 	versions, err := a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)
 	if err != nil {
-		return nil, &uiVersionNotice{Image: image, Kind: versionNoticeKind(err)}
+		return nil, &uimodel.VersionNotice{Image: image, Kind: versionNoticeKind(err)}
 	}
 	return labelRuntimeVersionSuggestions(source, image, registrypkg.RuntimeDeployVersionSuggestions(info, versions)), nil
 }
@@ -143,7 +143,7 @@ func versionNoticeKind(err error) string {
 	return "unreachable"
 }
 
-func appendVersionNotice(notices []uiVersionNotice, notice *uiVersionNotice) []uiVersionNotice {
+func appendVersionNotice(notices []uimodel.VersionNotice, notice *uimodel.VersionNotice) []uimodel.VersionNotice {
 	if notice == nil {
 		return notices
 	}

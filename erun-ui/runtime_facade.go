@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -94,7 +95,7 @@ func (a *App) newRuntimeService() *runtimeview.Service {
 		ResolveImageRegistry: func(ctx context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			return a.deps.resolveImageRegistry(ctx, namespace, repository)
 		},
-		ChartAvailabilityOverride: chartAvailabilityOverride,
+		ChartAvailabilityOverride: activitysvc.ChartAvailabilityOverride,
 		CanConnectLocalPort:       func(port int) bool { return a.deps.canConnectLocalPort(port) },
 		CanReachMCPEndpoint:       func(port int) bool { return a.deps.canReachMCPEndpoint(port) },
 		MCPEndpoint:               mcpEndpointForOpenResult,
