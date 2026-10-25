@@ -42,7 +42,7 @@ func healthChecksAllOK(checks []uiEnvironmentHealthCheck) bool {
 }
 
 func (a *App) registryHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
-	list, inherited := a.effectiveEnvironmentContainerRegistries(tenant, environment, config)
+	list, inherited := a.settings.EffectiveContainerRegistries(tenant, environment, config)
 	check := uiEnvironmentHealthCheck{ID: healthCheckIDRegistry, Title: "Container registry"}
 	if list.IsZero() {
 		check.Status = healthCheckStatusError

@@ -71,10 +71,10 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
   changes, three ways to one transaction (`eruncommon.PushEnvironmentDefinition`,
   reached through `uploadHostedDefinition`): the config watcher's reaction
   (`reactToConfigWatchTargets`), the launch catch-up
-  (`catchUpHostedDefinitions`), and the marker panel's own control
+  (`CatchUpHostedDefinitions`), and the marker panel's own control
   (`UploadHostedDefinition`). Do not add a fourth path.
 - **The origin filter is consulted only by the watcher's reaction, never by the
-  upload decision.** `definitionWriteOrigin` (`hosted_definition_origin.go`)
+  upload decision.** `definitionWriteOrigin` (`internal/settings/hosted_definition_origin.go`)
   records a config write this desktop is about to make, and
   `reactToConfigWatchTargets` consumes it at most once per environment with an
   explicit clear on a transfer that ends without writing. It is not a
@@ -105,7 +105,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
   through `eruncommon.EnvConfigPath`, never by pattern-matching a suffix: the
   root `config.yaml` holds `CloudContextConfig.AdminToken` in plaintext, and
   every live config sits beside its own dated backup.
-- `hosted_definition_upload_test.go` pins the behaviour. Change the filter and
+- `internal/settings/hosted_definition_upload_test.go` pins the behaviour. Change the filter and
   these change with it: `TestADesktopDefinitionWriteDoesNotReFireTheUpload` (the
   loop), `TestTheOriginMarkIsClearedWhenTheUploadWritesNothing` (a failed
   transfer must not swallow the next outside change),

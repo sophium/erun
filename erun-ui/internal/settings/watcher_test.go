@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -28,9 +28,9 @@ func TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated(t *testing.T) {
 
 func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn()}
+	svc := newTestService(Deps{Emit: emits.fn()})
 
-	app.reportConfigWatcherFailure(errors.New("create config directory: mkdir: not a directory"))
+	svc.reportConfigWatcherFailure(errors.New("create config directory: mkdir: not a directory"))
 
 	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
@@ -51,18 +51,18 @@ func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 	}
 
 	notified := make(chan uimodel.AppNotificationPayload, 1)
-	app := &App{emitFn: func(name string, args ...any) {
+	svc := newTestService(Deps{Emit: func(name string, args ...any) {
 		if name != uimodel.AppNotificationEvent || len(args) == 0 {
 			return
 		}
 		if payload, ok := args[0].(uimodel.AppNotificationPayload); ok {
 			notified <- payload
 		}
-	}}
+	}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cw := &configWatcher{watcher: watcher, cancel: cancel, done: make(chan struct{})}
-	go app.runConfigWatcher(ctx, cw, root)
+	go svc.runConfigWatcher(ctx, cw, root)
 	t.Cleanup(func() {
 		cancel()
 		<-cw.done

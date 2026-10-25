@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -233,7 +234,7 @@ func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiSt
 	state := uiState{
 		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
 		Build:          buildDetailsFrom(info),
-		CloudProviders: cloudProviderStatusesToUI(result.CloudProviders),
+		CloudProviders: settingssvc.CloudProviderStatusesToUI(result.CloudProviders),
 	}
 	for _, tenant := range result.Tenants {
 		if len(tenant.Environments) == 0 {
@@ -354,4 +355,12 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 		result = append(result, context)
 	}
 	return result
+}
+
+func copyBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
 }

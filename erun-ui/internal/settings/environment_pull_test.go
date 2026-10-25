@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ func TestPullCoordinatesRoundTripThroughTheEditor(t *testing.T) {
 		ImagePullSecrets: []string{"old-secret"},
 	}
 
-	saved := environmentConfigFromUI(uiEnvironmentConfig{
+	saved := environmentConfigFromUI(EnvironmentConfig{
 		RuntimeRegistry:  "  ghcr.io/sophium  ",
 		ImagePullSecrets: []string{"ecr-pull", "", "  ghcr-pull  "},
 	}, existing)
@@ -33,7 +33,7 @@ func TestClearingPullCoordinatesClearsTheConfig(t *testing.T) {
 		ImagePullSecrets: []string{"old-secret"},
 	}
 
-	saved := environmentConfigFromUI(uiEnvironmentConfig{}, existing)
+	saved := environmentConfigFromUI(EnvironmentConfig{}, existing)
 
 	if saved.RuntimeRegistry != "" {
 		t.Fatalf("expected the runtime registry cleared, got %q", saved.RuntimeRegistry)

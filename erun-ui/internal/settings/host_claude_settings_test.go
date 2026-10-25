@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"fmt"
@@ -88,7 +88,7 @@ func withSettingsDir(t *testing.T, body string) {
 
 func TestLoadHostGatewayDefaultsReadsSettingsFile(t *testing.T) {
 	withSettingsDir(t, `{"env":{"ANTHROPIC_BASE_URL":"https://openrouter.ai/api","ANTHROPIC_MODEL":"a/b","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"4096"}}`)
-	got, err := (&App{}).LoadHostGatewayDefaults()
+	got, err := (&Service{}).LoadHostGatewayDefaults()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestLoadHostGatewayDefaultsOffersNothingWithoutOne(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			withSettingsDir(t, body)
-			got, err := (&App{}).LoadHostGatewayDefaults()
+			got, err := (&Service{}).LoadHostGatewayDefaults()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

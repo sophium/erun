@@ -86,7 +86,7 @@ func (a *App) validateOrchestratorSettings(alias string, launch orchestratorLaun
 		return "", orchestratorLaunchInput{}, nil, fmt.Errorf("orchestrator alias: %w", err)
 	}
 	launch.Model, launch.Effort = clearedLaunchSetting(launch.Model), clearedLaunchSetting(launch.Effort)
-	catalog := a.resolveOpenRouterConfig()
+	catalog := a.settings.ResolveOpenRouterConfig()
 	if err := orchestrator.ValidateOrchestratorLaunchSettings(withOrchestratorLaunchSettings(config.OrchestratorConfig{}, launch), catalog); err != nil {
 		return "", orchestratorLaunchInput{}, nil, fmt.Errorf("orchestrator launch settings: %w -- %s", err, orchestratorLaunchSettingsRemedy(launch, catalog))
 	}

@@ -73,32 +73,6 @@ func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 	})
 }
 
-// A config-file change carries no selection, so the frontend must not auto-open.
-func (a *App) emitEnvironmentsChanged() {
-	a.emitEvent(uimodel.EnvironmentsChangedEvent, struct{}{})
-}
-
-type uiHostedDefinitionUploadedPayload struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Revision    int    `json:"revision"`
-}
-
-// emitHostedDefinitionUploaded refreshes the Manage dialog, which
-// environments-changed does not reload.
-func (a *App) emitHostedDefinitionUploaded(tenant, environment string, revision int) {
-	tenant = strings.TrimSpace(tenant)
-	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return
-	}
-	a.emitEvent(uimodel.HostedDefinitionUploadedEvent, uiHostedDefinitionUploadedPayload{
-		Tenant:      tenant,
-		Environment: environment,
-		Revision:    revision,
-	})
-}
-
 type uiDoctorCompletedPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`

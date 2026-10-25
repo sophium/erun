@@ -68,7 +68,7 @@ func (a *App) idleStatusToUI(result config.OpenResult, status model.EnvironmentI
 	ui := idleStatusToUI(status)
 	ui.FromPod = fromPod
 	a.verifyLeaseJobIDs(result.Tenant, result.Environment, ui.Leases)
-	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
+	cloudContext, ok, err := a.settings.LinkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return ui
 	}
@@ -265,7 +265,7 @@ func uiStopBlockedReason(markers []model.EnvironmentIdleMarker) string {
 // The in-pod monitor owns auto-stop; this only clears the post-fire latch when
 // an env runs again.
 func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ model.EnvironmentIdleStatus) {
-	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
+	cloudContext, ok, err := a.settings.LinkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
 	}
@@ -415,7 +415,7 @@ func (a *App) selectionKeysForCloudContext(name string) []string {
 			continue
 		}
 		for _, env := range envs {
-			cloudContext, ok, err := a.linkedCloudContext(env)
+			cloudContext, ok, err := a.settings.LinkedCloudContext(env)
 			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
 				continue
 			}

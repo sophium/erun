@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"os"
@@ -38,14 +38,14 @@ func TestManageDialogRepoPathMatchesInit(t *testing.T) {
 		configpkg.EnvironmentTypeHost,
 	} {
 		for _, tc := range fixtures {
-			app := &App{}
+			svc := newTestService(Deps{})
 			existing := configpkg.EnvConfig{Name: "dev", Type: envType}
-			config := uiEnvironmentConfig{
+			config := EnvironmentConfig{
 				Name:          "dev",
 				Type:          envType,
 				LocalRepoPath: tc.path,
 			}
-			updated, err := app.updatedEnvironmentConfig(config, existing)
+			updated, err := svc.updatedEnvironmentConfig(config, existing)
 			initErr := configpkg.ValidateHostRepoPath(envType, tc.path)
 
 			switch {
@@ -68,10 +68,10 @@ func TestManageDialogRepoPathIgnoresOtherTypes(t *testing.T) {
 		configpkg.EnvironmentTypeRemoteAgent,
 		configpkg.EnvironmentTypeRuntime,
 	} {
-		app := &App{}
+		svc := newTestService(Deps{})
 		existing := configpkg.EnvConfig{Name: "dev", Type: envType}
-		config := uiEnvironmentConfig{Name: "dev", Type: envType, LocalRepoPath: "/in-pod/worktree"}
-		if _, err := app.updatedEnvironmentConfig(config, existing); err != nil {
+		config := EnvironmentConfig{Name: "dev", Type: envType, LocalRepoPath: "/in-pod/worktree"}
+		if _, err := svc.updatedEnvironmentConfig(config, existing); err != nil {
 			t.Errorf("%s: dialog refused an in-pod path: %v", envType, err)
 		}
 	}

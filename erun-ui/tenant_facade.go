@@ -1,6 +1,7 @@
 package main
 
 import (
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
@@ -22,12 +23,12 @@ func (a *App) CloseReview(input tenantsvc.CloseReviewInput) (tenantsvc.Dashboard
 	return a.tenant.CloseReview(input)
 }
 
-func (a *App) ConnectERunPlatform(input tenantsvc.ConnectERunPlatformInput) (uiCloudProviderStatus, error) {
+func (a *App) ConnectERunPlatform(input tenantsvc.ConnectERunPlatformInput) (settingssvc.CloudProviderStatus, error) {
 	status, err := a.tenant.ConnectERunPlatform(input)
 	if err != nil {
-		return uiCloudProviderStatus{}, err
+		return settingssvc.CloudProviderStatus{}, err
 	}
-	return cloudProviderStatusToUI(status), nil
+	return settingssvc.CloudProviderStatusToUI(status), nil
 }
 
 func (a *App) CreatePlatformContext(input tenantsvc.CreatePlatformContextInput) (tenantsvc.PlatformContextOutcome, error) {

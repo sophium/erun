@@ -13,7 +13,7 @@ import (
 // environmentNodeSnapshot returns nil when no erun-managed node backs the env,
 // which must render nothing rather than "stopped".
 func (a *App) environmentNodeSnapshot(cloudProviderAlias, kubernetesContext string) *uiEnvironmentNodeSnapshot {
-	context, ok, err := a.linkedCloudContextFor(cloudProviderAlias, kubernetesContext)
+	context, ok, err := a.settings.LinkedCloudContextFor(cloudProviderAlias, kubernetesContext)
 	if err != nil || !ok {
 		return nil
 	}

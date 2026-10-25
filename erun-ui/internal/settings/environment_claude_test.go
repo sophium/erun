@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	useBedrock := false
 	maxTokens := 8192
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
@@ -29,9 +29,9 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	got, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
+	got, err := svc.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	assertClaudeDefaults(t, got.ClaudeDefaults)
 }
 
-func assertClaudeOverrides(t *testing.T, claude uiClaudeConfig) {
+func assertClaudeOverrides(t *testing.T, claude ClaudeConfig) {
 	t.Helper()
 
 	if claude.UseBedrock == nil || *claude.UseBedrock {
@@ -57,7 +57,7 @@ func assertClaudeOverrides(t *testing.T, claude uiClaudeConfig) {
 	}
 }
 
-func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
+func assertClaudeDefaults(t *testing.T, defaults ClaudeDefaults) {
 	t.Helper()
 
 	if defaults.MaxOutputTokens != configpkg.DefaultClaudeMaxOutputTokens {
@@ -73,7 +73,7 @@ func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
 
 func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
@@ -89,23 +89,23 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
 	useMantle := false
 	maxTokens := 16384
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, EnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-		RuntimePod: uiRuntimePodConfig{
+		RuntimePod: RuntimePodConfig{
 			CPU:    "4",
 			Memory: "8916Mi",
 		},
-		Idle: uiIdleConfig{
+		Idle: IdleConfig{
 			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
 			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
-		Claude: uiClaudeConfig{
+		Claude: ClaudeConfig{
 			UseMantle:       &useMantle,
 			Models:          []string{"opus"},
 			MaxOutputTokens: &maxTokens,
@@ -135,7 +135,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
@@ -147,18 +147,18 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
 	defaultModel := "fable"
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, EnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-		Idle: uiIdleConfig{
+		Idle: IdleConfig{
 			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
 			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
-		Claude: uiClaudeConfig{
+		Claude: ClaudeConfig{
 			Models:       []string{"opus", "fable"},
 			DefaultModel: &defaultModel,
 			VerboseDebug: true,
@@ -186,7 +186,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	// AutoStart modes map to *bool: ask=nil, always=true, never=false.
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
@@ -199,10 +199,10 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
 	never := false
-	saved := setAutoStartMode(t, app, "never")
+	saved := setAutoStartMode(t, svc, "never")
 	assertReturnedAutoStart(t, saved.AutoStart, &never, "false")
 	assertStoredAutoStart(t, store.envs["frs/prod"].AutoStart, &never, "false")
 	if keptRegistry, _ := store.envs["frs/prod"].ContainerRegistries.BuildRegistry(); keptRegistry != "registry.example/keep" {
@@ -210,22 +210,22 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	}
 
 	always := true
-	saved = setAutoStartMode(t, app, "always")
+	saved = setAutoStartMode(t, svc, "always")
 	assertReturnedAutoStart(t, saved.AutoStart, &always, "true")
 
-	saved = setAutoStartMode(t, app, "ask")
+	saved = setAutoStartMode(t, svc, "ask")
 	assertReturnedAutoStart(t, saved.AutoStart, nil, "nil after ask")
 	assertStoredAutoStart(t, store.envs["frs/prod"].AutoStart, nil, "nil after ask")
 
-	if _, err := app.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
+	if _, err := svc.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
 		t.Fatal("expected unknown auto-start mode to be rejected")
 	}
 }
 
-func setAutoStartMode(t *testing.T, app *App, mode string) uiEnvironmentConfig {
+func setAutoStartMode(t *testing.T, svc *Service, mode string) EnvironmentConfig {
 	t.Helper()
 
-	saved, err := app.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, mode)
+	saved, err := svc.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, mode)
 	if err != nil {
 		t.Fatalf("SetEnvironmentAutoStart(%s) failed: %v", mode, err)
 	}

@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -13,9 +13,8 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 const (
@@ -114,41 +113,20 @@ func isolateHostedUploadConfig(t *testing.T) string {
 	return home
 }
 
-const (
-	testERunAlias   = "erun+api.test.example@erun"
-	testERunIssuer  = "https://auth.erun.example"
-	testERunSubject = "user-subject-1"
-)
-
-func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
+// newHostedUploadService talks to the recording platform directly; resolving
+// the tenant's platform alias is the tenant service's concern.
+func newHostedUploadService(t *testing.T, platform *hostedUploadPlatform) *Service {
 	t.Helper()
-	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
-	refreshRef := "erun/refresh/" + testERunAlias
-	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
-		t.Fatalf("seed refresh token: %v", err)
-	}
-	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
-		Alias:    testERunAlias,
-		Provider: configpkg.CloudProviderERun,
-		Username: "erun",
-		ERun:     &model.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
-	}}}); err != nil {
-		t.Fatalf("save root config: %v", err)
-	}
 	if err := configpkg.SaveTenantConfig(model.TenantConfig{Name: hostedUploadTenant}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
-	return NewApp(erunUIDeps{
-		store: configpkg.ConfigStore{},
-		cloudDeps: cloud.CloudDependencies{
-			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
-				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
-			},
-			RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
-				return cloud.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
-			},
+	client := platformclient.NewPlatformClient(platform.URL, func() (string, error) { return "token", nil })
+	return newTestService(Deps{
+		Store:         configpkg.ConfigStore{},
+		PlatformReady: func(string) bool { return true },
+		PlatformClient: func(ctx context.Context, _ string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
+			requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			return client, requestCtx, cancel, nil
 		},
 	})
 }
@@ -167,7 +145,7 @@ func changeHostedUploadConfig(t *testing.T, mutate func(*configpkg.EnvConfig)) c
 	return config
 }
 
-func seededHostedUploadApp(t *testing.T) (*App, *hostedUploadPlatform, string) {
+func seededHostedUploadApp(t *testing.T) (*Service, *hostedUploadPlatform, string) {
 	t.Helper()
 	isolateHostedUploadConfig(t)
 	platform := newHostedUploadPlatform(t)
@@ -176,7 +154,7 @@ func seededHostedUploadApp(t *testing.T) (*App, *hostedUploadPlatform, string) {
 	if err := configpkg.SaveEnvConfig(hostedUploadTenant, config); err != nil {
 		t.Fatalf("seed env config: %v", err)
 	}
-	return newHostedUploadApp(t, platform), platform, apiHost
+	return newHostedUploadService(t, platform), platform, apiHost
 }
 
 // A digest-less marker always asks for an upload, leaving the filter as the
@@ -187,38 +165,38 @@ func TestTheOriginFilterIsWhatTurnsTheWatchersOwnWriteAway(t *testing.T) {
 	if err := configpkg.SaveEnvConfig(hostedUploadTenant, hostedUploadConfig(platform.URL)); err != nil {
 		t.Fatalf("seed env config: %v", err)
 	}
-	app := newHostedUploadApp(t, platform)
+	svc := newHostedUploadService(t, platform)
 	target := []definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}}
 
-	app.definitionWriteOrigin.mark(hostedUploadTenant, hostedUploadEnvironment)
-	app.reactToConfigWatchTargets(target)
+	svc.definitionWriteOrigin.mark(hostedUploadTenant, hostedUploadEnvironment)
+	svc.reactToConfigWatchTargets(target)
 	if got := platform.uploadCount(); got != 0 {
 		t.Fatalf("the watcher fired on this desktop's own write: %d uploads, want 0", got)
 	}
 
-	app.reactToConfigWatchTargets(target)
+	svc.reactToConfigWatchTargets(target)
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("an outside change did not reach the platform: %d uploads, want 1", got)
 	}
 }
 
 func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
+	svc, platform, _ := seededHostedUploadApp(t)
 
-	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
+	if _, err := svc.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("the desktop's own upload reached the platform %d times, want 1", got)
 	}
 
-	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
+	svc.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("the watcher fired on this desktop's own definition write: the platform received %d uploads, want 1", got)
 	}
 
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "9.9.9" })
-	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
+	svc.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 2 {
 		t.Fatalf("an outside change did not reach the platform: %d uploads, want 2", got)
 	}
@@ -228,11 +206,11 @@ func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
 }
 
 func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
+	svc, platform, _ := seededHostedUploadApp(t)
 	// A marker naming an unknown row fails before any write.
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.Hosted.EnvironmentID = "some-other-row" })
 
-	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err == nil {
+	if _, err := svc.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err == nil {
 		t.Fatal("an upload against a row the marker does not name was accepted")
 	}
 	if got := platform.uploadCount(); got != 0 {
@@ -243,16 +221,16 @@ func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 		config.Hosted.EnvironmentID = "env-1"
 		config.RuntimeVersion = "4.5.6"
 	})
-	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
+	svc.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("a failed transfer's mark swallowed the next outside change: %d uploads, want 1", got)
 	}
 }
 
 func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
+	svc, platform, _ := seededHostedUploadApp(t)
 
-	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
+	if _, err := svc.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
@@ -269,7 +247,7 @@ func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing
 		t.Error("the divergence is not rendered as a sentence the panel can show")
 	}
 
-	app.catchUpHostedDefinitions()
+	svc.CatchUpHostedDefinitions()
 	if got := platform.uploadCount(); got != 2 {
 		t.Fatalf("the launch pass did not upload the offline change: %d uploads, want 2", got)
 	}
@@ -279,9 +257,9 @@ func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing
 }
 
 func TestAHostOwnedChangeIsNotUploaded(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
+	svc, platform, _ := seededHostedUploadApp(t)
 
-	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
+	if _, err := svc.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	hostOwned := changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) {
@@ -292,14 +270,14 @@ func TestAHostOwnedChangeIsNotUploaded(t *testing.T) {
 	if change := hostedEnvironmentToUI(hostOwned).LocalChange; change.Changed {
 		t.Fatalf("a host-owned change reads as divergence: %+v", change)
 	}
-	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
+	svc.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 1 {
 		t.Fatalf("a host-owned change was uploaded: %d uploads, want 1", got)
 	}
 }
 
 func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
+	svc, platform, _ := seededHostedUploadApp(t)
 	unhosted := hostedUploadConfig(platform.URL)
 	unhosted.Name = "plain"
 	unhosted.Hosted = configpkg.HostedEnvironment{}
@@ -307,7 +285,7 @@ func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	app.autoUploadHostedDefinition(hostedUploadTenant, "plain")
+	svc.autoUploadHostedDefinition(hostedUploadTenant, "plain")
 
 	if got := platform.uploadCount(); got != 0 {
 		t.Fatalf("an unhosted environment was uploaded %d times", got)
@@ -315,9 +293,9 @@ func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
 }
 
 func TestTheWatcherUploadsAnOutsideChangeEndToEnd(t *testing.T) {
-	app, platform, _ := seededHostedUploadApp(t)
-	app.startConfigWatcher()
-	t.Cleanup(app.stopConfigWatcher)
+	svc, platform, _ := seededHostedUploadApp(t)
+	svc.StartConfigWatcher()
+	t.Cleanup(svc.StopConfigWatcher)
 
 	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "3.3.3" })
 
@@ -409,8 +387,8 @@ func TestTheOriginFilterConsumesAtMostOncePerMark(t *testing.T) {
 }
 
 func TestTheDirtyFlagIsStampedOnDisk(t *testing.T) {
-	app, _, _ := seededHostedUploadApp(t)
-	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
+	svc, _, _ := seededHostedUploadApp(t)
+	if _, err := svc.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 

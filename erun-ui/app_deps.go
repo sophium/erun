@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -95,6 +96,9 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 	if deps.claudeAgents == nil {
 		deps.claudeAgents = newDefaultClaudeAgents()
 	}
+	if deps.readGatewayRouting == nil {
+		deps.readGatewayRouting = lifecycle.ReadGatewayRouting
+	}
 	if deps.resolveGatewayCredential == nil {
 		deps.resolveGatewayCredential = gateway.ResolveGatewayCredential
 	}
@@ -111,7 +115,7 @@ func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 			if override, ok := localPortReachabilityOverride(); ok {
 				return override
 			}
-			return canConnectLocalTCP(port)
+			return settingssvc.CanConnectLocalTCP(port)
 		}
 	}
 	if deps.canReachMCPEndpoint == nil {

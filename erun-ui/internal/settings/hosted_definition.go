@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -6,26 +6,23 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
-
-const hostedDefinitionDriftTimeout = tenantsvc.RequestTimeout
 
 // hostedDefinitionDriftFor compares the hosted marker with the platform's
 // revision; it writes nothing.
-func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment string) uiHostedDefinitionDrift {
+func (s *Service) hostedDefinitionDriftFor(ctx context.Context, tenant, environment string) HostedDefinitionDrift {
 	config, _, err := configpkg.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return uiHostedDefinitionDrift{Error: fmt.Sprintf("Cannot read %s/%s's hosted marker: %s", tenant, environment, err)}
+		return HostedDefinitionDrift{Error: fmt.Sprintf("Cannot read %s/%s's hosted marker: %s", tenant, environment, err)}
 	}
 	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 	if !ok {
-		return uiHostedDefinitionDrift{Error: fmt.Sprintf("%s/%s is not marked as hosted, so there is nothing to compare", tenant, environment)}
+		return HostedDefinitionDrift{Error: fmt.Sprintf("%s/%s is not marked as hosted, so there is nothing to compare", tenant, environment)}
 	}
 
-	client, requestCtx, cancel, err := a.tenant.Client(ctx, tenant)
+	client, requestCtx, cancel, err := s.d.PlatformClient(ctx, tenant)
 	if err != nil {
-		return uiHostedDefinitionDrift{
+		return HostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
 			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
@@ -35,7 +32,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 
 	record, err := client.GetEnvironmentDefinition(requestCtx, marker.EnvironmentID)
 	if err != nil {
-		return uiHostedDefinitionDrift{
+		return HostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
 			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
@@ -43,7 +40,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 	}
 	// Refuse a resolved row that is not the one the marker names.
 	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
-		return uiHostedDefinitionDrift{
+		return HostedDefinitionDrift{
 			LocalRevision:    marker.DefinitionRevision,
 			PlatformRevision: record.Revision,
 			Error:            err.Error(),
@@ -54,7 +51,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 		LocalRevision:    marker.DefinitionRevision,
 		PlatformRevision: record.Revision,
 	}
-	return uiHostedDefinitionDrift{
+	return HostedDefinitionDrift{
 		LocalRevision:    drift.LocalRevision,
 		PlatformRevision: drift.PlatformRevision,
 		Behind:           drift.IsBehind(),
@@ -64,24 +61,24 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 
 // CheckHostedDefinitionDrift reports whether the platform's copy moved past
 // what this machine last pulled; it never writes.
-func (a *App) CheckHostedDefinitionDrift(tenant, environment string) (uiHostedDefinitionDrift, error) {
+func (s *Service) CheckHostedDefinitionDrift(tenant, environment string) (HostedDefinitionDrift, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
-		return uiHostedDefinitionDrift{}, fmt.Errorf(
+		return HostedDefinitionDrift{}, fmt.Errorf(
 			"no environment selected to check: open an environment's Manage dialog and use its hosted panel, or run `erun platform env pull TENANT ENVIRONMENT` from a terminal")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), hostedDefinitionDriftTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.d.PlatformRequestTimeout)
 	defer cancel()
-	return a.hostedDefinitionDriftFor(ctx, tenant, environment), nil
+	return s.hostedDefinitionDriftFor(ctx, tenant, environment), nil
 }
 
-func hostedEnvironmentToUI(config configpkg.EnvConfig) *uiHostedEnvironment {
+func hostedEnvironmentToUI(config configpkg.EnvConfig) *HostedEnvironment {
 	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return nil
 	}
-	return &uiHostedEnvironment{
+	return &HostedEnvironment{
 		Describe:           marker.Describe(),
 		APIHost:            marker.APIHost,
 		TenantID:           marker.TenantID,
@@ -92,8 +89,8 @@ func hostedEnvironmentToUI(config configpkg.EnvConfig) *uiHostedEnvironment {
 }
 
 // The sentence is carried, not reworded, so the panel and CLI agree.
-func hostedDefinitionLocalChangeToUI(change configpkg.HostedDefinitionLocalChange) uiHostedDefinitionLocalChange {
-	return uiHostedDefinitionLocalChange{
+func hostedDefinitionLocalChangeToUI(change configpkg.HostedDefinitionLocalChange) HostedDefinitionLocalChange {
+	return HostedDefinitionLocalChange{
 		Available: change.Available,
 		Changed:   change.Changed,
 		Describe:  change.Describe(),

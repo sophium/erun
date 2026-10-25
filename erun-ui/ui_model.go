@@ -3,17 +3,18 @@ package main
 import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type uiState struct {
-	Tenants                  []uiTenant              `json:"tenants"`
-	Selected                 *uimodel.Selection      `json:"selected,omitempty"`
-	Message                  string                  `json:"message,omitempty"`
-	Build                    uiBuildDetails          `json:"build"`
-	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
-	VersionSuggestionNotices []uiVersionNotice       `json:"versionSuggestionNotices,omitempty"`
-	CloudProviders           []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
+	Tenants                  []uiTenant                        `json:"tenants"`
+	Selected                 *uimodel.Selection                `json:"selected,omitempty"`
+	Message                  string                            `json:"message,omitempty"`
+	Build                    uiBuildDetails                    `json:"build"`
+	VersionSuggestions       []uiVersion                       `json:"versionSuggestions,omitempty"`
+	VersionSuggestionNotices []uiVersionNotice                 `json:"versionSuggestionNotices,omitempty"`
+	CloudProviders           []settingssvc.CloudProviderStatus `json:"cloudProviders,omitempty"`
 	// ConfigUnreadable distinguishes a failed config read from no environments.
 	ConfigUnreadable bool `json:"configUnreadable,omitempty"`
 }
@@ -171,44 +172,6 @@ type uiVersionSuggestions struct {
 	Notices     []uiVersionNotice `json:"notices,omitempty"`
 }
 
-type uiERunConfig struct {
-	DefaultTenant  string                  `json:"defaultTenant"`
-	CloudProviders []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
-	CloudContexts  []uiCloudContextStatus  `json:"cloudContexts,omitempty"`
-	// OpenRouter is one root-level catalog every environment selects from.
-	OpenRouter *uiOpenRouterConfig `json:"openRouter,omitempty"`
-	// OpenRouterDefaults pre-fills the catalog from this machine's Claude Code; it
-	// is not persisted.
-	OpenRouterDefaults *uiHostGatewayDefaults `json:"openRouterDefaults,omitempty"`
-}
-
-// uiOpenRouterModel carries the context window, which a gateway id lacks.
-type uiOpenRouterModel struct {
-	ID      string `json:"id"`
-	Context int    `json:"context,omitempty"`
-	// RequiresReasoningEcho must round-trip: the editor writes the whole catalog
-	// back, so a dropped field would be erased.
-	RequiresReasoningEcho bool `json:"requiresReasoningEcho,omitempty"`
-}
-
-// uiOpenRouterConfig references the credential as a Secret, never a value.
-type uiOpenRouterConfig struct {
-	BaseURL string `json:"baseUrl,omitempty"`
-	// AuthTokenRef is a secret store ref; the token never enters config.
-	AuthTokenRef string              `json:"authTokenRef,omitempty"`
-	DefaultModel string              `json:"defaultModel,omitempty"`
-	Models       []uiOpenRouterModel `json:"models,omitempty"`
-}
-
-type uiTenantConfig struct {
-	Name                      string                  `json:"name"`
-	DefaultEnvironment        string                  `json:"defaultEnvironment"`
-	APIURL                    string                  `json:"apiUrl"`
-	CloudProviderAliases      []string                `json:"cloudProviderAliases,omitempty"`
-	PrimaryCloudProviderAlias string                  `json:"primaryCloudProviderAlias,omitempty"`
-	CloudProviders            []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
-}
-
 // uiExposureList: Configured false means exposure cannot apply, distinct from
 // Restricted and from an empty list. NotConfiguredReason separates a host env
 // from a project missing its platform: block.
@@ -272,68 +235,6 @@ type uiExposeServiceInput struct {
 // uiUnexposeResult names the DNS record removed.
 type uiUnexposeResult struct {
 	WildcardName string `json:"wildcardName"`
-}
-
-type uiCloudProviderStatus struct {
-	Alias         string `json:"alias"`
-	Provider      string `json:"provider"`
-	Username      string `json:"username,omitempty"`
-	AccountID     string `json:"accountId,omitempty"`
-	Profile       string `json:"profile,omitempty"`
-	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
-	Status        string `json:"status"`
-	Message       string `json:"message,omitempty"`
-}
-
-type uiCloudProviderBearerToken struct {
-	Alias    string                `json:"alias"`
-	Issuer   string                `json:"issuer,omitempty"`
-	Token    string                `json:"token"`
-	Provider uiCloudProviderStatus `json:"provider"`
-}
-
-type uiCloudContextStatus struct {
-	Name                string `json:"name"`
-	Provider            string `json:"provider"`
-	CloudProviderAlias  string `json:"cloudProviderAlias"`
-	Region              string `json:"region"`
-	InstanceID          string `json:"instanceId,omitempty"`
-	PublicIP            string `json:"publicIp,omitempty"`
-	InstanceType        string `json:"instanceType"`
-	DiskType            string `json:"diskType"`
-	DiskSizeGB          int    `json:"diskSizeGb"`
-	KubernetesContext   string `json:"kubernetesContext"`
-	Status              string `json:"status"`
-	Message             string `json:"message,omitempty"`
-	StopProtection      bool   `json:"stopProtection,omitempty"`
-	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty"`
-}
-
-type uiAWSCloudAliasInput struct {
-	Alias         string `json:"alias,omitempty"`
-	Username      string `json:"username,omitempty"`
-	AccountID     string `json:"accountId,omitempty"`
-	Profile       string `json:"profile,omitempty"`
-	SSORegion     string `json:"ssoRegion,omitempty"`
-	SSOStartURL   string `json:"ssoStartUrl,omitempty"`
-	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
-}
-
-// uiEnvironmentCloudAlias is one provider-type slot, so AWS and Cloudflare
-// aliases can coexist.
-type uiEnvironmentCloudAlias struct {
-	Provider string   `json:"provider"`
-	Alias    string   `json:"alias"`
-	Options  []string `json:"options"`
-}
-
-type uiCloudContextInitInput struct {
-	Name               string `json:"name,omitempty"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceType       string `json:"instanceType"`
-	DiskType           string `json:"diskType"`
-	DiskSizeGB         int    `json:"diskSizeGb"`
 }
 
 type deleteEnvironmentResult struct {

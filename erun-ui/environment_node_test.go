@@ -35,6 +35,7 @@ func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.E
 	}
 	app.deps.canReachMCPEndpoint = func(int) bool { return false }
 	app.cloudContexts = app.newCloudContextService(time.Now)
+	app.settings = app.newSettingsService()
 	if contextStatus != "" {
 		app.cloudContexts.ApplyStatuses([]model.CloudContextStatus{{
 			CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
@@ -99,6 +100,7 @@ func TestEnvironmentNodeSnapshotCarriesAStaleReadingAsUnknown(t *testing.T) {
 	app := nodeTestApp(t, "", map[string]configpkg.EnvConfig{"develop": linkedEnv()})
 	now := time.Now()
 	app.cloudContexts = app.newCloudContextService(func() time.Time { return now })
+	app.settings = app.newSettingsService()
 	app.cloudContexts.ApplyStatuses([]model.CloudContextStatus{{
 		CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
 		Status:             cloud.CloudContextStatusRunning,

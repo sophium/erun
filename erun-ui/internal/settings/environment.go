@@ -1,61 +1,58 @@
-package main
+package settings
 
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) LoadEnvironmentConfig(selection uimodel.Selection) (uiEnvironmentConfig, error) {
+func (s *Service) LoadEnvironmentConfig(selection uimodel.Selection) (EnvironmentConfig, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("load environment config", selection.Tenant, selection.Environment); err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
 
-	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	config, _, err := s.d.Store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(selection.Tenant, config, selection.Environment, ports)
+	return s.environmentConfigToUI(selection.Tenant, config, selection.Environment, ports)
 }
 
-func (a *App) SaveEnvironmentConfig(selection uimodel.Selection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
+func (s *Service) SaveEnvironmentConfig(selection uimodel.Selection, config EnvironmentConfig) (EnvironmentConfig, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("save environment config", selection.Tenant, selection.Environment); err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
 
-	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	existing, _, err := s.d.Store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	updated, err := a.persistEnvironmentConfig(selection, config, existing)
+	updated, err := s.persistEnvironmentConfig(selection, config, existing)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
+	return s.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
 }
 
-func (a *App) persistEnvironmentConfig(selection uimodel.Selection, config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
-	updated, err := a.updatedEnvironmentConfig(config, existing)
+func (s *Service) persistEnvironmentConfig(selection uimodel.Selection, config EnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
+	updated, err := s.updatedEnvironmentConfig(config, existing)
 	if err != nil {
 		return configpkg.EnvConfig{}, err
 	}
@@ -63,43 +60,43 @@ func (a *App) persistEnvironmentConfig(selection uimodel.Selection, config uiEnv
 	if err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
+	if err := s.applyContainerRegistries(selection, &updated, registries); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
+	if err := s.saveRemoteCloudAlias(selection, existing, updated); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
+	if err := s.d.Store.SaveEnvConfig(selection.Tenant, updated); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.cloudContexts.ReconcileRefresher(selection, updated.HasAWSCloudAlias())
+	s.d.ReconcileWorkspaceSync(selection, updated.SSHD.WorkspaceSync.Enabled)
+	s.d.CloudStatuses.ReconcileRefresher(selection, updated.HasAWSCloudAlias())
 	return updated, nil
 }
 
 // SetEnvironmentAutoStart persists the desktop-only auto-start preference.
-func (a *App) SetEnvironmentAutoStart(selection uimodel.Selection, mode string) (uiEnvironmentConfig, error) {
+func (s *Service) SetEnvironmentAutoStart(selection uimodel.Selection, mode string) (EnvironmentConfig, error) {
 	selection = uimodel.NormalizeSelection(selection)
 	if err := uimodel.ErrMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
 	value, err := parseAutoStartMode(mode)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	existing, _, err := s.d.Store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
 	existing.AutoStart = value
-	if err := a.deps.store.SaveEnvConfig(selection.Tenant, existing); err != nil {
-		return uiEnvironmentConfig{}, err
+	if err := s.d.Store.SaveEnvConfig(selection.Tenant, existing); err != nil {
+		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiEnvironmentConfig{}, err
+		return EnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, ports)
+	return s.environmentConfigToUI(selection.Tenant, existing, selection.Environment, ports)
 }
 
 // parseAutoStartMode maps "ask" to nil.
@@ -119,61 +116,7 @@ func parseAutoStartMode(mode string) (*bool, error) {
 	return value, nil
 }
 
-func (a *App) ChooseWorkspaceSyncLocalFolder(selection uimodel.Selection, current string) (string, error) {
-	selection = uimodel.NormalizeSelection(selection)
-	if err := uimodel.ErrMissingTenantOrEnvironment("choose workspace-sync local folder", selection.Tenant, selection.Environment); err != nil {
-		return "", err
-	}
-	if a.ctx == nil {
-		return "", fmt.Errorf("application context is not ready")
-	}
-	defaultDirectory := strings.TrimSpace(current)
-	if defaultDirectory == "" {
-		defaultDirectory = resolveWorkspaceSyncDialogDefaultDirectory(a.deps.findProjectRoot)
-	}
-	if defaultDirectory != "" {
-		if info, err := os.Stat(defaultDirectory); err != nil || !info.IsDir() {
-			defaultDirectory = ""
-		}
-	}
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            fmt.Sprintf("Select local sync folder for %s/%s", selection.Tenant, selection.Environment),
-		DefaultDirectory: defaultDirectory,
-	})
-}
-
-func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot seam.ProjectFinderFunc) string {
-	if findProjectRoot == nil {
-		return ""
-	}
-	_, projectRoot, err := findProjectRoot()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(projectRoot)
-}
-
-// ChooseLocalRepoPath opens a native directory picker for the local repo path.
-func (a *App) ChooseLocalRepoPath(current string) (string, error) {
-	if a.ctx == nil {
-		return "", fmt.Errorf("application context is not ready")
-	}
-	defaultDirectory := strings.TrimSpace(current)
-	if defaultDirectory != "" {
-		if info, err := os.Stat(defaultDirectory); err != nil || !info.IsDir() {
-			defaultDirectory = ""
-		}
-	}
-	if defaultDirectory == "" {
-		defaultDirectory = resolveWorkspaceSyncDialogDefaultDirectory(a.deps.findProjectRoot)
-	}
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "Select local repo path",
-		DefaultDirectory: defaultDirectory,
-	})
-}
-
-func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
+func (s *Service) updatedEnvironmentConfig(config EnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
 	// Shares ValidateEnvRepoPath with init so both accept exactly the same paths.
 	if err := configpkg.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
@@ -185,11 +128,11 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing conf
 	if err := configpkg.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
+	if err := s.validateWorkspaceSyncConfig(updated); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
 	if updated.RemoteWorktree() && strings.TrimSpace(updated.CloudProviderAlias) != "" {
-		if _, ok, err := a.linkedCloudContext(updated); err != nil {
+		if _, ok, err := s.LinkedCloudContext(updated); err != nil {
 			return configpkg.EnvConfig{}, err
 		} else if ok {
 			updated.ManagedCloud = true
@@ -198,7 +141,7 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing conf
 	return updated, nil
 }
 
-func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
+func (s *Service) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	if !config.SSHD.WorkspaceSync.Enabled {
 		return nil
 	}
@@ -212,13 +155,13 @@ func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	return nil
 }
 
-func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports model.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (s *Service) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports model.EnvironmentLocalPorts) (EnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
 	}
-	syncStatus := a.workspaceSyncStatus(uimodel.Selection{Tenant: tenant, Environment: name})
-	effectiveRegistries, registriesInherited := a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config)
+	syncStatus, syncMessage := s.d.WorkspaceSyncStatus(uimodel.Selection{Tenant: tenant, Environment: name})
+	effectiveRegistries, registriesInherited := s.EffectiveContainerRegistries(tenant, fallbackName, config)
 	registries := containerRegistriesToUI(effectiveRegistries)
 	ports = configpkg.LocalPortsForResult(configpkg.OpenResult{
 		EnvConfig:  config,
@@ -226,8 +169,8 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 	})
 	workspaceSyncLocalPath := strings.TrimSpace(config.SSHD.WorkspaceSync.LocalPath)
 	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
-	gateway := a.resolveOpenRouterConfig()
-	result := uiEnvironmentConfig{
+	gateway := s.ResolveOpenRouterConfig()
+	result := EnvironmentConfig{
 		Name:                         name,
 		Hosted:                       hostedEnvironmentToUI(config),
 		Type:                         config.ResolvedType(),
@@ -237,23 +180,23 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		ContainerRegistries:          registries,
 		ContainerRegistriesInherited: registriesInherited,
 		CloudProviderAlias:           strings.TrimSpace(config.CloudProviderAlias),
-		CloudProviderAliases:         environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
-		CloudAliasSlots:              environmentCloudAliasSlots(a.deps.store, config),
+		CloudProviderAliases:         environmentCloudProviderAliases(s.d.Store, config.CloudProviderAlias),
+		CloudAliasSlots:              environmentCloudAliasSlots(s.d.Store, config),
 		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
 		RuntimeChart:                 strings.TrimSpace(config.RuntimeChart),
 		RuntimeRegistry:              strings.TrimSpace(config.RuntimeRegistry),
 		ImagePullSecrets:             uimodel.TrimmedNonEmpty(config.ImagePullSecrets),
 		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
-		SSHD: uiSSHDConfig{
+		SSHD: SSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
 			LocalPort:                  config.SSHD.LocalPort,
 			PublicKeyPath:              strings.TrimSpace(config.SSHD.PublicKeyPath),
 			WorkspaceSyncEnabled:       workspaceSyncEnabled,
 			WorkspaceSyncLocalPath:     workspaceSyncLocalPath,
-			WorkspaceSyncStatus:        syncStatus.Status,
-			WorkspaceSyncStatusMessage: syncStatus.Message,
+			WorkspaceSyncStatus:        syncStatus,
+			WorkspaceSyncStatusMessage: syncMessage,
 		},
-		Idle: uiIdleConfig{
+		Idle: IdleConfig{
 			Timeout:          idleConfigValue(config.Idle.Timeout, configpkg.DefaultEnvironmentIdleTimeout.String()),
 			WorkingHours:     idleConfigValue(config.Idle.WorkingHours, configpkg.DefaultEnvironmentWorkingHours),
 			IdleTrafficBytes: config.Idle.IdleTrafficBytes,
@@ -262,7 +205,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		ClaudeDefaults:    claudeDefaultsForUI(gateway),
 		AITool:            strings.TrimSpace(config.AITool),
 		AILaunchSignature: ailaunch.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
-		LocalPorts: uiEnvironmentLocalPorts{
+		LocalPorts: EnvironmentLocalPorts{
 			RangeStart:          ports.RangeStart,
 			RangeEnd:            ports.RangeEnd,
 			MCP:                 ports.MCP,
@@ -283,8 +226,8 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		RepoURL:            strings.TrimSpace(config.RepoURL),
 		DeployComponents:   append([]string(nil), config.Deploy.Components...),
 	}
-	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
-		return uiEnvironmentConfig{}, err
+	if cloudContext, ok, err := s.LinkedCloudContext(config); err != nil {
+		return EnvironmentConfig{}, err
 	} else if ok {
 		status := cloudContextStatusToUI(cloudContext)
 		result.CloudContext = &status
@@ -299,17 +242,19 @@ func environmentName(fallbackName string, config configpkg.EnvConfig) string {
 	return strings.TrimSpace(fallbackName)
 }
 
-func localPortStatus(port int) uiPortStatus {
+func localPortStatus(port int) PortStatus {
 	if port <= 0 {
-		return uiPortStatus{Status: "Not assigned"}
+		return PortStatus{Status: "Not assigned"}
 	}
-	if !canConnectLocalTCP(port) {
-		return uiPortStatus{Status: "No"}
+	if !CanConnectLocalTCP(port) {
+		return PortStatus{Status: "No"}
 	}
-	return uiPortStatus{Available: true, Status: "Yes"}
+	return PortStatus{Available: true, Status: "Yes"}
 }
 
-func canConnectLocalTCP(port int) bool {
+// CanConnectLocalTCP is the local-port probe the editor shows; main also uses it as
+// the production port check.
+func CanConnectLocalTCP(port int) bool {
 	if port <= 0 {
 		return false
 	}
@@ -321,7 +266,7 @@ func canConnectLocalTCP(port int) bool {
 	return true
 }
 
-func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvConfig) configpkg.EnvConfig {
+func environmentConfigFromUI(config EnvironmentConfig, existing configpkg.EnvConfig) configpkg.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	applyEnvironmentCloudAliasSlots(&existing, config)
 	// ContainerRegistries are routed by env type in SaveEnvironmentConfig.
@@ -387,15 +332,15 @@ func copyStringPtr(value *string) *string {
 	return &v
 }
 
-func runtimePodConfigToUI(config model.RuntimePodResources) uiRuntimePodConfig {
+func runtimePodConfigToUI(config model.RuntimePodResources) RuntimePodConfig {
 	config = configpkg.NormalizeRuntimePodResources(config)
-	return uiRuntimePodConfig{
+	return RuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	}
 }
 
-func runtimePodConfigFromUI(config uiRuntimePodConfig) model.RuntimePodResources {
+func runtimePodConfigFromUI(config RuntimePodConfig) model.RuntimePodResources {
 	return configpkg.NormalizeRuntimePodResources(model.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),

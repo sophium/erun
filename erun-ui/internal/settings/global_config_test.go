@@ -1,8 +1,6 @@
-package main
+package settings
 
 import (
-	"context"
-	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -10,8 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
-	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
@@ -20,7 +16,7 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 		Provider:      configpkg.CloudProviderAWS,
 		OIDCIssuerURL: "https://issuer.team.example",
 	}}}
-	store := stubUIStore{
+	store := fakeStore{
 		config: &rootConfig,
 		tenants: map[string]model.TenantConfig{
 			"frs": {
@@ -32,15 +28,15 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	loaded, err := app.LoadTenantConfig(" frs ")
+	loaded, err := svc.LoadTenantConfig(" frs ")
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
 	}
 	assertLoadedTenantConfig(t, loaded)
 
-	saved, err := app.SaveTenantConfig(uiTenantConfig{
+	saved, err := svc.SaveTenantConfig(TenantConfig{
 		Name:                      "frs",
 		DefaultEnvironment:        " prod ",
 		APIURL:                    " https://api.new.example ",
@@ -58,7 +54,7 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	}
 }
 
-func assertLoadedTenantConfig(t *testing.T, loaded uiTenantConfig) {
+func assertLoadedTenantConfig(t *testing.T, loaded TenantConfig) {
 	t.Helper()
 
 	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" || loaded.PrimaryCloudProviderAlias != "team-cloud" || len(loaded.CloudProviderAliases) != 1 || loaded.CloudProviderAliases[0] != "team-cloud" {
@@ -76,10 +72,10 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 		Profile:  "team",
 		Username: "Rihards.Freimanis",
 	}}}
-	store := stubUIStore{config: &rootConfig}
-	app := NewApp(erunUIDeps{
-		store: store,
-		cloudDeps: cloud.CloudDependencies{
+	store := fakeStore{config: &rootConfig}
+	svc := newTestService(Deps{
+		Store: store,
+		Cloud: cloud.CloudDependencies{
 			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
 				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
@@ -92,7 +88,7 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 		},
 	})
 
-	status, err := app.SetupCloudProviderOIDC("team-cloud")
+	status, err := svc.SetupCloudProviderOIDC("team-cloud")
 	if err != nil {
 		t.Fatalf("SetupCloudProviderOIDC failed: %v", err)
 	}
@@ -109,9 +105,9 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 		Profile:  "team",
 		Username: "Rihards.Freimanis",
 	}}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
-		cloudDeps: cloud.CloudDependencies{
+	svc := newTestService(Deps{
+		Store: fakeStore{config: &rootConfig},
+		Cloud: cloud.CloudDependencies{
 			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
 				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
@@ -124,7 +120,7 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 		},
 	})
 
-	token, err := app.GetCloudProviderBearerToken(" team-cloud ")
+	token, err := svc.GetCloudProviderBearerToken(" team-cloud ")
 	if err != nil {
 		t.Fatalf("GetCloudProviderBearerToken failed: %v", err)
 	}
@@ -138,12 +134,12 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 
 func TestLoadAndSaveERunConfig(t *testing.T) {
 	config := configpkg.ERunConfig{DefaultTenant: "old-tenant"}
-	store := stubUIStore{
+	store := fakeStore{
 		config: &config,
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	loaded, err := app.LoadERunConfig()
+	loaded, err := svc.LoadERunConfig()
 	if err != nil {
 		t.Fatalf("LoadERunConfig failed: %v", err)
 	}
@@ -151,23 +147,13 @@ func TestLoadAndSaveERunConfig(t *testing.T) {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
 
-	saved, err := app.SaveERunConfig(uiERunConfig{DefaultTenant: " new-tenant "})
+	saved, err := svc.SaveERunConfig(ERunConfig{DefaultTenant: " new-tenant "})
 	if err != nil {
 		t.Fatalf("SaveERunConfig failed: %v", err)
 	}
 	if saved.DefaultTenant != "new-tenant" || config.DefaultTenant != "new-tenant" {
 		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, config)
 	}
-}
-
-func testUIJWT(issuer string) string {
-	return testUIJWTWithSubject(issuer, "test-subject")
-}
-
-func testUIJWTWithSubject(issuer, subject string) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `","sub":"` + subject + `"}`))
-	return header + "." + payload + ".signature"
 }
 
 func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
@@ -187,9 +173,9 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 		},
 	}
 	var awsCalls []string
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: rootConfig},
-		cloudContextDeps: cloud.CloudContextDependencies{
+	svc := newTestService(Deps{
+		Store: fakeStore{config: rootConfig},
+		ContextDeps: cloud.CloudContextDependencies{
 			RunAWS: func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 				awsCalls = append(awsCalls, strings.Join(args, " "))
 				return "i-test\tstopped\n", nil
@@ -197,7 +183,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 		},
 	})
 
-	statuses, err := app.LoadCloudContextStatuses()
+	statuses, err := svc.LoadCloudContextStatuses()
 	if err != nil {
 		t.Fatalf("LoadCloudContextStatuses failed: %v", err)
 	}
@@ -207,66 +193,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
 		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
 	}
-	if got := app.cloudContexts.Status("team-context"); got != cloud.CloudContextStatusStopped {
+	if got := svc.d.CloudStatuses.Status("team-context"); got != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
-	}
-}
-
-func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
-	projectRoot := runtimeref.RemoteWorktreePathForRepoName("frs")
-	rootConfig := &configpkg.ERunConfig{
-		CloudContexts: []model.CloudContextConfig{{
-			Name:               "team-context",
-			CloudProviderAlias: "team-cloud",
-			KubernetesContext:  "cluster-dev",
-		}},
-	}
-	store := stubUIStore{
-		config: rootConfig,
-		tenants: map[string]model.TenantConfig{
-			"frs": {
-				Name:               "frs",
-				DefaultEnvironment: "dev",
-			},
-		},
-		envs: map[string]configpkg.EnvConfig{
-			"frs/dev": {
-				Name:               "dev",
-				LocalRepoPath:      projectRoot,
-				KubernetesContext:  "cluster-dev",
-				CloudProviderAlias: "old-cloud",
-				Type:               configpkg.EnvironmentTypeRuntime,
-			},
-		},
-	}
-	var remoteEndpoint string
-	var remoteTenant string
-	var remoteEnvironment string
-	var remoteAlias string
-	app := NewApp(erunUIDeps{
-		store:               store,
-		canConnectLocalPort: func(int) bool { return true },
-		canReachMCPEndpoint: func(int) bool { return true },
-		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (configpkg.EnvConfig, error) {
-			remoteEndpoint = endpoint
-			remoteTenant = tenant
-			remoteEnvironment = environment
-			remoteAlias = alias
-			return configpkg.EnvConfig{Name: environment, CloudProviderAlias: alias}, nil
-		},
-	})
-
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"}, uiEnvironmentConfig{
-		Name:               "dev",
-		CloudProviderAlias: "team-cloud",
-	})
-	if err != nil {
-		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
-	}
-	if saved.CloudProviderAlias != "team-cloud" || store.envs["frs/dev"].CloudProviderAlias != "team-cloud" || !store.envs["frs/dev"].ManagedCloud {
-		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, store.envs["frs/dev"])
-	}
-	if remoteEndpoint != "http://127.0.0.1:17000/mcp" || remoteTenant != "frs" || remoteEnvironment != "dev" || remoteAlias != "team-cloud" {
-		t.Fatalf("unexpected remote alias call: endpoint=%q tenant=%q environment=%q alias=%q", remoteEndpoint, remoteTenant, remoteEnvironment, remoteAlias)
 	}
 }

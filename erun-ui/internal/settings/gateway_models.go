@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -17,7 +17,7 @@ const gatewayModelListTimeout = 10 * time.Second
 
 const gatewayModelListBodyLimit = 8 << 20
 
-type uiGatewayModel struct {
+type GatewayModel struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -43,20 +43,20 @@ type gatewayModelsResponse struct {
 // LoadGatewayModels lists the gateway's models via Claude Code's discovery
 // request, without its claude/anthropic id filter. It sends no credential, so
 // a redirect cannot leak one.
-func (a *App) LoadGatewayModels(baseURL string) ([]uiGatewayModel, error) {
+func (s *Service) LoadGatewayModels(baseURL string) ([]GatewayModel, error) {
 	endpoint, err := gatewayModelsURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
-	body, err := a.fetchGatewayModels(endpoint)
+	body, err := s.fetchGatewayModels(endpoint)
 	if err != nil {
 		return nil, err
 	}
 	return parseGatewayModels(body)
 }
 
-func (a *App) fetchGatewayModels(endpoint string) ([]byte, error) {
-	ctx := a.context()
+func (s *Service) fetchGatewayModels(endpoint string) ([]byte, error) {
+	ctx := s.d.Context()
 	ctx, cancel := context.WithTimeout(ctx, gatewayModelListTimeout)
 	defer cancel()
 
@@ -84,12 +84,12 @@ func (a *App) fetchGatewayModels(endpoint string) ([]byte, error) {
 	return body, nil
 }
 
-func parseGatewayModels(body []byte) ([]uiGatewayModel, error) {
+func parseGatewayModels(body []byte) ([]GatewayModel, error) {
 	var payload gatewayModelsResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("the gateway's model list was not readable JSON: %w", err)
 	}
-	out := make([]uiGatewayModel, 0, len(payload.Data))
+	out := make([]GatewayModel, 0, len(payload.Data))
 	seen := make(map[string]struct{}, len(payload.Data))
 	for _, entry := range payload.Data {
 		id := strings.TrimSpace(entry.ID)
@@ -100,7 +100,7 @@ func parseGatewayModels(body []byte) ([]uiGatewayModel, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		out = append(out, uiGatewayModel{
+		out = append(out, GatewayModel{
 			ID:          id,
 			DisplayName: strings.TrimSpace(entry.DisplayName),
 			Description: strings.TrimSpace(entry.Description),

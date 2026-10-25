@@ -69,7 +69,7 @@ func (a *App) selectionsForCloudContext(name string) []uimodel.Selection {
 			continue
 		}
 		for _, env := range envs {
-			cloudContext, ok, err := a.linkedCloudContext(env)
+			cloudContext, ok, err := a.settings.LinkedCloudContext(env)
 			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
 				continue
 			}

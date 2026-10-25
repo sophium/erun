@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"strings"
@@ -7,8 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/ai"
 )
 
-func claudeConfigToUI(config configpkg.EnvironmentClaudeConfig) uiClaudeConfig {
-	out := uiClaudeConfig{
+func claudeConfigToUI(config configpkg.EnvironmentClaudeConfig) ClaudeConfig {
+	out := ClaudeConfig{
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
 		UseGateway:      copyBoolPtr(config.UseGateway),
@@ -23,7 +23,7 @@ func claudeConfigToUI(config configpkg.EnvironmentClaudeConfig) uiClaudeConfig {
 	return out
 }
 
-func claudeConfigFromUI(config uiClaudeConfig) configpkg.EnvironmentClaudeConfig {
+func claudeConfigFromUI(config ClaudeConfig) configpkg.EnvironmentClaudeConfig {
 	models := []string(nil)
 	if normalized := normalizeUIClaudeModels(config.Models); len(normalized) > 0 {
 		models = normalized
@@ -40,13 +40,13 @@ func claudeConfigFromUI(config uiClaudeConfig) configpkg.EnvironmentClaudeConfig
 	}
 }
 
-func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
+func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) ClaudeDefaults {
 	minTokens, maxTokens := configpkg.ClaudeMaxOutputTokensRange()
 	gatewayModels := gateway.ModelIDs()
 	if gatewayModels == nil {
 		gatewayModels = []string{}
 	}
-	return uiClaudeDefaults{
+	return ClaudeDefaults{
 		UseMantle:  configpkg.DefaultClaudeUseMantle,
 		UseBedrock: configpkg.DefaultClaudeUseBedrock,
 		// The environment's own models; the gateway catalog's set travels separately.
@@ -65,10 +65,10 @@ func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
 	}
 }
 
-// resolveOpenRouterConfig treats an unreadable root config as no catalog;
+// ResolveOpenRouterConfig treats an unreadable root config as no catalog;
 // gateway actions re-resolve it where it matters.
-func (a *App) resolveOpenRouterConfig() *configpkg.OpenRouterConfig {
-	gateway, err := configpkg.ResolveOpenRouterConfig(a.deps.store)
+func (s *Service) ResolveOpenRouterConfig() *configpkg.OpenRouterConfig {
+	gateway, err := configpkg.ResolveOpenRouterConfig(s.d.Store)
 	if err != nil {
 		return nil
 	}

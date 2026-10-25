@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"errors"
@@ -12,11 +12,11 @@ import (
 
 // applyContainerRegistries stores local-agent and host lists in project config
 // and remote/runtime lists on the env config, whose project config is not local.
-func (a *App) applyContainerRegistries(selection uimodel.Selection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
+func (s *Service) applyContainerRegistries(selection uimodel.Selection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	switch updated.ResolvedType() {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
 		updated.ContainerRegistries = nil
-		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
+		return s.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
 	case configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeRuntime:
 		fallthrough
 	default:
@@ -25,8 +25,8 @@ func (a *App) applyContainerRegistries(selection uimodel.Selection, updated *con
 	}
 }
 
-func (a *App) saveEnvironmentProjectRegistries(tenant string, config configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
-	projectRoot, store, ok := a.environmentProjectConfigStore(config)
+func (s *Service) saveEnvironmentProjectRegistries(tenant string, config configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
+	projectRoot, store, ok := s.environmentProjectConfigStore(config)
 	if !ok {
 		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
 	}
@@ -38,18 +38,18 @@ func (a *App) saveEnvironmentProjectRegistries(tenant string, config configpkg.E
 	return store.SaveProjectConfig(projectRoot, projectConfig)
 }
 
-func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRegistryEntry {
-	entries := make([]uiContainerRegistryEntry, 0, len(list))
+func containerRegistriesToUI(list configpkg.ContainerRegistries) []ContainerRegistryEntry {
+	entries := make([]ContainerRegistryEntry, 0, len(list))
 	for _, entry := range list {
 		roles := make([]string, 0, len(entry.Roles))
 		for _, role := range entry.Roles {
 			roles = append(roles, string(role))
 		}
-		uiEntry := uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles}
+		uiEntry := ContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles}
 		// A cluster entry has no static host; show its resolved address instead.
 		if entry.Cluster != nil {
 			cluster := entry.Cluster.WithDefaults()
-			uiEntry.Cluster = &uiContainerRegistryCluster{
+			uiEntry.Cluster = &ContainerRegistryCluster{
 				Service:   cluster.Service,
 				Namespace: cluster.Namespace,
 				Port:      cluster.Port,
@@ -63,7 +63,7 @@ func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRe
 }
 
 // An empty result clears the override so the env inherits the project default.
-func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
+func uiToContainerRegistries(entries []ContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
 	list := make(configpkg.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
 		roles := make([]model.RegistryRole, 0, len(entry.Roles))
@@ -100,13 +100,13 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.Cont
 	return list, nil
 }
 
-// effectiveEnvironmentContainerRegistries mirrors the build/deploy resolution
+// EffectiveContainerRegistries mirrors the build/deploy resolution
 // order; the bool reports inheritance from the project config.
-func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config configpkg.EnvConfig) (configpkg.ContainerRegistries, bool) {
+func (s *Service) EffectiveContainerRegistries(tenant, environment string, config configpkg.EnvConfig) (configpkg.ContainerRegistries, bool) {
 	if !config.ContainerRegistries.IsZero() {
 		return config.ContainerRegistries, false
 	}
-	projectConfig, ok := a.loadEnvironmentProjectConfig(tenant, config)
+	projectConfig, ok := s.loadEnvironmentProjectConfig(tenant, config)
 	if !ok {
 		return nil, false
 	}
@@ -114,8 +114,8 @@ func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string
 	return list, !list.IsZero()
 }
 
-func (a *App) loadEnvironmentProjectConfig(tenant string, config configpkg.EnvConfig) (configpkg.ProjectConfig, bool) {
-	projectRoot, store, ok := a.environmentProjectConfigStore(config)
+func (s *Service) loadEnvironmentProjectConfig(tenant string, config configpkg.EnvConfig) (configpkg.ProjectConfig, bool) {
+	projectRoot, store, ok := s.environmentProjectConfigStore(config)
 	if !ok {
 		return configpkg.ProjectConfig{}, false
 	}
@@ -126,15 +126,22 @@ func (a *App) loadEnvironmentProjectConfig(tenant string, config configpkg.EnvCo
 	return projectConfig, true
 }
 
-func (a *App) environmentProjectConfigStore(config configpkg.EnvConfig) (string, projectConfigStore, bool) {
-	if a.deps.store == nil {
+// projectConfigStore is the optional part of the store a local-agent's registry
+// list is read from and written to.
+type projectConfigStore interface {
+	LoadProjectConfig(string) (configpkg.ProjectConfig, string, error)
+	SaveProjectConfig(string, configpkg.ProjectConfig) error
+}
+
+func (s *Service) environmentProjectConfigStore(config configpkg.EnvConfig) (string, projectConfigStore, bool) {
+	if s.d.Store == nil {
 		return "", nil, false
 	}
 	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
 	if projectRoot == "" {
 		return "", nil, false
 	}
-	store, ok := a.deps.store.(projectConfigStore)
+	store, ok := s.d.Store.(projectConfigStore)
 	if !ok {
 		return "", nil, false
 	}

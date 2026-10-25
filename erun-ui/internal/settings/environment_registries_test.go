@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 
 func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {
 				ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/shared"),
@@ -37,28 +37,28 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	local, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
+	local, err := svc.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig local failed: %v", err)
 	}
-	if uiRegistryWithRole(local.ContainerRegistries, "build") != "registry.example/shared" {
+	if registryWithRole(local.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected local env to use project-wide registry, got %+v", local)
 	}
 
-	prod, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"})
+	prod, err := svc.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig prod failed: %v", err)
 	}
-	if uiRegistryWithRole(prod.ContainerRegistries, "build") != "registry.example/prod" {
+	if registryWithRole(prod.ContainerRegistries, "build") != "registry.example/prod" {
 		t.Fatalf("expected prod env to use environment registry override, got %+v", prod)
 	}
 }
 
 func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/shared")},
 		},
@@ -79,17 +79,17 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, EnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-		RuntimePod: uiRuntimePodConfig{
+		RuntimePod: RuntimePodConfig{
 			CPU:    "6",
 			Memory: "12Gi",
 		},
-		Idle: uiIdleConfig{
+		Idle: IdleConfig{
 			Timeout:      configpkg.DefaultEnvironmentIdleTimeout.String(),
 			WorkingHours: configpkg.DefaultEnvironmentWorkingHours,
 		},
@@ -97,7 +97,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
-	if uiRegistryWithRole(saved.ContainerRegistries, "build") != "registry.example/shared" {
+	if registryWithRole(saved.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected saved UI config to keep effective project registry, got %+v", saved)
 	}
 	stored := store.envs["frs/local"]
@@ -109,7 +109,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 // Local-agent registry lists live in the project config, where build/deploy read them.
 func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("ghcr.io/acme")},
 		},
@@ -118,18 +118,18 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: configpkg.EnvironmentTypeLocalAgent},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, EnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "c",
 		Type:              configpkg.EnvironmentTypeLocalAgent,
-		ContainerRegistries: []uiContainerRegistryEntry{
+		ContainerRegistries: []ContainerRegistryEntry{
 			{Registry: "ghcr.io/acme", Roles: []string{"build", "from"}},
 			{Registry: "registry.internal/acme", Roles: []string{"to", "deploy"}},
 		},
-		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
+		Idle: IdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig: %v", err)
@@ -144,29 +144,29 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 	if deploy, ok := list.DeployRegistry(); !ok || deploy != "registry.internal/acme" {
 		t.Fatalf("expected deploy=registry.internal/acme in project config, got %+v", list)
 	}
-	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "registry.internal/acme" {
+	if registryWithRole(saved.ContainerRegistries, "deploy") != "registry.internal/acme" {
 		t.Fatalf("saved UI must reflect the edited list, got %+v", saved.ContainerRegistries)
 	}
 }
 
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeLocalAgent},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	_, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	_, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, EnvironmentConfig{
 		Name:     "local",
 		RepoPath: projectRoot,
 		Type:     configpkg.EnvironmentTypeLocalAgent,
-		ContainerRegistries: []uiContainerRegistryEntry{
+		ContainerRegistries: []ContainerRegistryEntry{
 			{Registry: "ghcr.io/acme", Roles: []string{"build"}},
 		},
-		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
+		Idle: IdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err == nil {
 		t.Fatal("expected a validation error for a registry list with no deploy registry")
@@ -176,26 +176,26 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 // A deploy-only registry may serve externally published images, so it is valid.
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeRuntime},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"}, EnvironmentConfig{
 		Name: "prod",
 		Type: configpkg.EnvironmentTypeRuntime,
-		ContainerRegistries: []uiContainerRegistryEntry{
+		ContainerRegistries: []ContainerRegistryEntry{
 			{Registry: "ghcr.io/sophium", Roles: []string{"deploy"}},
 		},
-		Idle: uiIdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
+		Idle: IdleConfig{Timeout: configpkg.DefaultEnvironmentIdleTimeout.String(), WorkingHours: configpkg.DefaultEnvironmentWorkingHours},
 	})
 	if err != nil {
 		t.Fatalf("deploy-only registry must be accepted, got %v", err)
 	}
-	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
+	if registryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
 		t.Fatalf("expected the deploy-only registry to persist, got %+v", saved.ContainerRegistries)
 	}
 }
@@ -203,7 +203,7 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 // Clearing the runtime chart must persist as an empty field, not be ignored.
 func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	projectRoot := t.TempDir()
-	store := stubUIStore{
+	store := fakeStore{
 		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
@@ -216,9 +216,9 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 			},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 
-	loaded, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
+	loaded, err := svc.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	}
 
 	loaded.RuntimeChart = "  oci://registry.example/charts/erun-devops:1.2.3  "
-	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, loaded)
+	saved, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, loaded)
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	}
 
 	saved.RuntimeChart = ""
-	if _, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, saved); err != nil {
+	if _, err := svc.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, saved); err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed clearing the chart: %v", err)
 	}
 	if stored := store.envs["frs/local"].RuntimeChart; stored != "" {

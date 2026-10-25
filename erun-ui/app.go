@@ -16,8 +16,10 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -30,11 +32,6 @@ type erunUIStore interface {
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
-}
-
-type projectConfigStore interface {
-	LoadProjectConfig(string) (config.ProjectConfig, string, error)
-	SaveProjectConfig(string, config.ProjectConfig) error
 }
 
 type erunUIDeps struct {
@@ -79,6 +76,7 @@ type erunUIDeps struct {
 	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
 	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)
 	loadAPILog                func(context.Context, tenantsvc.DashboardInput) (string, error)
+	readGatewayRouting        func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error)
 	workspaceSyncReady        func(context.Context, string) error
 	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error)
 	workspaceSyncInterval     time.Duration
@@ -154,13 +152,10 @@ type App struct {
 	envEnsureFailNotified     map[string]struct{}
 	// initEmitted fires environment-initialized once per env: a Windows ConPTY repaint
 	// re-sends "==> Initialized", which would loop create→deploy.
-	initEmittedMu sync.Mutex
-	initEmitted   map[string]struct{}
-	configWatcher *configWatcher
-	// definitionWriteOrigin keeps the config watcher from firing on this desktop's own writes.
-	definitionWriteOrigin definitionWriteOrigin
-	contribute            *contributeStore
-	contributeApps        *contributeAppForwards
+	initEmittedMu  sync.Mutex
+	initEmitted    map[string]struct{}
+	contribute     *contributeStore
+	contributeApps *contributeAppForwards
 
 	envNodesMu sync.Mutex
 	envNodes   map[string]uiEnvironmentNodeSnapshot
@@ -185,6 +180,7 @@ type App struct {
 	tenant *tenantsvc.Service
 	// cloudContexts is the live power state; config no longer persists it.
 	cloudContexts *cloudctx.Service
+	settings      *settingssvc.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -264,6 +260,7 @@ func NewApp(deps erunUIDeps) *App {
 		ConfiguredERunAliases: app.configuredERunAliases,
 	})
 	app.cloudContexts = app.newCloudContextService(time.Now)
+	app.settings = app.newSettingsService()
 	if app.identity == nil {
 		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}
@@ -286,6 +283,48 @@ func (a *App) newCloudContextService(now func() time.Time) *cloudctx.Service {
 		NotifyRefreshFailure: a.notifyCredentialRefreshFailure,
 		OnStatusChange:       a.refreshEnvironmentNodeStatuses,
 		Now:                  now,
+	})
+}
+
+// newSettingsService reads the deps funcs and the tenant service per call, so a
+// test that builds App by hand or swaps a dep after NewApp still reaches its fake.
+func (a *App) newSettingsService() *settingssvc.Service {
+	return settingssvc.New(settingssvc.Deps{
+		Store:         a.deps.store,
+		Cloud:         a.deps.cloudDeps,
+		ContextDeps:   a.deps.cloudContextDeps,
+		Context:       a.context,
+		Emit:          a.emit,
+		CloudStatuses: a.cloudContexts,
+		StopCloudContext: func(ctx context.Context, name string) (model.CloudContextStatus, error) {
+			return a.deps.stopCloudContext(ctx, name)
+		},
+		MarkIntentionalStop:  a.markIntentionalStopForCloudContext,
+		ClearIntentionalStop: a.clearIntentionalStopForCloudContext,
+		ClearIdleStops:       func(name string) { a.clearIdleStopsForCloudContext(name) },
+		RecordManualStop:     a.recordManualStopForCloudContext,
+		EnsureMCPAvailable:   a.ensureMCPAvailable,
+		MCPEndpoint:          mcpEndpointForOpenResult,
+		MCPBearer:            a.mcpBearer,
+		SetRemoteCloudAlias: func(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
+			return a.deps.setRemoteCloudAlias(ctx, endpoint, bearer, tenant, environment, alias)
+		},
+		ReconcileWorkspaceSync: a.reconcileWorkspaceSyncForSelection,
+		WorkspaceSyncStatus: func(selection uimodel.Selection) (string, string) {
+			status := a.workspaceSyncStatus(selection)
+			return status.Status, status.Message
+		},
+		PlatformReady: func(tenant string) bool {
+			resolution, err := a.tenant.Platform(tenant, "")
+			return err == nil && resolution.State == tenantsvc.StateReady
+		},
+		PlatformClient: func(ctx context.Context, tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
+			return a.tenant.Client(ctx, tenant)
+		},
+		PlatformRequestTimeout: tenantsvc.RequestTimeout,
+		ReadGatewayRouting: func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
+			return a.deps.readGatewayRouting(ctx, env, tenant, catalog)
+		},
 	})
 }
 
@@ -313,15 +352,15 @@ func (a *App) startup(ctx context.Context) {
 	observeAppActivation()
 	a.startActivityPollers()
 	a.cloudContexts.Start()
-	a.startConfigWatcher()
+	a.settings.StartConfigWatcher()
 	a.startRestartControl()
-	go a.catchUpHostedDefinitions()
+	go a.settings.CatchUpHostedDefinitions()
 	// Off the startup path so per-env I/O does not delay first paint.
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
 func (a *App) shutdown(context.Context) {
-	a.stopConfigWatcher()
+	a.settings.StopConfigWatcher()
 	a.stopActivityPollers()
 	a.cloudContexts.Stop()
 	a.stopActionRunners()

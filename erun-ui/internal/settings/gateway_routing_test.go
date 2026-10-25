@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -14,12 +14,10 @@ import (
 )
 
 // stubGatewayRouting answers the cluster read from a "<tenant>/<env>" table.
-func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[string]bool) *[]string {
-	t.Helper()
+func stubGatewayRouting(deployed map[string]string, failing map[string]bool) (func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error), *[]string) {
 	var mu sync.Mutex
 	var asked []string
-	previous := readGatewayRouting
-	readGatewayRouting = func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
+	read := func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
 		key := tenant + "/" + env.Name
 		mu.Lock()
 		asked = append(asked, key)
@@ -30,19 +28,18 @@ func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[st
 		url, found := deployed[key]
 		return lifecycle.GatewayRouting{Deployed: url, Wanted: lifecycle.WantedGatewayEndpoint(env.Claude, catalog)}, found, nil
 	}
-	t.Cleanup(func() { readGatewayRouting = previous })
-	return &asked
+	return read, &asked
 }
 
 func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T) {
 	const gateway = "https://openrouter.ai/api"
 	no := false
-	asked := stubGatewayRouting(t, map[string]string{
+	read, asked := stubGatewayRouting(map[string]string{
 		"erun/build": gateway, // still on the switched-off gateway
 		"erun/ux":    gateway, // same
 		"erun/code1": "",      // already off
 	}, map[string]bool{"erun/code2": true})
-	app := NewApp(erunUIDeps{store: stubUIStore{
+	svc := newTestService(Deps{ReadGatewayRouting: read, Store: fakeStore{
 		// Switched off the way the settings dialog does: base URL cleared, models kept.
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
 		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
@@ -56,11 +53,11 @@ func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T
 		},
 	}})
 
-	got, err := app.LoadGatewayRoutingDrift()
+	got, err := svc.LoadGatewayRoutingDrift()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []uiGatewayRouting{
+	want := []GatewayRouting{
 		{Tenant: "erun", Environment: "build", Deployed: gateway},
 		{Tenant: "erun", Environment: "ux", Deployed: gateway},
 	}
@@ -76,14 +73,14 @@ func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T
 
 func TestLoadGatewayRoutingDriftNamesPodsNotYetOnASwitchedOnGateway(t *testing.T) {
 	const gateway = "https://openrouter.ai/api"
-	stubGatewayRouting(t, map[string]string{"erun/build": ""}, nil)
-	app := NewApp(erunUIDeps{store: stubUIStore{
+	read, _ := stubGatewayRouting(map[string]string{"erun/build": ""}, nil)
+	svc := newTestService(Deps{ReadGatewayRouting: read, Store: fakeStore{
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{BaseURL: gateway}},
 		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs:    map[string]config.EnvConfig{"erun/build": {Name: "build", KubernetesContext: "erun-build"}},
 	}})
 
-	got, err := app.LoadGatewayRoutingDrift()
+	got, err := svc.LoadGatewayRoutingDrift()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +91,8 @@ func TestLoadGatewayRoutingDriftNamesPodsNotYetOnASwitchedOnGateway(t *testing.T
 
 func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 	const gateway = "https://openrouter.ai/api"
-	stubGatewayRouting(t, map[string]string{"erun/build": gateway, "erun/ux": ""}, nil)
-	app := NewApp(erunUIDeps{store: stubUIStore{
+	read, _ := stubGatewayRouting(map[string]string{"erun/build": gateway, "erun/ux": ""}, nil)
+	svc := newTestService(Deps{ReadGatewayRouting: read, Store: fakeStore{
 		config:  &config.ERunConfig{},
 		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs: map[string]config.EnvConfig{
@@ -104,12 +101,12 @@ func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 		},
 	}})
 
-	drifted, err := app.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "build"})
+	drifted, err := svc.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "build"})
 	if err != nil || drifted.Environment != "build" || drifted.Deployed != gateway {
 		t.Fatalf("build = %+v err=%v, want its pod reported as still on the gateway", drifted, err)
 	}
-	matching, err := app.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "ux"})
-	if err != nil || matching != (uiGatewayRouting{}) {
+	matching, err := svc.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "ux"})
+	if err != nil || matching != (GatewayRouting{}) {
 		t.Fatalf("ux = %+v err=%v, want the zero value for a pod that matches its config", matching, err)
 	}
 }

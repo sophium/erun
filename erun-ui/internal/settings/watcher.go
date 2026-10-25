@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"context"
@@ -24,41 +24,41 @@ type configWatcher struct {
 	done    chan struct{}
 }
 
-func (a *App) startConfigWatcher() {
-	a.mu.Lock()
-	if a.configWatcher != nil {
-		a.mu.Unlock()
+func (s *Service) StartConfigWatcher() {
+	s.mu.Lock()
+	if s.configWatcher != nil {
+		s.mu.Unlock()
 		return
 	}
-	a.mu.Unlock()
+	s.mu.Unlock()
 
 	root, err := config.ERunConfigDir()
 	if err != nil {
-		a.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: %w", err))
+		s.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: %w", err))
 		return
 	}
 	if root == "" {
-		a.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: no path returned"))
+		s.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: no path returned"))
 		return
 	}
 	watcher, err := newFsnotifyConfigWatcher(root)
 	if err != nil {
-		a.reportConfigWatcherFailure(err)
+		s.reportConfigWatcherFailure(err)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(a.context())
+	ctx, cancel := context.WithCancel(s.d.Context())
 	cw := &configWatcher{
 		watcher: watcher,
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
 
-	a.mu.Lock()
-	a.configWatcher = cw
-	a.mu.Unlock()
+	s.mu.Lock()
+	s.configWatcher = cw
+	s.mu.Unlock()
 
-	go a.runConfigWatcher(ctx, cw, root)
+	go s.runConfigWatcher(ctx, cw, root)
 }
 
 func newFsnotifyConfigWatcher(root string) (*fsnotify.Watcher, error) {
@@ -77,18 +77,18 @@ func newFsnotifyConfigWatcher(root string) (*fsnotify.Watcher, error) {
 }
 
 // reportConfigWatcherFailure surfaces watcher failures; silence would read as "nothing changed".
-func (a *App) reportConfigWatcherFailure(err error) {
-	a.emitAppNotification("warning", fmt.Sprintf(
+func (s *Service) reportConfigWatcherFailure(err error) {
+	s.notify("warning", fmt.Sprintf(
 		"Could not watch the config directory for external changes: %s. Environments created or edited outside this window may not appear until you reopen the app.",
 		err.Error(),
 	))
 }
 
-func (a *App) stopConfigWatcher() {
-	a.mu.Lock()
-	cw := a.configWatcher
-	a.configWatcher = nil
-	a.mu.Unlock()
+func (s *Service) StopConfigWatcher() {
+	s.mu.Lock()
+	cw := s.configWatcher
+	s.configWatcher = nil
+	s.mu.Unlock()
 	if cw == nil {
 		return
 	}
@@ -182,10 +182,10 @@ func (d *configDebouncer) stop() {
 	d.running.Wait()
 }
 
-func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root string) {
+func (s *Service) runConfigWatcher(ctx context.Context, cw *configWatcher, root string) {
 	defer close(cw.done)
 
-	debounce := newConfigDebouncer(root, a.reactToConfigWatchTargets)
+	debounce := newConfigDebouncer(root, s.reactToConfigWatchTargets)
 	defer debounce.stop()
 
 	for {
@@ -201,7 +201,7 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 			if !ok {
 				return
 			}
-			a.reportConfigWatcherFailure(fmt.Errorf("watch config directory: %w", watchErr))
+			s.reportConfigWatcherFailure(fmt.Errorf("watch config directory: %w", watchErr))
 		}
 	}
 }

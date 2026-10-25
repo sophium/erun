@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
-	store := stubUIStore{
+	store := fakeStore{
 		config: &configpkg.ERunConfig{OpenRouter: &configpkg.OpenRouterConfig{
 			BaseURL:      "https://gateway.example/api",
 			DefaultModel: "vendor/model-x",
@@ -21,10 +21,10 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 			"frs/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "cluster-local"},
 		},
 	}
-	app := NewApp(erunUIDeps{store: store})
+	svc := newTestService(Deps{Store: store})
 	selection := uimodel.Selection{Tenant: "frs", Environment: "local"}
 
-	onGateway, err := app.LoadEnvironmentConfig(selection)
+	onGateway, err := svc.LoadEnvironmentConfig(selection)
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 	edited := onGateway
 	edited.Claude.UseGateway = &off
 	edited.Claude.DefaultModel = &opus
-	saved, err := app.SaveEnvironmentConfig(selection, edited)
+	saved, err := svc.SaveEnvironmentConfig(selection, edited)
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 	assertLeftGatewayLaunch(t, onGateway, saved)
 }
 
-func assertGatewayModelChoices(t *testing.T, config uiEnvironmentConfig) {
+func assertGatewayModelChoices(t *testing.T, config EnvironmentConfig) {
 	t.Helper()
 	defaults := config.ClaudeDefaults
 	if !defaults.GatewayConfigured || !equalStringSlices(defaults.GatewayModels, []string{"vendor/model-x"}) || defaults.GatewayDefaultModel != "vendor/model-x" {
@@ -59,7 +59,7 @@ func assertGatewayModelChoices(t *testing.T, config uiEnvironmentConfig) {
 	}
 }
 
-func assertLeftGatewayLaunch(t *testing.T, before, saved uiEnvironmentConfig) {
+func assertLeftGatewayLaunch(t *testing.T, before, saved EnvironmentConfig) {
 	t.Helper()
 	if saved.Claude.UseGateway == nil || *saved.Claude.UseGateway {
 		t.Fatalf("the saved config should carry the opt-out back, got %+v", saved.Claude)

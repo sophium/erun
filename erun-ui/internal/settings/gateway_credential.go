@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"fmt"
@@ -16,9 +16,9 @@ const (
 	gatewayCredentialSourceHost = "host"
 )
 
-// uiGatewayCredentialStatus identifies the credential a deploy delivers
+// GatewayCredentialStatus identifies the credential a deploy delivers
 // without revealing it.
-type uiGatewayCredentialStatus struct {
+type GatewayCredentialStatus struct {
 	Ref string `json:"ref"`
 	// Source is empty when no credential exists and a deploy cannot authenticate.
 	Source string `json:"source,omitempty"`
@@ -28,53 +28,53 @@ type uiGatewayCredentialStatus struct {
 }
 
 // LoadGatewayCredentialStatus reports which credential a deploy would deliver.
-func (a *App) LoadGatewayCredentialStatus() (uiGatewayCredentialStatus, error) {
-	catalog, err := a.gatewayCatalog()
+func (s *Service) LoadGatewayCredentialStatus() (GatewayCredentialStatus, error) {
+	catalog, err := s.gatewayCatalog()
 	if err != nil {
-		return uiGatewayCredentialStatus{}, err
+		return GatewayCredentialStatus{}, err
 	}
 	return gatewayCredentialStatus(catalog), nil
 }
 
 // SaveGatewayCredential stores a gateway credential in the operator secret
 // store, keeping it out of config, chart values, and traces.
-func (a *App) SaveGatewayCredential(token string) (uiGatewayCredentialStatus, error) {
+func (s *Service) SaveGatewayCredential(token string) (GatewayCredentialStatus, error) {
 	trimmed := strings.TrimSpace(token)
 	if trimmed == "" {
-		return uiGatewayCredentialStatus{}, fmt.Errorf("a gateway credential is required")
+		return GatewayCredentialStatus{}, fmt.Errorf("a gateway credential is required")
 	}
-	catalog, err := a.gatewayCatalog()
+	catalog, err := s.gatewayCatalog()
 	if err != nil {
-		return uiGatewayCredentialStatus{}, err
+		return GatewayCredentialStatus{}, err
 	}
 	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
-		return uiGatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
+		return GatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
 	if err := store.SaveCloudSecret(gatewayCredentialRef(catalog), trimmed); err != nil {
-		return uiGatewayCredentialStatus{}, fmt.Errorf("save gateway credential: %w", err)
+		return GatewayCredentialStatus{}, fmt.Errorf("save gateway credential: %w", err)
 	}
 	return gatewayCredentialStatus(catalog), nil
 }
 
 // ClearGatewayCredential removes a saved credential, falling back to the host key.
-func (a *App) ClearGatewayCredential() (uiGatewayCredentialStatus, error) {
-	catalog, err := a.gatewayCatalog()
+func (s *Service) ClearGatewayCredential() (GatewayCredentialStatus, error) {
+	catalog, err := s.gatewayCatalog()
 	if err != nil {
-		return uiGatewayCredentialStatus{}, err
+		return GatewayCredentialStatus{}, err
 	}
 	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
-		return uiGatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
+		return GatewayCredentialStatus{}, fmt.Errorf("resolve cloud secret store: %w", err)
 	}
 	if err := store.DeleteCloudSecret(gatewayCredentialRef(catalog)); err != nil {
-		return uiGatewayCredentialStatus{}, fmt.Errorf("clear gateway credential: %w", err)
+		return GatewayCredentialStatus{}, fmt.Errorf("clear gateway credential: %w", err)
 	}
 	return gatewayCredentialStatus(catalog), nil
 }
 
-func (a *App) gatewayCatalog() (*configpkg.OpenRouterConfig, error) {
-	config, _, err := a.deps.store.LoadERunConfig()
+func (s *Service) gatewayCatalog() (*configpkg.OpenRouterConfig, error) {
+	config, _, err := s.d.Store.LoadERunConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,8 @@ func gatewayCredentialRef(catalog *configpkg.OpenRouterConfig) string {
 
 // gatewayCredentialStatus must mirror resolveGatewayCredential's precedence so
 // the catalog never reports what a deploy will not do.
-func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) uiGatewayCredentialStatus {
-	status := uiGatewayCredentialStatus{Ref: gatewayCredentialRef(catalog)}
+func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) GatewayCredentialStatus {
+	status := GatewayCredentialStatus{Ref: gatewayCredentialRef(catalog)}
 	if saved, ok := savedGatewayCredential(status.Ref); ok {
 		status.Source = gatewayCredentialSourceSaved
 		status.Hint = credentialHint(saved)

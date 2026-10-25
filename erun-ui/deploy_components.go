@@ -11,6 +11,12 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
+// uiDeployComponents is what a deploy at a chosen version would roll out.
+type uiDeployComponents struct {
+	Components   []componentspkg.DeployableComponent `json:"components"`
+	RuntimeChart uiRuntimeChartPlan                  `json:"runtimeChart"`
+}
+
 // LoadDeployComponents lists what an equivalent `erun deploy` would roll out, limited
 // to component charts published at the deploy version. Read-only.
 func (a *App) LoadDeployComponents(selection uimodel.Selection) (uiDeployComponents, error) {

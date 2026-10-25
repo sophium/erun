@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"errors"
@@ -10,8 +10,8 @@ import (
 )
 
 func TestLoadTenantConfigRequiresATenant(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	_, err := app.LoadTenantConfig("   ")
+	svc := newTestService(Deps{Store: fakeStore{}})
+	_, err := svc.LoadTenantConfig("   ")
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -21,8 +21,8 @@ func TestLoadTenantConfigRequiresATenant(t *testing.T) {
 }
 
 func TestSaveTenantConfigRequiresATenant(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	_, err := app.SaveTenantConfig(uiTenantConfig{Name: "  "})
+	svc := newTestService(Deps{Store: fakeStore{}})
+	_, err := svc.SaveTenantConfig(TenantConfig{Name: "  "})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -68,18 +68,18 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 	stored := &configpkg.OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []configpkg.OpenRouterModel{{ID: "acme/coder"}}}
 	cases := []struct {
 		name    string
-		catalog uiOpenRouterConfig
+		catalog OpenRouterConfig
 		want    string
 	}{
-		{"flag-shaped model", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []uiOpenRouterModel{{ID: "acme/coder"}, {ID: "--dangerously-skip-permissions"}}}, `invalid model "--dangerously-skip-permissions"`},
-		{"shell syntax in a model", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []uiOpenRouterModel{{ID: "acme/coder; rm -rf ~"}}}, `invalid model "acme/coder; rm -rf ~"`},
-		{"shell syntax in the default", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", DefaultModel: "$(id)", Models: []uiOpenRouterModel{{ID: "acme/coder"}}}, `default invalid model "$(id)"`},
+		{"flag-shaped model", OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []OpenRouterModel{{ID: "acme/coder"}, {ID: "--dangerously-skip-permissions"}}}, `invalid model "--dangerously-skip-permissions"`},
+		{"shell syntax in a model", OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []OpenRouterModel{{ID: "acme/coder; rm -rf ~"}}}, `invalid model "acme/coder; rm -rf ~"`},
+		{"shell syntax in the default", OpenRouterConfig{BaseURL: "https://gateway.example.test", DefaultModel: "$(id)", Models: []OpenRouterModel{{ID: "acme/coder"}}}, `default invalid model "$(id)"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := stubUIStore{config: &configpkg.ERunConfig{OpenRouter: stored}}
-			app := NewApp(erunUIDeps{store: store})
-			_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &tc.catalog})
+			store := fakeStore{config: &configpkg.ERunConfig{OpenRouter: stored}}
+			svc := newTestService(Deps{Store: store})
+			_, err := svc.SaveERunConfig(ERunConfig{OpenRouter: &tc.catalog})
 			if err == nil || !strings.Contains(err.Error(), "cannot save the gateway catalog: "+tc.want) {
 				t.Fatalf("expected the save refused naming the id (%s), got %v", tc.want, err)
 			}
@@ -89,12 +89,12 @@ func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
 		})
 	}
 
-	store := stubUIStore{config: &configpkg.ERunConfig{}}
-	app := NewApp(erunUIDeps{store: store})
-	_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &uiOpenRouterConfig{
+	store := fakeStore{config: &configpkg.ERunConfig{}}
+	svc := newTestService(Deps{Store: store})
+	_, err := svc.SaveERunConfig(ERunConfig{OpenRouter: &OpenRouterConfig{
 		BaseURL:      "https://gateway.example.test",
 		DefaultModel: " acme/coder ",
-		Models:       []uiOpenRouterModel{{ID: " acme/coder "}, {ID: "vendor/model:free"}, {ID: "  "}},
+		Models:       []OpenRouterModel{{ID: " acme/coder "}, {ID: "vendor/model:free"}, {ID: "  "}},
 	}})
 	if err != nil {
 		t.Fatalf("expected plain model ids to save, got %v", err)

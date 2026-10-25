@@ -189,7 +189,7 @@ func (a *App) shouldRespawnForCloudContext(managed *managedTerminal) bool {
 	if err != nil {
 		return true
 	}
-	cloudContext, ok, err := a.linkedCloudContext(config)
+	cloudContext, ok, err := a.settings.LinkedCloudContext(config)
 	if err != nil || !ok {
 		return true
 	}

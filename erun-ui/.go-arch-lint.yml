@@ -35,6 +35,8 @@ components:
     in: "headlessserver"
   internal-cloudctx:
     in: "internal/cloudctx"
+  internal-settings:
+    in: "internal/settings"
   internal-tenant:
     in: "internal/tenant"
   internal-uimodel:
@@ -49,6 +51,13 @@ deps:
     canUse:
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common
+  internal-settings:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-fsnotify-fsnotify
+      - github-com-sophium-erun-erun-common
   internal-tenant:
     mayDependOn:
       - internal-uimodel
@@ -58,6 +67,7 @@ deps:
     mayDependOn:
       - headlessserver
       - internal-cloudctx
+      - internal-settings
       - internal-tenant
       - internal-uimodel
     canUse:
@@ -65,7 +75,6 @@ deps:
       - github-com-ActiveState-termtest-conpty
       - github-com-adrg-xdg
       - github-com-creack-pty
-      - github-com-fsnotify-fsnotify
       - github-com-google-uuid
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common
