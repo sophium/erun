@@ -1,4 +1,6 @@
-package main
+// Package investigate owns the bounded spawning of failure agents: the
+// investigations and bug-report drafts the desktop starts from a failure report.
+package investigate
 
 import (
 	"crypto/sha256"
@@ -17,9 +19,9 @@ import (
 // the bounds below are deliberately conservative.
 
 const (
-	// investigationEventWindow folds one failure's unwinding reports, which arrive
+	// EventWindow folds one failure's unwinding reports, which arrive
 	// milliseconds apart, into one investigation.
-	investigationEventWindow = time.Minute
+	EventWindow = time.Minute
 
 	// investigationCooldown covers observed sub-hourly repeats of one failure.
 	investigationCooldown = 2 * time.Hour
@@ -72,36 +74,37 @@ type investigationRefusalError struct {
 
 func (r *investigationRefusalError) Error() string { return r.message }
 
-type investigationTimer interface{ Stop() bool }
+// Timer is the lifetime bound's pending stop.
+type Timer interface{ Stop() bool }
 
 // Liveness is re-observed from the session registry so an exited session frees
 // its slot without an exit hook.
 type investigationRegistry struct {
 	mu        sync.Mutex
 	records   []*investigationRecord
-	timers    map[string]investigationTimer
+	timers    map[string]Timer
 	reportDir string
 	now       func() time.Time
-	after     func(time.Duration, func()) investigationTimer
+	after     func(time.Duration, func()) Timer
 	live      func(id string) bool
 	onExpire  func(investigationRecord)
 }
 
 func newInvestigationRegistry(reportDir string) *investigationRegistry {
 	return &investigationRegistry{
-		timers:    map[string]investigationTimer{},
+		timers:    map[string]Timer{},
 		reportDir: reportDir,
 		now:       time.Now,
-		after: func(d time.Duration, f func()) investigationTimer {
+		after: func(d time.Duration, f func()) Timer {
 			return time.AfterFunc(d, f)
 		},
 		live: func(string) bool { return true },
 	}
 }
 
-// A registry field rather than a constant so tests never write to the shared
-// temp dir.
-func defaultInvestigationReportDir() string {
+// DefaultReportDir is the production report dir; it is a Deps field rather
+// than a constant so tests never write to the shared temp dir.
+func DefaultReportDir() string {
 	return filepath.Join(os.TempDir(), "erun-investigate")
 }
 
@@ -125,7 +128,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 
 	live := r.liveLocked()
 	for _, existing := range live {
-		if existing.EventKey == eventKey && now.Sub(existing.StartedAt) < investigationEventWindow {
+		if existing.EventKey == eventKey && now.Sub(existing.StartedAt) < EventWindow {
 			existing.Suppressed++
 			return &investigationRefusalError{
 				reason: "same-event",

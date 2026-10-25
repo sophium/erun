@@ -86,10 +86,10 @@ func orchestratorEdgeTestApp(t *testing.T, edge *spawnEdgeProbe) (*App, *capture
 		canReachMCPEndpoint:         edge.reachable,
 		reconnectMCP:                edge.reconnect,
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
+		investigationReportDir:      t.TempDir(),
 	})
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
-	app.investigations.reportDir = t.TempDir()
 	return app, emits
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/investigate"
 	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
@@ -60,7 +61,7 @@ func TestReportBugFailureRefusalNamesTheExistingDraftToFocus(t *testing.T) {
 	if err != nil || !first.Admitted {
 		t.Fatalf("first report must be admitted: %v, %+v", err, first)
 	}
-	harness.advance(investigationEventWindow + time.Minute)
+	harness.advance(investigate.EventWindow + time.Minute)
 	second, err := harness.app.ReportBugFailure(report, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("a refusal must be reported as a value, not a Go error: %v", err)
@@ -84,7 +85,7 @@ func TestReportBugAndInvestigateShareTheSameBoundedPopulation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("investigation must be admitted: %v", err)
 	}
-	harness.advance(investigationEventWindow + time.Minute)
+	harness.advance(investigate.EventWindow + time.Minute)
 	outcome, err := harness.app.ReportBugFailure(report, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("a refusal must be reported as a value, not a Go error: %v", err)

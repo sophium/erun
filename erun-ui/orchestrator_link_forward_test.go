@@ -39,13 +39,13 @@ func orchestratorLinkForwardTestApp(
 		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
-		reconnectMCP:        reconnect,
-		readRuntimeRunState: readRunState,
-		canReachMCPEndpoint: orchestratorTestAlwaysReachable,
+		reconnectMCP:           reconnect,
+		readRuntimeRunState:    readRunState,
+		canReachMCPEndpoint:    orchestratorTestAlwaysReachable,
+		investigationReportDir: t.TempDir(),
 	})
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
-	app.investigations.reportDir = t.TempDir()
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, emits
 }

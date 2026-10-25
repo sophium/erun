@@ -22,6 +22,7 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
 	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/investigate"
 	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
@@ -102,6 +103,7 @@ type erunUIDeps struct {
 	skipLoginShellEnv            bool
 	cloneERun                    func(context.Context, string, string) error
 	contributeStatePath          string
+	investigationReportDir       string
 	interruptedActivityPath      string
 	orchestratorRestoreDir       string
 	orchestratorOpenPath         string
@@ -122,7 +124,7 @@ type App struct {
 	identity *desktopIdentity
 
 	// investigations has its own lock; never call into it while holding the terminal lock.
-	investigations *investigationRegistry
+	investigations *investigate.Service
 
 	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit
 	// proceed without prompting. It is guarded by the terminal lock
@@ -191,9 +193,7 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{deps: deps}
-	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
-	app.investigations.live = func(id string) bool { return app.orchestrator.Running(id) }
-	app.investigations.onExpire = app.finishExpiredInvestigation
+	app.investigations = app.newInvestigationService(nil, nil)
 	app.activity = app.newActivityService()
 	app.contribute = app.newContributeService()
 	app.tenant = tenantsvc.New(tenantsvc.Deps{
@@ -319,7 +319,7 @@ func (a *App) shutdown(context.Context) {
 	a.activity.StopPollers()
 	a.cloudContexts.Stop()
 	a.activity.StopActionRunners()
-	a.investigations.stopTimers()
+	a.investigations.StopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()
 	// The refreshers' and sync workers' own locks are leaves, so stop them before taking the terminal lock.

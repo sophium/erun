@@ -31,8 +31,8 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 		orchestratorOpenPath:        openPath,
 		orchestratorRestoreDir:      restoreDir,
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
+		investigationReportDir:      t.TempDir(),
 	})
-	app.investigations.reportDir = t.TempDir()
 	return app, openPath, restoreDir
 }
 

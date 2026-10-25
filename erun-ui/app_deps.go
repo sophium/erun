@@ -20,6 +20,7 @@ import (
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/investigate"
 	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
@@ -331,6 +332,9 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.contributeStatePath == "" {
 		deps.contributeStatePath = contribute.DefaultStatePath()
+	}
+	if deps.investigationReportDir == "" {
+		deps.investigationReportDir = investigate.DefaultReportDir()
 	}
 	if deps.interruptedActivityPath == "" {
 		deps.interruptedActivityPath = activitysvc.DefaultInterruptedActivityPath()

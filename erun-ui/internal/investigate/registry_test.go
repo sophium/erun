@@ -1,10 +1,11 @@
-package main
+package investigate
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -14,8 +15,6 @@ import (
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
-	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
-	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -28,13 +27,96 @@ const (
 	investigateThinProbeReport  = "probe 1"
 )
 
+const investigateHelmTimeoutReport = `erun deploy failed
+Target: frs/dev
+Version: 1.0.179
+Release: frs-devops
+Namespace: frs-dev
+Started: 2026-08-16T06:01:12Z
+Elapsed: 4s
+
+Error: ==> Deploy failed after 4s
+
+Output:
+helm upgrade --install frs-devops ./chart
+Error: UPGRADE FAILED: timed out waiting for the condition`
+
+// fakeSessions stands in for the orchestrator sessions a spawn starts.
+type fakeSessions struct {
+	mu      sync.Mutex
+	live    map[string]bool
+	tracked bool
+	started []Transient
+}
+
+func (f *fakeSessions) start(spawn Transient) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.live[spawn.ID] = true
+	f.started = append(f.started, spawn)
+	return nil
+}
+
+func (f *fakeSessions) running(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.live[id]
+}
+
+func (f *fakeSessions) stop(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.live, id)
+}
+
+// pid is this test process for a tracked session, so the job it attaches reads as alive.
+func (f *fakeSessions) pid(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.tracked || !f.live[id] {
+		return 0
+	}
+	return os.Getpid()
+}
+
+func (f *fakeSessions) liveIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.live))
+	for id := range f.live {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+type capturedEmits struct {
+	mu     sync.Mutex
+	byName map[string][]any
+}
+
+func (c *capturedEmits) emit(name string, args ...any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(args) > 0 {
+		c.byName[name] = append(c.byName[name], args[0])
+	}
+}
+
+func (c *capturedEmits) events(name string) []any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]any(nil), c.byName[name]...)
+}
+
 // investigationHarness injects the clock and lifetime timer, so no test sleeps.
 type investigationHarness struct {
-	app     *App
-	emits   *capturedEmits
-	mu      sync.Mutex
-	now     time.Time
-	pending []func()
+	service  *Service
+	sessions *fakeSessions
+	emits    *capturedEmits
+	mu       sync.Mutex
+	now      time.Time
+	pending  []func()
 }
 
 func newInvestigationHarness(t *testing.T) *investigationHarness {
@@ -43,21 +125,29 @@ func newInvestigationHarness(t *testing.T) *investigationHarness {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 
-	app := orchestratorTestApp(t)
-	t.Cleanup(func() { app.shutdown(context.Background()) })
 	harness := &investigationHarness{
-		app:   app,
-		emits: newCapturedEmits(),
-		now:   time.Date(2026, 8, 16, 6, 0, 0, 0, time.UTC),
+		sessions: &fakeSessions{live: map[string]bool{}},
+		emits:    &capturedEmits{byName: map[string][]any{}},
+		now:      time.Date(2026, 8, 16, 6, 0, 0, 0, time.UTC),
 	}
-	app.SetEmitter(harness.emits.fn())
-	app.investigations.now = harness.clock
-	app.investigations.after = func(_ time.Duration, fire func()) investigationTimer {
-		harness.mu.Lock()
-		defer harness.mu.Unlock()
-		harness.pending = append(harness.pending, fire)
-		return stubInvestigationTimer{}
-	}
+	harness.service = New(Deps{
+		Running:     harness.sessions.running,
+		StopSession: harness.sessions.stop,
+		SessionPID:  harness.sessions.pid,
+		HostWorkspace: func(uimodel.Selection) (string, error) {
+			return "", errors.New("no host workspace in this test")
+		},
+		Emit:      harness.emits.emit,
+		ReportDir: t.TempDir(),
+		Now:       harness.clock,
+		After: func(_ time.Duration, fire func()) Timer {
+			harness.mu.Lock()
+			defer harness.mu.Unlock()
+			harness.pending = append(harness.pending, fire)
+			return stubInvestigationTimer{}
+		},
+	})
+	t.Cleanup(harness.service.StopTimers)
 	return harness
 }
 
@@ -87,18 +177,26 @@ type stubInvestigationTimer struct{}
 
 func (stubInvestigationTimer) Stop() bool { return true }
 
-func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) orchestratorsvc.Info {
+// investigate is InvestigateFailure as the facade runs it, returning the session it started.
+func (h *investigationHarness) investigate(report, tenant, environment string) (Transient, error) {
+	var started Transient
+	err := h.service.Spawn(InvestigateRequest(report, tenant, environment, 80, 24), func(spawn Transient) error {
+		started = spawn
+		return h.sessions.start(spawn)
+	})
+	return started, err
+}
+
+func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) Transient {
 	t.Helper()
-	h.app.deps.startTerminal = func(terminal.StartParams) (terminal.PTY, error) {
-		session := newStubTerminalSession()
-		session.pid = os.Getpid()
-		return session, nil
-	}
-	info, err := h.app.InvestigateFailure(report, tenant, environment, 80, 24)
+	h.sessions.mu.Lock()
+	h.sessions.tracked = true
+	h.sessions.mu.Unlock()
+	started, err := h.investigate(report, tenant, environment)
 	if err != nil {
-		t.Fatalf("InvestigateFailure failed: %v", err)
+		t.Fatalf("investigate failed: %v", err)
 	}
-	return info
+	return started
 }
 
 func investigateReport(target, failure string) string {
@@ -113,10 +211,51 @@ func refusalReason(t *testing.T, err error) string {
 	return investigationRefusalReason(err)
 }
 
-func assertNoSessions(t *testing.T, app *App, context string) {
+func assertNoSessions(t *testing.T, h *investigationHarness, context string) {
 	t.Helper()
-	if listed := app.ListOrchestrators(); len(listed) != 0 {
-		t.Fatalf("%s: expected no orchestrator session, got %+v", context, listed)
+	if live := h.sessions.liveIDs(); len(live) != 0 {
+		t.Fatalf("%s: expected no orchestrator session, got %v", context, live)
+	}
+}
+
+func TestEmptyReportIsRejectedBeforeAnythingIsStaged(t *testing.T) {
+	harness := newInvestigationHarness(t)
+	if _, err := harness.investigate("   ", "frs", "dev"); err == nil {
+		t.Fatal("expected an empty failure report to be rejected")
+	}
+	if staged := stagedReports(t, harness.service.registry.reportDir); len(staged) != 0 {
+		t.Fatalf("an empty report must stage nothing, got %v", staged)
+	}
+}
+
+func TestAFailedSpawnHoldsNoSlot(t *testing.T) {
+	harness := newInvestigationHarness(t)
+	err := harness.service.Spawn(InvestigateRequest(investigateHelmTimeoutReport, "frs", "dev", 80, 24), func(Transient) error {
+		return errors.New("spawn refused")
+	})
+	if err == nil || err.Error() != "spawn refused" {
+		t.Fatalf("expected the spawn's own error, got %v", err)
+	}
+	if _, err := harness.investigate(investigateHelmTimeoutReport, "frs", "dev"); err != nil {
+		t.Fatalf("a failed spawn must start no cooldown and hold no capacity: %v", err)
+	}
+}
+
+func TestInvestigationIsSeededWithTheStagedReport(t *testing.T) {
+	harness := newInvestigationHarness(t)
+	started, err := harness.investigate(investigateHelmTimeoutReport, "frs", "dev")
+	if err != nil {
+		t.Fatalf("investigate failed: %v", err)
+	}
+	if started.Name != "Investigate dev" || len(started.Envs) != 1 || started.Envs[0].Tenant != "frs" || started.Envs[0].Environment != "dev" {
+		t.Fatalf("expected a session named for and scoped to frs/dev, got %+v", started)
+	}
+	if !strings.HasPrefix(started.ID, "investigate-") {
+		t.Fatalf("expected an investigate id, got %q", started.ID)
+	}
+	staged := stagedReports(t, harness.service.registry.reportDir)
+	if len(staged) != 1 || !strings.Contains(started.InitialPrompt, staged[0]) || !strings.Contains(started.InitialPrompt, "erun-file-issue") {
+		t.Fatalf("the prompt must name the staged report %v, got %q", staged, started.InitialPrompt)
 	}
 }
 
@@ -129,16 +268,16 @@ func TestReportWithNoDiagnosticContentSpawnsNothing(t *testing.T) {
 	} {
 		t.Run(report, func(t *testing.T) {
 			harness := newInvestigationHarness(t)
-			_, err := harness.app.InvestigateFailure(report, "frs", "dev", 80, 24)
+			_, err := harness.investigate(report, "frs", "dev")
 			if reason := refusalReason(t, err); reason != "thin-report" {
 				t.Fatalf("expected a thin-report refusal, got %q (%v)", reason, err)
 			}
 			if !strings.Contains(err.Error(), "no diagnostic content") {
 				t.Fatalf("the refusal must name the missing evidence, got %q", err)
 			}
-			assertNoSessions(t, harness.app, "thin report")
+			assertNoSessions(t, harness, "thin report")
 
-			staged := stagedReports(t, harness.app.investigations.reportDir)
+			staged := stagedReports(t, harness.service.registry.reportDir)
 			if len(staged) != 1 {
 				t.Fatalf("expected the refused report to be staged, got %d files", len(staged))
 			}
@@ -151,32 +290,28 @@ func TestReportWithNoDiagnosticContentSpawnsNothing(t *testing.T) {
 
 func TestReportWithDiagnosticContentStillSpawnsAnInvestigation(t *testing.T) {
 	harness := newInvestigationHarness(t)
-	info, err := harness.app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
-	if err != nil {
+	if _, err := harness.investigate(investigateHelmTimeoutReport, "frs", "dev"); err != nil {
 		t.Fatalf("a report with a command, an error, and captured output must be admitted: %v", err)
 	}
-	if !info.Transient {
-		t.Fatalf("expected a transient investigator, got %+v", info)
-	}
-	if listed := harness.app.ListOrchestrators(); len(listed) != 1 {
+	if listed := harness.sessions.liveIDs(); len(listed) != 1 {
 		t.Fatalf("expected exactly one investigation, got %+v", listed)
 	}
 }
 
 func TestSecondReportOfOneFailureEventSpawnsNothing(t *testing.T) {
 	harness := newInvestigationHarness(t)
-	if _, err := harness.app.InvestigateFailure(investigateReport("frs/dev", "UPGRADE FAILED: timed out"), "frs", "dev", 80, 24); err != nil {
+	if _, err := harness.investigate(investigateReport("frs/dev", "UPGRADE FAILED: timed out"), "frs", "dev"); err != nil {
 		t.Fatalf("first report: %v", err)
 	}
 	harness.advance(10 * time.Millisecond)
-	_, err := harness.app.InvestigateFailure(investigateReport("frs/dev", "release frs-devops has no deployed revision"), "frs", "dev", 80, 24)
+	_, err := harness.investigate(investigateReport("frs/dev", "release frs-devops has no deployed revision"), "frs", "dev")
 	if reason := refusalReason(t, err); reason != "same-event" {
 		t.Fatalf("expected the second report to fold into the same event, got %q (%v)", reason, err)
 	}
-	if listed := harness.app.ListOrchestrators(); len(listed) != 1 {
+	if listed := harness.sessions.liveIDs(); len(listed) != 1 {
 		t.Fatalf("one event must spawn one investigation, got %+v", listed)
 	}
-	records := harness.app.investigations.list()
+	records := harness.service.registry.list()
 	if len(records) != 1 || records[0].Suppressed != 1 {
 		t.Fatalf("the folded report must be counted against the investigation, got %+v", records)
 	}
@@ -185,15 +320,15 @@ func TestSecondReportOfOneFailureEventSpawnsNothing(t *testing.T) {
 func TestRepeatOfAFailureAlreadyUnderInvestigationSpawnsNothing(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")
-	if _, err := harness.app.InvestigateFailure(report, "frs", "dev", 80, 24); err != nil {
+	if _, err := harness.investigate(report, "frs", "dev"); err != nil {
 		t.Fatalf("first report: %v", err)
 	}
-	harness.advance(investigationEventWindow + time.Minute)
-	_, err := harness.app.InvestigateFailure(report, "frs", "dev", 80, 24)
+	harness.advance(EventWindow + time.Minute)
+	_, err := harness.investigate(report, "frs", "dev")
 	if reason := refusalReason(t, err); reason != "already-investigating" {
 		t.Fatalf("expected a refusal naming the running investigation, got %q (%v)", reason, err)
 	}
-	if listed := harness.app.ListOrchestrators(); len(listed) != 1 {
+	if listed := harness.sessions.liveIDs(); len(listed) != 1 {
 		t.Fatalf("expected the population to stay at one, got %+v", listed)
 	}
 }
@@ -201,27 +336,25 @@ func TestRepeatOfAFailureAlreadyUnderInvestigationSpawnsNothing(t *testing.T) {
 func TestRepeatOfAnEndedInvestigationWaitsOutTheCooldown(t *testing.T) {
 	harness := newInvestigationHarness(t)
 	report := investigateReport("frs/dev", "UPGRADE FAILED: timed out")
-	first, err := harness.app.InvestigateFailure(report, "frs", "dev", 80, 24)
+	first, err := harness.investigate(report, "frs", "dev")
 	if err != nil {
 		t.Fatalf("first report: %v", err)
 	}
-	if err := harness.app.StopOrchestrator(first.ID); err != nil {
-		t.Fatalf("stop the first investigation: %v", err)
-	}
-	assertNoSessions(t, harness.app, "after the first investigation ended")
+	harness.sessions.stop(first.ID)
+	assertNoSessions(t, harness, "after the first investigation ended")
 
 	harness.advance(investigationCooldown - time.Minute)
-	_, err = harness.app.InvestigateFailure(report, "frs", "dev", 80, 24)
+	_, err = harness.investigate(report, "frs", "dev")
 	if reason := refusalReason(t, err); reason != "cooldown" {
 		t.Fatalf("expected a cooldown refusal inside the window, got %q (%v)", reason, err)
 	}
-	assertNoSessions(t, harness.app, "inside the cooldown")
+	assertNoSessions(t, harness, "inside the cooldown")
 
 	harness.advance(2 * time.Minute)
-	if _, err := harness.app.InvestigateFailure(report, "frs", "dev", 80, 24); err != nil {
+	if _, err := harness.investigate(report, "frs", "dev"); err != nil {
 		t.Fatalf("the cooldown must release: %v", err)
 	}
-	if listed := harness.app.ListOrchestrators(); len(listed) != 1 {
+	if listed := harness.sessions.liveIDs(); len(listed) != 1 {
 		t.Fatalf("expected one investigation after the cooldown released, got %+v", listed)
 	}
 }
@@ -236,7 +369,7 @@ func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			environment := fmt.Sprintf("env%d", index)
-			_, err := harness.app.InvestigateFailure(investigateReport("frs/"+environment, "UPGRADE FAILED: timed out"), "frs", environment, 80, 24)
+			_, err := harness.investigate(investigateReport("frs/"+environment, "UPGRADE FAILED: timed out"), "frs", environment)
 			admitted[index] = err == nil
 		}()
 	}
@@ -251,14 +384,11 @@ func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 	if count != maxLiveInvestigations {
 		t.Fatalf("expected exactly %d of %d concurrent events to be admitted, got %d", maxLiveInvestigations, events, count)
 	}
-	if listed := harness.app.ListOrchestrators(); len(listed) != maxLiveInvestigations {
+	if listed := harness.sessions.liveIDs(); len(listed) != maxLiveInvestigations {
 		t.Fatalf("expected %d live sessions, got %+v", maxLiveInvestigations, listed)
 	}
-	live := harness.app.ListOrchestrators()
-	if err := harness.app.StopOrchestrator(live[0].ID); err != nil {
-		t.Fatalf("stop one investigation: %v", err)
-	}
-	if _, err := harness.app.InvestigateFailure(investigateReport("frs/spare", "UPGRADE FAILED: timed out"), "frs", "spare", 80, 24); err != nil {
+	harness.sessions.stop(harness.sessions.liveIDs()[0])
+	if _, err := harness.investigate(investigateReport("frs/spare", "UPGRADE FAILED: timed out"), "frs", "spare"); err != nil {
 		t.Fatalf("a freed slot must admit the next event: %v", err)
 	}
 }
@@ -273,11 +403,11 @@ func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	harness.advance(investigationLifetime)
 	harness.reachLifetimeBound()
 
-	assertNoSessions(t, harness.app, "after the lifetime bound")
+	assertNoSessions(t, harness, "after the lifetime bound")
 	if leases := activityLeaseIDs(t, "frs", "dev"); len(leases) != 0 {
 		t.Fatalf("a terminated investigation must not keep the environment busy, got %v", leases)
 	}
-	records := harness.app.investigations.list()
+	records := harness.service.registry.list()
 	if len(records) != 1 || records[0].State != investigationExpired {
 		t.Fatalf("expected the investigation recorded as expired, got %+v", records)
 	}
@@ -287,7 +417,7 @@ func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	if !emittedNotificationContains(harness.emits, "was stopped after") {
 		t.Fatalf("the operator must be told the investigation was stopped, got %+v", harness.emits.events(uimodel.AppNotificationEvent))
 	}
-	if _, err := harness.app.InvestigateFailure(investigateReport("frs/other", "ImagePullBackOff"), "frs", "other", 80, 24); err != nil {
+	if _, err := harness.investigate(investigateReport("frs/other", "ImagePullBackOff"), "frs", "other"); err != nil {
 		t.Fatalf("the freed slot must admit a new investigation: %v", err)
 	}
 }

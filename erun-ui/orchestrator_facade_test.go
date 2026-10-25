@@ -62,9 +62,9 @@ func orchestratorTestApp(t *testing.T) *App {
 		resolveGatewayCredential: func(*configpkg.OpenRouterConfig) (string, error) {
 			return "", errors.New("no gateway credential staged by this test")
 		},
+		// Keep failure reports out of the shared host temp dir.
+		investigationReportDir: t.TempDir(),
 	})
-	// Keep failure reports out of the shared host temp dir.
-	app.investigations.reportDir = t.TempDir()
 	return app
 }
 

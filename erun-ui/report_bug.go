@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-ui/internal/investigate"
 	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 )
 
@@ -28,11 +29,20 @@ func (a *App) ReportBugFailure(report, tenant, environment string, cols, rows in
 	if env := strings.TrimSpace(environment); env != "" {
 		name = "Report bug: " + env
 	}
-	info, err := a.spawnFailureAgent("report-bug", report, tenant, environment, cols, rows, name, reportBugPrompt)
+	info, err := a.spawnFailureAgent(investigate.Request{
+		IDPrefix:    "report-bug",
+		Report:      report,
+		Tenant:      tenant,
+		Environment: environment,
+		Name:        name,
+		Cols:        cols,
+		Rows:        rows,
+		Prompt:      reportBugPrompt,
+	})
 	if err == nil {
 		return reportBugOutcome{Orchestrator: info, Admitted: true}, nil
 	}
-	reason, message, existingID := investigationRefusalDetails(err)
+	reason, message, existingID := investigate.RefusalDetails(err)
 	return reportBugOutcome{Reason: reason, Message: message, ExistingID: existingID}, nil
 }
 
