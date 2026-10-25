@@ -26,7 +26,7 @@ import {
 } from '@/components/app/Titlebar.WhipAction.helpers';
 import { TitlebarWhipTargetPicker } from '@/components/app/Titlebar.WhipAction.TargetPicker';
 
-import type { main } from '../../../wailsjs/go/models';
+import type { orchestrator } from '../../../wailsjs/go/models';
 
 const whipButtonClassName =
   'size-7 flex-none cursor-pointer rounded-[var(--radius)] border-0 bg-transparent text-muted-foreground [--wails-draggable:no-drag] hover:bg-accent hover:text-accent-foreground [&_svg]:size-[18px]';
@@ -72,7 +72,7 @@ export function TitlebarWhipAction(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [outcome, setOutcome] = React.useState<WhipOutcome | null>(null);
-  const [targets, setTargets] = React.useState<main.uiWhipTargetList | null>(null);
+  const [targets, setTargets] = React.useState<orchestrator.WhipTargetList | null>(null);
   const [targetsLoading, setTargetsLoading] = React.useState(false);
   const [selection, setSelection] = React.useState<WhipTargetSelection>(
     defaultWhipTargetSelection(null),
@@ -179,7 +179,7 @@ function WhipPopoverBody({
 }: {
   pending: boolean;
   outcome: WhipOutcome | null;
-  targets: main.uiWhipTargetList | null;
+  targets: orchestrator.WhipTargetList | null;
   targetsLoading: boolean;
   selection: WhipTargetSelection;
   setSelection: React.Dispatch<React.SetStateAction<WhipTargetSelection>>;
@@ -272,7 +272,7 @@ function WhipReportBody({
   );
 }
 
-function WhipResultRow({ result }: { result: main.uiWhipResult }): React.ReactElement {
+function WhipResultRow({ result }: { result: orchestrator.WhipResult }): React.ReactElement {
   return (
     <li className="flex flex-col gap-0.5 text-xs">
       <div className="flex items-center justify-between gap-2">

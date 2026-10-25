@@ -13,6 +13,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -149,7 +150,7 @@ func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreStat
 // A pending hand-off decides the pane owner; otherwise the most recently started one does.
 func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	state := consumeOrchestratorRestoreTarget(a.deps.orchestratorRestoreDir, time.Now())
-	openEntries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
+	openEntries := orchestratorsvc.ReadOpenOrchestrators(a.deps.orchestratorOpenPath)
 	owner := state.OrchestratorID
 	if owner == "" {
 		if len(openEntries) == 0 {
@@ -164,18 +165,6 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 		}
 	}
 	return target
-}
-
-func equalOrchestratorScope(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // RestartApp persists the hand-off, spawns a fresh instance, then quits this one
@@ -230,7 +219,7 @@ func exitForStalledRestartQuit(reason string) {
 // orchestratorRestartPreview reports, without restarting, which orchestrators the
 // next launch would refuse to reopen.
 func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []model.DesktopRestartReopen {
-	entries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
+	entries := orchestratorsvc.ReadOpenOrchestrators(a.deps.orchestratorOpenPath)
 	ids := restartPreviewOrchestratorIDs(entries, strings.TrimSpace(returnToOrchestratorID))
 	out := make([]model.DesktopRestartReopen, 0, len(ids))
 	for _, id := range ids {
@@ -244,7 +233,7 @@ func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []model.
 
 // restartPreviewOrchestratorIDs is the open set plus the hand-off's orchestrator,
 // which is reopened even when not in the open set.
-func restartPreviewOrchestratorIDs(entries []orchestratorOpenEntry, handoffID string) []string {
+func restartPreviewOrchestratorIDs(entries []orchestratorsvc.OpenEntry, handoffID string) []string {
 	ids := make([]string, 0, len(entries)+1)
 	for _, entry := range entries {
 		ids = append(ids, entry.OrchestratorID)
@@ -261,11 +250,7 @@ func (a *App) restartLaunchRefusal(id string) string {
 	if id == "" {
 		return ""
 	}
-	def, err := a.findOrchestratorConfig(id)
-	if err != nil {
-		return ""
-	}
-	if _, err := a.resolvePersistedOrchestratorLaunch(def); err != nil {
+	if err := a.orchestrator.PersistedLaunchError(id); err != nil {
 		return fmt.Sprintf("The restart will not reopen %s: %v. Its background agent keeps running; fix that and open it again.", id, err)
 	}
 	return ""

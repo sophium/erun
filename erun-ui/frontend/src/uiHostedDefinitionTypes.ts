@@ -1,4 +1,4 @@
-// Hosted-definition marker types, mirroring erun-ui/hosted_definition.go.
+// Hosted-definition marker types, mirroring erun-ui/internal/settings/hosted_definition.go.
 
 export interface UIHostedEnvironment {
   describe: string;

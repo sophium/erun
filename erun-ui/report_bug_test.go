@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/investigate"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // A refusal is reported as a value, carrying the existing session's id when
@@ -33,7 +36,7 @@ func TestReportBugFailureWithNoDiagnosticContentIsRefused(t *testing.T) {
 
 func TestReportBugFailureWithDiagnosticContentSpawnsADraftAgent(t *testing.T) {
 	harness := newInvestigationHarness(t)
-	harness.app.deps.startTerminal = func(startTerminalSessionParams) (terminalSession, error) {
+	harness.app.deps.startTerminal = func(terminal.StartParams) (terminal.PTY, error) {
 		session := newStubTerminalSession()
 		session.pid = os.Getpid()
 		return session, nil
@@ -58,7 +61,7 @@ func TestReportBugFailureRefusalNamesTheExistingDraftToFocus(t *testing.T) {
 	if err != nil || !first.Admitted {
 		t.Fatalf("first report must be admitted: %v, %+v", err, first)
 	}
-	harness.advance(investigationEventWindow + time.Minute)
+	harness.advance(investigate.EventWindow + time.Minute)
 	second, err := harness.app.ReportBugFailure(report, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("a refusal must be reported as a value, not a Go error: %v", err)
@@ -82,7 +85,7 @@ func TestReportBugAndInvestigateShareTheSameBoundedPopulation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("investigation must be admitted: %v", err)
 	}
-	harness.advance(investigationEventWindow + time.Minute)
+	harness.advance(investigate.EventWindow + time.Minute)
 	outcome, err := harness.app.ReportBugFailure(report, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("a refusal must be reported as a value, not a Go error: %v", err)

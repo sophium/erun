@@ -45,7 +45,7 @@ test.describe('ERUN sidebar section', () => {
   });
 
   // Both guidance layers render with resolved paths; the IDE launch itself is covered by
-  // erun-ui/orchestrator_guidance_test.go.
+  // erun-ui/internal/orchestrator/guidance_test.go.
   test('manage dialog reveals both guidance layers with their resolved paths', async ({ app }) => {
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
     await app.orchestratorDialog.waitForOpen('Edit orchestrator');

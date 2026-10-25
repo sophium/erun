@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -96,4 +97,21 @@ func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (
 	priv := d.privatePEM
 	d.mu.Unlock()
 	return mcpauth.SignDesktopMCPToken(priv, tenant, environment, now)
+}
+
+// appendMCPAuthPublicKeyFlag requires the desktop-signed MCP bearer; on failure it
+// omits the flag, since an unauthenticated env is recoverable and a blocked deploy is not.
+func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
+	if a.identity == nil {
+		return args
+	}
+	path, err := a.identity.ensurePublicKeyPath()
+	if err != nil {
+		log.Printf("erun-app: resolve MCP auth public key for deploy: %v", err)
+		return args
+	}
+	if path == "" {
+		return args
+	}
+	return append(args, "--mcp-auth-public-key", path)
 }

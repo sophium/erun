@@ -6,6 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func newTestAppForWindowClose(t *testing.T) *App {
@@ -22,21 +27,21 @@ func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "deploy-1",
 		Command:     "deploy",
 		Tenant:      "acme",
 		Environment: "prod",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 
 	if prevent := app.beforeClose(context.Background()); !prevent {
 		t.Fatal("beforeClose must block the close while a deploy is running")
 	}
 
-	events := emits.events(appCloseGateEvent)
+	events := emits.events(uimodel.AppCloseGateEvent)
 	if len(events) != 1 {
-		t.Fatalf("expected one %s event, got %d", appCloseGateEvent, len(events))
+		t.Fatalf("expected one %s event, got %d", uimodel.AppCloseGateEvent, len(events))
 	}
 	gate, ok := events[0].(uiCloseGate)
 	if !ok {
@@ -59,7 +64,7 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	if prevent := app.beforeClose(context.Background()); prevent {
 		t.Fatal("beforeClose must not block the close when nothing is running")
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("expected no close-gate event on an idle queue, got %d", len(events))
 	}
 	if _, err := os.Stat(app.deps.windowStatePath); err != nil {
@@ -68,51 +73,51 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 }
 
 func TestATabStillBeingEstablishedDoesNotBlockTheClose(t *testing.T) {
-	for _, kind := range []gatedSessionKind{
-		gatedSessionKindOpen,
-		gatedSessionKindAI,
-		gatedSessionKindContributeERun,
-		gatedSessionKindContributeAI,
+	for _, kind := range []string{
+		activitysvc.GatedOpen,
+		activitysvc.GatedAI,
+		activitysvc.GatedContributeERun,
+		activitysvc.GatedContributeAI,
 	} {
-		t.Run(string(kind), func(t *testing.T) {
+		t.Run(kind, func(t *testing.T) {
 			assertTabSetupDoesNotBlockTheClose(t, kind)
 		})
 	}
 }
 
-func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
+func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind string) {
 	t.Helper()
 	app := newTestAppForWindowClose(t)
-	t.Cleanup(app.stopActionRunners)
+	t.Cleanup(app.activity.StopActionRunners)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "pw", Environment: "alpha"}
-	held := &managedTerminal{selection: selection}
-	t.Cleanup(func() { held.signalReady(nil) })
+	selection := uimodel.Selection{Tenant: "pw", Environment: "alpha"}
+	held := &terminal.Session{Selection: selection}
+	t.Cleanup(func() { held.SignalReady(nil) })
 
-	if _, err := app.enqueueGatedSession(selection, kind, func(context.Context) (startSessionResult, *managedTerminal, error) {
-		return startSessionResult{SessionID: 1, Selection: selection}, held, nil
-	}); err != nil {
-		t.Fatalf("enqueueGatedSession: %v", err)
+	if _, err := app.activity.EnqueueGatedSession(selection, kind, gatedStart(func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
+		return uimodel.StartSessionResult{SessionID: 1, Selection: selection}, held, nil
+	})); err != nil {
+		t.Fatalf("EnqueueGatedSession: %v", err)
 	}
 	setup := app.FindActiveDeployForSelection(selection)
-	if setup.Status != activityQueueStatusRunning || setup.ActionKind != string(kind) {
+	if setup.Status != activitysvc.StatusRunning || setup.ActionKind != kind {
 		t.Fatalf("expected the %s tab to be held running in setup, got %+v", kind, setup)
 	}
 
 	if gate := app.PrepareWindowClose(); gate.Blocked || len(gate.Running) != 0 {
 		t.Fatalf("a %s tab still being established must not block the close: %+v", kind, gate)
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("expected no close-gate event while only a tab is being established, got %d", len(events))
 	}
 
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "deploy-1",
 		Command:     "deploy",
 		Tenant:      "pw",
 		Environment: "alpha",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 	gate := app.PrepareWindowClose()
 	if !gate.Blocked || len(gate.Running) != 1 || gate.Running[0].ID != "deploy-1" {
@@ -122,12 +127,12 @@ func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
 
 func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
 	app := newTestAppForWindowClose(t)
-	t.Cleanup(app.stopActionRunners)
+	t.Cleanup(app.activity.StopActionRunners)
 	started := false
-	_, err := app.enqueueGatedSession(uiSelection{Tenant: "pw", Environment: "alpha"}, gatedSessionKind("deploy"), func(context.Context) (startSessionResult, *managedTerminal, error) {
+	_, err := app.activity.EnqueueGatedSession(uimodel.Selection{Tenant: "pw", Environment: "alpha"}, "deploy", gatedStart(func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		started = true
-		return startSessionResult{}, nil, nil
-	})
+		return uimodel.StartSessionResult{}, nil, nil
+	}))
 	if err == nil || started {
 		t.Fatalf("expected an unregistered kind to be refused before starting, err=%v started=%v", err, started)
 	}
@@ -137,12 +142,12 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	quit := 0
 	app.deps.quitApp = func() { quit++ }
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "release-1",
 		Command:     "release",
 		Tenant:      "acme",
 		Environment: "prod",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 
 	if err := app.ConfirmWindowClose(); err != nil {
@@ -156,7 +161,7 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected an interrupted-activity record: %v", err)
 	}
-	var record interruptedActivityRecord
+	var record activitysvc.InterruptedRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatalf("record was not valid JSON: %v", err)
 	}
@@ -170,7 +175,7 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	if prevent := app.beforeClose(context.Background()); prevent {
 		t.Fatal("beforeClose must not re-block after ConfirmWindowClose")
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("beforeClose must not re-emit the gate after confirmation, got %d", len(events))
 	}
 }
@@ -197,10 +202,10 @@ func TestConfirmWindowCloseStillQuitsWhenRecordingFails(t *testing.T) {
 	app.deps.interruptedActivityPath = filepath.Join(blocker, "interrupted-activity.json")
 	quit := 0
 	app.deps.quitApp = func() { quit++ }
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:      "deploy-1",
 		Command: "deploy",
-		Status:  activityQueueStatusRunning,
+		Status:  activitysvc.StatusRunning,
 	})
 
 	if err := app.ConfirmWindowClose(); err == nil {

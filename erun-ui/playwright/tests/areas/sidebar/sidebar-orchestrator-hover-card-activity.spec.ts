@@ -488,7 +488,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     });
   });
 
-  // Persisted-history reads are covered by orchestrator_nudge_history_test.go; here the unreadable
+  // Persisted-history reads are covered by internal/orchestrator/nudge_history_test.go; here the unreadable
   // flag must not collapse to "Not nudged".
   test('an unreadable persisted history reads as unavailable, never as "Not nudged"', async ({
     app,
@@ -647,7 +647,7 @@ interface EnvActivityEvent {
   detail?: string;
 }
 
-// Mirrors erun-ui/environment_activity.go's env-activity event; re-driven until it converges since
+// Mirrors erun-ui/internal/runtimeview/env_activity.go's env-activity event; re-driven until it converges since
 // the backend sweep can overwrite it.
 async function driveEnvActivity(
   page: Page,

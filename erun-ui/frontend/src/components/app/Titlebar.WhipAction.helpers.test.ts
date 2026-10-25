@@ -2,19 +2,19 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import type { main } from '../../../wailsjs/go/models';
+import type { orchestrator } from '../../../wailsjs/go/models';
 import {
   whipOutcomeLabel,
   whipOutcomeTone,
   whipReportAllSucceeded,
 } from './Titlebar.WhipAction.helpers';
 
-function result(overrides: Partial<main.uiWhipResult>): main.uiWhipResult {
+function result(overrides: Partial<orchestrator.WhipResult>): orchestrator.WhipResult {
   return { kind: 'environment', id: 'frs/dev', name: 'frs/dev', outcome: 'pushed', ...overrides };
 }
 
 test('whipReportAllSucceeded is true when every result pushed', () => {
-  const report = { results: [result({ id: '1' }), result({ id: '2' })] } as main.uiWhipReport;
+  const report = { results: [result({ id: '1' }), result({ id: '2' })] } as orchestrator.WhipReport;
   assert.equal(whipReportAllSucceeded(report), true);
 });
 
@@ -22,7 +22,7 @@ test('whipReportAllSucceeded is false if any result capped, failed, or skipped',
   for (const outcome of ['capped', 'failed', 'skipped']) {
     const report = {
       results: [result({ id: '1' }), result({ id: '2', outcome })],
-    } as main.uiWhipReport;
+    } as orchestrator.WhipReport;
     assert.equal(
       whipReportAllSucceeded(report),
       false,
@@ -34,7 +34,7 @@ test('whipReportAllSucceeded is false if any result capped, failed, or skipped',
 // "Nothing was targeted" reads as an outcome the operator needs to notice,
 // not a success to hide -- an empty result list is not "all succeeded".
 test('whipReportAllSucceeded is false for an empty result list', () => {
-  const report = { results: [] } as unknown as main.uiWhipReport;
+  const report = { results: [] } as unknown as orchestrator.WhipReport;
   assert.equal(whipReportAllSucceeded(report), false);
 });
 

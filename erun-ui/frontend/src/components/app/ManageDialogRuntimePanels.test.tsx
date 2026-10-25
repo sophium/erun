@@ -32,7 +32,7 @@ const selection: UISelection = { tenant: 'acme', environment: 'dev' };
 
 const probeFailure = 'exit status 1: kubectl stub: no cluster in the Playwright harness';
 
-// Shares available=false with a failed read (erun-ui/runtime_sizing.go).
+// Shares available=false with a failed read (erun-ui/internal/runtimeview/sizing.go).
 const sizingEmptyState = 'No standing sizing recommendation is available for this environment yet.';
 
 function renderPanels(): { usage: string; activity: string; sizing: string } {

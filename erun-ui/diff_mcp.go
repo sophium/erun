@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type idleProbeRoundTripper struct {
@@ -59,7 +60,7 @@ func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.Streamable
 	}
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (model.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uimodel.DiffOptions) (model.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {

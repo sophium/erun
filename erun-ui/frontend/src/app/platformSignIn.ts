@@ -1,6 +1,6 @@
 import type { UITenantDashboard } from '@/types';
 
-// TENANT_SIGN_IN_AGAIN_MESSAGE must match tenant_platform_error.go exactly: a failed
+// TENANT_SIGN_IN_AGAIN_MESSAGE must match internal/tenant/platform_error.go exactly: a failed
 // Wails call is a bare string, so the sentence is the contract.
 export const TENANT_SIGN_IN_AGAIN_MESSAGE =
   'Your sign-in is no longer valid for this tenant. Sign in again and retry.';

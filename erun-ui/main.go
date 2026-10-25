@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-ui/headlessserver"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -82,7 +83,7 @@ func desktopDeps(headless bool) erunUIDeps {
 	deps := erunUIDeps{
 		store:           config.ConfigStore{},
 		findProjectRoot: config.FindProjectRoot,
-		resolveCLIPath:  resolveCLIExecutable,
+		resolveCLIPath:  terminal.ResolveCLIExecutable,
 		windowStatePath: defaultAppWindowStatePath(),
 	}
 	if headless {

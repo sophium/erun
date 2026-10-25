@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // restartTestApp keeps restart records in a temp dir with inert relaunch/quit.
@@ -22,14 +25,14 @@ func restartTestApp(t *testing.T) (*App, string) {
 	restoreDir := filepath.Join(home, "state", orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorRestoreDir: restoreDir,
-		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
+		orchestratorOpenPath:   filepath.Join(home, "orchestrator-open.json"),
 		relaunchApp:            func() error { return nil },
 		quitApp:                func() {},
 		// The real probe needs a Wails context.
@@ -43,10 +46,10 @@ func restartTestApp(t *testing.T) (*App, string) {
 // The quit is driven through beforeClose, as Wails drives it, so the real decision is asserted.
 func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
 	app, _ := restartTestApp(t)
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:      "deploy-1",
 		Command: "deploy",
-		Status:  activityQueueStatusRunning,
+		Status:  activitysvc.StatusRunning,
 	})
 
 	quitLanded := false
@@ -159,11 +162,7 @@ func TestRestartHandOffNamesOnlyThePaneOwner(t *testing.T) {
 
 func TestReopenGivesThePaneToTheHandOffAndReopensTheRest(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
-	for _, id := range []string{"alpha", "beta", "gamma"} {
-		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
-			t.Fatalf("record %s: %v", id, err)
-		}
-	}
+	recordOpenOrchestrators(t, app.deps.orchestratorOpenPath, "alpha", "beta", "gamma")
 	if err := writeOrchestratorRestoreTarget(restoreDir, orchestratorRestoreState{OrchestratorID: "beta"}, time.Now()); err != nil {
 		t.Fatalf("write hand-off: %v", err)
 	}
@@ -179,11 +178,7 @@ func TestReopenGivesThePaneToTheHandOffAndReopensTheRest(t *testing.T) {
 
 func TestReopenWithoutAHandOffGivesThePaneToTheMostRecent(t *testing.T) {
 	app, _ := restartTestApp(t)
-	for _, id := range []string{"alpha", "beta"} {
-		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
-			t.Fatalf("record %s: %v", id, err)
-		}
-	}
+	recordOpenOrchestrators(t, app.deps.orchestratorOpenPath, "alpha", "beta")
 	target := app.ResolveOrchestratorToReopen()
 	if target.OrchestratorID != "beta" || len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != "alpha" {
 		t.Fatalf("expected beta to own the pane with alpha beside it, got %+v", target)

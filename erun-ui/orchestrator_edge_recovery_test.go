@@ -9,6 +9,11 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/envops"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
@@ -22,7 +27,7 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 	log.SetOutput(&logs)
 	restoreLogOutputAfter(t)
 
-	app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
+	spawnEdgeOrchestrator(t, app, "petios", "Petios", []config.OrchestratorEnvConfig{
 		{Tenant: "erun", Environment: "remote"},
 	})
 	if got := logs.String(); !strings.Contains(got, "orchestrator petios: wired erun/remote but its edge is not answering") {
@@ -37,7 +42,7 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 
 	probe.setAnswers(true)
 	state := sweepUntilRebindSettles(t, app)
-	if !state.reachable || !state.observed {
+	if !state.Reachable || !state.Observed {
 		t.Fatalf("expected the sweep to observe the answering edge, got %+v", state)
 	}
 	if got := logs.String(); !strings.Contains(got, "orchestrator petios: wired erun/remote and its edge is answering again") {
@@ -47,6 +52,24 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 	sweepUntilRebindSettles(t, app)
 	if got := strings.Count(logs.String(), "answering again"); got != 1 {
 		t.Fatalf("recovery lines = %d, want exactly 1:\n%s", got, logs.String())
+	}
+}
+
+// spawnEdgeOrchestrator spawns a session linking envs, which wires their MCP
+// edges and records any that do not answer; every process it would run is stubbed.
+func spawnEdgeOrchestrator(t *testing.T, app *App, id, name string, envs []config.OrchestratorEnvConfig) {
+	t.Helper()
+	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
+	t.Setenv("ERUN_AGENTS_DIR", t.TempDir())
+	app.deps.startTerminal = func(terminal.StartParams) (terminal.PTY, error) {
+		return newStubTerminalSession(), nil
+	}
+	app.deps.resolveOrchestratorLaunch = func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		return "claude-stub", nil, nil
+	}
+	app.deps.runOrchestratorLabelCommand = stubOrchestratorClaimLabel
+	if _, err := app.orchestrator.SpawnTransient(orchestratorsvc.TransientSpawn{ID: id, Name: name, Envs: envs, Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("SpawnTransient %s: %v", id, err)
 	}
 }
 
@@ -68,8 +91,8 @@ func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.
 	restoreLogOutputAfter(t)
 
 	envs := []config.OrchestratorEnvConfig{{Tenant: "erun", Environment: "remote"}}
-	app.wireOrchestratorMCP("petios", "Petios", envs)
-	app.wireOrchestratorMCP("atlas", "Atlas", envs)
+	spawnEdgeOrchestrator(t, app, "petios", "Petios", envs)
+	spawnEdgeOrchestrator(t, app, "atlas", "Atlas", envs)
 	for _, id := range []string{"petios", "atlas"} {
 		want := "orchestrator " + id + ": wired erun/remote but its edge is not answering"
 		if got := logs.String(); !strings.Contains(got, want) {
@@ -79,7 +102,7 @@ func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.
 
 	sealForwardForSweep(t)
 	probe.setAnswers(true)
-	if state := sweepUntilRebindSettles(t, app); !state.reachable || !state.observed {
+	if state := sweepUntilRebindSettles(t, app); !state.Reachable || !state.Observed {
 		t.Fatalf("expected the sweep to observe the answering edge, got %+v", state)
 	}
 
@@ -112,12 +135,12 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 			log.SetOutput(&logs)
 			restoreLogOutputAfter(t)
 
-			app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
+			spawnEdgeOrchestrator(t, app, "petios", "Petios", []config.OrchestratorEnvConfig{
 				{Tenant: "erun", Environment: "remote"},
 			})
 			sealForwardForSweep(t)
-			var state environmentActivityState
-			for range forwardRepairAttempts + 2 {
+			var state runtimeview.ActivityState
+			for range envops.ForwardRepairAttempts + 2 {
 				state = sweepUntilRebindSettles(t, app)
 			}
 
@@ -126,33 +149,12 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 				t.Fatalf("expected the entry to be recorded, got:\n%s", got)
 			}
 			// A sweep that returned early would also log no recovery.
-			if !state.outage {
+			if !state.Outage {
 				t.Fatalf("expected the sweep to diagnose the unreachable edge, got %+v", state)
 			}
 			if strings.Contains(got, "answering again") {
 				t.Fatalf("an unresolved outage reported a recovery:\n%s", got)
 			}
 		})
-	}
-}
-
-func TestCutEnvLabelRejectsLabelsTheSweepCouldNeverMatch(t *testing.T) {
-	for _, tc := range []struct {
-		label       string
-		tenant      string
-		environment string
-		ok          bool
-	}{
-		{label: "frs/dev", tenant: "frs", environment: "dev", ok: true},
-		{label: "no-separator", ok: false},
-		{label: "/dev", ok: false},
-		{label: "frs/", ok: false},
-		{label: "", ok: false},
-	} {
-		tenant, environment, ok := cutEnvLabel(tc.label)
-		if ok != tc.ok || tenant != tc.tenant || environment != tc.environment {
-			t.Fatalf("cutEnvLabel(%q) = (%q, %q, %v), want (%q, %q, %v)",
-				tc.label, tenant, environment, ok, tc.tenant, tc.environment, tc.ok)
-		}
 	}
 }

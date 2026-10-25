@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -16,6 +17,15 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+	"github.com/sophium/erun/erun-ui/internal/contribute"
+	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/investigate"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -27,7 +37,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 		deps.findProjectRoot = config.FindProjectRoot
 	}
 	if deps.resolveCLIPath == nil {
-		deps.resolveCLIPath = resolveCLIExecutable
+		deps.resolveCLIPath = terminal.ResolveCLIExecutable
 	}
 	if deps.resolveBuildInfo == nil {
 		deps.resolveBuildInfo = func() model.BuildInfo {
@@ -63,16 +73,16 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 		deps.listKubeContexts = listKubernetesContexts
 	}
 	if deps.loadResourceStatus == nil {
-		deps.loadResourceStatus = loadRuntimeResourceStatus
+		deps.loadResourceStatus = runtimeview.ReadResourceStatus
 	}
 	if deps.loadClusterRegistry == nil {
-		deps.loadClusterRegistry = loadClusterRegistry
+		deps.loadClusterRegistry = runtimeview.ReadClusterRegistry
 	}
 	if deps.loadHostedRegistry == nil {
 		deps.loadHostedRegistry = loadHostedRegistryWithTestOverride
 	}
 	if deps.checkRuntimeDeployed == nil {
-		deps.checkRuntimeDeployed = checkRuntimeDeployed
+		deps.checkRuntimeDeployed = runtimeview.CheckRuntimeDeployed
 	}
 	if deps.stopEnvironmentRuntime == nil {
 		deps.stopEnvironmentRuntime = lifecycle.RunStopEnvironment
@@ -94,6 +104,9 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 	if deps.claudeAgents == nil {
 		deps.claudeAgents = newDefaultClaudeAgents()
 	}
+	if deps.readGatewayRouting == nil {
+		deps.readGatewayRouting = lifecycle.ReadGatewayRouting
+	}
 	if deps.resolveGatewayCredential == nil {
 		deps.resolveGatewayCredential = gateway.ResolveGatewayCredential
 	}
@@ -110,7 +123,7 @@ func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 			if override, ok := localPortReachabilityOverride(); ok {
 				return override
 			}
-			return canConnectLocalTCP(port)
+			return settingssvc.CanConnectLocalTCP(port)
 		}
 	}
 	if deps.canReachMCPEndpoint == nil {
@@ -134,12 +147,12 @@ func localPortReachabilityOverride() (bool, bool) {
 }
 
 // loadHostedRegistryWithTestOverride prefers the test override over the real probe.
-func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
+func loadHostedRegistryWithTestOverride(ctx context.Context) runtimeview.HostedRegistryStatus {
 	available, ok := hostedRegistryReachabilityOverride()
 	if !ok {
-		return loadHostedRegistry(ctx)
+		return runtimeview.ProbeHostedRegistry(ctx)
 	}
-	status := uiHostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
+	status := runtimeview.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
 	if !available {
 		status.Reason = "does not resolve"
 		status.Recovery = "Choose a different registry instead."
@@ -160,30 +173,30 @@ func hostedRegistryReachabilityOverride() (bool, bool) {
 func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result config.OpenResult) error {
-			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+			return terminal.EnsureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
 	if deps.reconnectMCP == nil {
 		deps.reconnectMCP = func(ctx context.Context, result config.OpenResult, onLine func(string)) error {
-			return runOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
+			return terminal.RunOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
 		}
 	}
 	if deps.ensureSSHD == nil {
 		deps.ensureSSHD = func(ctx context.Context, result config.OpenResult) error {
-			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+			return terminal.EnsureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
 	if deps.startTerminal == nil {
-		deps.startTerminal = startTerminalSession
+		deps.startTerminal = terminal.StartPTY
 	}
 	if deps.runIDECommand == nil {
-		deps.runIDECommand = runIDECommand
+		deps.runIDECommand = terminal.RunIDECommand
 	}
 	if deps.launchHostArtifact == nil {
-		deps.launchHostArtifact = launchHostArtifactDetached
+		deps.launchHostArtifact = terminal.LaunchHostArtifactDetached
 	}
 	if deps.launchHostOpener == nil {
-		deps.launchHostOpener = launchHostOpenerDetached
+		deps.launchHostOpener = envops.LaunchHostOpenerDetached
 	}
 	return deps
 }
@@ -202,10 +215,10 @@ func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
 		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
 	}
 	if deps.orchestratorOpenPath == "" {
-		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
+		deps.orchestratorOpenPath = orchestratorsvc.DefaultOpenPath()
 	}
 	if deps.orchestratorNudgeHistoryPath == "" {
-		deps.orchestratorNudgeHistoryPath = defaultOrchestratorNudgeHistoryPath()
+		deps.orchestratorNudgeHistoryPath = orchestratorsvc.DefaultNudgeHistoryPath()
 	}
 	if deps.runOrchestratorLabelCommand == nil {
 		deps.runOrchestratorLabelCommand = execWorkingIssueCommand
@@ -215,13 +228,13 @@ func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
 
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedFile == nil {
-		deps.savePastedFile = savePastedFileToRuntime
+		deps.savePastedFile = terminal.SavePastedFileToRuntime
 	}
 	if deps.listAgentOutputs == nil {
-		deps.listAgentOutputs = listAgentOutputsViaRuntime
+		deps.listAgentOutputs = envops.ListAgentOutputsViaRuntime
 	}
 	if deps.downloadAgentOutput == nil {
-		deps.downloadAgentOutput = downloadAgentOutputViaRuntime
+		deps.downloadAgentOutput = envops.DownloadAgentOutputViaRuntime
 	}
 	if deps.loadDiff == nil {
 		deps.loadDiff = loadDiffFromMCP
@@ -241,7 +254,18 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 		deps.syncWorkspace = workspace.SyncWorkspaceOnce
 	}
 	if deps.workspaceSyncInterval <= 0 {
-		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
+		deps.workspaceSyncInterval = envops.DefaultWorkspaceSyncInterval
+	}
+	return deps
+}
+
+// withDefaultExecWriteDeps is split out to stay under the cyclomatic-complexity cap.
+func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
+	if deps.execCommit == nil {
+		deps.execCommit = execCommitViaMCP
+	}
+	if deps.execPush == nil {
+		deps.execPush = execPushViaMCP
 	}
 	return deps
 }
@@ -273,17 +297,17 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.runPodRaw = runPodRawFromMCP
 	}
 	if deps.execRuntimePod == nil {
-		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
+		deps.execRuntimePod = func(ctx context.Context, selection uimodel.Selection, script string) (string, error) {
 			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
 		}
 	}
 	if deps.loadRuntimeUsage == nil {
-		deps.loadRuntimeUsage = func(ctx context.Context, selection uiSelection) (uiRuntimeUsage, error) {
-			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
+		deps.loadRuntimeUsage = func(ctx context.Context, selection uimodel.Selection) (runtimeview.Usage, error) {
+			return runtimeview.ReadUsageViaKubectl(ctx, deps.store, selection)
 		}
 	}
 	if deps.environmentUsageHistoryPath == "" {
-		deps.environmentUsageHistoryPath = defaultEnvironmentUsageHistoryPath()
+		deps.environmentUsageHistoryPath = runtimeview.DefaultUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = activity.RecordEnvironmentActivity
@@ -307,13 +331,24 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 		deps.cloneERun = cloneERunViaMCP
 	}
 	if deps.contributeStatePath == "" {
-		deps.contributeStatePath = defaultContributeStatePath()
+		deps.contributeStatePath = contribute.DefaultStatePath()
+	}
+	if deps.investigationReportDir == "" {
+		deps.investigationReportDir = investigate.DefaultReportDir()
 	}
 	if deps.interruptedActivityPath == "" {
-		deps.interruptedActivityPath = defaultInterruptedActivityPath()
+		deps.interruptedActivityPath = activitysvc.DefaultInterruptedActivityPath()
 	}
 	if deps.desktopControlMarkerPath == "" {
 		deps.desktopControlMarkerPath = core.DefaultDesktopControlMarkerPath()
 	}
 	return deps
+}
+
+func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	core.HideConsoleWindow(cmd)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
 }

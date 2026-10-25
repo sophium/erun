@@ -13,7 +13,7 @@ import {
 } from '../../../fixtures/seedRoot.js';
 
 // "In step" can't be staged without reimplementing the projection digest; that
-// branch is covered in erun-ui/hosted_definition_upload_test.go.
+// branch is covered in erun-ui/internal/settings/hosted_definition_upload_test.go.
 
 interface InvokeBody {
   method?: string;

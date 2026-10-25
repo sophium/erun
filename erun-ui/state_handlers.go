@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -12,6 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) LoadState() (uiState, error) {
@@ -63,10 +64,7 @@ func (a *App) LoadState() (uiState, error) {
 }
 
 func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (model.RuntimeRegistryVersions, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	if namespace = strings.TrimSpace(namespace); namespace == "" {
 		namespace = config.DefaultContainerRegistry
 	}
@@ -103,7 +101,7 @@ func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	return ""
 }
 
-func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environment string) ([]uiVersion, []uiVersionNotice) {
+func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environment string) ([]uiVersion, []uimodel.VersionNotice) {
 	tenant = strings.TrimSpace(tenant)
 	defaultImage := config.DefaultContainerRegistry + "/" + config.DefaultRuntimeImageName
 	if tenant == "" {
@@ -113,7 +111,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 
 	tenantImage := config.RuntimeReleaseName(tenant)
 	suggestions := make([]uiVersion, 0, 8)
-	notices := make([]uiVersionNotice, 0, 4)
+	notices := make([]uimodel.VersionNotice, 0, 4)
 	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
 		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
 		got, notice := a.suggestionsForImage(info, tenant, image, registry, tenant)
@@ -130,10 +128,10 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 }
 
 // suggestionsForImage returns a notice rather than dropping the source when listing fails.
-func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
+func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uimodel.VersionNotice) {
 	versions, err := a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)
 	if err != nil {
-		return nil, &uiVersionNotice{Image: image, Kind: versionNoticeKind(err)}
+		return nil, &uimodel.VersionNotice{Image: image, Kind: versionNoticeKind(err)}
 	}
 	return labelRuntimeVersionSuggestions(source, image, registrypkg.RuntimeDeployVersionSuggestions(info, versions)), nil
 }
@@ -145,7 +143,7 @@ func versionNoticeKind(err error) string {
 	return "unreachable"
 }
 
-func appendVersionNotice(notices []uiVersionNotice, notice *uiVersionNotice) []uiVersionNotice {
+func appendVersionNotice(notices []uimodel.VersionNotice, notice *uimodel.VersionNotice) []uimodel.VersionNotice {
 	if notice == nil {
 		return notices
 	}
@@ -201,8 +199,8 @@ func (a *App) lookupEnvConfig(tenant, environment string) (config.EnvConfig, boo
 	return config.EnvConfig{}, false
 }
 
-func (a *App) LoadVersionSuggestions(selection uiSelection) (uiVersionSuggestions, error) {
-	selection = normalizeSelection(selection)
+func (a *App) LoadVersionSuggestions(selection uimodel.Selection) (uiVersionSuggestions, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	suggestions, notices := a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant, selection.Environment)
 	return uiVersionSuggestions{Suggestions: suggestions, Notices: notices}, nil
 }
@@ -236,7 +234,7 @@ func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiSt
 	state := uiState{
 		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
 		Build:          buildDetailsFrom(info),
-		CloudProviders: cloudProviderStatusesToUI(result.CloudProviders),
+		CloudProviders: settingssvc.CloudProviderStatusesToUI(result.CloudProviders),
 	}
 	for _, tenant := range result.Tenants {
 		if len(tenant.Environments) == 0 {
@@ -268,7 +266,7 @@ func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiSt
 		state.Tenants = append(state.Tenants, item)
 	}
 	if result.CurrentDirectory.Effective != nil {
-		state.Selected = &uiSelection{
+		state.Selected = &uimodel.Selection{
 			Tenant:      strings.TrimSpace(result.CurrentDirectory.Effective.Tenant),
 			Environment: strings.TrimSpace(result.CurrentDirectory.Effective.Environment),
 		}
@@ -359,38 +357,10 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
-// errMissingTenantOrEnvironment returns nil when both are set, so it can be a caller's whole guard.
-func errMissingTenantOrEnvironment(operation, tenant, environment string) error {
-	var missing []string
-	if strings.TrimSpace(tenant) == "" {
-		missing = append(missing, "tenant")
-	}
-	if strings.TrimSpace(environment) == "" {
-		missing = append(missing, "environment")
-	}
-	if len(missing) == 0 {
+func copyBoolPtr(value *bool) *bool {
+	if value == nil {
 		return nil
 	}
-	return fmt.Errorf(
-		"%s: %s not set -- select an environment in the sidebar before retrying this action",
-		operation, strings.Join(missing, " and "),
-	)
-}
-
-func normalizeSelection(selection uiSelection) uiSelection {
-	return uiSelection{
-		Tenant:            strings.TrimSpace(selection.Tenant),
-		Environment:       strings.TrimSpace(selection.Environment),
-		Version:           strings.TrimSpace(selection.Version),
-		RuntimeImage:      strings.TrimSpace(selection.RuntimeImage),
-		RuntimeCPU:        strings.TrimSpace(selection.RuntimeCPU),
-		RuntimeMemory:     strings.TrimSpace(selection.RuntimeMemory),
-		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
-		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
-		Type:              strings.TrimSpace(selection.Type),
-		LocalRepoPath:     strings.TrimSpace(selection.LocalRepoPath),
-		NoGit:             selection.NoGit,
-		SetDefaultTenant:  selection.SetDefaultTenant,
-		Components:        trimmedComponentNames(selection.Components),
-	}
+	v := *value
+	return &v
 }

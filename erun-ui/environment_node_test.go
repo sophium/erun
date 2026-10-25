@@ -8,6 +8,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.EnvConfig) *App {
@@ -31,10 +34,15 @@ func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.E
 		tenants: map[string]model.TenantConfig{"petios": {Name: "petios"}},
 		envs:    stored,
 	}
+	app.deps.canReachMCPEndpoint = func(int) bool { return false }
+	app.cloudContexts = app.newCloudContextService(time.Now)
+	app.settings = app.newSettingsService()
+	app.runtime = app.newRuntimeService()
 	if contextStatus != "" {
-		app.cloudContextStatuses = map[string]cloudContextCacheEntry{
-			"erun-node-1": {status: contextStatus, confirmedAt: time.Now()},
-		}
+		app.cloudContexts.ApplyStatuses([]model.CloudContextStatus{{
+			CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
+			Status:             contextStatus,
+		}})
 	}
 	return app
 }
@@ -45,7 +53,7 @@ func linkedEnv() configpkg.EnvConfig {
 
 func TestEnvironmentNodeSnapshotReportsAStoppedNode(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusStopped, map[string]configpkg.EnvConfig{"develop": linkedEnv()})
-	node := app.environmentNodeSnapshot("acct", "erun-node-1-eu-west-2")
+	node := app.runtime.NodeSnapshot("acct", "erun-node-1-eu-west-2")
 	if node == nil {
 		t.Fatal("an env linked to a configured cloud context must resolve a node")
 	}
@@ -59,7 +67,7 @@ func TestEnvironmentNodeSnapshotReportsAStoppedNode(t *testing.T) {
 
 func TestEnvironmentNodeSnapshotReportsARunningNode(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusRunning, map[string]configpkg.EnvConfig{"develop": linkedEnv()})
-	node := app.environmentNodeSnapshot("acct", "erun-node-1-eu-west-2")
+	node := app.runtime.NodeSnapshot("acct", "erun-node-1-eu-west-2")
 	if node == nil || node.Status != cloud.CloudContextStatusRunning {
 		t.Fatalf("want the cached running status, got %+v", node)
 	}
@@ -67,21 +75,21 @@ func TestEnvironmentNodeSnapshotReportsARunningNode(t *testing.T) {
 
 func TestEnvironmentNodeSnapshotIsAbsentForAnEnvWithNoKubernetesContext(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusStopped, map[string]configpkg.EnvConfig{"local": {}})
-	if node := app.environmentNodeSnapshot("", ""); node != nil {
+	if node := app.runtime.NodeSnapshot("", ""); node != nil {
 		t.Fatalf("an env with no kubernetes context must report no node, got %+v", node)
 	}
 }
 
 func TestEnvironmentNodeSnapshotIsAbsentForAnUnmanagedCluster(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusStopped, map[string]configpkg.EnvConfig{"k3d": {KubernetesContext: "k3d-local"}})
-	if node := app.environmentNodeSnapshot("", "k3d-local"); node != nil {
+	if node := app.runtime.NodeSnapshot("", "k3d-local"); node != nil {
 		t.Fatalf("an env on an unmanaged cluster must report no node, got %+v", node)
 	}
 }
 
 func TestEnvironmentNodeSnapshotCarriesAnUnobservedNodeAsUnknownNotStopped(t *testing.T) {
 	app := nodeTestApp(t, "", map[string]configpkg.EnvConfig{"develop": linkedEnv()})
-	node := app.environmentNodeSnapshot("acct", "erun-node-1-eu-west-2")
+	node := app.runtime.NodeSnapshot("acct", "erun-node-1-eu-west-2")
 	if node == nil {
 		t.Fatal("a linked node must still be reported when its status is unobserved")
 	}
@@ -92,25 +100,27 @@ func TestEnvironmentNodeSnapshotCarriesAnUnobservedNodeAsUnknownNotStopped(t *te
 
 func TestEnvironmentNodeSnapshotCarriesAStaleReadingAsUnknown(t *testing.T) {
 	app := nodeTestApp(t, "", map[string]configpkg.EnvConfig{"develop": linkedEnv()})
-	app.cloudContextStatuses = map[string]cloudContextCacheEntry{
-		"erun-node-1": {
-			status:      cloud.CloudContextStatusRunning,
-			confirmedAt: time.Now().Add(-2 * cloudContextStatusTTL),
-		},
-	}
-	node := app.environmentNodeSnapshot("acct", "erun-node-1-eu-west-2")
+	now := time.Now()
+	app.cloudContexts = app.newCloudContextService(func() time.Time { return now })
+	app.settings = app.newSettingsService()
+	app.cloudContexts.ApplyStatuses([]model.CloudContextStatus{{
+		CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
+		Status:             cloud.CloudContextStatusRunning,
+	}})
+	now = now.Add(2 * cloudctx.StatusTTL)
+	node := app.runtime.NodeSnapshot("acct", "erun-node-1-eu-west-2")
 	if node == nil || node.Status != cloud.CloudContextStatusUnknown {
 		t.Fatalf("a stale reading must read as unknown, got %+v", node)
 	}
 }
 
-func collectEnvNodeEvents(app *App) *[]envNodePayload {
-	events := make([]envNodePayload, 0)
+func collectEnvNodeEvents(app *App) *[]runtimeview.NodePayload {
+	events := make([]runtimeview.NodePayload, 0)
 	app.SetEmitter(func(name string, args ...any) {
-		if name != envNodeEvent || len(args) != 1 {
+		if name != uimodel.EnvNodeEvent || len(args) != 1 {
 			return
 		}
-		if payload, ok := args[0].(envNodePayload); ok {
+		if payload, ok := args[0].(runtimeview.NodePayload); ok {
 			events = append(events, payload)
 		}
 	})
@@ -123,8 +133,8 @@ func TestRefreshEnvironmentNodeStatusesPublishesEachEnvironment(t *testing.T) {
 		"local":   {},
 	})
 	events := collectEnvNodeEvents(app)
-	app.refreshEnvironmentNodeStatuses()
-	byEnv := make(map[string]envNodePayload, len(*events))
+	app.runtime.RefreshNodeStatuses()
+	byEnv := make(map[string]runtimeview.NodePayload, len(*events))
 	for _, event := range *events {
 		byEnv[event.Environment] = event
 	}
@@ -147,17 +157,17 @@ func TestRefreshEnvironmentNodeStatusesPublishesEachEnvironment(t *testing.T) {
 func TestRefreshEnvironmentNodeStatusesRepublishesOnlyOnChange(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusStopped, map[string]configpkg.EnvConfig{"develop": linkedEnv()})
 	events := collectEnvNodeEvents(app)
-	app.refreshEnvironmentNodeStatuses()
+	app.runtime.RefreshNodeStatuses()
 	first := len(*events)
-	app.refreshEnvironmentNodeStatuses()
+	app.runtime.RefreshNodeStatuses()
 	if len(*events) != first {
 		t.Fatalf("an unchanged node reading must not re-publish: %d then %d events", first, len(*events))
 	}
-	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{{
+	app.cloudContexts.ApplyStatuses([]model.CloudContextStatus{{
 		CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
 		Status:             cloud.CloudContextStatusRunning,
 	}})
-	app.refreshEnvironmentNodeStatuses()
+	app.runtime.RefreshNodeStatuses()
 	last := (*events)[len(*events)-1]
 	if last.Node == nil || last.Node.Status != cloud.CloudContextStatusRunning {
 		t.Fatalf("a changed node reading must publish, got %+v", last.Node)
@@ -166,9 +176,9 @@ func TestRefreshEnvironmentNodeStatusesRepublishesOnlyOnChange(t *testing.T) {
 
 func TestStartingANodeRepublishesItsEnvironmentsImmediately(t *testing.T) {
 	app := nodeTestApp(t, cloud.CloudContextStatusStopped, map[string]configpkg.EnvConfig{"develop": linkedEnv()})
-	app.refreshEnvironmentNodeStatuses()
+	app.runtime.RefreshNodeStatuses()
 	events := collectEnvNodeEvents(app)
-	app.setCloudContextStatusInCache("erun-node-1", cloud.CloudContextStatusRunning)
+	app.cloudContexts.SetStatus("erun-node-1", cloud.CloudContextStatusRunning)
 	if len(*events) == 0 {
 		t.Fatal("a cache write from a start/stop handler must republish the envs on that node")
 	}

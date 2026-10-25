@@ -9,6 +9,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T) {
@@ -41,21 +43,21 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.DeleteEnvironment(uiSelection{Tenant: "frs", Environment: "prod"}, "wrong"); err == nil {
+	if _, err := app.DeleteEnvironment(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "wrong"); err == nil {
 		t.Fatal("expected confirmation mismatch")
 	}
 	if _, ok := store.envs["frs/prod"]; !ok {
 		t.Fatal("expected env config to remain after failed confirmation")
 	}
 
-	result, err := app.DeleteEnvironment(uiSelection{Tenant: "frs", Environment: "prod"}, "frs-prod")
+	result, err := app.DeleteEnvironment(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "frs-prod")
 	if err != nil {
 		t.Fatalf("DeleteEnvironment failed: %v", err)
 	}
 	assertDeletedEnvironment(t, store, result, deletedContext, deletedNamespace)
 }
 
-func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvironmentResult, deletedContext, deletedNamespace string) {
+func assertDeletedEnvironment(t *testing.T, store stubUIStore, result terminal.DeleteEnvironmentResult, deletedContext, deletedNamespace string) {
 	t.Helper()
 
 	if deletedContext != "cluster-prod" || deletedNamespace != "frs-prod" {
@@ -118,7 +120,7 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 		},
 	})
 
-	result, err := app.DeleteEnvironment(uiSelection{Tenant: "frs", Environment: "prod"}, "frs-prod")
+	result, err := app.DeleteEnvironment(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "frs-prod")
 	if err != nil {
 		t.Fatalf("DeleteEnvironment failed: %v", err)
 	}

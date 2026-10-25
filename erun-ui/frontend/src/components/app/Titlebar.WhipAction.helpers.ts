@@ -1,9 +1,11 @@
 import type { StatusBadgeTone } from 'erun-kit';
 
-import type { main } from '../../../wailsjs/go/models';
+import type { orchestrator } from '../../../wailsjs/go/models';
 
 // whipReportAllSucceeded gates auto-dismiss; an empty result list is not success.
-export function whipReportAllSucceeded(report: main.uiWhipReport | null | undefined): boolean {
+export function whipReportAllSucceeded(
+  report: orchestrator.WhipReport | null | undefined,
+): boolean {
   const results = report?.results ?? [];
   return (
     results.length > 0 && results.every((result) => whipOutcomeTone(result.outcome) === 'success')

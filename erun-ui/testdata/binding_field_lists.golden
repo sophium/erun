@@ -1,0 +1,368 @@
+# functions
+AddReviewer(#): Promise<#>
+AdvanceMergeQueue(#): Promise<#>
+ApplyPinVersion(#,string): Promise<#>
+ApproveTenantInviteRequest(#): Promise<#>
+CancelEnvironmentJob(#): Promise<#>
+CancelPendingIdleStop(#): Promise<void>
+CancelWaitingAction(string): Promise<boolean>
+CheckEnvironmentHealth(#): Promise<#>
+CheckHostedDefinitionDrift(string,string): Promise<#>
+ChooseLocalRepoPath(string): Promise<string>
+ChooseWorkspaceSyncLocalFolder(#,string): Promise<string>
+ClearGatewayCredential(): Promise<#>
+CloseEnvironmentSessions(#): Promise<Array<number>>
+CloseReview(#): Promise<#>
+CloseSession(number): Promise<void>
+ConfirmWindowClose(): Promise<void>
+ConnectERunPlatform(#): Promise<#>
+ConsumeInterruptedActivityNotice(): Promise<Array<#>>
+CreateOrchestrator(string,Array<#>,Array<string>,string,#): Promise<#>
+CreatePlatformContext(#): Promise<#>
+CreateReview(#): Promise<#>
+CreateReviewComment(#): Promise<#>
+CreateReviewReply(#): Promise<#>
+DeclineTenantInviteRequest(#): Promise<#>
+DeleteEnvironment(#,string): Promise<#>
+DeleteOrchestrator(string): Promise<void>
+DeletePlatformEnvironment(#): Promise<#>
+DeployPlatformEnvironment(#): Promise<#>
+DescribeCloudContextApiStop(string): Promise<#>
+DiffReviewStatus(#): Promise<#>
+DisableCloudContextApiStop(string): Promise<#>
+DismissDeploy(string): Promise<boolean>
+DownloadAgentOutput(#,string): Promise<string>
+DownloadOrchestratorOutput(string,string): Promise<string>
+EnableCloudContextApiStop(string): Promise<#>
+EndAISessions(#): Promise<boolean>
+EnrollERunPlatformUser(#): Promise<#>
+EnvironmentWorkingIssue(#): Promise<#>
+ExecCommit(#,#): Promise<#>
+ExecPush(#,#): Promise<#>
+ExposeEnvironmentService(#,#): Promise<#>
+FindActiveDeployForSelection(#): Promise<#>
+ForceDismissActivity(string): Promise<boolean>
+GetCloudProviderBearerToken(string): Promise<#>
+GetContributeMode(#): Promise<boolean>
+GetDeploy(string): Promise<#>
+GetMyTenantInviteRequest(#): Promise<#>
+InitAWSCloudProvider(#): Promise<#>
+InitCloudContext(#): Promise<#>
+InvestigateFailure(string,string,string,number,number): Promise<#>
+IsContributeEligible(#): Promise<boolean>
+KillSession(number): Promise<boolean>
+ListAgentOutputs(#): Promise<#>
+ListDeploys(): Promise<Array<#>>
+ListEnvironmentExposures(#): Promise<#>
+ListEnvironmentServices(#): Promise<#>
+ListHostArtifacts(#): Promise<Array<#>>
+ListOrchestratorAliasChoices(): Promise<Array<string>>
+ListOrchestratorEnvCandidates(): Promise<Array<#>>
+ListOrchestratorLaunchChoices(): Promise<#>
+ListOrchestratorOutputs(string): Promise<#>
+ListOrchestrators(): Promise<Array<#>>
+ListPinnableVersions(#): Promise<Array<string>>
+ListRemoteAppSessions(#): Promise<Array<string>>
+ListTenantPlatformEnrollmentStatuses(#): Promise<Array<#>>
+LoadAppLog(): Promise<#>
+LoadCloudContextStatuses(): Promise<Array<#>>
+LoadCloudProviderStatuses(): Promise<Array<#>>
+LoadClusterRegistry(#): Promise<#>
+LoadDeployComponents(#): Promise<#>
+LoadDiff(#,#): Promise<#>
+LoadDirectoryDiff(string,#): Promise<#>
+LoadERunConfig(): Promise<#>
+LoadEnvTrace(#): Promise<#>
+LoadEnvironmentConfig(#): Promise<#>
+LoadEnvironmentGatewayRouting(#): Promise<#>
+LoadEnvironmentJobs(string,string): Promise<Array<#>>
+LoadGatewayCredentialStatus(): Promise<#>
+LoadGatewayModels(string): Promise<Array<#>>
+LoadGatewayRoutingDrift(): Promise<Array<#>>
+LoadHostDiff(#,#): Promise<#>
+LoadHostGatewayDefaults(): Promise<#>
+LoadHostedRegistry(): Promise<#>
+LoadIdleStatus(#): Promise<#>
+LoadKubernetesContexts(): Promise<Array<string>>
+LoadReviewDetail(#): Promise<#>
+LoadRuntimeActivity(#): Promise<#>
+LoadRuntimeResourceStatus(#): Promise<#>
+LoadRuntimeRunState(#): Promise<#>
+LoadRuntimeSizing(#): Promise<#>
+LoadRuntimeUsage(#): Promise<#>
+LoadState(): Promise<#>
+LoadStopHistory(#): Promise<Array<#>>
+LoadTenantConfig(string): Promise<#>
+LoadTenantDashboard(#): Promise<#>
+LoadVersionSuggestions(#): Promise<#>
+LoginCloudProvider(string): Promise<#>
+LogoutCloudProvider(string): Promise<#>
+OpenHostIDE(#,string): Promise<void>
+OpenHostPath(string): Promise<void>
+OpenIDE(#,string): Promise<void>
+OrchestratorGuidancePaths(string): Promise<#>
+OverrideAdvanceMergeQueue(#): Promise<#>
+PinRepoCheckoutStatus(#): Promise<#>
+PrepareWindowClose(): Promise<#>
+PreviewPinVersion(#,string): Promise<#>
+PreviewPlatformEnvironment(#): Promise<#>
+ReadEnvironmentJobOutput(#): Promise<#>
+ReclaimRuntimeResources(#): Promise<#>
+ReconnectMCP(#): Promise<void>
+RecoverPendingHelmRelease(string): Promise<#>
+RegisterPlatformEnvironment(#): Promise<#>
+RemoveReviewer(#): Promise<void>
+RepaintSession(number): Promise<void>
+ReportBugFailure(string,string,string,number,number): Promise<#>
+ResetEnvironmentActivityObservations(): Promise<void>
+ResetEnvironmentUsageObservations(): Promise<void>
+ResizeRuntimeToRecommendation(#,boolean): Promise<#>
+ResizeSession(number,number,number): Promise<void>
+ResolveEnvironmentHostPath(#,string): Promise<#>
+ResolveOrchestratorToReopen(): Promise<#>
+ResolveReviewComment(#): Promise<#>
+ResolveUpgradePlan(): Promise<#>
+RestartApp(string): Promise<void>
+RestartOrchestrator(string,number,number): Promise<#>
+RevealHostPath(string): Promise<void>
+RevealOrchestratorGuidance(string,string,string): Promise<void>
+RevertPinVersion(#): Promise<#>
+RunHostArtifact(#,string): Promise<void>
+RunOrchestratorOutputOnHost(string,string): Promise<void>
+SaveAWSCloudProviderAlias(#): Promise<#>
+SaveERunConfig(#): Promise<#>
+SaveEnvironmentConfig(#,#): Promise<#>
+SaveGatewayCredential(string): Promise<#>
+SavePastedFile(number,#): Promise<#>
+SaveTenantConfig(#): Promise<#>
+SendSessionInput(number,string): Promise<void>
+SetContributeMode(#,boolean): Promise<#>
+SetEmitter(any): Promise<void>
+SetEnvironmentAutoStart(#,string): Promise<#>
+SetupCloudProviderOIDC(string): Promise<#>
+StartAISession(#,number,number,number,boolean): Promise<#>
+StartCloudContext(string): Promise<#>
+StartCloudInitAWSSession(number,number): Promise<#>
+StartCloudInitCloudflareSession(number,number): Promise<#>
+StartContributeAISession(#,number,number,number): Promise<#>
+StartContributeApp(#): Promise<#>
+StartContributeSession(#,number,number,number): Promise<#>
+StartCreateVersionSession(#,number,number): Promise<#>
+StartDeploySession(#,number,number): Promise<#>
+StartDoctorSession(#,number,number): Promise<#>
+StartForceDeploySession(#,number,number): Promise<#>
+StartInitSession(#,number,number): Promise<#>
+StartInitialDeploySession(#,number,number): Promise<#>
+StartLocalSession(#,number,number,number): Promise<#>
+StartOrchestrator(string,number,number): Promise<#>
+StartSSHDInitSession(#,number,number): Promise<#>
+StartSession(#,number,number,number): Promise<#>
+StartUpgradeEnvironmentSession(#,number,number): Promise<#>
+StopCloudContext(string): Promise<#>
+StopEnvironment(#): Promise<#>
+StopOrchestrator(string): Promise<void>
+StopPlatformEnvironment(#): Promise<#>
+SubmitTenantInviteRequest(#): Promise<#>
+SwitchCloudProviderIdentity(string): Promise<#>
+TenantReviewCreateCapability(string): Promise<#>
+TriggerEnvironmentActivitySweep(): Promise<void>
+UnexposeEnvironment(#): Promise<#>
+UnresolveReviewComment(#): Promise<#>
+UpdateOrchestrator(string,string,Array<#>,Array<string>,string,#): Promise<#>
+UploadHostedDefinition(string,string): Promise<#>
+WhipNow(Array<#>): Promise<#>
+WhipTargets(): Promise<#>
+
+# classes
+class {action: string; message: string}
+class {activity?: string; lastMessage?: string; turns: number; toolsRun: number}
+class {address: string; bytes?: number; secondsAgo?: number}
+class {alias: string; issuer?: string; token: string; provider: #}
+class {alias: string; provider: string; username?: string; accountId?: string; profile?: string; oidcIssuerUrl?: string; status: string; message?: string}
+class {alias: string; username: string; issuer: string; subject: string}
+class {alias?: string; username?: string; accountId?: string; profile?: string; ssoRegion?: string; ssoStartUrl?: string; oidcIssuerUrl?: string}
+class {apiUrl: string; tenant?: string}
+class {available: boolean; branch?: string; issueNumber?: number; issueTitle?: string; reason?: string}
+class {available: boolean; changed: boolean; describe: string}
+class {available: boolean; content?: string; path: string; reason?: string; notice?: string}
+class {available: boolean; content?: string; path: string; reason?: string}
+class {available: boolean; status: string}
+class {available: boolean; unavailable?: string; cpuSeconds?: number; cpuPercentOfQuota?: number; throttledPeriods?: number; totalPeriods?: number; throttledSeconds?: number; ioReadBytes?: number; ioWriteBytes?: number; peakMemoryBytes?: number}
+class {available: boolean; unavailable?: string; quotaCores?: number; quota?: string; utilizationPercent?: number; utilization?: string; usageUsec?: number}
+class {available: boolean; unavailable?: string; unlimited?: boolean; currentBytes?: number; current?: string; peakBytes?: number; peak?: string; limitBytes?: number; limit?: string; percentOfLimit?: number; oomKills: number}
+class {baseUrl?: string; authTokenRef?: string; defaultModel?: string; models?: #[]}
+class {baseUrl?: string; model?: string; context?: number}
+class {blocked: boolean; running?: #[]}
+class {branch: string; commit: string; files: string[]}
+class {branch: string; message: string}
+class {branch: string; remote: string; commit: string}
+class {branch: string; remote?: string}
+class {branch?: string; commit?: string; shortCommit?: string}
+class {buildId: string; tenantId: string; reviewId?: string; reviewName?: string; environmentId?: string; environmentName?: string; successful: boolean; commitId: string; version: string; profile?: #; createdAt?: string; updatedAt?: string}
+class {canCreate: boolean; restricted?: string; accessRemedy?: #}
+class {command?: string; roleName?: string}
+class {commentId: string; creatorUserId?: string; creatorUsername?: string; status: string; parentCommentId?: string; commitId: string; filePath: string; line: number; body: string; createdAt?: string}
+class {components: #[]; runtimeChart: #}
+class {configured: boolean; restricted: boolean; error?: string; services: #[]; notConfiguredReason?: string}
+class {configured: boolean; restricted: boolean; error?: string; services: #[]; notConfiguredReason?: string}
+class {contextId: string; name: string; provider: string; cloudProviderAlias?: string; region?: string; instanceType?: string; kubernetesContext?: string; status: string; provisionError?: string}
+class {cpu: #; memory: #; message?: string; notice?: string}
+class {cpu: #; memory: #}
+class {cpu: string; memory: string}
+class {cpuMilli?: number; memoryBytes?: number; cpu?: string; memory?: string}
+class {data: string; mimeType?: string; name?: string}
+class {defaultTenant: string; cloudProviders?: #[]; cloudContexts?: #[]; openRouter?: #; openRouterDefaults?: #}
+class {describe: string; apiHost: string; tenantId: string; environmentId: string; definitionRevision: number; localChange: #; drift?: #}
+class {dir: string; entries: #[]; total: number; truncated: boolean}
+class {durationSeconds: number; failed?: boolean; cgroup?: #; topSteps?: #[]; totalStepCount?: number; truncatedStepCount?: number}
+class {enabled: boolean; localPort: number; publicKeyPath: string; workspaceSyncEnabled: boolean; workspaceSyncLocalPath?: string; workspaceSyncStatus?: string; workspaceSyncStatusMessage?: string}
+class {environmentId: string; name: string; type: string; contextId?: string; kubernetesContext?: string; runtimeVersion?: string; status: string; provisionError?: string; deployedVersion?: string; deleteError?: string}
+class {environments: #[]; orchestrators: #[]}
+class {fileCount: number; additions: number; deletions: number}
+class {gatewayConfigured: boolean; gatewayModels: string[]; gatewayUndriveableModels: string[]; gatewayDefaultModel: string; defaultModel: string; effortLevels: string[]; defaultEffort: string}
+class {hash: string; shortHash: string; subject: string; author: string; date: string}
+class {header: string; oldStart: number; oldLines: number; newStart: number; newLines: number; lines?: #[]}
+class {host: string; available: boolean; reason?: string; recovery?: string}
+class {id: string; command: string; tenant: string; environment: string; version?: string; release?: string; namespace?: string; kubernetesContext?: string; component?: string; image?: string; summary?: string; status: string; startedAt: any; endedAt?: any; lastUpdated: any; containers?: #[]; error?: string; detail?: string; source?: string; sessionId?: string; actionKind?: string; enqueuedAt?: any; startedRunningAt?: any}
+class {id: string; context?: number; requiresReasoningEcho?: boolean}
+class {id: string; displayName?: string; description?: string; context?: number}
+class {id: string; label: string; count: number; memory: string; memoryMiB: number; reclaim?: string; reclaimLabel?: string}
+class {id: string; name: string; environments: #[]; tenants: string[]; directories: string[]; sessionId: number; status: string; busy: boolean; busyAtUnix?: number; transient: boolean; shellRunning: boolean; shellCommand?: string; shellStartedAtUnix?: number; nudgeCount: number; nudgeCapped: boolean; lastNudgeAtUnix?: number; autoNudgeCount: number; lastAutoNudgeAtUnix?: number; whipCount: number; lastWhipAtUnix?: number; lastCappedAtUnix?: number; nudgeHistoryUnreadable?: boolean; pacingUnreachable?: boolean; restartRequired: boolean; roleChanged: boolean; alias?: string; useGateway?: boolean; model?: string; effort?: string; launchSettingsChanged: boolean}
+class {id: string; name: string; state: string; kind?: string; agentTool?: string; command?: string[]; dir?: string; exitCode?: number; startedAtUnix?: number; endedAtUnix?: number; progress?: #}
+class {id: string; name: string}
+class {id: string; running: boolean; program?: string}
+class {id: string; status: string; title: string; detail: string; fix?: string}
+class {id: string; tenant: string; environment: string}
+class {image: string; kind: string}
+class {inviteRequestId: string; issuer: string; subject: string; email?: string; displayName?: string; kind: string; tenantName: string; environmentName?: string; note?: string; status: string; declineReason?: string; mintedInviteToken?: string; createdAt?: string; updatedAt?: string}
+class {issueKey: string; issueRef?: string; issueRefSource?: string; rung: string; job?: #; review?: #}
+class {issueKey: string; items: #[]}
+class {items: #[]}
+class {job: #; offset: number; nextOffset: number; output: string; hasMore: boolean; complete: boolean}
+class {jobId: string; jobType: string; issueRef?: string; summary: string; status: string; actorKind: string; actorId: string; startedAt?: string; endedAt?: string}
+class {kind: string; content: string; oldLine?: number; newLine?: number}
+class {kind: string; context?: #; plan?: string[]; message?: string}
+class {kind: string; environment?: #; message?: string}
+class {kind: string; hostPath?: string; reason?: string}
+class {kind: string; id: string; name: string; outcome: string; reason?: string; error?: string}
+class {kind: string; id: string}
+class {kind: string; label: string; current: string; target: string; aligned: boolean}
+class {kubernetesContext: string; available: boolean; message?: string; node?: string; schedulable: #; schedulableComplete: boolean; worstCase: #; floored: boolean; measuredUsage: boolean; unmeasuredContainers?: number; unreadableRequests?: number; nodes?: #[]}
+class {kubernetesContext: string; deployed: boolean; service?: string; namespace?: string; port?: number; insecure: boolean; message?: string}
+class {kubernetesContext: string; tenant?: string; environment?: string}
+class {label: string; version: string; source?: string; image?: string}
+class {line?: string; image?: string; undetermined?: boolean; disagrees?: boolean}
+class {localRevision: number; platformRevision: number; behind: boolean; describe: string; error?: string}
+class {mount: string; available: boolean; unavailable?: string; totalBytes?: number; total?: string; usedBytes?: number; used?: string; percentUsed?: number; percent?: string}
+class {name: string; defaultEnvironment: string; apiUrl: string; cloudProviderAliases?: string[]; primaryCloudProviderAlias?: string; cloudProviders?: #[]}
+class {name: string; defaultEnvironment?: string; cloudProviderAliases?: string[]; primaryCloudProviderAlias?: string; environments: #[]}
+class {name: string; durationSeconds: number; cgroup?: #}
+class {name: string; idle: boolean; reason?: string; secondsIdleFor?: number}
+class {name: string; idle: boolean; reason?: string; secondsRemaining?: number; clients?: #[]}
+class {name: string; image: string; phase: string; ready: boolean; restarts: number; reason?: string; message?: string}
+class {name: string; label?: string; status: string}
+class {name: string; path: string; parentPath?: string; type: string; depth: number; status?: string; additions?: number; deletions?: number}
+class {name: string; path: string; size: number; modTime: any; isDir: boolean}
+class {name: string; provider: string; cloudProviderAlias: string; region: string; instanceId?: string; publicIp?: string; instanceType: string; diskType: string; diskSizeGb: number; kubernetesContext: string; status: string; message?: string; stopProtection?: boolean; stopProtectionKnown?: boolean}
+class {name: string; runtime: boolean; source: string; selected: boolean; publishedChart?: string}
+class {name: string; schedulable: #; schedulableComplete: boolean; worstCase: #}
+class {name: string; secondsHeld?: number; jobId?: string}
+class {name: string; size: number; modTime: string}
+class {name: string; type?: string; localRepoPath?: string; repoPath: string; kubernetesContext: string; containerRegistries: #[]; containerRegistriesInherited: boolean; cloudProviderAlias: string; cloudProviderAliases?: string[]; cloudAliasSlots?: #[]; cloudContext?: #; runtimeVersion: string; runtimeChart?: string; runtimeRegistry?: string; imagePullSecrets?: string[]; runtimePod: #; sshd: #; idle: #; claude: #; claudeDefaults: #; aiTool?: string; aiLaunchSignature: string; localPorts: #; autoStart?: boolean; remoteHostCredentials: boolean; autoUpgrade: boolean; upgradeChannel?: string; disableBuildScript: boolean; platformAccount: boolean; mountSource: boolean; repoURL: string; deployComponents?: string[]; hosted?: #}
+class {name: string; type?: string; mcpUrl?: string; apiUrl?: string; runtimeVersion?: string; runtimeVersionLine?: #; erunVersion?: #; runtimeImageLineMismatch?: #; kubernetesContext?: string; isActive?: boolean; sshdEnabled?: boolean; autoStart?: boolean; activity?: #; usage?: #; node?: #}
+class {name: string; type?: string; ports?: #[]; hostname?: string; scheme?: string; exposedAs?: string}
+class {name?: string; cloudProviderAlias: string; region: string; instanceType: string; diskType: string; diskSizeGb: number}
+class {name?: string; port: number}
+class {ok: boolean; output: string; error?: string}
+class {orchestrator: #; admitted: boolean; reason?: string; message?: string; existingId?: string}
+class {orchestratorId: string; alsoReopen?: #[]}
+class {orchestratorId: string}
+class {path: string; oldPath?: string; newPath?: string; status: string; additions: number; deletions: number; binary?: boolean; hunks?: #[]}
+class {path: string}
+class {plan: string[]; quotaOk: boolean}
+class {provider: string; alias: string; options: string[]}
+class {rangeStart: number; rangeEnd: number; mcp: number; api: number; ssh: number; contributeApp: number; mcpStatus: #; apiStatus: #; sshStatus: #; contributeAppStatus: #}
+class {reachable: boolean; observed: boolean; outage: boolean; checkFailed?: boolean; busy: boolean; detail?: string}
+class {recordedLine: string; observedLine: string}
+class {ref: string; source?: string; hint?: string; hostEndpoint?: string}
+class {reference: string; version: string; chart: string; source: string; missing: boolean; unknown: boolean}
+class {registry: string; cluster?: #; roles: string[]}
+class {request?: #; rateLimited?: #}
+class {resolvable: boolean; reason?: string}
+class {resource: string; from: string; to: string}
+class {results: #[]}
+class {retryAfterSeconds: number}
+class {reviewId: string; apiError?: string; restricted?: string; accessRemedies?: Record<string, #>; error?: string; review?: #; comments?: #[]; commentsRestricted?: string; commentsError?: string; builds?: #[]; buildsRestricted?: string; buildsError?: string; queuePosition?: number; unresolvedThreads?: number; canComment: boolean; canClose: boolean; canResolveComments: boolean; reviewers?: #[]; reviewersRestricted?: string; reviewersError?: string; canAssignReviewers: boolean; canRemoveReviewers: boolean; availableReviewers?: #[]}
+class {reviewId: string; repository?: string; name: string; targetBranch: string; sourceBranch: string; status: string}
+class {reviewId: string; tenantId: string; authorUserId?: string; authorUsername?: string; name: string; repository?: string; targetBranch: string; sourceBranch: string; status: string; unresolvedThreads?: number; blocked?: boolean; lastFailedBuildId?: string; lastReadyBuildId?: string; lastMergedBuildId?: string; createdAt?: string; updatedAt?: string}
+class {revision: number; describe: string; localChange: #}
+class {role: string; shared: string}
+class {runtime: #; unavailable?: string}
+class {scope?: string; selectedCommit?: string; target?: string}
+class {service: string; backendService?: string; targetIP: string; port?: number}
+class {service: string; hostname: string; scheme: string; backendService?: string; tlsReady?: boolean; tlsNotReadyReason?: string}
+class {service: string; namespace: string; port: number; insecure: boolean; label: string}
+class {sessionId: number; selection: #; slot?: number; kind?: string; orchestrated?: boolean; occupancy?: #[]}
+class {state: string; platformState?: string; reviewId?: string; name?: string; repository?: string; queuePosition?: number; unresolvedThreads?: number; lastFailedBuildId?: string; lastMergedBuildId?: string; canAdvanceMergeQueue: boolean}
+class {stoppedAt: string; armedAt?: string; graceSeconds: number; source?: string; reason: string; cloudContextName?: string; policy?: #; markers?: #[]}
+class {suggestions: #[]; notices?: #[]}
+class {tab: string; restricted?: string; error?: string}
+class {tenant: string; environment: string; action: string}
+class {tenant: string; environment: string; available: boolean; message?: string; cpu: #; memory: #; disk?: #[]; warnings?: string[]; excludesBuilds?: boolean; dind?: #; requests?: #}
+class {tenant: string; environment: string; available: boolean; message?: string; noOp?: boolean; actions?: #[]; verdicts?: string[]; evidence?: string}
+class {tenant: string; environment: string; available: boolean; message?: string; sessionsRunning: number; sessions?: #[]; processes?: #[]; memoryHeld?: string; memoryHeldMiB?: number}
+class {tenant: string; environment: string; channel: string; current: string; target: string; lagging: boolean; candidates?: #[]; unresolvedReason?: string; isGate?: boolean}
+class {tenant: string; environment: string; deployed: string; wanted: string}
+class {tenant: string; environment: string; directory: string; role: string; activity?: #; usage?: #}
+class {tenant: string; environment: string; directory: string; role: string}
+class {tenant: string; environment: string; enabled: boolean}
+class {tenant: string; environment: string; environmentType: string; eligible: boolean; defaultDirectory: string; mirrored: boolean; requiredRole?: string; ineligibleReason: string}
+class {tenant: string; environment: string; healthy: boolean; checks: #[]}
+class {tenant: string; environment: string; id: string; offset: number; maxBytes: number}
+class {tenant: string; environment: string; id: string; signal?: string}
+class {tenant: string; environment: string; namespace?: string; kubernetesContext?: string; namespaceDeleteError?: string; cloudContextStopError?: string}
+class {tenant: string; environment: string; present: boolean; desiredReplicas: number; readyReplicas: number; stopped: boolean; remainingComponents?: string[]; message?: string}
+class {tenant: string; environment: string; release: string; namespace: string; alreadyStopped: boolean; remainingComponents?: string[]}
+class {tenant: string; environment: string; target: string; previous?: string; sites: #[]; skipped?: string[]; changed: number; aligned: boolean; available?: string[]; notice?: #}
+class {tenant: string; environment: string; version?: string; runtimeImage?: string; runtimeCpu?: string; runtimeMemory?: string; kubernetesContext?: string; containerRegistry?: string; clusterRegistry?: boolean; erunRegistry?: boolean; runtimeRegistry?: string; imagePullSecrets?: string[]; type?: string; localRepoPath?: string; noGit?: boolean; setDefaultTenant?: boolean; components?: string[]}
+class {tenant: string; environment?: string; apiUrl?: string; apiError?: string; apiLog?: string; apiLogError?: string; platformState?: string; platformAliasChoices?: string[]; platformAlias?: string; platformUrl?: string; platformIssuer?: string; platformSubject?: string; accessRemedies?: Record<string, #>; user?: #; users?: #[]; reviews?: #[]; mergeQueue?: #[]; builds?: #[]; pipeline?: #[]; auditEvents?: #[]; panels?: #[]; canCreateReview: boolean; canAdvanceMergeQueue: boolean; canOverrideMergeQueue: boolean; mineReviewCount?: number; waitingOnMeReviewCount?: number; contexts?: #[]; contextsRestricted?: string; contextsError?: string; environments?: #[]; environmentsRestricted?: string; environmentsError?: string; canCreateContext: boolean; canRegisterEnvironment: boolean; canDeployEnvironment: boolean; canStopEnvironment: boolean; canDeleteEnvironment: boolean; myInviteRequest?: #; myInviteRequestError?: string; inviteRequests?: #[]; pendingInviteRequestCount?: number; canApproveInviteRequests: boolean; canDeclineInviteRequests: boolean; inviteRequestRateLimitWindowSeconds?: number}
+class {tenant: string; environment?: string; mcpUrl?: string; kubernetesContext?: string; platformAlias?: string; reviewFilterMine?: boolean; reviewFilterWaitingOnMe?: boolean}
+class {tenant: string; environmentId: string; version?: string}
+class {tenant: string; inviteRequestId: string; reason: string}
+class {tenant: string; inviteRequestId: string}
+class {tenant: string; kind: string; tenantName: string; environmentName?: string; note?: string}
+class {tenant: string; name: string; cloudProviderAlias: string; region: string; instanceType?: string; diskType?: string; diskSizeGb?: number; preview?: boolean}
+class {tenant: string; name: string; type: string; contextId?: string; kubernetesContext?: string; runtimeVersion?: string; adopt?: boolean}
+class {tenant: string; repository: string; name: string; targetBranch: string; sourceBranch: string}
+class {tenant: string; repository: string; targetBranch: string; reason: string}
+class {tenant: string; repository: string; targetBranch: string}
+class {tenant: string; reviewId: string; commentId: string}
+class {tenant: string; reviewId: string; commitId: string; filePath: string; line: number; body: string}
+class {tenant: string; reviewId: string; parentCommentId: string; commitId: string; filePath: string; line: number; body: string}
+class {tenant: string; reviewId: string; userId: string}
+class {tenant: string; reviewId: string; userId: string}
+class {tenant: string; reviewId: string}
+class {tenant: string; reviewId: string}
+class {tenant: string; sourceBranch: string; targetBranch: string}
+class {tenant: string; state: string; declineReason?: string; platformHost?: string; platformTenant?: string}
+class {tenant: string}
+class {tenantId: string; tenantName?: string; userId: string; username?: string; roles?: string[]; issuer?: string; subject?: string; createdAt?: string; updatedAt?: string}
+class {tenants: #[]; selected?: #; message?: string; build: #; versionSuggestions?: #[]; versionSuggestionNotices?: #[]; cloudProviders?: #[]; configUnreadable?: boolean}
+class {tenants: string[]}
+class {timeout: string; workingHours: string; idleTrafficBytes: number}
+class {timeoutSeconds: number; secondsUntilStop: number; stopEligible: boolean; outsideWorkingHours: boolean; managedCloud: boolean; fromPod: boolean; stopBlockedReason?: string; stopError?: string; cloudContextName?: string; cloudContextStatus?: string; cloudContextLabel?: string; markers?: #[]; leases?: #[]; stopPendingSince?: string; secondsUntilForcedStop?: number; gracePeriodSeconds?: number}
+class {timeoutSeconds: number; workingHours?: string; timezone?: string; idleTrafficBytes?: number}
+class {total: number; used: number; free: number; unit: string; formatted: string; floored: boolean}
+class {type: string; actor?: string; action: string; createdAt?: string}
+class {url: string; port: number}
+class {usage: #; observedAtUnix: number; staleAfterSeconds: number}
+class {useGateway: boolean; model: string; effort: string}
+class {useMantle: boolean; useBedrock: boolean; models: string[]; maxOutputTokens: number; knownModels: string[]; minTokens: number; maxTokens: number; effort: string; effortLevels: string[]; gatewayConfigured: boolean; gatewayModels: string[]; gatewayDefaultModel: string}
+class {useMantle?: boolean; useBedrock?: boolean; useGateway?: boolean; models?: string[]; maxOutputTokens?: number; effort?: string; defaultModel?: string; verboseDebug?: boolean}
+class {userId: string; tenantId: string; username: string}
+class {userId: string; username?: string}
+class {version: string; commit?: string; date?: string}
+class {version: string; registry?: string}
+class {version?: string; sameAsRuntimeVersion?: boolean}
+class {wildcardName: string}
+class {workingDirectory?: string; rawDiff: string; summary: #; files?: #[]; tree?: #[]; reviewBase?: #; reviewCommits?: #[]; scope?: string; selectedCommit?: string; includesWorktree?: boolean}

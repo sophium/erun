@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func stubStore(app *App) stubUIStore {
@@ -248,4 +249,109 @@ func (s *stubTerminalSession) Close() error {
 		close(s.closeCh)
 	}
 	return nil
+}
+
+// withTestEnvops gives a hand-built App the envops service NewApp would build,
+// for tests that construct App directly and reach an environment operation.
+// withTestTerminal gives a hand-built App the terminal service NewApp would build.
+func withTestTerminal(app *App) *App {
+	store := app.deps.store
+	if store == nil {
+		app.deps.store = stubUIStore{}
+	}
+	app.terminal = app.newTerminalService()
+	app.deps.store = store
+	return app
+}
+
+// setTestSession registers managed under key, as a test that seeds the registry directly needs.
+func setTestSession(app *App, key string, managed *terminal.Session) {
+	app.terminal.WithLock(func(l *terminal.Locked) {
+		l.Sessions()[key] = managed
+	})
+}
+
+type capturedEmits struct {
+	mu       sync.Mutex
+	arrived  *sync.Cond
+	byName   map[string][]any
+	deadline bool
+}
+
+func newCapturedEmits() *capturedEmits {
+	c := &capturedEmits{byName: make(map[string][]any)}
+	c.arrived = sync.NewCond(&c.mu)
+	return c
+}
+
+func (c *capturedEmits) fn() func(string, ...any) {
+	return func(name string, args ...any) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.byName[name] = append(c.byName[name], args...)
+		if len(args) == 0 {
+			c.byName[name] = append(c.byName[name], nil)
+		}
+		c.arrived.Broadcast()
+	}
+}
+
+// waitFor waits on the emitter's signal rather than a wall-clock poll, so CPU
+// contention cannot fail it; pred runs under the lock.
+func (c *capturedEmits) waitFor(bound time.Duration, pred func(byName map[string][]any) bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deadline = false
+	timer := time.AfterFunc(bound, func() {
+		c.mu.Lock()
+		c.deadline = true
+		c.mu.Unlock()
+		c.arrived.Broadcast()
+	})
+	defer timer.Stop()
+	for !pred(c.byName) {
+		if c.deadline {
+			return false
+		}
+		c.arrived.Wait()
+	}
+	return true
+}
+
+func (c *capturedEmits) events(name string) []any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]any, len(c.byName[name]))
+	copy(out, c.byName[name])
+	return out
+}
+
+func waitForSessionCount(t *testing.T, mu *sync.Mutex, sessions *[]*stubTerminalSession, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		got := len(*sessions)
+		mu.Unlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	got := len(*sessions)
+	mu.Unlock()
+	t.Fatalf("timed out waiting for %d sessions, got %d", want, got)
+}
+
+// lockTerminalForTest holds the terminal lock until unlock runs, so a test can
+// seed or read state that shares it across several statements.
+func lockTerminalForTest(app *App) (*terminal.Locked, func()) {
+	held := make(chan *terminal.Locked)
+	release := make(chan struct{})
+	go app.terminal.WithLock(func(l *terminal.Locked) {
+		held <- l
+		<-release
+	})
+	return <-held, func() { close(release) }
 }

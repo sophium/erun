@@ -10,6 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func orchestratorLinkForwardTestApp(
@@ -33,16 +36,16 @@ func orchestratorLinkForwardTestApp(
 	store.envs["frs/laptop"] = laptopEnv
 	app := NewApp(erunUIDeps{
 		store: store,
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
-		reconnectMCP:        reconnect,
-		readRuntimeRunState: readRunState,
-		canReachMCPEndpoint: orchestratorTestAlwaysReachable,
+		reconnectMCP:           reconnect,
+		readRuntimeRunState:    readRunState,
+		canReachMCPEndpoint:    orchestratorTestAlwaysReachable,
+		investigationReportDir: t.TempDir(),
 	})
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
-	app.investigations.reportDir = t.TempDir()
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, emits
 }
@@ -79,9 +82,9 @@ func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 	var calls []string
 	app, _ := orchestratorLinkForwardTestApp(t, countingReconnect(&mu, &calls, nil), nil)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
@@ -99,18 +102,18 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	var calls []string
 	app, _ := orchestratorLinkForwardTestApp(t, countingReconnect(&mu, &calls, nil), nil)
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	created, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{})
+	}, nil, "", orchestratorsvc.LaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 	waitForReconnectCalls(t, &mu, &calls, 1, 2*time.Second)
 
-	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
+	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
 		{Tenant: "frs", Environment: "laptop"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -139,15 +142,15 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		},
 	)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusRuntimeStopped)
 	for _, status := range envStatuses(emits) {
-		if status.Status == envStatusFailed {
+		if status.Status == uimodel.EnvStatusFailed {
 			t.Fatalf("a stopped environment must never surface as failed, got %+v", status)
 		}
 	}
@@ -161,15 +164,15 @@ func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 		nil,
 	)
 
-	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
+	if _, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}, nil, "", orchestratorLaunchInput{}); err != nil {
+	}, nil, "", orchestratorsvc.LaunchInput{}); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusFailed)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusFailed)
 	posted := emits.waitFor(envStatusWaitBound, func(byName map[string][]any) bool {
-		return len(byName[appNotificationEvent]) > 0
+		return len(byName[uimodel.AppNotificationEvent]) > 0
 	})
 	if !posted {
 		t.Fatal("a forward-open failure must post a visible notification, got none")

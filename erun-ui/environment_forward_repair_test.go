@@ -4,19 +4,57 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const forwardRepairTestPort = 17500
+
+func seedMCPForward(t *testing.T, tenant, environment string, port int) {
+	t.Helper()
+	// Redirect both roots os.UserConfigDir consults.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	// adrg/xdg caches ConfigHome at init, so Reload is needed; the
+	// environmentIsConfigured guard reads the real on-disk ConfigStore.
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
+		t.Fatalf("SaveEnvConfig: %v", err)
+	}
+	path, err := kube.PortForwardStatePath("mcp", tenant, environment)
+	if err != nil {
+		t.Fatalf("PortForwardStatePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	data, err := json.Marshal(model.PortForwardState{
+		Tenant: tenant, Environment: environment, LocalPort: port,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
 
 // hold keeps a rebind in flight until released; repairs makes a rebind succeed.
 type forwardRepairProbe struct {
@@ -105,7 +143,7 @@ func forwardRepairTestApp(
 		},
 		readRuntimeRunState: readRunState,
 		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			data, err := json.Marshal(model.EnvironmentIdleStatus{
 				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			})
@@ -123,27 +161,23 @@ func forwardRepairTestApp(
 	return app, emits
 }
 
-func forwardRepairSelection() uiSelection {
-	return uiSelection{Tenant: "erun", Environment: "remote"}
+func forwardRepairSelection() uimodel.Selection {
+	return uimodel.Selection{Tenant: "erun", Environment: "remote"}
 }
 
 // sweepUntilRebindSettles waits for the started rebind so the in-flight latch
 // does not suppress the next sweep.
-func sweepUntilRebindSettles(t *testing.T, app *App) environmentActivityState {
+func sweepUntilRebindSettles(t *testing.T, app *App) runtimeview.ActivityState {
 	t.Helper()
 	return sweepEnvUntilRebindSettles(t, app, forwardRepairSelection())
 }
 
-func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uiSelection) environmentActivityState {
+func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uimodel.Selection) runtimeview.ActivityState {
 	t.Helper()
-	state := app.observeEnvironmentActivity(selection).state
-	key := selectionKey(selection)
+	state := app.runtime.ObserveActivity(selection)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		app.envEnsureMu.Lock()
-		_, inflight := app.envEnsureInflight[key]
-		app.envEnsureMu.Unlock()
-		if !inflight {
+		if !app.envops.EnsureInFlight(selection) {
 			return state
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -169,22 +203,22 @@ func TestDroppedForwardIsRestarted(t *testing.T) {
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
 	state := sweepUntilRebindSettles(t, app)
-	if state.reachable {
+	if state.Reachable {
 		t.Fatal("a forward whose port nothing holds is not reachable")
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("the first failing sweep restarts the forward; it does not yet diagnose it")
 	}
 	waitForReconnects(t, probe, 1)
 
 	state = sweepUntilRebindSettles(t, app)
-	if !state.reachable || !state.observed {
+	if !state.Reachable || !state.Observed {
 		t.Fatalf("a restarted forward makes the environment reachable and observed, got %+v", state)
 	}
 	if got := probe.count(); got != 1 {
 		t.Fatalf("restarting one dropped forward took %d rebinds, want 1", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("a forward that was restarted reported %d outages, want 0", len(got))
 	}
 }
@@ -193,10 +227,10 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
 
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	waitForReconnects(t, probe, 1)
 
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	close(probe.hold)
 	waitForReconnects(t, probe, 1)
 	if got := probe.count(); got != 1 {
@@ -208,21 +242,21 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
-	unopened := uiSelection{Tenant: "erun", Environment: "fresh"}
+	unopened := uimodel.Selection{Tenant: "erun", Environment: "fresh"}
 
-	for range forwardRepairAttempts + 2 {
+	for range envops.ForwardRepairAttempts + 2 {
 		state := sweepEnvUntilRebindSettles(t, app, unopened)
-		if state.outage || state.checkFailed {
+		if state.Outage || state.CheckFailed {
 			t.Fatalf("a successful pod probe is neither an outage nor a failed check, got %+v", state)
 		}
-		if !state.reachable || !state.observed || state.busy {
+		if !state.Reachable || !state.Observed || state.Busy {
 			t.Fatalf("an idle pod probe reports the environment idle, got %+v", state)
 		}
 	}
 	if got := probe.count(); got != 0 {
 		t.Fatalf("an environment with no recorded forward was rebound %d times, want 0", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("an environment with no recorded forward reported %d outages, want 0", len(got))
 	}
 }
@@ -231,19 +265,19 @@ func TestStaleForwardIsReestablishedWithoutDuplicatingIt(t *testing.T) {
 	probe := &forwardRepairProbe{hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
 
-	state := app.observeEnvironmentActivity(forwardRepairSelection()).state
-	if !state.reachable {
+	state := app.runtime.ObserveActivity(forwardRepairSelection())
+	if !state.Reachable {
 		t.Fatal("a forward whose port is held is still reachable; that is exactly what makes it deceptive")
 	}
-	if state.observed {
+	if state.Observed {
 		t.Fatal("an edge that answers nothing has not answered the idle question")
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("the first failing sweep repairs the forward; it does not yet diagnose it as unrepairable")
 	}
 	waitForReconnects(t, probe, 1)
 
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	close(probe.hold)
 	waitForReconnects(t, probe, 1)
 	if got := probe.count(); got != 1 {
@@ -257,10 +291,10 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 
 	for range 3 {
 		state := sweepUntilRebindSettles(t, app)
-		if !state.reachable || !state.observed {
+		if !state.Reachable || !state.Observed {
 			t.Fatalf("an environment that answered is reachable and observed, got %+v", state)
 		}
-		if state.outage {
+		if state.Outage {
 			t.Fatal("an environment that answered is not a broken forward")
 		}
 	}
@@ -273,10 +307,10 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 		return model.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
 	}
 	state := sweepUntilRebindSettles(t, app)
-	if !state.reachable || state.observed {
+	if !state.Reachable || state.Observed {
 		t.Fatalf("a declined idle query is reachable without a verdict, got %+v", state)
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("an edge that replies is not a broken forward")
 	}
 	if got := probe.count(); got != 0 {
@@ -288,26 +322,26 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for attempt := range forwardRepairAttempts {
-		if state := sweepUntilRebindSettles(t, app); state.outage {
+	for attempt := range envops.ForwardRepairAttempts {
+		if state := sweepUntilRebindSettles(t, app); state.Outage {
 			t.Fatalf("sweep %d diagnosed the forward while attempts remained", attempt+1)
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, envops.ForwardRepairAttempts)
 	}
 
 	for range 3 {
 		state := sweepUntilRebindSettles(t, app)
-		if !state.outage {
+		if !state.Outage {
 			t.Fatal("an exhausted episode must render the environment as unreachable, not as unopened")
 		}
-		if state.reachable {
+		if state.Reachable {
 			t.Fatal("a dropped forward is not reachable; the outage is what carries the row")
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, envops.ForwardRepairAttempts)
 	}
 
 	assertOneOutageNotification(t, emits, "is gone and nothing holds the port")
@@ -315,7 +349,7 @@ func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 
 func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault string) {
 	t.Helper()
-	notes := notificationsFromSource(emits, notificationSourceForwardOutage)
+	notes := notificationsFromSource(emits, envops.SourceForwardOutage)
 	if len(notes) != 1 {
 		t.Fatalf("outage notification posted %d times, want exactly 1 per episode", len(notes))
 	}
@@ -331,7 +365,7 @@ func TestUnrepairableStaleForwardReportsItsOwnFault(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 	assertOneOutageNotification(t, emits, "holds the local port but its edge never answers")
@@ -341,23 +375,23 @@ func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 
 	probe.setAnswers(true)
-	if state := sweepUntilRebindSettles(t, app); state.outage {
+	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a forward that carries traffic again is not broken")
 	}
-	if got := len(clearedNotificationSources(emits, notificationSourceForwardOutage)); got != 1 {
+	if got := len(clearedNotificationSources(emits, envops.SourceForwardOutage)); got != 1 {
 		t.Fatalf("recovery cleared the outage notification %d times, want 1", got)
 	}
 
 	probe.setAnswers(false)
-	if state := sweepUntilRebindSettles(t, app); state.outage {
+	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a fresh failure must be repaired before it is reported")
 	}
-	if got := probe.count(); got != forwardRepairAttempts+1 {
+	if got := probe.count(); got != envops.ForwardRepairAttempts+1 {
 		t.Fatalf("rebind count = %d, want a fresh episode's first attempt", got)
 	}
 }
@@ -379,25 +413,25 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 					return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 				})
 
-			for range forwardRepairAttempts + 2 {
-				if state := sweepUntilRebindSettles(t, app); state.outage {
+			for range envops.ForwardRepairAttempts + 2 {
+				if state := sweepUntilRebindSettles(t, app); state.Outage {
 					t.Fatal("a stopped environment is stopped, not an unreachable one")
 				}
 			}
 			if got := probe.count(); got != 0 {
 				t.Fatalf("a stopped environment was woken by %d rebinds, want 0", got)
 			}
-			if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+			if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 				t.Fatalf("a stopped environment reported %d outages, want 0", len(got))
 			}
 		})
 	}
 }
 
-func notificationsFromSource(emits *capturedEmits, source string) []appNotificationPayload {
-	var out []appNotificationPayload
-	for _, event := range emits.events(appNotificationEvent) {
-		note, ok := event.(appNotificationPayload)
+func notificationsFromSource(emits *capturedEmits, source string) []uimodel.AppNotificationPayload {
+	var out []uimodel.AppNotificationPayload
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		note, ok := event.(uimodel.AppNotificationPayload)
 		if ok && note.Source == source {
 			out = append(out, note)
 		}
@@ -405,10 +439,10 @@ func notificationsFromSource(emits *capturedEmits, source string) []appNotificat
 	return out
 }
 
-func clearedNotificationSources(emits *capturedEmits, source string) []appNotificationClearPayload {
-	var out []appNotificationClearPayload
-	for _, event := range emits.events(appNotificationClearEvent) {
-		cleared, ok := event.(appNotificationClearPayload)
+func clearedNotificationSources(emits *capturedEmits, source string) []uimodel.AppNotificationClearPayload {
+	var out []uimodel.AppNotificationClearPayload
+	for _, event := range emits.events(uimodel.AppNotificationClearEvent) {
+		cleared, ok := event.(uimodel.AppNotificationClearPayload)
 		if ok && cleared.Source == source {
 			out = append(out, cleared)
 		}

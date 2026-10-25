@@ -14,6 +14,14 @@ var (
 	buildDate    = ""
 )
 
+// buildSkillsSource and buildAgentsSource are the build checkout's
+// erun-skills/skills and erun-skills/agents, stamped by the build scripts, so a
+// bundle copied out of its checkout still installs the orchestrator's skills and agents.
+var (
+	buildSkillsSource = ""
+	buildAgentsSource = ""
+)
+
 func currentBuildInfo() model.BuildInfo {
 	return core.NormalizeBuildInfo(model.BuildInfo{
 		Version: buildVersion,

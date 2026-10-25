@@ -1,0 +1,311 @@
+package envops
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
+)
+
+func exposureTestService(t *testing.T, projectRoot string) *Service {
+	t.Helper()
+	return newTestService(Deps{
+		Store: fakeStore{
+			envs: map[string]config.EnvConfig{
+				"team/dev":  {KubernetesContext: "team-context"},
+				"team/host": {Type: config.EnvironmentTypeHost},
+			},
+		},
+		FindProjectRoot: func() (string, string, error) {
+			if projectRoot == "" {
+				return "", "", fmt.Errorf("no project found")
+			}
+			return filepath.Base(projectRoot), projectRoot, nil
+		},
+	})
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func exposableProjectRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := config.SaveProjectConfig(root, config.ProjectConfig{
+		Platform: config.PlatformConfig{
+			BaseDomain:   "erunpaas.test",
+			Env:          "frs-prod",
+			ServicesZone: "services.erunpaas.test",
+		},
+	}); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	return root
+}
+
+func stubKubectlOutput(t *testing.T, stdout, stderr string, exitCode int) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\nprintf %s\nprintf %s 1>&2\nexit %d\n",
+		shellQuote(stdout), shellQuote(stderr), exitCode)
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestListEnvironmentExposuresNotConfiguredWithoutPlatformBlock(t *testing.T) {
+	service := exposureTestService(t, "")
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Configured {
+		t.Fatal("expected Configured=false when the project has no platform block")
+	}
+	if result.Restricted {
+		t.Fatal("an unconfigured project must not report Restricted")
+	}
+	if len(result.Services) != 0 {
+		t.Fatalf("expected no services, got %+v", result.Services)
+	}
+	if result.NotConfiguredReason != ExposureNotConfiguredNoPlatformBlock {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", ExposureNotConfiguredNoPlatformBlock, result.NotConfiguredReason)
+	}
+}
+
+func TestListEnvironmentExposuresNotConfiguredForHostEnvironment(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "host"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Configured {
+		t.Fatal("expected Configured=false for a host environment")
+	}
+	if result.NotConfiguredReason != ExposureNotConfiguredHostEnvironment {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", ExposureNotConfiguredHostEnvironment, result.NotConfiguredReason)
+	}
+}
+
+func TestListEnvironmentExposuresRestrictedOnForbidden(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlOutput(t, "", `Error from server (Forbidden): ingresses.networking.k8s.io is forbidden: User "x" cannot list resource "ingresses"`, 1)
+
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured {
+		t.Fatal("expected Configured=true for a project with a platform block")
+	}
+	if !result.Restricted {
+		t.Fatal("expected Restricted=true on a Forbidden listing failure")
+	}
+	if result.Error != "" {
+		t.Fatalf("a restricted result should not also carry a generic error, got %q", result.Error)
+	}
+}
+
+func TestListEnvironmentExposuresErrorOnOtherFailure(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlOutput(t, "", "Unable to connect to the server: dial tcp: i/o timeout", 1)
+
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured {
+		t.Fatal("expected Configured=true for a project with a platform block")
+	}
+	if result.Restricted {
+		t.Fatal("a generic listing failure must not report Restricted")
+	}
+	if result.Error == "" {
+		t.Fatal("expected a non-empty Error for a generic listing failure")
+	}
+}
+
+func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlOutput(t, `{"items":[{"metadata":{"name":"expose-api"},"spec":{"rules":[{"host":"api.frs-prod.services.test"}]}}]}`, "", 0)
+
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured || result.Restricted || result.Error != "" {
+		t.Fatalf("unexpected result shape: %+v", result)
+	}
+	if len(result.Services) != 1 || result.Services[0].Hostname != "api.frs-prod.services.test" {
+		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+}
+
+// stubKubectlIngressAndCertificates answers per resource, so Ingress and
+// Certificate reads get different bodies.
+func stubKubectlIngressAndCertificates(t *testing.T, ingressJSON, certificateJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *certificates*) printf %s ;;\n  *ingress*) printf %s ;;\n  *) printf '{\"items\":[]}' ;;\nesac\n",
+		shellQuote(certificateJSON), shellQuote(ingressJSON))
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// cert-manager writes the tls block before issuance, so TLSReady must follow
+// the Certificate.
+func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlIngressAndCertificates(t,
+		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
+			"rules":[{"host":"web.frs-prod.services.test"}],
+			"tls":[{"hosts":["web.frs-prod.services.test"],"secretName":"frs-prod-wildcard-tls"}]
+		}}]}`,
+		`{"items":[{"metadata":{"name":"wildcard"},"spec":{"secretName":"frs-prod-wildcard-tls"},"status":{"conditions":[
+			{"type":"Ready","status":"False","reason":"Issuing","message":"waiting for order to complete"}
+		]}}]}`,
+	)
+
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Services) != 1 {
+		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+	got := result.Services[0]
+	if got.Scheme != "https" || got.TLSReady {
+		t.Fatalf("expected https scheme with TLSReady=false, got %+v", got)
+	}
+	if got.TLSNotReadyReason != "Issuing: waiting for order to complete" {
+		t.Fatalf("TLSNotReadyReason = %q, want the certificate's own condition", got.TLSNotReadyReason)
+	}
+}
+
+func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlIngressAndCertificates(t,
+		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
+			"rules":[{"host":"web.frs-prod.services.test"}],
+			"tls":[{"hosts":["web.frs-prod.services.test"],"secretName":"frs-prod-wildcard-tls"}]
+		}}]}`,
+		`{"items":[{"metadata":{"name":"wildcard"},"spec":{"secretName":"frs-prod-wildcard-tls"},"status":{"conditions":[
+			{"type":"Ready","status":"True"}
+		]}}]}`,
+	)
+
+	result, err := service.ListEnvironmentExposures(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Services) != 1 {
+		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+	got := result.Services[0]
+	if !got.TLSReady || got.TLSNotReadyReason != "" {
+		t.Fatalf("expected a ready certificate with no reason, got %+v", got)
+	}
+}
+
+func TestExposeEnvironmentServiceRequiresServiceAndTargetIP(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	if _, err := service.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, ExposeServiceInput{}); err == nil {
+		t.Fatal("expected an error when service and target IP are both missing")
+	}
+}
+
+func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
+	service := exposureTestService(t, "")
+	_, err := service.ExposeEnvironmentService(uimodel.Selection{Tenant: "team", Environment: "dev"}, ExposeServiceInput{
+		Service: "api", TargetIP: "127.0.0.1",
+	})
+	if err == nil {
+		t.Fatal("expected an error exposing a service with no platform block configured")
+	}
+}
+
+// stubKubectlByResource answers per resource; the listing reads Services and Ingresses.
+func stubKubectlByResource(t *testing.T, serviceJSON, ingressJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *ingress*) printf %s ;;\n  *service*) printf %s ;;\n  *) printf '{\"items\":[]}' ;;\nesac\n",
+		shellQuote(ingressJSON), shellQuote(serviceJSON))
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlByResource(t,
+		`{"items":[
+			{"metadata":{"name":"validation-agent-backend-api"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":8000,"protocol":"TCP"}]}},
+			{"metadata":{"name":"team-mcp"},"spec":{"type":"ClusterIP","ports":[{"port":80}]}}
+		]}`,
+		`{"items":[{"metadata":{"name":"expose-validator"},"spec":{
+			"rules":[{"host":"validator.team-dev.services.test","http":{"paths":[{"backend":{"service":{"name":"validation-agent-backend-api","port":{"number":8000}}}}]}}],
+			"tls":[{"hosts":["validator.team-dev.services.test"],"secretName":"team-dev-wildcard-tls"}]
+		}}]}`,
+	)
+
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured || result.Restricted {
+		t.Fatalf("unexpected result shape: %+v", result)
+	}
+	// Exposure matches through the Ingress backend, so off-convention names still
+	// count; team-mcp has no route.
+	want := []EnvironmentService{
+		{Name: "team-mcp", Type: "ClusterIP", Ports: []EnvironmentServicePort{{Port: 80}}},
+		{
+			Name:      "validation-agent-backend-api",
+			Type:      "ClusterIP",
+			Ports:     []EnvironmentServicePort{{Name: "http", Port: 8000}},
+			Hostname:  "validator.team-dev.services.test",
+			Scheme:    "https",
+			ExposedAs: "validator",
+		},
+	}
+	if !reflect.DeepEqual(result.Services, want) {
+		t.Fatalf("services = %+v, want %+v", result.Services, want)
+	}
+}
+
+func TestListEnvironmentServicesRestrictedOnForbidden(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	stubKubectlOutput(t, "", `Error from server (Forbidden): services is forbidden: User "x" cannot list resource "services"`, 1)
+
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured || !result.Restricted {
+		t.Fatalf("expected a restricted listing, got %+v", result)
+	}
+	if len(result.Services) != 0 {
+		t.Fatalf("a restricted listing must not also claim services: %+v", result.Services)
+	}
+}
+
+func TestListEnvironmentServicesNotConfiguredForHostEnvironment(t *testing.T) {
+	service := exposureTestService(t, exposableProjectRoot(t))
+	result, err := service.ListEnvironmentServices(uimodel.Selection{Tenant: "team", Environment: "host"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Configured || result.NotConfiguredReason != ExposureNotConfiguredHostEnvironment {
+		t.Fatalf("expected the host-environment reason, got %+v", result)
+	}
+}

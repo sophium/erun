@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // machOArtifactBytes opens with the 64-bit Mach-O magic; the desktop
@@ -29,8 +31,8 @@ func stubCodesign(t *testing.T, dir string) string {
 
 func seedOrchestratorArtifact(t *testing.T, name string, content []byte) string {
 	t.Helper()
-	dir, err := ensureOrchestratorOutputsDir("erun")
-	if err != nil {
+	dir := orchestratorConfigFile(t, "orchestrator-outputs", "erun")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("ensure outputs dir: %v", err)
 	}
 	path := filepath.Join(dir, name)
@@ -51,7 +53,8 @@ func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) 
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -75,11 +78,11 @@ func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) 
 
 func requireOnlyNotification(t *testing.T, emits *capturedEmits, kind, contains string) {
 	t.Helper()
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -98,7 +101,8 @@ func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -113,7 +117,7 @@ func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	if info.Mode().Perm()&0o111 != 0 {
 		t.Fatalf("expected the artifact left untouched, got mode %v", info.Mode().Perm())
 	}
-	if got := emits.events(appNotificationEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 0 {
 		t.Fatalf("expected no notification off darwin, got %+v", got)
 	}
 }
