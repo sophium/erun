@@ -13,9 +13,7 @@ import (
 
 func newRunnerTestApp(t *testing.T) *App {
 	t.Helper()
-	app := &App{
-		sessions: make(map[string]*managedTerminal),
-	}
+	app := withTestTerminal(&App{})
 	app.activityQueue = newActivityQueueStore(nil, nil)
 	return app
 }

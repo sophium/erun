@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // orchestratorShellActivity is a hook-written report of a background shell that
@@ -195,17 +197,18 @@ func (a *App) reconcileOrphanedOrchestratorShellActivity(now time.Time) {
 
 // aliveOrchestratorIDs includes transient sessions, which keep the long bound while running.
 func (a *App) aliveOrchestratorIDs() map[string]struct{} {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	ids := make(map[string]struct{}, len(a.orchestrators))
-	for id, session := range a.orchestrators {
-		if session == nil {
-			continue
+	var ids map[string]struct{}
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		ids = make(map[string]struct{}, len(a.orchestrators))
+		for id, session := range a.orchestrators {
+			if session == nil {
+				continue
+			}
+			if managed := l.Session(terminal.OrchestratorSessionKey(id)); managed != nil && !managed.Closed {
+				ids[id] = struct{}{}
+			}
 		}
-		if managed := a.sessions[orchestratorSessionKey(id)]; managed != nil && !managed.closed {
-			ids[id] = struct{}{}
-		}
-	}
+	})
 	return ids
 }
 

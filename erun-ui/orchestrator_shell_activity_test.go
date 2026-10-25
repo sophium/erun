@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func writeOrchestratorShellActivity(t *testing.T, id string, activity orchestratorShellActivity) {
@@ -252,7 +254,7 @@ func TestReconcileOrphanedOrchestratorShellActivityReapsAnEphemeralIDNoOneWillEv
 		AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
 	})
 
-	a := &App{}
+	a := withTestTerminal(&App{})
 	a.reconcileOrphanedOrchestratorShellActivity(now)
 
 	if _, ok := readOrchestratorShellActivity(id, now, false, ""); ok {
@@ -273,7 +275,7 @@ func TestReconcileOrphanedOrchestratorShellActivityLeavesAFreshOrphanAlone(t *te
 		Running: true, TaskID: "task-1", AtUnix: now.Unix(),
 	})
 
-	a := &App{}
+	a := withTestTerminal(&App{})
 	a.reconcileOrphanedOrchestratorShellActivity(now)
 
 	if _, err := os.Stat(orchestratorShellActivityPath(id)); err != nil {
@@ -293,10 +295,10 @@ func TestReconcileOrphanedOrchestratorShellActivityRespectsALiveSessionsSafetyBo
 		AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
 	})
 
-	a := &App{
+	a := withTestTerminal(&App{
 		orchestrators: map[string]*orchestratorSession{id: {id: id, transient: true}},
-		sessions:      map[string]*managedTerminal{orchestratorSessionKey(id): {session: newStubTerminalSession()}},
-	}
+	})
+	setTestSession(a, terminal.OrchestratorSessionKey(id), &terminal.Session{PTY: newStubTerminalSession()})
 	a.reconcileOrphanedOrchestratorShellActivity(now)
 	if _, err := os.Stat(orchestratorShellActivityPath(id)); err != nil {
 		t.Fatalf("a live session's shell may run well past the short bound: %v", err)

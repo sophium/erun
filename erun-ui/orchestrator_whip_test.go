@@ -9,6 +9,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // adrg/xdg caches base dirs at init, so Reload after changing XDG_CONFIG_HOME.
@@ -70,8 +71,8 @@ func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 
 	aliveSession := newCallRecordingSession()
-	aliveKey := orchestratorSessionKey("alive")
-	app.sessions[aliveKey] = &managedTerminal{session: aliveSession, key: aliveKey, serial: 1, kind: sessionKindOrchestrator}
+	aliveKey := terminal.OrchestratorSessionKey("alive")
+	setTestSession(app, aliveKey, &terminal.Session{PTY: aliveSession, Key: aliveKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "alive", startedAt: time.Now()}
 
 	app.orchestrators["gone"] = &orchestratorSession{id: "gone", serial: 2, name: "gone", startedAt: time.Now()}
@@ -99,8 +100,8 @@ func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) 
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 1, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 1, Kind: terminal.KindOrchestrator})
 	// An automatic pass would skip this fresh session; an explicit whip does not.
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 1, name: "agent", startedAt: time.Now()}
 
@@ -109,9 +110,9 @@ func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) 
 		t.Fatalf("expected the explicit whip to push despite fresh activity, got %+v", outcomes)
 	}
 
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	s := app.orchestrators["agent"]
-	app.mu.Unlock()
+	unlock()
 	if s.pacingWhipCount != 1 || s.pacingLastWhipAtUnix == 0 {
 		t.Fatalf("expected the explicit whip to be recorded in its own history, got count=%d lastAt=%d", s.pacingWhipCount, s.pacingLastWhipAtUnix)
 	}
@@ -135,8 +136,8 @@ func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testin
 		},
 	}}})
 
-	key := orchestratorSessionKey("opened")
-	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("opened")
+	setTestSession(app, key, &terminal.Session{PTY: newCallRecordingSession(), Key: key, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["opened"] = &orchestratorSession{id: "opened", serial: 1, name: "opened", startedAt: time.Now()}
 
 	byID := map[string]orchestratorWhipOutcome{}
@@ -164,13 +165,13 @@ func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 
 	wantedSession := newCallRecordingSession()
-	wantedKey := orchestratorSessionKey("wanted")
-	app.sessions[wantedKey] = &managedTerminal{session: wantedSession, key: wantedKey, serial: 1, kind: sessionKindOrchestrator}
+	wantedKey := terminal.OrchestratorSessionKey("wanted")
+	setTestSession(app, wantedKey, &terminal.Session{PTY: wantedSession, Key: wantedKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["wanted"] = &orchestratorSession{id: "wanted", serial: 1, name: "wanted", startedAt: time.Now()}
 
 	unwantedSession := newCallRecordingSession()
-	unwantedKey := orchestratorSessionKey("unwanted")
-	app.sessions[unwantedKey] = &managedTerminal{session: unwantedSession, key: unwantedKey, serial: 2, kind: sessionKindOrchestrator}
+	unwantedKey := terminal.OrchestratorSessionKey("unwanted")
+	setTestSession(app, unwantedKey, &terminal.Session{PTY: unwantedSession, Key: unwantedKey, Serial: 2, Kind: terminal.KindOrchestrator})
 	app.orchestrators["unwanted"] = &orchestratorSession{id: "unwanted", serial: 2, name: "unwanted", startedAt: time.Now()}
 
 	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"wanted": {}})
@@ -195,8 +196,8 @@ func TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs(t *testing.T) {
 			{ID: "never-opened", Name: "never-opened"},
 		},
 	}}})
-	key := orchestratorSessionKey("opened")
-	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("opened")
+	setTestSession(app, key, &terminal.Session{PTY: newCallRecordingSession(), Key: key, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["opened"] = &orchestratorSession{id: "opened", serial: 1, name: "opened", startedAt: time.Now()}
 
 	targets := app.listWhipOrchestratorTargets()

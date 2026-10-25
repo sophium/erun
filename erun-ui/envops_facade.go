@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"runtime"
-	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
@@ -15,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -153,9 +153,11 @@ func (a *App) newEnvopsService() *envops.Service {
 			return a.deps.ensureSSHD(ctx, result)
 		},
 		ReconnectLineHandler: func(selection uimodel.Selection) func(string) {
-			return newActivityTraceLineHandler(a, selection, sessionKindOpen)
+			return newActivityTraceLineHandler(a, selection, terminal.KindOpen)
 		},
-		DeployInFlight:    a.deployInFlightForEnv,
+		DeployInFlight: func(selection uimodel.Selection) bool {
+			return a.terminal.DeployInFlight(selection)
+		},
 		NoteEdgeAnswering: a.noteOrchestratorEdgeAnswering,
 		StopRuntime: func(ctx core.Context, params lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			return a.deps.stopEnvironmentRuntime(ctx, params)
@@ -223,11 +225,11 @@ func (a *App) newEnvopsService() *envops.Service {
 
 // openLocalIDE launches ide on a host path; the IDE command line is the terminal side's.
 func (a *App) openLocalIDE(ide, path string) error {
-	executable, args, err := localOpenIDECommand(runtime.GOOS, ide, path)
+	executable, args, err := terminal.LocalOpenIDECommand(runtime.GOOS, ide, path)
 	if err != nil {
 		return err
 	}
-	output, err := a.deps.runIDECommand(a.context(), startTerminalSessionParams{
+	output, err := a.deps.runIDECommand(a.context(), terminal.StartParams{
 		Dir:        path,
 		Executable: executable,
 		Args:       args,
@@ -236,24 +238,7 @@ func (a *App) openLocalIDE(ide, path string) error {
 	if err == nil {
 		return nil
 	}
-	return formatOpenIDEError(ide, output, err)
-}
-
-// deployInFlightForEnv: only deploys lock sibling terminals, so a locked session is the signal.
-func (a *App) deployInFlightForEnv(selection uimodel.Selection) bool {
-	selection = uimodel.NormalizeSelection(selection)
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, managed := range a.sessions {
-		if managed == nil || managed.closed || managed.lockedByActivity == "" {
-			continue
-		}
-		if strings.TrimSpace(managed.selection.Tenant) == selection.Tenant &&
-			strings.TrimSpace(managed.selection.Environment) == selection.Environment {
-			return true
-		}
-	}
-	return false
+	return terminal.FormatOpenIDEError(ide, output, err)
 }
 
 // reportHostArtifactSigning surfaces ad-hoc signing for the orchestrator's outputs.

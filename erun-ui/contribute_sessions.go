@@ -8,12 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
-)
-
-const (
-	sessionKindContributeERun sessionKind = "contribute-erun"
-	sessionKindContributeAI   sessionKind = "contribute-ai"
 )
 
 // StartContributeSession spawns a shell in the operator's erun clone running the locally-built CLI.
@@ -22,7 +18,7 @@ func (a *App) StartContributeSession(selection uimodel.Selection, slot, cols, ro
 	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
 		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, false)
 	})
 }
@@ -33,12 +29,12 @@ func (a *App) StartContributeAISession(selection uimodel.Selection, slot, cols, 
 	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
 		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, true)
 	})
 }
 
-func (a *App) runContributeSession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int, withAI bool) (uimodel.StartSessionResult, *managedTerminal, error) {
+func (a *App) runContributeSession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int, withAI bool) (uimodel.StartSessionResult, *terminal.Session, error) {
 	if !a.GetContributeMode(selection) {
 		return uimodel.StartSessionResult{}, nil, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
 	}
@@ -58,9 +54,9 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 		return uimodel.StartSessionResult{}, nil, err
 	}
 
-	kind := sessionKindContributeERun
+	kind := terminal.KindContributeERun
 	if withAI {
-		kind = sessionKindContributeAI
+		kind = terminal.KindContributeAI
 	}
 
 	if reused, managed, ok := a.reuseExistingContributeSession(key, slot, kind); ok {
@@ -72,10 +68,10 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	if withAI {
 		appSessionID = "contribute-ai"
 	}
-	params := startTerminalSessionParams{
-		Dir:        resolveTerminalStartDir(result.RepoPath),
+	params := terminal.StartParams{
+		Dir:        terminal.ResolveStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment), appSessionID, withAI, true),
+		Args:       terminal.WithAppSession(terminal.BuildOpenArgs(result.Tenant, result.Environment), appSessionID, withAI, true),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -85,33 +81,34 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 		return uimodel.StartSessionResult{}, nil, err
 	}
 
-	a.mu.Lock()
-	a.nextSerial++
-	serial := a.nextSerial
-	managed := &managedTerminal{
-		session:                session,
-		selection:              selection,
-		key:                    key,
-		serial:                 serial,
-		slot:                   slot,
-		kind:                   kind,
-		appSession:             appSessionID,
-		blocksIdleStop:         true,
-		clearIdleBlockOnOutput: true,
-		respawn: func() (terminalSession, error) {
-			return a.deps.startTerminal(reconnectSessionParams(params))
-		},
-		startedAt: time.Now(),
-		lastCols:  cols,
-		lastRows:  rows,
-	}
-	a.sessions[key] = managed
-	a.busyEnvs[selectionKey(selection)]++
-	a.mu.Unlock()
+	var serial int
+	var managed *terminal.Session
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		serial = l.NextSerial()
+		managed = &terminal.Session{
+			PTY:                    session,
+			Selection:              selection,
+			Key:                    key,
+			Serial:                 serial,
+			Slot:                   slot,
+			Kind:                   kind,
+			AppSession:             appSessionID,
+			BlocksIdleStop:         true,
+			ClearIdleBlockOnOutput: true,
+			Respawn: func() (terminal.PTY, error) {
+				return a.deps.startTerminal(terminal.ReconnectParams(params))
+			},
+			StartedAt: time.Now(),
+			LastCols:  cols,
+			LastRows:  rows,
+		}
+		l.Register(managed)
+		l.AddBusy(selection)
+	})
 
-	a.recordTerminalActivity(selection)
+	a.terminal.RecordActivity(selection)
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
+	go a.terminal.Stream(managed)
 	go a.envops.StartWorkspaceSync(selection)
 	go a.cloudContexts.StartRefresher(selection)
 
@@ -119,7 +116,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	if withAI {
 		tabName = "AI contribute tab"
 	}
-	a.logSpawnedCommandToLocal(selection, string(kind), formatLocalCommandLog(formatLaunchCommand(params), tabName))
+	a.terminal.LogSpawnedCommandToLocal(selection, string(kind), terminal.FormatLocalCommandLog(terminal.FormatLaunchCommand(params), tabName))
 	_ = ctx
 	return uimodel.StartSessionResult{
 		SessionID: serial,
@@ -129,18 +126,18 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 	}, managed, nil
 }
 
-func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionKind) (uimodel.StartSessionResult, *managedTerminal, bool) {
-	a.mu.Lock()
-	existing := a.sessions[key]
-	if existing == nil || existing.closed || existing.session == nil {
-		a.mu.Unlock()
+func (a *App) reuseExistingContributeSession(key string, slot int, kind terminal.Kind) (uimodel.StartSessionResult, *terminal.Session, bool) {
+	var existing *terminal.Session
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		existing = l.Session(key)
+	})
+	if existing == nil || existing.Closed || existing.PTY == nil {
 		return uimodel.StartSessionResult{}, nil, false
 	}
-	a.mu.Unlock()
-	existing.signalReady(nil)
+	existing.SignalReady(nil)
 	return uimodel.StartSessionResult{
-		SessionID: existing.serial,
-		Selection: existing.selection,
+		SessionID: existing.Serial,
+		Selection: existing.Selection,
 		Slot:      slot,
 		Kind:      string(kind),
 	}, existing, true
@@ -151,32 +148,32 @@ func contributeSessionKey(selection uimodel.Selection, slot int, withAI bool) st
 	if withAI {
 		prefix = "contribute-ai"
 	}
-	return prefix + "\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
+	return prefix + "\x00" + uimodel.SelectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
 func (a *App) closeContributeSessionsForSelection(selection uimodel.Selection) {
 	selection = uimodel.NormalizeSelection(selection)
 	prefixes := []string{
-		"contribute-erun\x00" + selectionKey(selection) + "\x00",
-		"contribute-ai\x00" + selectionKey(selection) + "\x00",
+		"contribute-erun\x00" + uimodel.SelectionKey(selection) + "\x00",
+		"contribute-ai\x00" + uimodel.SelectionKey(selection) + "\x00",
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for key, managed := range a.sessions {
-		if managed == nil {
-			continue
-		}
-		matches := false
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(key, prefix) {
-				matches = true
-				break
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for key, managed := range l.Sessions() {
+			if managed == nil {
+				continue
 			}
+			matches := false
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(key, prefix) {
+					matches = true
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			_ = managed.PTY.Close()
+			l.Delete(key)
 		}
-		if !matches {
-			continue
-		}
-		_ = managed.session.Close()
-		delete(a.sessions, key)
-	}
+	})
 }

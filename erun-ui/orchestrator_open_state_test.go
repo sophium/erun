@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func openStateTestApp(t *testing.T) (*App, string, string) {
@@ -20,7 +21,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 	restoreDir := filepath.Join(state, orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {

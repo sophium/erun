@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -40,9 +41,9 @@ func TestBuildOrchestratorLaunchStartsAFreshTransientSession(t *testing.T) {
 
 // The agent id is spliced into a shell line, so non-ids are refused.
 func TestOrchestratorLaunchCommandAttachesOnlyToAnAgentID(t *testing.T) {
-	if _, err := exec.LookPath(defaultAITool); err != nil {
+	if _, err := exec.LookPath(terminal.DefaultAITool); err != nil {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, defaultAITool), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, terminal.DefaultAITool), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -89,7 +90,7 @@ func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	stub := filepath.Join(dir, defaultAITool)
+	stub := filepath.Join(dir, terminal.DefaultAITool)
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n"), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
@@ -117,29 +118,6 @@ func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
 	}
 }
 
-// A clean exit or a torn-down registration refuses respawn.
-func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
-	app := NewApp(erunUIDeps{})
-	id := "agent"
-	key := orchestratorSessionKey(id)
-	managed := &managedTerminal{key: key, kind: sessionKindOrchestrator}
-	app.orchestrators[id] = &orchestratorSession{id: id}
-	app.sessions[key] = managed
-
-	if !app.orchestratorReconnectRefused(managed, "") {
-		t.Fatal("a clean exit (empty reason) must refuse respawn")
-	}
-	if app.orchestratorReconnectRefused(managed, "exit status 1") {
-		t.Fatal("a crash with an intact registration must not be refused")
-	}
-
-	delete(app.orchestrators, id)
-	delete(app.sessions, key)
-	if !app.orchestratorReconnectRefused(managed, "exit status 1") {
-		t.Fatal("a torn-down registration must refuse respawn, so Stop cannot be undone")
-	}
-}
-
 // A crash reattaches to the same agent without a prompt.
 func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 	home := t.TempDir()
@@ -151,7 +129,7 @@ func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 	var attached, prompts []string
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			session := newStubTerminalSession()
 			mu.Lock()
 			sessions = append(sessions, session)
@@ -209,7 +187,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			session := newStubTerminalSession()
 			mu.Lock()
 			sessions = append(sessions, session)
@@ -265,7 +243,7 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			session := newStubTerminalSession()
 			mu.Lock()
 			sessions = append(sessions, session)

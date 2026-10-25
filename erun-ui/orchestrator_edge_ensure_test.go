@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -72,7 +73,7 @@ func orchestratorEdgeTestApp(t *testing.T, edge *spawnEdgeProbe) (*App, *capture
 	emits := newCapturedEmits()
 	app := NewApp(erunUIDeps{
 		store: store,
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {

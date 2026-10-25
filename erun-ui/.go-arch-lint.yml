@@ -43,6 +43,8 @@ components:
     in: "internal/settings"
   internal-tenant:
     in: "internal/tenant"
+  internal-terminal:
+    in: "internal/terminal"
   internal-uimodel:
     in: "internal/uimodel"
   root:
@@ -79,6 +81,15 @@ deps:
       - internal-uimodel
     canUse:
       - github-com-sophium-erun-erun-common
+  internal-terminal:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-ActiveState-termtest-conpty
+      - github-com-adrg-xdg
+      - github-com-creack-pty
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
   root:
     mayDependOn:
       - headlessserver
@@ -87,12 +98,11 @@ deps:
       - internal-runtimeview
       - internal-settings
       - internal-tenant
+      - internal-terminal
       - internal-uimodel
     canUse:
       - cgo
-      - github-com-ActiveState-termtest-conpty
       - github-com-adrg-xdg
-      - github-com-creack-pty
       - github-com-google-uuid
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common

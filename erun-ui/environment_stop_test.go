@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -39,7 +40,7 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 	var sessions []*stubTerminalSession
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			session := newStubTerminalSession()
 			sessionsMu.Lock()
 			sessions = append(sessions, session)

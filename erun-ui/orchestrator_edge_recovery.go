@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -24,28 +25,30 @@ func (a *App) recordOrchestratorEdgeOutage(orchestratorID, label string) {
 	if !ok {
 		return
 	}
-	key := selectionKey(uimodel.Selection{Tenant: tenant, Environment: environment})
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.edgeOutages == nil {
-		a.edgeOutages = make(map[string]orchestratorEdgeOutage)
-	}
-	episode := a.edgeOutages[key]
-	episode.label = label
-	if !slices.Contains(episode.orchestratorIDs, orchestratorID) {
-		episode.orchestratorIDs = append(episode.orchestratorIDs, orchestratorID)
-	}
-	a.edgeOutages[key] = episode
+	key := uimodel.SelectionKey(uimodel.Selection{Tenant: tenant, Environment: environment})
+	a.terminal.WithLock(func(*terminal.Locked) {
+		if a.edgeOutages == nil {
+			a.edgeOutages = make(map[string]orchestratorEdgeOutage)
+		}
+		episode := a.edgeOutages[key]
+		episode.label = label
+		if !slices.Contains(episode.orchestratorIDs, orchestratorID) {
+			episode.orchestratorIDs = append(episode.orchestratorIDs, orchestratorID)
+		}
+		a.edgeOutages[key] = episode
+	})
 }
 
 // noteOrchestratorEdgeAnswering logs the exit for an edge the sweep just saw
 // answer, and forgets it.
 func (a *App) noteOrchestratorEdgeAnswering(selection uimodel.Selection) {
-	key := selectionKey(uimodel.NormalizeSelection(selection))
-	a.mu.Lock()
-	episode, ok := a.edgeOutages[key]
-	delete(a.edgeOutages, key)
-	a.mu.Unlock()
+	key := uimodel.SelectionKey(uimodel.NormalizeSelection(selection))
+	var episode orchestratorEdgeOutage
+	var ok bool
+	a.terminal.WithLock(func(*terminal.Locked) {
+		episode, ok = a.edgeOutages[key]
+		delete(a.edgeOutages, key)
+	})
 	if !ok {
 		return
 	}

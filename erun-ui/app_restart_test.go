@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // restartTestApp keeps restart records in a temp dir with inert relaunch/quit.
@@ -22,7 +23,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 	restoreDir := filepath.Join(home, "state", orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {

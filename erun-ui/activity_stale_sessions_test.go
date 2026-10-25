@@ -6,28 +6,30 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func newStaleShellTestApp() *App {
-	app := &App{sessions: make(map[string]*managedTerminal)}
+	app := withTestTerminal(&App{})
 	app.activityQueue = newActivityQueueStore(nil, nil)
 	return app
 }
 
 // addStaleShellSession runs no reader goroutine so the closed state stays deterministic.
-func addStaleShellSession(app *App, serial int, startedAt time.Time) (*managedTerminal, *stubTerminalSession) {
+func addStaleShellSession(app *App, serial int, startedAt time.Time) (*terminal.Session, *stubTerminalSession) {
 	session := newStubTerminalSession()
 	session.pid = serial
-	managed := &managedTerminal{
-		session:   session,
-		key:       "extra\x00" + strconv.Itoa(serial),
-		serial:    serial,
-		kind:      sessionKindCommand,
-		startedAt: startedAt,
+	managed := &terminal.Session{
+		PTY:       session,
+		Key:       "extra\x00" + strconv.Itoa(serial),
+		Serial:    serial,
+		Kind:      terminal.KindCommand,
+		StartedAt: startedAt,
 	}
-	app.mu.Lock()
-	app.sessions[managed.key] = managed
-	app.mu.Unlock()
+	l, unlock := lockTerminalForTest(app)
+	l.Register(managed)
+	unlock()
 	return managed, session
 }
 
@@ -53,19 +55,19 @@ func (s *reapedShellSession) Close() error {
 	return s.stubTerminalSession.Close()
 }
 
-func addReapedShellSession(app *App, serial int, startedAt time.Time) (*managedTerminal, *reapedShellSession) {
+func addReapedShellSession(app *App, serial int, startedAt time.Time) (*terminal.Session, *reapedShellSession) {
 	session := newReapedShellSession()
 	session.pid = serial
-	managed := &managedTerminal{
-		session:   session,
-		key:       "extra\x00" + strconv.Itoa(serial),
-		serial:    serial,
-		kind:      sessionKindCommand,
-		startedAt: startedAt,
+	managed := &terminal.Session{
+		PTY:       session,
+		Key:       "extra\x00" + strconv.Itoa(serial),
+		Serial:    serial,
+		Kind:      terminal.KindCommand,
+		StartedAt: startedAt,
 	}
-	app.mu.Lock()
-	app.sessions[managed.key] = managed
-	app.mu.Unlock()
+	l, unlock := lockTerminalForTest(app)
+	l.Register(managed)
+	unlock()
 	return managed, session
 }
 
@@ -76,7 +78,7 @@ func TestADeliberatelyClosedSessionIsNotReportedAsAStaleShell(t *testing.T) {
 	app := newStaleShellTestApp()
 	managed, session := addStaleShellSession(app, 41, aStaleShellSessionAge())
 
-	if err := app.CloseSession(managed.serial); err != nil {
+	if err := app.CloseSession(managed.Serial); err != nil {
 		t.Fatalf("CloseSession: %v", err)
 	}
 	// Precondition: the process really is gone.
@@ -88,7 +90,7 @@ func TestADeliberatelyClosedSessionIsNotReportedAsAStaleShell(t *testing.T) {
 		t.Fatalf("a session the operator just closed was offered to the stale detector: %+v", snapshots)
 	}
 	app.reconcileStaleShellsOnce()
-	if entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); ok {
+	if entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); ok {
 		t.Fatalf("a deliberate close queued a stale-shell entry: %q", entry.Error)
 	}
 }
@@ -103,13 +105,13 @@ func TestASessionWhoseProcessDiedOnItsOwnIsStillReportedAsAStaleShell(t *testing
 	}
 
 	snapshots := app.collectStaleSessionSnapshots()
-	if len(snapshots) != 1 || snapshots[0].serial != managed.serial {
+	if len(snapshots) != 1 || snapshots[0].serial != managed.Serial {
 		t.Fatalf("a session that died on its own must still be reported stale, got %+v", snapshots)
 	}
 	app.reconcileStaleShellsOnce()
-	entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial))
+	entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial))
 	if !ok {
-		t.Fatalf("expected a stale-shell queue entry for serial %d", managed.serial)
+		t.Fatalf("expected a stale-shell queue entry for serial %d", managed.Serial)
 	}
 	if !strings.Contains(entry.Error, "shell exited unexpectedly") {
 		t.Fatalf("unexpected stale-shell entry error: %q", entry.Error)
@@ -121,7 +123,7 @@ func TestAFreshlyStartedSessionIsHeldOutOfTheStaleDetector(t *testing.T) {
 	app := newStaleShellTestApp()
 	managed, session := addStaleShellSession(app, 43, time.Now())
 
-	if err := app.CloseSession(managed.serial); err != nil {
+	if err := app.CloseSession(managed.Serial); err != nil {
 		t.Fatalf("CloseSession: %v", err)
 	}
 	if session.Alive() {
@@ -139,22 +141,22 @@ func TestKillingAStaleSessionDoesNotQueueItAgain(t *testing.T) {
 	managed, session := addReapedShellSession(app, 51, aStaleShellSessionAge())
 
 	app.reconcileStaleShellsOnce()
-	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); !ok {
 		t.Fatalf("precondition: the detector must report the reaped shell before Kill is offered")
 	}
 
-	if !app.KillSession(managed.serial) {
-		t.Fatalf("KillSession(%d) found no session to kill", managed.serial)
+	if !app.KillSession(managed.Serial) {
+		t.Fatalf("KillSession(%d) found no session to kill", managed.Serial)
 	}
 	if session.Alive() {
 		t.Fatalf("the session read alive after KillSession")
 	}
-	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); ok {
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); ok {
 		t.Fatalf("KillSession did not dismiss the entry it was pressed on")
 	}
 
 	app.reconcileStaleShellsOnce()
-	if entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); ok {
+	if entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); ok {
 		t.Fatalf("a session the operator killed was re-queued as stale: %q", entry.Error)
 	}
 }
@@ -165,7 +167,7 @@ func TestKillSessionForAnUnknownSerialLeavesTheDetectorAlone(t *testing.T) {
 	managed, _ := addReapedShellSession(app, 52, aStaleShellSessionAge())
 
 	app.reconcileStaleShellsOnce()
-	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); !ok {
 		t.Fatalf("precondition: the detector must report the dead shell")
 	}
 	if app.KillSession(9999) {
@@ -173,7 +175,7 @@ func TestKillSessionForAnUnknownSerialLeavesTheDetectorAlone(t *testing.T) {
 	}
 
 	app.reconcileStaleShellsOnce()
-	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.Serial)); !ok {
 		t.Fatalf("a dead shell no Kill landed on must stay reported as stale")
 	}
 }

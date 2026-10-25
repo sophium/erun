@@ -72,37 +72,6 @@ type uiVersionSuggestions struct {
 	Notices     []uiVersionNotice `json:"notices,omitempty"`
 }
 
-type deleteEnvironmentResult struct {
-	Tenant                string `json:"tenant"`
-	Environment           string `json:"environment"`
-	Namespace             string `json:"namespace,omitempty"`
-	KubernetesContext     string `json:"kubernetesContext,omitempty"`
-	NamespaceDeleteError  string `json:"namespaceDeleteError,omitempty"`
-	CloudContextStopError string `json:"cloudContextStopError,omitempty"`
-}
-
-type terminalOutputPayload struct {
-	SessionID int    `json:"sessionId"`
-	Data      string `json:"data"`
-}
-
-type terminalExitPayload struct {
-	SessionID int    `json:"sessionId"`
-	Reason    string `json:"reason,omitempty"`
-	// Deliberate marks an exit the desktop caused, whose Reason describes the kill
-	// rather than a failure.
-	Deliberate bool `json:"deliberate,omitempty"`
-}
-
-// aiActivityPayload drives the sidebar spinner. The tool's turn report wins;
-// the output-volume debounce applies only to sessions that never reported.
-type aiActivityPayload struct {
-	SessionID   int    `json:"sessionId"`
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Busy        bool   `json:"busy"`
-}
-
 // orchestratorShellActivityPayload is emitted every tick so a missed event
 // self-heals.
 type orchestratorShellActivityPayload struct {
@@ -110,81 +79,4 @@ type orchestratorShellActivityPayload struct {
 	Running       bool   `json:"running"`
 	Command       string `json:"command,omitempty"`
 	StartedAtUnix int64  `json:"startedAtUnix,omitempty"`
-}
-
-type pastedFilePayload struct {
-	Data     string `json:"data"`
-	MIMEType string `json:"mimeType,omitempty"`
-	Name     string `json:"name,omitempty"`
-}
-
-type pastedFileResult struct {
-	Path string `json:"path"`
-}
-
-type uiIdleStatus struct {
-	TimeoutSeconds      int64 `json:"timeoutSeconds"`
-	SecondsUntilStop    int64 `json:"secondsUntilStop"`
-	StopEligible        bool  `json:"stopEligible"`
-	OutsideWorkingHours bool  `json:"outsideWorkingHours"`
-	ManagedCloud        bool  `json:"managedCloud"`
-	// FromPod false means a host-side reconstruction, not a live observation.
-	FromPod            bool           `json:"fromPod"`
-	StopBlockedReason  string         `json:"stopBlockedReason,omitempty"`
-	StopError          string         `json:"stopError,omitempty"`
-	CloudContextName   string         `json:"cloudContextName,omitempty"`
-	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
-	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
-	Markers            []uiIdleMarker `json:"markers,omitempty"`
-	// Leases are job claims; the desktop's own sessions never take one.
-	Leases []uimodel.EnvironmentLease `json:"leases,omitempty"`
-	// StopPendingSince is when the env became StopEligible; empty when no auto-stop
-	// is pending.
-	StopPendingSince       string `json:"stopPendingSince,omitempty"`
-	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
-	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
-}
-
-// uiLastStopEvent explains the latest automatic stop. Source is "pod-monitor" or
-// "host-manual"; Policy is snapshotted at fire time.
-type uiLastStopEvent struct {
-	StoppedAt        string             `json:"stoppedAt"`
-	ArmedAt          string             `json:"armedAt,omitempty"`
-	GraceSeconds     int64              `json:"graceSeconds"`
-	Source           string             `json:"source,omitempty"`
-	Reason           string             `json:"reason"`
-	CloudContextName string             `json:"cloudContextName,omitempty"`
-	Policy           *uiIdlePolicy      `json:"policy,omitempty"`
-	Markers          []uiLastStopMarker `json:"markers,omitempty"`
-}
-
-// uiIdlePolicy uses seconds so the frontend never parses Go durations.
-type uiIdlePolicy struct {
-	TimeoutSeconds   int64  `json:"timeoutSeconds"`
-	WorkingHours     string `json:"workingHours,omitempty"`
-	Timezone         string `json:"timezone,omitempty"`
-	IdleTrafficBytes int64  `json:"idleTrafficBytes,omitempty"`
-}
-
-// uiLastStopMarker is a marker's state when the auto-stop fired.
-type uiLastStopMarker struct {
-	Name           string `json:"name"`
-	Idle           bool   `json:"idle"`
-	Reason         string `json:"reason,omitempty"`
-	SecondsIdleFor int64  `json:"secondsIdleFor,omitempty"`
-}
-
-type uiIdleMarker struct {
-	Name             string               `json:"name"`
-	Idle             bool                 `json:"idle"`
-	Reason           string               `json:"reason,omitempty"`
-	SecondsRemaining int64                `json:"secondsRemaining,omitempty"`
-	Clients          []uiIdleMarkerClient `json:"clients,omitempty"`
-}
-
-// uiIdleMarkerClient is populated only by the SSH proxy.
-type uiIdleMarkerClient struct {
-	Address    string `json:"address"`
-	Bytes      int64  `json:"bytes,omitempty"`
-	SecondsAgo int64  `json:"secondsAgo,omitempty"`
 }

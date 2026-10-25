@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -106,30 +107,30 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 		return
 	}
 	target := activityTargetForRuntime(entry)
-	a.mu.Lock()
 	var events []activityLockEvent
-	for _, managed := range a.sessions {
-		if managed == nil || managed.closed {
-			continue
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, managed := range l.Sessions() {
+			if managed == nil || managed.Closed {
+				continue
+			}
+			if !sessionMatchesActivity(managed, entry) {
+				continue
+			}
+			if managed.LockedByActivity == entry.ID {
+				continue
+			}
+			managed.LockedByActivity = entry.ID
+			events = append(events, activityLockEvent{
+				SessionID:    managed.Serial,
+				Tenant:       entry.Tenant,
+				Environment:  entry.Environment,
+				Locked:       true,
+				DeployID:     entry.ID,
+				Reason:       "Waiting for deploy to complete",
+				DeployTarget: target,
+			})
 		}
-		if !sessionMatchesActivity(managed, entry) {
-			continue
-		}
-		if managed.lockedByActivity == entry.ID {
-			continue
-		}
-		managed.lockedByActivity = entry.ID
-		events = append(events, activityLockEvent{
-			SessionID:    managed.serial,
-			Tenant:       entry.Tenant,
-			Environment:  entry.Environment,
-			Locked:       true,
-			DeployID:     entry.ID,
-			Reason:       "Waiting for deploy to complete",
-			DeployTarget: target,
-		})
-	}
-	a.mu.Unlock()
+	})
 	for _, ev := range events {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
@@ -144,27 +145,27 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 		return
 	}
 	target := activityTargetForRuntime(entry)
-	a.mu.Lock()
 	var event *activityLockEvent
-	for _, managed := range a.sessions {
-		if managed == nil || managed.closed || managed.serial != sessionID {
-			continue
-		}
-		if managed.lockedByActivity != entry.ID {
-			managed.lockedByActivity = entry.ID
-			event = &activityLockEvent{
-				SessionID:    managed.serial,
-				Tenant:       entry.Tenant,
-				Environment:  entry.Environment,
-				Locked:       true,
-				DeployID:     entry.ID,
-				Reason:       "Waiting for deploy to complete",
-				DeployTarget: target,
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, managed := range l.Sessions() {
+			if managed == nil || managed.Closed || managed.Serial != sessionID {
+				continue
 			}
+			if managed.LockedByActivity != entry.ID {
+				managed.LockedByActivity = entry.ID
+				event = &activityLockEvent{
+					SessionID:    managed.Serial,
+					Tenant:       entry.Tenant,
+					Environment:  entry.Environment,
+					Locked:       true,
+					DeployID:     entry.ID,
+					Reason:       "Waiting for deploy to complete",
+					DeployTarget: target,
+				}
+			}
+			break
 		}
-		break
-	}
-	a.mu.Unlock()
+	})
 	if event != nil {
 		a.emitEvent(activityQueueLockEvent, *event)
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
@@ -186,25 +187,25 @@ func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
 	}
-	a.mu.Lock()
 	var events []activityLockEvent
-	for _, managed := range a.sessions {
-		if managed == nil {
-			continue
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, managed := range l.Sessions() {
+			if managed == nil {
+				continue
+			}
+			if managed.LockedByActivity != entry.ID {
+				continue
+			}
+			managed.LockedByActivity = ""
+			events = append(events, activityLockEvent{
+				SessionID:   managed.Serial,
+				Tenant:      entry.Tenant,
+				Environment: entry.Environment,
+				Locked:      false,
+				DeployID:    entry.ID,
+			})
 		}
-		if managed.lockedByActivity != entry.ID {
-			continue
-		}
-		managed.lockedByActivity = ""
-		events = append(events, activityLockEvent{
-			SessionID:   managed.serial,
-			Tenant:      entry.Tenant,
-			Environment: entry.Environment,
-			Locked:      false,
-			DeployID:    entry.ID,
-		})
-	}
-	a.mu.Unlock()
+	})
 	for _, ev := range events {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
@@ -212,20 +213,20 @@ func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 
 // sessionMatchesActivity: only a deploy locks sibling terminals, since it
 // replaces the runtime hosting them.
-func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) bool {
+func sessionMatchesActivity(managed *terminal.Session, entry activityQueueEntry) bool {
 	if managed == nil {
 		return false
 	}
 	if entry.Command != "deploy" {
 		return false
 	}
-	if managed.selection.Tenant != entry.Tenant || managed.selection.Environment != entry.Environment {
+	if managed.Selection.Tenant != entry.Tenant || managed.Selection.Environment != entry.Environment {
 		return false
 	}
-	switch managed.kind {
-	case sessionKindOpen, sessionKindAI:
+	switch managed.Kind {
+	case terminal.KindOpen, terminal.KindAI:
 		return true
-	case sessionKindLocal, sessionKindCommand, sessionKindContributeERun, sessionKindContributeAI, sessionKindOrchestrator:
+	case terminal.KindLocal, terminal.KindCommand, terminal.KindContributeERun, terminal.KindContributeAI, terminal.KindOrchestrator:
 		fallthrough
 	default:
 		return false

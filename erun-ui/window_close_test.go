@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -89,10 +90,10 @@ func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	selection := uimodel.Selection{Tenant: "pw", Environment: "alpha"}
-	held := &managedTerminal{selection: selection}
-	t.Cleanup(func() { held.signalReady(nil) })
+	held := &terminal.Session{Selection: selection}
+	t.Cleanup(func() { held.SignalReady(nil) })
 
-	if _, err := app.enqueueGatedSession(selection, kind, func(context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
+	if _, err := app.enqueueGatedSession(selection, kind, func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		return uimodel.StartSessionResult{SessionID: 1, Selection: selection}, held, nil
 	}); err != nil {
 		t.Fatalf("enqueueGatedSession: %v", err)
@@ -126,7 +127,7 @@ func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	t.Cleanup(app.stopActionRunners)
 	started := false
-	_, err := app.enqueueGatedSession(uimodel.Selection{Tenant: "pw", Environment: "alpha"}, gatedSessionKind("deploy"), func(context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
+	_, err := app.enqueueGatedSession(uimodel.Selection{Tenant: "pw", Environment: "alpha"}, gatedSessionKind("deploy"), func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		started = true
 		return uimodel.StartSessionResult{}, nil, nil
 	})

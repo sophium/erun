@@ -104,15 +104,6 @@ func TestOrchestratorActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 	}
 }
 
-func TestOrchestratorSessionsDoNotDriveTheOutputLatch(t *testing.T) {
-	if aiActivityKind(sessionKindOrchestrator) {
-		t.Fatal("an orchestrator's spinner must come from its own report, not from terminal output")
-	}
-	if !aiActivityKind(sessionKindAI) {
-		t.Fatal("an env's AI tab still drives the output latch, released by the pod heartbeat")
-	}
-}
-
 func hookCommandText(t *testing.T, hook []any) string {
 	t.Helper()
 	if len(hook) != 1 {

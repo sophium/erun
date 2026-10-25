@@ -37,6 +37,12 @@ const (
 	EnvStatusFailed         = "failed"
 )
 
+// TerminalOutputPayload carries a base64 chunk of a session's PTY output.
+type TerminalOutputPayload struct {
+	SessionID int    `json:"sessionId"`
+	Data      string `json:"data"`
+}
+
 // EnvStatusPayload: tab presence alone does not mean running.
 type EnvStatusPayload struct {
 	Tenant      string `json:"tenant"`

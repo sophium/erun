@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -128,13 +129,15 @@ func (a *App) finishExpiredInvestigation(record investigationRecord) {
 }
 
 func (a *App) orchestratorSessionPID(id string) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	managed := a.sessions[orchestratorSessionKey(id)]
-	if managed == nil || managed.closed || managed.session == nil {
-		return 0
-	}
-	return managed.session.Pid()
+	pid := 0
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		managed := l.Session(terminal.OrchestratorSessionKey(id))
+		if managed == nil || managed.Closed || managed.PTY == nil {
+			return
+		}
+		pid = managed.PTY.Pid()
+	})
+	return pid
 }
 
 func investigationRefusalReason(err error) string {

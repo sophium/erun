@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -23,8 +24,8 @@ import (
 // `build --deploy`, per erun-ui/AGENTS.md), threading the minted version so what deploys is what was built.
 func (a *App) runDeployOrchestration(ctx context.Context, selection uimodel.Selection, result config.OpenResult, force bool) error {
 	cli := a.deps.resolveCLIPath()
-	dir := resolveTerminalStartDir(result.RepoPath)
-	onLine := newActivityTraceLineHandler(a, selection, sessionKindLocal)
+	dir := terminal.ResolveStartDir(result.RepoPath)
+	onLine := newActivityTraceLineHandler(a, selection, terminal.KindLocal)
 
 	if result.EnvConfig.ResolvedType() == config.EnvironmentTypeLocalAgent {
 		return a.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
@@ -52,7 +53,7 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 	if force {
 		deployArgs = append(deployArgs, "--force")
 	}
-	deployArgs = appendDeployComponentsFlag(deployArgs, selection)
+	deployArgs = terminal.AppendDeployComponentsFlag(deployArgs, selection)
 	deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
 	_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
 	return err
@@ -65,13 +66,13 @@ func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, 
 	} else {
 		args = append(args, "--current")
 	}
-	if image := deployRuntimeImageOverride(selection); image != "" {
+	if image := terminal.DeployRuntimeImageOverride(selection); image != "" {
 		args = append(args, "--runtime-image", image)
 	}
 	if force {
 		args = append(args, "--force")
 	}
-	args = appendDeployComponentsFlag(args, selection)
+	args = terminal.AppendDeployComponentsFlag(args, selection)
 	args = a.appendMCPAuthPublicKeyFlag(args)
 	_, err := runErunCaptured(ctx, cli, dir, onLine, args...)
 	return err

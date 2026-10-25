@@ -105,7 +105,7 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
-		if a.classifyMCPUnreachable(mcpPort) == mcp.LocalMCPStaleForward {
+		if a.terminal.ClassifyMCPUnreachable(mcpPort) == mcp.LocalMCPStaleForward {
 			return model.WhipResult{
 				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
 				Decision:  model.WhipDecisionNone,

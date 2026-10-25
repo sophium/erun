@@ -40,7 +40,7 @@ func (s orchestratorLinkedEnvBusyState) stuckDetail() string {
 func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.OrchestratorEnvConfig, snapshot map[string]runtimeview.ActivityState) orchestratorLinkedEnvBusyState {
 	sawUnknown := false
 	for _, env := range envs {
-		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
+		key := uimodel.SelectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		state, ok := snapshot[key]
 		if !ok || !state.Observed {
 			// Unobserved and inconclusive are both no evidence either way.

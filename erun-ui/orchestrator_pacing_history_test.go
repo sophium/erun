@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // Rearm zeroes the cap gauge; the cumulative history must survive it.
@@ -13,19 +15,19 @@ func TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm(t *testing.T) {
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	app.orchestrators["agent"] = &orchestratorSession{
 		id: "agent", serial: 5, name: "agent",
 		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
 	}
 
 	app.reconcileOrchestratorPacing()
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	autoCount := app.orchestrators["agent"].pacingAutoNudgeCount
 	lastAutoAt := app.orchestrators["agent"].pacingLastAutoNudgeAtUnix
 	nudgeCount := app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if autoCount != 1 || lastAutoAt == 0 {
 		t.Fatalf("expected the nudge to be recorded in the cumulative history, got autoCount=%d lastAutoAt=%d", autoCount, lastAutoAt)
 	}
@@ -37,12 +39,12 @@ func TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm(t *testing.T) {
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: lastAutoAt + 10})
 	app.reconcileOrchestratorPacing()
 
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	nudgeCount = app.orchestrators["agent"].pacingNudgeCount
 	capped := app.orchestrators["agent"].pacingCapped
 	autoCountAfter := app.orchestrators["agent"].pacingAutoNudgeCount
 	lastAutoAtAfter := app.orchestrators["agent"].pacingLastAutoNudgeAtUnix
-	app.mu.Unlock()
+	unlock()
 	if nudgeCount != 0 || capped {
 		t.Fatalf("expected the answer to rearm the cap gauge, got nudgeCount=%d capped=%v", nudgeCount, capped)
 	}
@@ -58,8 +60,8 @@ func TestOrchestratorPacingNeverNudgedReportsNoHistory(t *testing.T) {
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("fresh")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 1, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("fresh")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["fresh"] = &orchestratorSession{id: "fresh", serial: 1, name: "fresh", startedAt: time.Now()}
 
 	app.reconcileOrchestratorPacing()
@@ -67,9 +69,9 @@ func TestOrchestratorPacingNeverNudgedReportsNoHistory(t *testing.T) {
 	if len(session.Calls()) != 0 {
 		t.Fatalf("a fresh session must not be nudged, got writes %v", session.Calls())
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	s := app.orchestrators["fresh"]
-	app.mu.Unlock()
+	unlock()
 	if s.pacingAutoNudgeCount != 0 || s.pacingLastAutoNudgeAtUnix != 0 {
 		t.Fatalf("expected no auto-nudge history, got count=%d lastAt=%d", s.pacingAutoNudgeCount, s.pacingLastAutoNudgeAtUnix)
 	}
@@ -91,18 +93,18 @@ func TestOrchestratorPacingCappedHistorySurvivesRearm(t *testing.T) {
 	app.SetEmitter(emits.fn())
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	longAgo := time.Now().Add(-24 * time.Hour)
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: longAgo}
 
 	for i := 0; i < orchestratorPacingMaxNudges+1; i++ {
 		app.reconcileOrchestratorPacing()
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	capped := app.orchestrators["agent"].pacingCapped
 	lastCappedAt := app.orchestrators["agent"].pacingLastCappedAtUnix
-	app.mu.Unlock()
+	unlock()
 	if !capped || lastCappedAt == 0 {
 		t.Fatalf("expected the session to be capped with a recorded timestamp, got capped=%v lastCappedAt=%d", capped, lastCappedAt)
 	}
@@ -110,10 +112,10 @@ func TestOrchestratorPacingCappedHistorySurvivesRearm(t *testing.T) {
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: true, AtUnix: lastCappedAt + 10})
 	app.reconcileOrchestratorPacing()
 
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	capped = app.orchestrators["agent"].pacingCapped
 	lastCappedAtAfter := app.orchestrators["agent"].pacingLastCappedAtUnix
-	app.mu.Unlock()
+	unlock()
 	if capped {
 		t.Fatal("expected the fresh busy report to clear the live capped gauge")
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -62,14 +63,14 @@ type erunUIDeps struct {
 	// canReachMCPEndpoint checks traffic, not a dial: a stale port-forward accepts and never answers.
 	canReachMCPEndpoint       func(int) bool
 	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (config.EnvConfig, error)
-	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
+	startTerminal             func(terminal.StartParams) (terminal.PTY, error)
+	runIDECommand             func(context.Context, terminal.StartParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
 	resolveOrchestratorLaunch func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
 	claudeAgents              claudeAgentCLI
 	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
-	savePastedFile            func(pastedFileSaveParams) (string, error)
+	savePastedFile            func(terminal.PasteParams) (string, error)
 	listAgentOutputs          func(config.OpenResult, model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error)
 	downloadAgentOutput       func(config.OpenResult, model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error)
 	loadDiff                  func(context.Context, string, string, uimodel.DiffOptions) (model.DiffResult, error)
@@ -117,22 +118,15 @@ type App struct {
 	// identity signs per-env MCP bearers; nil in unit tests.
 	identity *desktopIdentity
 
-	mu         sync.Mutex
-	nextSerial int
-	sessions   map[string]*managedTerminal
-	// sessionWG lets shutdown wait for every stream reader goroutine to exit.
-	sessionWG        sync.WaitGroup
-	idleStops        map[string]struct{}
-	intentionalStops map[string]struct{}
-	// sessionHeartbeats is the latest pod observation of live sessions per environment.
-	sessionHeartbeats map[string]sessionHeartbeat
-	aiSessionReadings map[string]aiSessionReading
-	edgeOutages       map[string]orchestratorEdgeOutage
-	busyEnvs          map[string]int
-	orchestrators     map[string]*orchestratorSession
-	// unmanagedPacingReason dedups pacing log lines for orchestrators without a session. Guarded by a.mu.
+	// edgeOutages, orchestrators, unmanagedPacingReason, the *SourceReported flags,
+	// activityPollersStop and closeConfirmed are guarded by the terminal lock
+	// (terminal.WithLock) until their concerns move out of main, so a section that
+	// reads them together with sessions stays one critical section.
+	edgeOutages   map[string]orchestratorEdgeOutage
+	orchestrators map[string]*orchestratorSession
+	// unmanagedPacingReason dedups pacing log lines for orchestrators without a session.
 	unmanagedPacingReason map[string]orchestratorPacingReason
-	// investigations has its own lock; never call into it while holding a.mu.
+	// investigations has its own lock; never call into it while holding the terminal lock.
 	investigations *investigationRegistry
 	// skillsSourceReported warns once per run about unresolvable shipped skills.
 	skillsSourceReported      bool
@@ -168,6 +162,7 @@ type App struct {
 	settings      *settingssvc.Service
 	runtime       *runtimeview.Service
 	envops        *envops.Service
+	terminal      *terminal.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -210,11 +205,6 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultUIDeps(deps)
 	app := &App{
 		deps:                  deps,
-		sessions:              make(map[string]*managedTerminal),
-		idleStops:             make(map[string]struct{}),
-		intentionalStops:      make(map[string]struct{}),
-		sessionHeartbeats:     make(map[string]sessionHeartbeat),
-		busyEnvs:              make(map[string]int),
 		orchestrators:         make(map[string]*orchestratorSession),
 		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
 	}
@@ -244,6 +234,7 @@ func NewApp(deps erunUIDeps) *App {
 	})
 	app.cloudContexts = app.newCloudContextService(time.Now)
 	app.envops = app.newEnvopsService()
+	app.terminal = app.newTerminalService()
 	app.settings = app.newSettingsService()
 	app.runtime = app.newRuntimeService()
 	if app.identity == nil {
@@ -284,13 +275,17 @@ func (a *App) newSettingsService() *settingssvc.Service {
 		StopCloudContext: func(ctx context.Context, name string) (model.CloudContextStatus, error) {
 			return a.deps.stopCloudContext(ctx, name)
 		},
-		MarkIntentionalStop:  a.markIntentionalStopForCloudContext,
-		ClearIntentionalStop: a.clearIntentionalStopForCloudContext,
-		ClearIdleStops:       func(name string) { a.clearIdleStopsForCloudContext(name) },
-		RecordManualStop:     a.recordManualStopForCloudContext,
-		EnsureMCPAvailable:   a.ensureMCPAvailable,
-		MCPEndpoint:          mcpEndpointForOpenResult,
-		MCPBearer:            a.mcpBearer,
+		MarkIntentionalStop:  func(name string) { a.terminal.MarkIntentionalStopForCloudContext(name) },
+		ClearIntentionalStop: func(name string) { a.terminal.ClearIntentionalStopForCloudContext(name) },
+		ClearIdleStops:       func(name string) { a.terminal.ClearIdleStopsForCloudContext(name) },
+		RecordManualStop: func(ctx context.Context, name string) {
+			a.terminal.RecordManualStopForCloudContext(ctx, name)
+		},
+		EnsureMCPAvailable: func(ctx context.Context, result config.OpenResult) error {
+			return a.terminal.EnsureMCPAvailable(ctx, result)
+		},
+		MCPEndpoint: mcpEndpointForOpenResult,
+		MCPBearer:   a.mcpBearer,
 		SetRemoteCloudAlias: func(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
 			return a.deps.setRemoteCloudAlias(ctx, endpoint, bearer, tenant, environment, alias)
 		},
@@ -354,14 +349,11 @@ func (a *App) shutdown(context.Context) {
 	a.investigations.stopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()
-	// The refreshers' and sync workers' own locks are leaves, so stop them before taking a.mu.
+	// The refreshers' and sync workers' own locks are leaves, so stop them before taking the terminal lock.
 	a.cloudContexts.StopAllRefreshers()
 	a.envops.StopAllWorkspaceSyncs()
-	a.mu.Lock()
-	a.closeAllSessionsLocked()
-	a.mu.Unlock()
-	// Readers take a.mu on exit, so wait outside the lock.
-	a.sessionWG.Wait()
+	a.terminal.CloseAll()
+	a.terminal.Wait()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

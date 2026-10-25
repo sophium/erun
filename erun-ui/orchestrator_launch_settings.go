@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // orchestratorLaunchPlan is a launch resolved at start. env may carry the gateway
@@ -134,14 +135,16 @@ func (a *App) orchestratorLaunchEnv(launch orchestrator.OrchestratorLaunch) ([]s
 }
 
 func (a *App) orchestratorLaunchSettingsChanged(def config.OrchestratorConfig, catalog *config.OpenRouterConfig) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session := a.orchestrators[def.ID]
-	managed := a.sessions[orchestratorSessionKey(def.ID)]
-	if session == nil || managed == nil || managed.closed {
-		return false
-	}
-	return orchestratorLaunchDiffers(def, catalog, session.launched)
+	changed := false
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		session := a.orchestrators[def.ID]
+		managed := l.Session(terminal.OrchestratorSessionKey(def.ID))
+		if session == nil || managed == nil || managed.Closed {
+			return
+		}
+		changed = orchestratorLaunchDiffers(def, catalog, session.launched)
+	})
+	return changed
 }
 
 func (a *App) withConfiguredLaunchSettings(info orchestratorInfo) orchestratorInfo {

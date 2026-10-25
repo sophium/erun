@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -90,7 +91,7 @@ func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orc
 	return decideOrchestratorWhip(c, now, false)
 }
 
-// orchestratorPacingRow is gathered under a.mu before any IO outside the lock.
+// orchestratorPacingRow is gathered under the terminal lock before any IO outside it.
 type orchestratorPacingRow struct {
 	id               string
 	serial           int
@@ -143,64 +144,65 @@ func (a *App) orchestratorPacingUnmanagedRows(managed map[string]struct{}) []orc
 	if err != nil {
 		return nil
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	rows := make([]orchestratorPacingRow, 0, len(configs))
-	for _, config := range configs {
-		id := strings.TrimSpace(config.ID)
-		if id == "" {
-			continue
+	a.terminal.WithLock(func(*terminal.Locked) {
+		for _, config := range configs {
+			id := strings.TrimSpace(config.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := managed[id]; ok {
+				continue
+			}
+			if _, ok := a.orchestrators[id]; ok {
+				continue
+			}
+			rows = append(rows, orchestratorPacingRow{
+				id:               id,
+				name:             config.Name,
+				unmanaged:        true,
+				lastLoggedReason: a.unmanagedPacingReason[id],
+			})
 		}
-		if _, ok := managed[id]; ok {
-			continue
-		}
-		if _, ok := a.orchestrators[id]; ok {
-			continue
-		}
-		rows = append(rows, orchestratorPacingRow{
-			id:               id,
-			name:             config.Name,
-			unmanaged:        true,
-			lastLoggedReason: a.unmanagedPacingReason[id],
-		})
-	}
+	})
 	return rows
 }
 
 // forgetPacedOrchestrators drops remembered lines for orchestrators with a
 // session this pass, so they log again if they return to the unpaced population.
 func (a *App) forgetPacedOrchestrators(managed map[string]struct{}) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for id := range a.unmanagedPacingReason {
-		if _, ok := managed[id]; ok {
-			delete(a.unmanagedPacingReason, id)
+	a.terminal.WithLock(func(*terminal.Locked) {
+		for id := range a.unmanagedPacingReason {
+			if _, ok := managed[id]; ok {
+				delete(a.unmanagedPacingReason, id)
+			}
 		}
-	}
+	})
 }
 
 func (a *App) orchestratorPacingRows() []orchestratorPacingRow {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	rows := make([]orchestratorPacingRow, 0, len(a.orchestrators))
-	for orchestratorID, session := range a.orchestrators {
-		if session == nil || session.transient {
-			continue
+	var rows []orchestratorPacingRow
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		rows = make([]orchestratorPacingRow, 0, len(a.orchestrators))
+		for orchestratorID, session := range a.orchestrators {
+			if session == nil || session.transient {
+				continue
+			}
+			managed := l.Session(terminal.OrchestratorSessionKey(orchestratorID))
+			rows = append(rows, orchestratorPacingRow{
+				id:               orchestratorID,
+				serial:           session.serial,
+				name:             session.name,
+				alive:            managed != nil && !managed.Closed,
+				startedAt:        session.startedAt,
+				nudgeCount:       session.pacingNudgeCount,
+				capped:           session.pacingCapped,
+				lastNudgeAtUnix:  session.pacingLastNudgeAtUnix,
+				lastLoggedReason: session.pacingLastReason,
+				envs:             session.envs,
+			})
 		}
-		managed := a.sessions[orchestratorSessionKey(orchestratorID)]
-		rows = append(rows, orchestratorPacingRow{
-			id:               orchestratorID,
-			serial:           session.serial,
-			name:             session.name,
-			alive:            managed != nil && !managed.closed,
-			startedAt:        session.startedAt,
-			nudgeCount:       session.pacingNudgeCount,
-			capped:           session.pacingCapped,
-			lastNudgeAtUnix:  session.pacingLastNudgeAtUnix,
-			lastLoggedReason: session.pacingLastReason,
-			envs:             session.envs,
-		})
-	}
+	})
 	return rows
 }
 
@@ -272,16 +274,16 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 	if reason == row.lastLoggedReason {
 		return
 	}
-	a.mu.Lock()
-	if session := a.orchestrators[row.id]; session != nil {
-		session.pacingLastReason = reason
-	} else if row.unmanaged {
-		if a.unmanagedPacingReason == nil {
-			a.unmanagedPacingReason = make(map[string]orchestratorPacingReason)
+	a.terminal.WithLock(func(*terminal.Locked) {
+		if session := a.orchestrators[row.id]; session != nil {
+			session.pacingLastReason = reason
+		} else if row.unmanaged {
+			if a.unmanagedPacingReason == nil {
+				a.unmanagedPacingReason = make(map[string]orchestratorPacingReason)
+			}
+			a.unmanagedPacingReason[row.id] = reason
 		}
-		a.unmanagedPacingReason[row.id] = reason
-	}
-	a.mu.Unlock()
+	})
 	// The id is the stable key; the display name follows only when it differs.
 	subject := strings.TrimSpace(row.id)
 	if name := strings.TrimSpace(row.name); name != "" && name != subject {
@@ -297,42 +299,52 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 // rearmOrchestratorPacing clears the cap budget on fresh activity or operator
 // input, leaving the cumulative hover-card counters alone.
 func (a *App) rearmOrchestratorPacing(id string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if session := a.orchestrators[id]; session != nil {
-		session.pacingNudgeCount = 0
-		session.pacingCapped = false
-	}
+	a.terminal.WithLock(func(*terminal.Locked) {
+		if session := a.orchestrators[id]; session != nil {
+			session.pacingNudgeCount = 0
+			session.pacingCapped = false
+		}
+	})
 }
 
 // sendOrchestratorPacingNudge counts the attempt before writing so a failing pty
 // cannot loop forever; explicit picks which cumulative counter to bump.
 func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string, explicit bool) {
-	a.mu.Lock()
-	session := a.orchestrators[id]
-	managed := a.sessions[orchestratorSessionKey(id)]
-	if session == nil || managed == nil || managed.closed {
-		a.mu.Unlock()
-		return
-	}
-	if typedRecentlyLocked(managed) {
+	var managed *terminal.Session
+	var count int
+	var history orchestratorNudgeHistoryEntry
+	var persist, ready, typing bool
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		session := a.orchestrators[id]
+		managed = l.Session(terminal.OrchestratorSessionKey(id))
+		if session == nil || managed == nil || managed.Closed {
+			return
+		}
+		if l.TypedRecently(managed) {
+			typing = true
+			return
+		}
+		session.pacingNudgeCount++
+		session.pacingLastNudgeAtUnix = now.Unix()
+		if explicit {
+			session.pacingWhipCount++
+			session.pacingLastWhipAtUnix = now.Unix()
+		} else {
+			session.pacingAutoNudgeCount++
+			session.pacingLastAutoNudgeAtUnix = now.Unix()
+		}
+		count = session.pacingNudgeCount
+		history, persist = orchestratorNudgeHistoryEntryFromSession(session)
+		ready = true
+	})
+	if typing {
 		// The operator is typing here; skip without spending the cap and retry next tick.
-		a.mu.Unlock()
 		log.Printf("erun-app: orchestrator %s pacing nudge deferred: pane is being typed into", id)
 		return
 	}
-	session.pacingNudgeCount++
-	session.pacingLastNudgeAtUnix = now.Unix()
-	if explicit {
-		session.pacingWhipCount++
-		session.pacingLastWhipAtUnix = now.Unix()
-	} else {
-		session.pacingAutoNudgeCount++
-		session.pacingLastAutoNudgeAtUnix = now.Unix()
+	if !ready {
+		return
 	}
-	count := session.pacingNudgeCount
-	history, persist := orchestratorNudgeHistoryEntryFromSession(session)
-	a.mu.Unlock()
 
 	a.persistOrchestratorNudgeHistory(history, persist)
 	if !a.writeOrchestratorPacingNudge(managed) {
@@ -344,7 +356,7 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, 
 
 // writeOrchestratorPacingNudge submits with a separate, settled carriage return;
 // a combined write risks the CR being read as pasted text.
-func (a *App) writeOrchestratorPacingNudge(managed *managedTerminal) bool {
+func (a *App) writeOrchestratorPacingNudge(managed *terminal.Session) bool {
 	session, ok := a.liveSessionOf(managed)
 	if !ok {
 		return false
@@ -362,28 +374,34 @@ func (a *App) writeOrchestratorPacingNudge(managed *managedTerminal) bool {
 }
 
 // liveSessionOf reads the pty under lock so a concurrent close cannot race the write.
-func (a *App) liveSessionOf(managed *managedTerminal) (terminalSession, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if managed.closed || managed.session == nil {
-		return nil, false
-	}
-	return managed.session, true
+func (a *App) liveSessionOf(managed *terminal.Session) (terminal.PTY, bool) {
+	var session terminal.PTY
+	a.terminal.WithLock(func(*terminal.Locked) {
+		if !managed.Closed {
+			session = managed.PTY
+		}
+	})
+	return session, session != nil
 }
 
 // capOrchestratorPacing latches once per cap so the notice posts once; the
 // capped-at stamp survives rearm.
 func (a *App) capOrchestratorPacing(id string, serial int, name string, now time.Time) {
-	a.mu.Lock()
-	session := a.orchestrators[id]
-	if session == nil || session.pacingCapped {
-		a.mu.Unlock()
+	var history orchestratorNudgeHistoryEntry
+	var persist, capped bool
+	a.terminal.WithLock(func(*terminal.Locked) {
+		session := a.orchestrators[id]
+		if session == nil || session.pacingCapped {
+			return
+		}
+		session.pacingCapped = true
+		session.pacingLastCappedAtUnix = now.Unix()
+		history, persist = orchestratorNudgeHistoryEntryFromSession(session)
+		capped = true
+	})
+	if !capped {
 		return
 	}
-	session.pacingCapped = true
-	session.pacingLastCappedAtUnix = now.Unix()
-	history, persist := orchestratorNudgeHistoryEntryFromSession(session)
-	a.mu.Unlock()
 	a.persistOrchestratorNudgeHistory(history, persist)
 	a.emitOrchestratorPacingCappedMarker(serial)
 	a.emitAppNotification("warning", orchestratorPacingCappedNotice(name))
@@ -394,7 +412,7 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string, now time
 func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
 	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
 		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal, envStuckDetail))
-	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, uimodel.TerminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
@@ -421,7 +439,7 @@ func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestrat
 
 func (a *App) emitOrchestratorPacingCappedMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── stopped pacing nudges after repeated silence — reply in this pane or restart the orchestrator to resume ──\x1b[0m\r\n"
-	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, uimodel.TerminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})

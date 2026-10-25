@@ -20,6 +20,7 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -32,7 +33,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 		deps.findProjectRoot = config.FindProjectRoot
 	}
 	if deps.resolveCLIPath == nil {
-		deps.resolveCLIPath = resolveCLIExecutable
+		deps.resolveCLIPath = terminal.ResolveCLIExecutable
 	}
 	if deps.resolveBuildInfo == nil {
 		deps.resolveBuildInfo = func() model.BuildInfo {
@@ -168,27 +169,27 @@ func hostedRegistryReachabilityOverride() (bool, bool) {
 func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result config.OpenResult) error {
-			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+			return terminal.EnsureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
 	if deps.reconnectMCP == nil {
 		deps.reconnectMCP = func(ctx context.Context, result config.OpenResult, onLine func(string)) error {
-			return runOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
+			return terminal.RunOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
 		}
 	}
 	if deps.ensureSSHD == nil {
 		deps.ensureSSHD = func(ctx context.Context, result config.OpenResult) error {
-			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+			return terminal.EnsureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
 	if deps.startTerminal == nil {
-		deps.startTerminal = startTerminalSession
+		deps.startTerminal = terminal.StartPTY
 	}
 	if deps.runIDECommand == nil {
-		deps.runIDECommand = runIDECommand
+		deps.runIDECommand = terminal.RunIDECommand
 	}
 	if deps.launchHostArtifact == nil {
-		deps.launchHostArtifact = launchHostArtifactDetached
+		deps.launchHostArtifact = terminal.LaunchHostArtifactDetached
 	}
 	if deps.launchHostOpener == nil {
 		deps.launchHostOpener = envops.LaunchHostOpenerDetached
@@ -223,7 +224,7 @@ func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
 
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedFile == nil {
-		deps.savePastedFile = savePastedFileToRuntime
+		deps.savePastedFile = terminal.SavePastedFileToRuntime
 	}
 	if deps.listAgentOutputs == nil {
 		deps.listAgentOutputs = envops.ListAgentOutputsViaRuntime

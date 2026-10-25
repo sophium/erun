@@ -1,6 +1,9 @@
 package main
 
-import "github.com/sophium/erun/erun-ui/internal/uimodel"
+import (
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
+)
 
 type uiCloseGate struct {
 	Blocked bool                 `json:"blocked"`
@@ -49,16 +52,17 @@ func (a *App) ConfirmWindowClose() error {
 
 // markCloseConfirmed lets the next beforeClose pass the running-work gate.
 func (a *App) markCloseConfirmed() {
-	a.mu.Lock()
-	a.closeConfirmed = true
-	a.mu.Unlock()
+	a.terminal.WithLock(func(*terminal.Locked) {
+		a.closeConfirmed = true
+	})
 }
 
 // consumeCloseConfirmed is one-shot.
 func (a *App) consumeCloseConfirmed() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	confirmed := a.closeConfirmed
-	a.closeConfirmed = false
+	confirmed := false
+	a.terminal.WithLock(func(*terminal.Locked) {
+		confirmed = a.closeConfirmed
+		a.closeConfirmed = false
+	})
 	return confirmed
 }

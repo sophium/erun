@@ -6,19 +6,23 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 const activityPollerInterval = 5 * time.Second
 
 func (a *App) startActivityPollers() {
-	a.mu.Lock()
-	if a.activityPollersStop != nil {
-		a.mu.Unlock()
+	var stop chan struct{}
+	a.terminal.WithLock(func(*terminal.Locked) {
+		if a.activityPollersStop != nil {
+			return
+		}
+		stop = make(chan struct{})
+		a.activityPollersStop = stop
+	})
+	if stop == nil {
 		return
 	}
-	stop := make(chan struct{})
-	a.activityPollersStop = stop
-	a.mu.Unlock()
 
 	a.seedConfiguredKubeContexts()
 
@@ -34,10 +38,11 @@ func (a *App) startActivityPollers() {
 
 // stopActivityPollers is idempotent.
 func (a *App) stopActivityPollers() {
-	a.mu.Lock()
-	stop := a.activityPollersStop
-	a.activityPollersStop = nil
-	a.mu.Unlock()
+	var stop chan struct{}
+	a.terminal.WithLock(func(*terminal.Locked) {
+		stop = a.activityPollersStop
+		a.activityPollersStop = nil
+	})
 	if stop != nil {
 		close(stop)
 	}
@@ -115,13 +120,38 @@ func (a *App) watchedKubeContexts() []string {
 			}
 		}
 	}
-	a.mu.Lock()
-	for _, managed := range a.sessions {
-		if managed == nil || managed.closed {
-			continue
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, managed := range l.Sessions() {
+			if managed == nil || managed.Closed {
+				continue
+			}
+			add(managed.Selection.KubernetesContext)
 		}
-		add(managed.selection.KubernetesContext)
-	}
-	a.mu.Unlock()
+	})
 	return contexts
+}
+
+// runSessionHeartbeatPoller drives the per-tick reconciles in their order: each
+// reads what the one before it just observed.
+func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
+	ticker := time.NewTicker(terminal.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			a.terminal.ReconcileSessionHeartbeatsOnce()
+			// After the heartbeats, so this tick's pod view is in hand.
+			a.terminal.ReconcileAISessionStatusesOnce()
+			// Re-enumerated every tick: an env linked while the app runs gets no sync worker
+			// otherwise. Idempotent once every linked env is syncing.
+			a.envops.ReconcileConfiguredWorkspaceSyncs()
+			a.reconcileOrchestratorActivity()
+			// After reconcileOrchestratorActivity so shellRunning is this tick's report.
+			a.reconcileOrchestratorPacing()
+			// Reaps reports for orchestrator ids no longer in a.orchestrators.
+			a.reconcileOrphanedOrchestratorShellActivity(time.Now())
+		}
+	}
 }

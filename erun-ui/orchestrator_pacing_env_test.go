@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -19,8 +20,8 @@ func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordi
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	app.orchestrators["agent"] = &orchestratorSession{
 		id:        "agent",
 		serial:    5,
@@ -48,9 +49,9 @@ func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 	if len(session.Calls()) != 0 {
 		t.Fatalf("expected no nudge written while the linked env is busy, got %v", session.Calls())
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if count != 0 {
 		t.Fatalf("expected the nudge count to stay at zero while suppressed, got %d", count)
 	}
@@ -158,10 +159,10 @@ func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 	if len(session.Calls()) != 0 {
 		t.Fatalf("expected no writes across every suppressed tick, got %v", session.Calls())
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
 	capped := app.orchestrators["agent"].pacingCapped
-	app.mu.Unlock()
+	unlock()
 	if count != 0 || capped {
 		t.Fatalf("expected the cap to stay entirely unspent through the busy period, got count=%d capped=%v", count, capped)
 	}
@@ -172,8 +173,8 @@ func TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder(t *testing.T) {
 		{Tenant: "acme", Environment: "dev"},
 		{Tenant: "acme", Environment: "build"},
 	}
-	devKey := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
-	buildKey := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "build"})
+	devKey := uimodel.SelectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	buildKey := uimodel.SelectionKey(uimodel.Selection{Tenant: "acme", Environment: "build"})
 
 	cases := []struct {
 		name     string

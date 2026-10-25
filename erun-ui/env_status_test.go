@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -34,7 +35,7 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 		store:           store,
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			session := newStubTerminalSession()
 			sessionsMu.Lock()
 			*sessions = append(*sessions, session)
@@ -72,77 +73,6 @@ func waitForEnvStatus(t *testing.T, emits *capturedEmits, status string) {
 	})
 	if !arrived {
 		t.Fatalf("env-status %q was not emitted; got %+v", status, envStatuses(emits))
-	}
-}
-
-func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
-	var sessionsMu sync.Mutex
-	var sessions []*stubTerminalSession
-	emits := newCapturedEmits()
-	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
-
-	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
-	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
-		t.Fatalf("StartSession failed: %v", err)
-	}
-	waitForEnvStatus(t, emits, "")
-
-	// After an intentional Stop, the session exit flags the row instead of respawning.
-	app.markIntentionalStopForCloudContext("managed-cloud")
-	sessionsMu.Lock()
-	current := sessions[0]
-	sessionsMu.Unlock()
-	_ = current.Close()
-
-	waitForEnvStatus(t, emits, uimodel.EnvStatusStopped)
-
-	sessionsMu.Lock()
-	got := len(sessions)
-	sessionsMu.Unlock()
-	if got != 1 {
-		t.Fatalf("expected no respawn for a stopped context, got %d sessions", got)
-	}
-}
-
-func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) {
-	var sessionsMu sync.Mutex
-	var sessions []*stubTerminalSession
-	emits := newCapturedEmits()
-	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
-
-	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
-	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
-		t.Fatalf("StartSession failed: %v", err)
-	}
-
-	const closes = reconnectLoopMaxExits + 1
-	for i := 0; i < closes; i++ {
-		expected := i + 1
-		waitForSessionCount(t, &sessionsMu, &sessions, expected, 2*time.Second)
-		sessionsMu.Lock()
-		current := sessions[expected-1]
-		sessionsMu.Unlock()
-		_ = current.Close()
-	}
-
-	waitForEnvStatus(t, emits, uimodel.EnvStatusFailed)
-
-	statuses := envStatuses(emits)
-	last := statuses[len(statuses)-1]
-	if last.Status != uimodel.EnvStatusFailed {
-		t.Fatalf("expected the final env-status to be failed, got %+v", statuses)
-	}
-	if last.Tenant != "erun" || last.Environment != "remote" {
-		t.Fatalf("env-status carries the wrong selection: %+v", last)
-	}
-	clears := 0
-	for _, payload := range statuses {
-		if payload.Status == "" {
-			clears++
-		}
-	}
-	if clears < reconnectLoopMaxExits {
-		t.Fatalf("expected at least %d clearing emissions (initial open + respawns), got %d in %+v", reconnectLoopMaxExits, clears, statuses)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -26,7 +27,7 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 		store:           store,
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {

@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -12,7 +14,7 @@ import (
 func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> Doctor team/dev")
 	entry, ok := app.activityQueue.findActiveByCommand("doctor", "team", "dev")
@@ -36,7 +38,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
 func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> Doctor team/dev")
 	handler("==> Doctor failed team/dev: kubectl not reachable")
@@ -54,11 +56,11 @@ func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
 func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
-	app.sessions[localSession.key] = localSession
+	localSession := &terminal.Session{Selection: selection, Key: "local\x00team\x00dev", Serial: 1, Kind: terminal.KindLocal}
+	setTestSession(app, localSession.Key, localSession)
 	app.startDoctorFromTrace(selection, "team", "dev")
-	if localSession.lockedByActivity != "" {
-		t.Fatalf("expected doctor to not lock terminal, got %q", localSession.lockedByActivity)
+	if localSession.LockedByActivity != "" {
+		t.Fatalf("expected doctor to not lock terminal, got %q", localSession.LockedByActivity)
 	}
 }
 
@@ -67,7 +69,7 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> Doctor team/dev")
 	handler("==> Doctor failed team/dev: kubectl not reachable")
@@ -94,7 +96,7 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> SSHD init team/dev")
 	entry, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev")
@@ -118,7 +120,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> SSHD init team/dev")
 	handler("==> SSHD init failed team/dev: sync remote authorized_keys from key.pub: exit status 1")
@@ -135,8 +137,8 @@ func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
 func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
-	app.sessions[localSession.key] = localSession
+	localSession := &terminal.Session{Selection: selection, Key: "local\x00team\x00dev", Serial: 1, Kind: terminal.KindLocal}
+	setTestSession(app, localSession.Key, localSession)
 	app.startSSHDInitFromTrace(selection, "team", "dev")
 	if _, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev"); !ok {
 		t.Fatal("expected sshd-init entry to be active")
@@ -148,7 +150,7 @@ func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	handler("==> SSHD init team/dev")
 	handler("==> SSHD init failed team/dev: kubectl not reachable")
@@ -177,11 +179,11 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	for _, command := range []string{"build", "release", "push"} {
 		app := newTestAppForActivityQueue(t)
 		selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
-		envSession := &managedTerminal{selection: selection, key: "env\x00erun\x00local", serial: 1, kind: sessionKindOpen}
-		app.sessions[envSession.key] = envSession
+		envSession := &terminal.Session{Selection: selection, Key: "env\x00erun\x00local", Serial: 1, Kind: terminal.KindOpen}
+		setTestSession(app, envSession.Key, envSession)
 		app.startCommandFromTrace(selection, command)
-		if envSession.lockedByActivity != "" {
-			t.Fatalf("expected %s to not lock terminal, got %q", command, envSession.lockedByActivity)
+		if envSession.LockedByActivity != "" {
+			t.Fatalf("expected %s to not lock terminal, got %q", command, envSession.LockedByActivity)
 		}
 	}
 }
@@ -192,7 +194,7 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 
-	openHandler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+	openHandler := newActivityTraceLineHandler(app, selection, terminal.KindOpen)
 	openHandler("==> Initializing erun/local")
 	openHandler("==> Initialized erun/local")
 	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); ok {
@@ -202,13 +204,13 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 		t.Fatalf("open-session init trace must be display-only, got %+v", got)
 	}
 
-	aiHandler := newActivityTraceLineHandler(app, selection, sessionKindAI)
+	aiHandler := newActivityTraceLineHandler(app, selection, terminal.KindAI)
 	aiHandler("==> Initializing erun/local")
 	if got := app.activityQueue.list(); len(got) != 0 {
 		t.Fatalf("ai-session init trace must be display-only, got %+v", got)
 	}
 
-	localHandler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	localHandler := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 	localHandler("==> Initializing erun/local")
 	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); !ok {
 		t.Fatal("Local-session init trace must register an init activity")

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -43,7 +44,7 @@ func (a *App) reconcileStaleShellsOnce() {
 
 type staleSessionSnapshot struct {
 	serial    int
-	kind      sessionKind
+	kind      terminal.Kind
 	selection uimodel.Selection
 	startedAt time.Time
 	pid       int
@@ -52,32 +53,32 @@ type staleSessionSnapshot struct {
 // The App mutex is held only briefly so the reconciler cannot deadlock against terminal startup.
 func (a *App) collectStaleSessionSnapshots() []staleSessionSnapshot {
 	now := time.Now()
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	var out []staleSessionSnapshot
-	for _, managed := range a.sessions {
-		if managed == nil || managed.closed || managed.session == nil {
-			continue
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, managed := range l.Sessions() {
+			if managed == nil || managed.Closed || managed.PTY == nil {
+				continue
+			}
+			if managed.StartedAt.IsZero() || now.Sub(managed.StartedAt) < staleShellDebounce {
+				continue
+			}
+			pid := managed.PTY.Pid()
+			if pid <= 0 {
+				continue
+			}
+			// Ask the session, not the PID: EDR on locked-down Windows denies process probes.
+			if managed.PTY.Alive() {
+				continue
+			}
+			out = append(out, staleSessionSnapshot{
+				serial:    managed.Serial,
+				kind:      managed.Kind,
+				selection: managed.Selection,
+				startedAt: managed.StartedAt,
+				pid:       pid,
+			})
 		}
-		if managed.startedAt.IsZero() || now.Sub(managed.startedAt) < staleShellDebounce {
-			continue
-		}
-		pid := managed.session.Pid()
-		if pid <= 0 {
-			continue
-		}
-		// Ask the session, not the PID: EDR on locked-down Windows denies process probes.
-		if managed.session.Alive() {
-			continue
-		}
-		out = append(out, staleSessionSnapshot{
-			serial:    managed.serial,
-			kind:      managed.kind,
-			selection: managed.selection,
-			startedAt: managed.startedAt,
-			pid:       pid,
-		})
-	}
+	})
 	return out
 }
 
@@ -126,20 +127,22 @@ func (a *App) KillSession(serial int) bool {
 	if serial <= 0 {
 		return false
 	}
-	a.mu.Lock()
-	var managed *managedTerminal
-	for _, candidate := range a.sessions {
-		if candidate != nil && candidate.serial == serial {
-			managed = candidate
-			break
+	var managed *terminal.Session
+	var session terminal.PTY
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for _, candidate := range l.Sessions() {
+			if candidate != nil && candidate.Serial == serial {
+				managed = candidate
+				break
+			}
 		}
-	}
+		if managed != nil {
+			session = l.MarkClosed(managed)
+		}
+	})
 	if managed == nil {
-		a.mu.Unlock()
 		return false
 	}
-	session := a.closeManagedLocked(managed)
-	a.mu.Unlock()
 	if session != nil {
 		_ = session.Close()
 	}
@@ -157,17 +160,17 @@ func staleShellActivityID(serial int) string {
 	return "shell:" + strconv.Itoa(serial)
 }
 
-func staleShellCommandFromKind(kind sessionKind) string {
+func staleShellCommandFromKind(kind terminal.Kind) string {
 	switch kind {
-	case sessionKindOpen:
+	case terminal.KindOpen:
 		return "open"
-	case sessionKindAI:
+	case terminal.KindAI:
 		return "ai"
-	case sessionKindLocal:
+	case terminal.KindLocal:
 		return "local"
-	case sessionKindCommand:
+	case terminal.KindCommand:
 		return "command"
-	case sessionKindContributeERun, sessionKindContributeAI, sessionKindOrchestrator:
+	case terminal.KindContributeERun, terminal.KindContributeAI, terminal.KindOrchestrator:
 		fallthrough
 	default:
 		return string(kind)

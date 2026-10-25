@@ -152,19 +152,6 @@ type orchestratorInfo struct {
 	LaunchSettingsChanged bool   `json:"launchSettingsChanged"`
 }
 
-func orchestratorSessionKey(id string) string {
-	return "orchestrator\x00" + id
-}
-
-// orchestratorIDFromSessionKey reverses orchestratorSessionKey.
-func orchestratorIDFromSessionKey(key string) (string, bool) {
-	const prefix = "orchestrator\x00"
-	if !strings.HasPrefix(key, prefix) {
-		return "", false
-	}
-	return strings.TrimPrefix(key, prefix), true
-}
-
 // orchestratableEnv reports whether role may be linked against env.
 func orchestratableEnv(env configpkg.EnvConfig, role model.OrchestratorEnvRole) bool {
 	return configpkg.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)

@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -34,7 +35,7 @@ func orchestratorLinkForwardTestApp(
 	store.envs["frs/laptop"] = laptopEnv
 	app := NewApp(erunUIDeps{
 		store: store,
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		reconnectMCP:        reconnect,

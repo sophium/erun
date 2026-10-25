@@ -6,56 +6,58 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // feedActivityTraceFromTerminal feeds each complete PTY line to the trace handler.
-func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []byte) {
+func (a *App) feedActivityTraceFromTerminal(managed *terminal.Session, chunk []byte) {
 	if managed == nil || a.activityQueue == nil || !terminalFeedsActivityTrace(managed) {
 		return
 	}
-	a.mu.Lock()
-	managed.activityTraceBuffer += stripActivityTraceANSI(string(chunk))
-	lines := drainActivityTraceLines(managed)
-	a.mu.Unlock()
+	var lines []string
+	a.terminal.WithLock(func(*terminal.Locked) {
+		managed.ActivityTraceBuffer += stripActivityTraceANSI(string(chunk))
+		lines = drainActivityTraceLines(managed)
+	})
 	if len(lines) == 0 {
 		return
 	}
-	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
+	handler := newActivityTraceLineHandler(a, managed.Selection, managed.Kind)
 	for _, line := range lines {
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 		// Another window re-attached this session, so its PTY exit must not reconnect.
 		if strings.TrimSpace(line) == appsession.ShellSessionTakenOverNotice {
-			a.markSessionTakenOver(managed)
+			a.terminal.MarkTakenOver(managed)
 		}
 	}
 }
 
 // terminalFeedsActivityTrace excludes orchestrator panes.
-func terminalFeedsActivityTrace(managed *managedTerminal) bool {
-	if managed.selection.Tenant == "" || managed.selection.Environment == "" {
+func terminalFeedsActivityTrace(managed *terminal.Session) bool {
+	if managed.Selection.Tenant == "" || managed.Selection.Environment == "" {
 		return false
 	}
-	switch managed.kind {
-	case sessionKindLocal, sessionKindOpen, sessionKindAI, sessionKindCommand,
-		sessionKindContributeERun, sessionKindContributeAI:
+	switch managed.Kind {
+	case terminal.KindLocal, terminal.KindOpen, terminal.KindAI, terminal.KindCommand,
+		terminal.KindContributeERun, terminal.KindContributeAI:
 		return true
-	case sessionKindOrchestrator:
+	case terminal.KindOrchestrator:
 		fallthrough
 	default:
 		return false
 	}
 }
 
-// drainActivityTraceLines keeps the trailing partial line buffered; caller holds a.mu.
-func drainActivityTraceLines(managed *managedTerminal) []string {
+// drainActivityTraceLines keeps the trailing partial line buffered; caller holds the terminal lock.
+func drainActivityTraceLines(managed *terminal.Session) []string {
 	lines := []string{}
 	for {
-		idx := strings.IndexByte(managed.activityTraceBuffer, '\n')
+		idx := strings.IndexByte(managed.ActivityTraceBuffer, '\n')
 		if idx < 0 {
 			break
 		}
-		raw := managed.activityTraceBuffer[:idx]
+		raw := managed.ActivityTraceBuffer[:idx]
 		// Keep the text after the last `\r` (spinner overwrites) once the trailing
 		// `\r` of `\r\n` is trimmed, matching what the user sees.
 		line := strings.TrimRight(raw, "\r")
@@ -63,7 +65,7 @@ func drainActivityTraceLines(managed *managedTerminal) []string {
 			line = line[r+1:]
 		}
 		lines = append(lines, line)
-		managed.activityTraceBuffer = managed.activityTraceBuffer[idx+1:]
+		managed.ActivityTraceBuffer = managed.ActivityTraceBuffer[idx+1:]
 	}
 	return lines
 }
@@ -77,7 +79,7 @@ var (
 	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)
 )
 
-func signalSessionReadyOnLine(managed *managedTerminal, line string) {
+func signalSessionReadyOnLine(managed *terminal.Session, line string) {
 	if managed == nil {
 		return
 	}
@@ -87,9 +89,9 @@ func signalSessionReadyOnLine(managed *managedTerminal, line string) {
 		sessionReadySkippedRe.MatchString(trimmed),
 		sessionReadyAttachedRe.MatchString(trimmed),
 		sessionReadyShellPromptRe.MatchString(trimmed):
-		managed.signalReady(nil)
+		managed.SignalReady(nil)
 	case sessionReadyFailedRe.MatchString(trimmed):
-		managed.signalReady(fmt.Errorf("%s", trimmed))
+		managed.SignalReady(fmt.Errorf("%s", trimmed))
 	}
 }
 

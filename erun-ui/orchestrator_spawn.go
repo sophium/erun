@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // orchestratorNoAskFlag denies the question tool: a question stalls an unattended
@@ -24,8 +25,8 @@ const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
 // resolve under ConPTY. A persisted orchestrator attaches to its background
 // agent; a transient one runs a fresh session seeded with initialPrompt.
 func orchestratorLaunchCommand(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
-	if _, err := exec.LookPath(defaultAITool); err != nil {
-		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", defaultAITool)
+	if _, err := exec.LookPath(terminal.DefaultAITool); err != nil {
+		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", terminal.DefaultAITool)
 	}
 	if strings.TrimSpace(agentID) != "" {
 		if !claudeAgentIDPattern.MatchString(agentID) {
@@ -44,18 +45,18 @@ var claudeAgentIDPattern = regexp.MustCompile(`^[0-9a-f]{6,64}$`)
 // buildOrchestratorLaunch splices model and effort unquoted, which is safe only
 // because ResolveOrchestratorLaunch admits plain tokens.
 func buildOrchestratorLaunch(goos string, launch orchestrator.OrchestratorLaunch, initialPrompt, mcpConfigPath string) (string, []string) {
-	quote := shellQuote
+	quote := terminal.ShellQuote
 	if goos == "windows" {
-		quote = powerShellQuote
+		quote = terminal.PowerShellQuote
 	}
-	command := defaultAITool + launch.EffortFlags + orchestratorNoAskFlag + " --model " + launch.Model
+	command := terminal.DefaultAITool + launch.EffortFlags + orchestratorNoAskFlag + " --model " + launch.Model
 	if strings.TrimSpace(mcpConfigPath) != "" {
 		command += " --mcp-config " + quote(mcpConfigPath)
 	}
 	if strings.TrimSpace(initialPrompt) != "" {
 		command += " " + orchestratorPromptArg(goos, initialPrompt)
 	}
-	shell, shellArgs := resolveLocalShellCommand(goos)
+	shell, shellArgs := terminal.LocalShellCommand(goos)
 	flag := "-lc"
 	if goos == "windows" {
 		flag = "-Command"
@@ -68,9 +69,9 @@ func buildOrchestratorLaunch(goos string, launch orchestrator.OrchestratorLaunch
 func orchestratorPromptArg(goos, prompt string) string {
 	prompt = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(prompt)
 	if goos == "windows" {
-		return "-- " + powerShellQuote(prompt)
+		return "-- " + terminal.PowerShellQuote(prompt)
 	}
-	return "-- " + shellQuote(prompt)
+	return "-- " + terminal.ShellQuote(prompt)
 }
 
 type orchestratorSpawn struct {
@@ -139,7 +140,7 @@ func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orch
 
 func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
 	id, name, envs := spawn.id, spawn.name, spawn.envs
-	cols, rows := clampTerminalSize(spawn.cols, spawn.rows)
+	cols, rows := terminal.ClampSize(spawn.cols, spawn.rows)
 	mcpConfigPath := a.wireOrchestratorMCP(id, name, envs)
 	dir, err := a.ensureOrchestratorWorkspaceFor(id)
 	if err != nil {
@@ -160,41 +161,43 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		return orchestratorInfo{}, err
 	}
 
-	a.mu.Lock()
-	a.nextSerial++
-	serial := a.nextSerial
-	key := orchestratorSessionKey(id)
-	managed := &managedTerminal{
-		session:   session,
-		key:       key,
-		serial:    serial,
-		kind:      sessionKindOrchestrator,
-		startedAt: time.Now(),
-	}
-	if !spawn.transient {
-		// Transient sessions are bounded elsewhere and get no respawn.
-		managed.respawn = a.orchestratorRespawnFunc(spawn, launch)
-	}
-	newSession := &orchestratorSession{
-		id:         id,
-		serial:     serial,
-		agentID:    launch.agent.agentID,
-		transient:  spawn.transient,
-		name:       name,
-		alias:      spawn.alias,
-		launched:   wired.launched,
-		envs:       envs,
-		wiredScope: wired.scope,
-		dirs:       spawn.dirs,
-		startedAt:  time.Now(),
-	}
-	a.restoreOrchestratorNudgeHistory(newSession)
-	a.sessions[key] = managed
-	a.orchestrators[id] = newSession
-	pacing := orchestratorPacingSnapshotFromSession(newSession)
-	a.mu.Unlock()
+	var serial int
+	var managed *terminal.Session
+	var pacing orchestratorPacingSnapshot
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		serial = l.NextSerial()
+		key := terminal.OrchestratorSessionKey(id)
+		managed = &terminal.Session{
+			PTY:       session,
+			Key:       key,
+			Serial:    serial,
+			Kind:      terminal.KindOrchestrator,
+			StartedAt: time.Now(),
+		}
+		if !spawn.transient {
+			// Transient sessions are bounded elsewhere and get no respawn.
+			managed.Respawn = a.orchestratorRespawnFunc(spawn, launch)
+		}
+		newSession := &orchestratorSession{
+			id:         id,
+			serial:     serial,
+			agentID:    launch.agent.agentID,
+			transient:  spawn.transient,
+			name:       name,
+			alias:      spawn.alias,
+			launched:   wired.launched,
+			envs:       envs,
+			wiredScope: wired.scope,
+			dirs:       spawn.dirs,
+			startedAt:  time.Now(),
+		}
+		a.restoreOrchestratorNudgeHistory(newSession)
+		l.Register(managed)
+		a.orchestrators[id] = newSession
+		pacing = orchestratorPacingSnapshotFromSession(newSession)
+	})
 
-	a.spawnStreamSession(managed)
+	a.terminal.SpawnStream(managed)
 	// Record on open, not on exit: a crash or kill runs no exit path.
 	if !spawn.transient {
 		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
@@ -260,13 +263,13 @@ func (a *App) prepareOrchestratorAgent(spawn orchestratorSpawn, launch orchestra
 	})
 }
 
-func (a *App) startOrchestratorPTY(launch orchestratorPTYLaunch, initialPrompt string) (terminalSession, error) {
+func (a *App) startOrchestratorPTY(launch orchestratorPTYLaunch, initialPrompt string) (terminal.PTY, error) {
 	executable, args, err := a.deps.resolveOrchestratorLaunch(launch.launch, launch.agent.agentID, initialPrompt, launch.mcpConfigPath)
 	if err != nil {
 		return nil, err
 	}
-	return a.deps.startTerminal(startTerminalSessionParams{
-		Dir:        resolveTerminalStartDir(launch.dir),
+	return a.deps.startTerminal(terminal.StartParams{
+		Dir:        terminal.ResolveStartDir(launch.dir),
 		Executable: executable,
 		Args:       args,
 		Env:        launch.env,
@@ -277,19 +280,19 @@ func (a *App) startOrchestratorPTY(launch orchestratorPTYLaunch, initialPrompt s
 
 // orchestratorRespawnFunc reattaches after a crash; the agent kept its conversation.
 // tryReconnect calls it only after refusing clean exits and operator stops.
-func (a *App) orchestratorRespawnFunc(spawn orchestratorSpawn, launch orchestratorPTYLaunch) func() (terminalSession, error) {
+func (a *App) orchestratorRespawnFunc(spawn orchestratorSpawn, launch orchestratorPTYLaunch) func() (terminal.PTY, error) {
 	spawn.restart = false
-	return func() (terminalSession, error) {
+	return func() (terminal.PTY, error) {
 		agent, err := a.prepareOrchestratorAgent(spawn, launch)
 		if err != nil {
 			return nil, err
 		}
 		launch.agent = agent
-		a.mu.Lock()
-		if session := a.orchestrators[spawn.id]; session != nil {
-			session.agentID = agent.agentID
-		}
-		a.mu.Unlock()
+		a.terminal.WithLock(func(*terminal.Locked) {
+			if session := a.orchestrators[spawn.id]; session != nil {
+				session.agentID = agent.agentID
+			}
+		})
 		return a.startOrchestratorPTY(launch, "")
 	}
 }

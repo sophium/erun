@@ -6,14 +6,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func newTestAppForActivityQueue(t *testing.T) *App {
 	t.Helper()
-	app := &App{
-		sessions: make(map[string]*managedTerminal),
-	}
+	app := withTestTerminal(&App{})
 	app.activityQueue = newActivityQueueStore(nil, nil)
 	return withTestEnvops(app)
 }
@@ -21,15 +20,15 @@ func newTestAppForActivityQueue(t *testing.T) *App {
 func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
-	aiSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 2, kind: sessionKindAI}
-	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 3, kind: sessionKindLocal}
+	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
+	aiSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 2, Kind: terminal.KindAI}
+	localSession := &terminal.Session{Selection: selection, Key: "local\x00team\x00dev", Serial: 3, Kind: terminal.KindLocal}
 	otherSelection := uimodel.Selection{Tenant: "other", Environment: "dev", Version: "1.0.0"}
-	unrelated := &managedTerminal{selection: otherSelection, key: "env\x00other\x00dev", serial: 4, kind: sessionKindOpen}
-	app.sessions[envSession.key] = envSession
-	app.sessions[aiSession.key] = aiSession
-	app.sessions[localSession.key] = localSession
-	app.sessions[unrelated.key] = unrelated
+	unrelated := &terminal.Session{Selection: otherSelection, Key: "env\x00other\x00dev", Serial: 4, Kind: terminal.KindOpen}
+	setTestSession(app, envSession.Key, envSession)
+	setTestSession(app, aiSession.Key, aiSession)
+	setTestSession(app, localSession.Key, localSession)
+	setTestSession(app, unrelated.Key, unrelated)
 
 	entry, _ := app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -40,17 +39,17 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	})
 	app.lockTerminalsForActivity(entry)
 
-	if envSession.lockedByActivity != entry.ID {
-		t.Fatalf("env session not locked: %q want %q", envSession.lockedByActivity, entry.ID)
+	if envSession.LockedByActivity != entry.ID {
+		t.Fatalf("env session not locked: %q want %q", envSession.LockedByActivity, entry.ID)
 	}
-	if aiSession.lockedByActivity != entry.ID {
-		t.Fatalf("ai session not locked: %q", aiSession.lockedByActivity)
+	if aiSession.LockedByActivity != entry.ID {
+		t.Fatalf("ai session not locked: %q", aiSession.LockedByActivity)
 	}
-	if localSession.lockedByActivity != "" {
-		t.Fatalf("local session unexpectedly locked: %q", localSession.lockedByActivity)
+	if localSession.LockedByActivity != "" {
+		t.Fatalf("local session unexpectedly locked: %q", localSession.LockedByActivity)
 	}
-	if unrelated.lockedByActivity != "" {
-		t.Fatalf("unrelated tenant locked: %q", unrelated.lockedByActivity)
+	if unrelated.LockedByActivity != "" {
+		t.Fatalf("unrelated tenant locked: %q", unrelated.LockedByActivity)
 	}
 }
 
@@ -60,8 +59,8 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
-	app.sessions[envSession.key] = envSession
+	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
+	setTestSession(app, envSession.Key, envSession)
 
 	entry, _ := app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -90,7 +89,7 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	selection := uimodel.Selection{Tenant: "frs", Environment: "local"}
-	onLine := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	onLine := newActivityTraceLineHandler(app, selection, terminal.KindLocal)
 
 	onLine(`==> Deploy failed frs/local: values file not found for environment "local"`)
 
@@ -119,11 +118,11 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	other := &managedTerminal{
-		selection: uimodel.Selection{Tenant: "other", Environment: "dev"},
-		key:       "env\x00other\x00dev", serial: 1, kind: sessionKindOpen,
+	other := &terminal.Session{
+		Selection: uimodel.Selection{Tenant: "other", Environment: "dev"},
+		Key:       "env\x00other\x00dev", Serial: 1, Kind: terminal.KindOpen,
 	}
-	app.sessions[other.key] = other
+	setTestSession(app, other.Key, other)
 
 	entry, _ := app.activityQueue.start(activityQueueEntry{
 		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
@@ -145,15 +144,15 @@ func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
 		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
 	})
 
-	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
-	app.mu.Lock()
-	app.sessions[joinSession.key] = joinSession
-	app.mu.Unlock()
+	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 7, Kind: terminal.KindAI}
+	l, unlock := lockTerminalForTest(app)
+	l.Register(joinSession)
+	unlock()
 
-	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.Serial)
 
-	if joinSession.lockedByActivity != entry.ID {
-		t.Fatalf("joinSession.lockedByActivity = %q, want %q", joinSession.lockedByActivity, entry.ID)
+	if joinSession.LockedByActivity != entry.ID {
+		t.Fatalf("joinSession.lockedByActivity = %q, want %q", joinSession.LockedByActivity, entry.ID)
 	}
 	if got := len(emits.events(activityQueueLockEvent)); got != 1 {
 		t.Fatalf("lock events emitted = %d, want 1", got)
@@ -166,15 +165,15 @@ func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) 
 	app.SetEmitter(emits.fn())
 
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
-	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
-	app.mu.Lock()
-	app.sessions[joinSession.key] = joinSession
-	app.mu.Unlock()
+	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 7, Kind: terminal.KindAI}
+	l, unlock := lockTerminalForTest(app)
+	l.Register(joinSession)
+	unlock()
 
-	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.Serial)
 
-	if joinSession.lockedByActivity != "" {
-		t.Fatalf("joinSession.lockedByActivity = %q, want empty", joinSession.lockedByActivity)
+	if joinSession.LockedByActivity != "" {
+		t.Fatalf("joinSession.lockedByActivity = %q, want empty", joinSession.LockedByActivity)
 	}
 	if got := len(emits.events(activityQueueLockEvent)); got != 0 {
 		t.Fatalf("lock events emitted = %d, want 0", got)
@@ -185,8 +184,8 @@ func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) 
 func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
-	app.sessions[envSession.key] = envSession
+	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
+	setTestSession(app, envSession.Key, envSession)
 
 	var emitted []activityLockEvent
 	app.SetEmitter(func(name string, data ...any) {
@@ -208,11 +207,11 @@ func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 
 	app.lockTerminalsForActivity(entry)
 
-	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 2, kind: sessionKindAI}
-	app.mu.Lock()
-	app.sessions[joinSession.key] = joinSession
-	app.mu.Unlock()
-	app.lockTerminalForActivity(joinSession.serial, entry)
+	joinSession := &terminal.Session{Selection: selection, Key: "ai\x00team\x00dev", Serial: 2, Kind: terminal.KindAI}
+	l, unlock := lockTerminalForTest(app)
+	l.Register(joinSession)
+	unlock()
+	app.lockTerminalForActivity(joinSession.Serial, entry)
 
 	if len(emitted) == 0 {
 		t.Fatal("expected lock events to be emitted")
@@ -235,17 +234,17 @@ func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 func TestUnlockTerminalsForActivityClearsMatchingLocks(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
-	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
-	app.sessions[envSession.key] = envSession
+	envSession := &terminal.Session{Selection: selection, Key: "env\x00team\x00dev", Serial: 1, Kind: terminal.KindOpen}
+	setTestSession(app, envSession.Key, envSession)
 	entry, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
 	app.lockTerminalsForActivity(entry)
-	if envSession.lockedByActivity == "" {
+	if envSession.LockedByActivity == "" {
 		t.Fatal("session not locked at start")
 	}
 	final, _ := app.activityQueue.finish(entry.ID, activityQueueStatusSucceeded, "")
 	app.unlockTerminalsForActivity(final)
-	if envSession.lockedByActivity != "" {
-		t.Fatalf("session still locked after unlock: %q", envSession.lockedByActivity)
+	if envSession.LockedByActivity != "" {
+		t.Fatalf("session still locked after unlock: %q", envSession.LockedByActivity)
 	}
 }
 

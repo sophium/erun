@@ -15,7 +15,7 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 		{Tenant: "erun", Environment: "local-ideas"},
 	}
 	activity := map[string]runtimeview.ActivityState{
-		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
+		uimodel.SelectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
 			Reachable: true, Observed: true, Busy: true, Detail: "holding: gradle-build",
 		},
 	}
@@ -35,7 +35,7 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 }
 
 func TestEnvInfosDistinguishesOutageFromIdleAndUnobserved(t *testing.T) {
-	key := selectionKey(uimodel.Selection{Tenant: "frs", Environment: "dev"})
+	key := uimodel.SelectionKey(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	envs := []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
 
 	outage := envInfos(envs, map[string]runtimeview.ActivityState{key: {Outage: true}}, nil)
@@ -61,7 +61,7 @@ func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
 	}
 	observedAt := time.Unix(1000, 0)
 	usage := map[string]runtimeview.UsageReading{
-		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
+		uimodel.SelectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
 			Usage:      runtimeview.Usage{Available: true, CPU: runtimeview.CPUUsage{Available: true, Utilization: "12.0%"}},
 			ObservedAt: observedAt,
 		},

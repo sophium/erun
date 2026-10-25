@@ -8,6 +8,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // CreateOrchestrator persists a new, stopped orchestrator and wires each env's review directory.
@@ -175,31 +176,39 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 }
 
 func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
-	// The runtime readings are a snapshot taken outside a.mu; the card only renders them.
+	// The runtime readings are a snapshot taken outside the terminal lock; the card only renders them.
 	envActivity, envUsage := a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot()
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session := a.orchestrators[id]
-	managed := a.sessions[orchestratorSessionKey(id)]
-	if session == nil || managed == nil || managed.closed {
-		return orchestratorInfo{}, false
-	}
-	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-	pacing := orchestratorPacingSnapshotFromSession(session)
-	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, envActivity, envUsage, false, false), true
+	var info orchestratorInfo
+	running := false
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		session := a.orchestrators[id]
+		managed := l.Session(terminal.OrchestratorSessionKey(id))
+		if session == nil || managed == nil || managed.Closed {
+			return
+		}
+		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+		pacing := orchestratorPacingSnapshotFromSession(session)
+		info = orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, envActivity, envUsage, false, false)
+		running = true
+	})
+	return info, running
 }
 
 // orchestratorWiredEnvs returns what the live session started with, which may differ
 // from the current config.
 func (a *App) orchestratorWiredEnvs(id string) ([]configpkg.OrchestratorEnvConfig, []string, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session := a.orchestrators[id]
-	managed := a.sessions[orchestratorSessionKey(id)]
-	if session == nil || managed == nil || managed.closed {
-		return nil, nil, false
-	}
-	return session.envs, session.wiredScope, true
+	var envs []configpkg.OrchestratorEnvConfig
+	var scope []string
+	live := false
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		session := a.orchestrators[id]
+		managed := l.Session(terminal.OrchestratorSessionKey(id))
+		if session == nil || managed == nil || managed.Closed {
+			return
+		}
+		envs, scope, live = session.envs, session.wiredScope, true
+	})
+	return envs, scope, live
 }
 
 // Review directories are left out: they can move without changing what is driven.
@@ -236,56 +245,57 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	if err != nil {
 		configs, catalog = nil, nil
 	}
-	// File reads happen before taking a.mu.
+	// File reads happen before taking the terminal lock.
 	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
 	unreachable := unreachableOrchestratorIDs(configs, time.Now())
 	envActivity, envUsage := a.runtime.ActivitySnapshot(), a.runtime.UsageSnapshot()
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	out := make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
-	seen := make(map[string]struct{}, len(configs))
-	for _, config := range configs {
-		status := "stopped"
-		sessionID := 0
-		busy := orchestratorBusySnapshot{}
-		shell := orchestratorShellSnapshot{}
-		historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
-		pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
-		// Only a stopped row can be unpaced-but-running.
-		pacing.Unreachable = unreachable[config.ID]
-		restartRequired := false
-		roleChanged := false
-		launchSettings := orchestratorLaunchSettingsOf(config)
-		launchSettingsChanged := false
-		if session := a.orchestrators[config.ID]; session != nil {
-			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
-				status = "running"
-				sessionID = session.serial
-				busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
-				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-				pacing = orchestratorPacingSnapshotFromSession(session)
-				// The session still runs on its spawned scope.
-				restartRequired = orchestratorScopeMismatch(session.wiredScope, config.Environments)
-				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
-				launchSettingsChanged = orchestratorLaunchDiffers(config, catalog, session.launched)
+	var out []orchestratorInfo
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		out = make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
+		seen := make(map[string]struct{}, len(configs))
+		for _, config := range configs {
+			status := "stopped"
+			sessionID := 0
+			busy := orchestratorBusySnapshot{}
+			shell := orchestratorShellSnapshot{}
+			historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
+			pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
+			// Only a stopped row can be unpaced-but-running.
+			pacing.Unreachable = unreachable[config.ID]
+			restartRequired := false
+			roleChanged := false
+			launchSettings := orchestratorLaunchSettingsOf(config)
+			launchSettingsChanged := false
+			if session := a.orchestrators[config.ID]; session != nil {
+				if managed := l.Session(terminal.OrchestratorSessionKey(config.ID)); managed != nil && !managed.Closed {
+					status = "running"
+					sessionID = session.serial
+					busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
+					shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+					pacing = orchestratorPacingSnapshotFromSession(session)
+					// The session still runs on its spawned scope.
+					restartRequired = orchestratorScopeMismatch(session.wiredScope, config.Environments)
+					roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
+					launchSettingsChanged = orchestratorLaunchDiffers(config, catalog, session.launched)
+				}
 			}
+			info := orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, envActivity, envUsage, restartRequired, roleChanged)
+			out = append(out, orchestratorInfoWithLaunchSettings(info, launchSettings, launchSettingsChanged))
+			seen[config.ID] = struct{}{}
 		}
-		info := orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, envActivity, envUsage, restartRequired, roleChanged)
-		out = append(out, orchestratorInfoWithLaunchSettings(info, launchSettings, launchSettingsChanged))
-		seen[config.ID] = struct{}{}
-	}
-	for id, session := range a.orchestrators {
-		if _, ok := seen[id]; ok {
-			continue
+		for id, session := range a.orchestrators {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			managed := l.Session(terminal.OrchestratorSessionKey(id))
+			if managed == nil || managed.Closed {
+				continue
+			}
+			shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+			pacing := orchestratorPacingSnapshotFromSession(session)
+			out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, envActivity, envUsage, false, false))
 		}
-		managed := a.sessions[orchestratorSessionKey(id)]
-		if managed == nil || managed.closed {
-			continue
-		}
-		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-		pacing := orchestratorPacingSnapshotFromSession(session)
-		out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, envActivity, envUsage, false, false))
-	}
+	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
@@ -309,19 +319,21 @@ func (a *App) StopOrchestrator(id string) error {
 }
 
 func (a *App) stopOrchestratorSession(id string) bool {
-	a.mu.Lock()
-	session := a.orchestrators[id]
-	key := orchestratorSessionKey(id)
-	managed := a.sessions[key]
-	if session != nil {
-		delete(a.orchestrators, id)
-	}
+	var session *orchestratorSession
+	var managed *terminal.Session
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		session = a.orchestrators[id]
+		key := terminal.OrchestratorSessionKey(id)
+		managed = l.Session(key)
+		if session != nil {
+			delete(a.orchestrators, id)
+		}
+		if managed != nil {
+			l.Delete(key)
+		}
+	})
 	if managed != nil {
-		delete(a.sessions, key)
-	}
-	a.mu.Unlock()
-	if managed != nil {
-		_ = a.closeManaged(managed)
+		_ = a.terminal.CloseManaged(managed)
 	}
 	// A stopped orchestrator stays closed on later launches.
 	if err := clearOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {

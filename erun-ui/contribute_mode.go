@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -191,21 +192,21 @@ func contributeAppLaunchCommand(port int) string {
 }
 
 func (a *App) sendCommandToContributeERunSession(selection uimodel.Selection, command string) {
-	prefix := "contribute-erun\x00" + selectionKey(selection) + "\x00"
-	a.mu.Lock()
-	var target *managedTerminal
-	for key, managed := range a.sessions {
-		if managed == nil || managed.closed || managed.session == nil {
-			continue
+	prefix := "contribute-erun\x00" + uimodel.SelectionKey(selection) + "\x00"
+	var target *terminal.Session
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		for key, managed := range l.Sessions() {
+			if managed == nil || managed.Closed || managed.PTY == nil {
+				continue
+			}
+			if strings.HasPrefix(key, prefix) {
+				target = managed
+				break
+			}
 		}
-		if strings.HasPrefix(key, prefix) {
-			target = managed
-			break
-		}
-	}
-	a.mu.Unlock()
+	})
 	if target == nil {
 		return
 	}
-	_, _ = io.WriteString(target.session, command)
+	_, _ = io.WriteString(target.PTY, command)
 }

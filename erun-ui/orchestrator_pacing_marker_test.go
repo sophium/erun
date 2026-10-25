@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func TestOrchestratorPacingMarkerReportsMeasuredStaleness(t *testing.T) {
@@ -18,8 +20,8 @@ func TestOrchestratorPacingMarkerReportsMeasuredStaleness(t *testing.T) {
 	app.SetEmitter(emits.fn())
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 7, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 7, Kind: terminal.KindOrchestrator})
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 7, name: "agent", startedAt: time.Now().Add(-30 * time.Minute)}
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: time.Now().Add(-20 * time.Minute).Unix()})
 
@@ -59,8 +61,8 @@ func TestOrchestratorPacingMarkerDistinguishesADiedTurnFromAQuietOne(t *testing.
 			app.SetEmitter(emits.fn())
 
 			session := newCallRecordingSession()
-			key := orchestratorSessionKey("agent")
-			app.sessions[key] = &managedTerminal{session: session, key: key, serial: 7, kind: sessionKindOrchestrator}
+			key := terminal.OrchestratorSessionKey("agent")
+			setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 7, Kind: terminal.KindOrchestrator})
 			started := time.Now().Add(-orchestratorPacingStaleAfter - time.Minute)
 			app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 7, name: "agent", startedAt: started}
 			if tc.writeReport {
@@ -91,15 +93,15 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 
 	freshSession := newCallRecordingSession()
-	freshKey := orchestratorSessionKey("fresh")
-	app.sessions[freshKey] = &managedTerminal{session: freshSession, key: freshKey, serial: 1, kind: sessionKindOrchestrator}
+	freshKey := terminal.OrchestratorSessionKey("fresh")
+	setTestSession(app, freshKey, &terminal.Session{PTY: freshSession, Key: freshKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["fresh"] = &orchestratorSession{id: "fresh", serial: 1, name: "fresh", startedAt: time.Now()}
 
 	app.orchestrators["gone"] = &orchestratorSession{id: "gone", serial: 2, name: "gone", startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute)}
 
 	cappedSession := newCallRecordingSession()
-	cappedKey := orchestratorSessionKey("capped")
-	app.sessions[cappedKey] = &managedTerminal{session: cappedSession, key: cappedKey, serial: 3, kind: sessionKindOrchestrator}
+	cappedKey := terminal.OrchestratorSessionKey("capped")
+	setTestSession(app, cappedKey, &terminal.Session{PTY: cappedSession, Key: cappedKey, Serial: 3, Kind: terminal.KindOrchestrator})
 	app.orchestrators["capped"] = &orchestratorSession{
 		id: "capped", serial: 3, name: "capped",
 		startedAt:    time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
@@ -107,8 +109,8 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	}
 
 	nudgedSession := newCallRecordingSession()
-	nudgedKey := orchestratorSessionKey("petios")
-	app.sessions[nudgedKey] = &managedTerminal{session: nudgedSession, key: nudgedKey, serial: 4, kind: sessionKindOrchestrator}
+	nudgedKey := terminal.OrchestratorSessionKey("petios")
+	setTestSession(app, nudgedKey, &terminal.Session{PTY: nudgedSession, Key: nudgedKey, Serial: 4, Kind: terminal.KindOrchestrator})
 	app.orchestrators["petios"] = &orchestratorSession{id: "petios", serial: 4, name: "petios-qa", startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute)}
 
 	app.reconcileOrchestratorPacing()
@@ -148,8 +150,8 @@ func TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord(t *testing.T) {
 	}
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("petios")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 4, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("petios")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 4, Kind: terminal.KindOrchestrator})
 	app.orchestrators["petios"] = &orchestratorSession{
 		id: "petios", serial: 4, name: "petios-qa",
 		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),

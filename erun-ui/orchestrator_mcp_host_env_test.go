@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -148,7 +149,7 @@ func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestratorpkg.OrchestratorLaunch, string, string, string) (string, []string, error) {

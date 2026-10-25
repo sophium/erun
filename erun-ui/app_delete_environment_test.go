@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -56,7 +57,7 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 	assertDeletedEnvironment(t, store, result, deletedContext, deletedNamespace)
 }
 
-func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvironmentResult, deletedContext, deletedNamespace string) {
+func assertDeletedEnvironment(t *testing.T, store stubUIStore, result terminal.DeleteEnvironmentResult, deletedContext, deletedNamespace string) {
 	t.Helper()
 
 	if deletedContext != "cluster-prod" || deletedNamespace != "frs-prod" {

@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 const (
@@ -69,7 +70,7 @@ func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 		rec.mu.Unlock()
 		return shell, args, nil
 	}
-	app.deps.startTerminal = func(p startTerminalSessionParams) (terminalSession, error) {
+	app.deps.startTerminal = func(p terminal.StartParams) (terminal.PTY, error) {
 		rec.mu.Lock()
 		rec.args = append(rec.args, append([]string{p.Executable}, p.Args...))
 		rec.envs = append(rec.envs, append([]string(nil), p.Env...))
@@ -412,9 +413,9 @@ func TestACrashRespawnKeepsTheLaunchItContinues(t *testing.T) {
 	})
 	rec.setCredential("sk-rotated", nil)
 
-	app.mu.Lock()
-	respawn := app.sessions[orchestratorSessionKey(created.ID)].respawn
-	app.mu.Unlock()
+	l, unlock := lockTerminalForTest(app)
+	respawn := l.Session(terminal.OrchestratorSessionKey(created.ID)).Respawn
+	unlock()
 	if respawn == nil {
 		t.Fatal("expected a persisted orchestrator to carry a crash respawn")
 	}

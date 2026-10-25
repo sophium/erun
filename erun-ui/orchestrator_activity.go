@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // An agent TUI repaints constantly, so busy state cannot be read off its output;
@@ -141,4 +144,81 @@ func mergeOrchestratorHookBlocks(existing any, ours []any, isOurs func(any) bool
 		merged = append(merged, block)
 	}
 	return append(merged, ours...)
+}
+
+// reconcileOrchestratorActivity re-emits every tick, not only on change, so a
+// missed event self-heals; session.aiBusy also feeds orchestratorInfo.Busy for snapshots.
+func (a *App) reconcileOrchestratorActivity() {
+	now := time.Now()
+	type row struct {
+		id      string
+		serial  int
+		alive   bool
+		agentID string
+	}
+	var rows []row
+	a.terminal.WithLock(func(l *terminal.Locked) {
+		rows = make([]row, 0, len(a.orchestrators))
+		for id, session := range a.orchestrators {
+			if session == nil || session.transient {
+				continue
+			}
+			// A session we can no longer see ages out on the short bound, since nothing else will clear it.
+			managed := l.Session(terminal.OrchestratorSessionKey(id))
+			rows = append(rows, row{
+				id:      id,
+				serial:  session.serial,
+				alive:   managed != nil && !managed.Closed,
+				agentID: session.agentID,
+			})
+		}
+	})
+	conversations := a.orchestratorAgentConversations(len(rows) > 0)
+
+	for _, r := range rows {
+		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
+		busy := ok && activity.Busy
+		// The shell report is independent of turn busy state, and must name the session
+		// that wrote it: sessionAlive is per orchestrator id, so a replaced session's
+		// report would otherwise borrow its successor's liveness.
+		liveConversationID := conversations[r.agentID]
+		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveConversationID)
+		shellRunning := shellOK && shell.Running
+		a.terminal.WithLock(func(*terminal.Locked) {
+			if session := a.orchestrators[r.id]; session != nil {
+				session.aiBusy = busy
+				session.aiBusyAtUnix = activity.AtUnix
+				session.shellRunning = shellRunning
+				session.shellCommand = shell.Command
+				session.shellStartedAtUnix = shell.AtUnix
+			}
+		})
+		a.terminal.EmitAIActivity(r.serial, uimodel.Selection{}, busy)
+		a.emitOrchestratorShellActivity(r.serial, shellRunning, shell.Command, shell.AtUnix)
+	}
+}
+
+func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command string, startedAtUnix int64) {
+	a.emitEvent(uimodel.OrchestratorShellEvent, orchestratorShellActivityPayload{
+		SessionID:     sessionID,
+		Running:       running,
+		Command:       command,
+		StartedAtUnix: startedAtUnix,
+	})
+}
+
+// An unreadable listing returns nil and the replaced-session check is skipped.
+func (a *App) orchestratorAgentConversations(needed bool) map[string]string {
+	out := map[string]string{}
+	if !needed {
+		return out
+	}
+	agents, err := a.deps.claudeAgents.List()
+	if err != nil {
+		return out
+	}
+	for _, agent := range agents {
+		out[agent.ID] = agent.SessionID
+	}
+	return out
 }

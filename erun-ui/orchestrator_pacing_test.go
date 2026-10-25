@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func orchestratorPacingMarkerTexts(emits *capturedEmits) []string {
 	var texts []string
 	for _, evt := range emits.events(uimodel.TerminalOutputEvent) {
-		payload, ok := evt.(terminalOutputPayload)
+		payload, ok := evt.(uimodel.TerminalOutputPayload)
 		if !ok {
 			continue
 		}
@@ -97,9 +98,9 @@ func TestReconcileOrchestratorPacingNudgesAQuietSession(t *testing.T) {
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	managed := &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
-	app.sessions[key] = managed
+	key := terminal.OrchestratorSessionKey("agent")
+	managed := &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator}
+	setTestSession(app, key, managed)
 	app.orchestrators["agent"] = &orchestratorSession{
 		id:        "agent",
 		serial:    5,
@@ -120,9 +121,9 @@ func TestReconcileOrchestratorPacingNudgesAQuietSession(t *testing.T) {
 		t.Fatalf("second write = %q, want a bare carriage return", calls[1])
 	}
 
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if count != 1 {
 		t.Fatalf("expected the nudge count to be recorded, got %d", count)
 	}
@@ -136,13 +137,13 @@ func TestReconcileOrchestratorPacingSkipsFreshAndTransient(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 
 	freshSession := newCallRecordingSession()
-	freshKey := orchestratorSessionKey("fresh")
-	app.sessions[freshKey] = &managedTerminal{session: freshSession, key: freshKey, serial: 1, kind: sessionKindOrchestrator}
+	freshKey := terminal.OrchestratorSessionKey("fresh")
+	setTestSession(app, freshKey, &terminal.Session{PTY: freshSession, Key: freshKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["fresh"] = &orchestratorSession{id: "fresh", serial: 1, startedAt: time.Now()}
 
 	transientSession := newCallRecordingSession()
-	transientKey := orchestratorSessionKey("")
-	app.sessions[transientKey] = &managedTerminal{session: transientSession, key: transientKey, serial: 3, kind: sessionKindOrchestrator}
+	transientKey := terminal.OrchestratorSessionKey("")
+	setTestSession(app, transientKey, &terminal.Session{PTY: transientSession, Key: transientKey, Serial: 3, Kind: terminal.KindOrchestrator})
 	app.orchestrators[""] = &orchestratorSession{
 		serial: 3, transient: true,
 		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
@@ -164,8 +165,8 @@ func TestReconcileOrchestratorPacingNudgesThroughABackgroundShell(t *testing.T) 
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("shell")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 2, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("shell")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 2, Kind: terminal.KindOrchestrator})
 	app.orchestrators["shell"] = &orchestratorSession{
 		id: "shell", serial: 2,
 		startedAt:    time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
@@ -189,27 +190,27 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	app.SetEmitter(emits.fn())
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	longAgo := time.Now().Add(-24 * time.Hour)
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: longAgo}
 
 	for i := 0; i < orchestratorPacingMaxNudges; i++ {
 		app.reconcileOrchestratorPacing()
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
 	capped := app.orchestrators["agent"].pacingCapped
-	app.mu.Unlock()
+	unlock()
 	if count != orchestratorPacingMaxNudges || capped {
 		t.Fatalf("expected %d nudges and no cap yet, got count=%d capped=%v", orchestratorPacingMaxNudges, count, capped)
 	}
 	writesBeforeCap := len(session.Calls())
 
 	app.reconcileOrchestratorPacing()
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	capped = app.orchestrators["agent"].pacingCapped
-	app.mu.Unlock()
+	unlock()
 	if !capped {
 		t.Fatal("expected the cap to latch after the max nudges")
 	}
@@ -228,15 +229,15 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 
 	// Derive AtUnix from the last nudge: both are whole seconds, and the real
 	// clock could land in the same second.
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	lastNudgeAtUnix := app.orchestrators["agent"].pacingLastNudgeAtUnix
-	app.mu.Unlock()
+	unlock()
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: true, AtUnix: lastNudgeAtUnix + 10})
 	app.reconcileOrchestratorPacing()
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	capped = app.orchestrators["agent"].pacingCapped
 	count = app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if capped || count != 0 {
 		t.Fatalf("a fresh busy report must rearm the cap, got capped=%v count=%d", capped, count)
 	}
@@ -253,8 +254,8 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 	app.SetEmitter(emits.fn())
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	base := time.Unix(1_700_000_000, 0)
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: base}
 
@@ -272,9 +273,9 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 			t.Fatalf("cycle %d: expected a nudge, got decision=%v", i, decision)
 		}
 
-		app.mu.Lock()
+		_, unlock := lockTerminalForTest(app)
 		lastNudgeAtUnix := app.orchestrators["agent"].pacingLastNudgeAtUnix
-		app.mu.Unlock()
+		unlock()
 
 		replyAt := time.Unix(lastNudgeAtUnix, 0).Add(time.Second)
 		writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: replyAt.Unix()})
@@ -283,11 +284,11 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 		rows = app.orchestratorPacingRows()
 		app.reconcileOrchestratorPacingOne(rows[0], tick, false)
 
-		app.mu.Lock()
+		_, unlock = lockTerminalForTest(app)
 		count := app.orchestrators["agent"].pacingNudgeCount
 		capped := app.orchestrators["agent"].pacingCapped
 		autoCount := app.orchestrators["agent"].pacingAutoNudgeCount
-		app.mu.Unlock()
+		unlock()
 		if capped {
 			t.Fatalf("cycle %d: a session that answered its nudge must not be capped", i)
 		}
@@ -315,8 +316,8 @@ func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 	app.SetEmitter(emits.fn())
 
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("agent")
+	setTestSession(app, key, &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator})
 	longAgo := time.Now().Add(-24 * time.Hour)
 	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: longAgo}
 
@@ -324,9 +325,9 @@ func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 		app.reconcileOrchestratorPacing()
 	}
 
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	capped := app.orchestrators["agent"].pacingCapped
-	app.mu.Unlock()
+	unlock()
 	if !capped {
 		t.Fatal("expected a session that never replies to still cap")
 	}
@@ -345,9 +346,9 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 
 	app := NewApp(erunUIDeps{})
 	session := newCallRecordingSession()
-	key := orchestratorSessionKey("agent")
-	managed := &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
-	app.sessions[key] = managed
+	key := terminal.OrchestratorSessionKey("agent")
+	managed := &terminal.Session{PTY: session, Key: key, Serial: 5, Kind: terminal.KindOrchestrator}
+	setTestSession(app, key, managed)
 	app.orchestrators["agent"] = &orchestratorSession{
 		id:        "agent",
 		serial:    5,
@@ -360,24 +361,24 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 	if len(firstCalls) != 2 {
 		t.Fatalf("expected the first stale tick to nudge, got %v", firstCalls)
 	}
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if count != 1 {
 		t.Fatalf("expected one recorded nudge, got %d", count)
 	}
 
-	app.mu.Lock()
-	managed.lastInputAt = time.Now()
-	app.mu.Unlock()
+	_, unlock = lockTerminalForTest(app)
+	managed.LastInputAt = time.Now()
+	unlock()
 
 	app.reconcileOrchestratorPacing()
 	if got := session.Calls(); len(got) != len(firstCalls) {
 		t.Fatalf("a pane being typed into must not receive a pacing nudge, got extra writes %v", got[len(firstCalls):])
 	}
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	count = app.orchestrators["agent"].pacingNudgeCount
-	app.mu.Unlock()
+	unlock()
 	if count != 1 {
 		t.Fatalf("skipping for input must not consume a nudge from the cap, got count=%d", count)
 	}
@@ -389,10 +390,12 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 func TestSendSessionInputRearmsOrchestratorPacing(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 	session := newStubTerminalSession()
-	key := orchestratorSessionKey("agent")
-	app.nextSerial = 1
-	managed := &managedTerminal{session: session, key: key, serial: 1, kind: sessionKindOrchestrator}
-	app.sessions[key] = managed
+	key := terminal.OrchestratorSessionKey("agent")
+	l, unlock := lockTerminalForTest(app)
+	l.NextSerial()
+	unlock()
+	managed := &terminal.Session{PTY: session, Key: key, Serial: 1, Kind: terminal.KindOrchestrator}
+	setTestSession(app, key, managed)
 	app.orchestrators["agent"] = &orchestratorSession{
 		id: "agent", serial: 1,
 		pacingNudgeCount: orchestratorPacingMaxNudges,
@@ -403,10 +406,10 @@ func TestSendSessionInputRearmsOrchestratorPacing(t *testing.T) {
 		t.Fatalf("SendSessionInput failed: %v", err)
 	}
 
-	app.mu.Lock()
+	_, unlock = lockTerminalForTest(app)
 	count := app.orchestrators["agent"].pacingNudgeCount
 	capped := app.orchestrators["agent"].pacingCapped
-	app.mu.Unlock()
+	unlock()
 	if count != 0 || capped {
 		t.Fatalf("expected real operator input to rearm pacing, got count=%d capped=%v", count, capped)
 	}

@@ -12,6 +12,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // newOrchestratorStubStore has a remote-agent, a local-agent and a non-orchestratable runtime env.
@@ -67,7 +68,7 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 	laptopRepo := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(laptopRepo),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
@@ -295,7 +296,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 	var capturedEnv []string
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(p startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(p terminal.StartParams) (terminal.PTY, error) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
@@ -449,7 +450,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	t.Setenv("HOME", home)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(launch orchestrator.OrchestratorLaunch, _, prompt, _ string) (string, []string, error) {

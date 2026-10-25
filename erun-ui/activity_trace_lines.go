@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -72,13 +73,13 @@ func cleanActivityFailureLine(line string) string {
 
 // newActivityTraceLineHandler registers and finalizes activity entries from PTY
 // trace lines; the helm poller converges on the same entries by ID.
-func newActivityTraceLineHandler(app *App, selection uimodel.Selection, kind sessionKind) func(string) {
+func newActivityTraceLineHandler(app *App, selection uimodel.Selection, kind terminal.Kind) func(string) {
 	// Matches both "Deploy of <rel> failed" and "Deploy failed".
 	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	// Only the Local session that runs `erun init` owns the init lifecycle; a remote
 	// open re-prints it, and honoring that would loop deploy→reopen.
-	initTraceHonored := kind == sessionKindLocal
+	initTraceHonored := kind == terminal.KindLocal
 	return func(line string) {
 		line = strings.TrimSpace(line)
 		// Buffer before dispatch so the finalizing line and preceding output are in

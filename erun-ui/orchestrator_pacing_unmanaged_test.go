@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // A configured orchestrator with no session here must still be logged, with the
@@ -23,8 +25,8 @@ func TestOrchestratorPacingLogsAConfiguredOrchestratorItCannotPace(t *testing.T)
 
 	createOrchestratorNamed(t, app, "held")
 	heldSession := newCallRecordingSession()
-	heldKey := orchestratorSessionKey("held")
-	app.sessions[heldKey] = &managedTerminal{session: heldSession, key: heldKey, serial: 1, kind: sessionKindOrchestrator}
+	heldKey := terminal.OrchestratorSessionKey("held")
+	setTestSession(app, heldKey, &terminal.Session{PTY: heldSession, Key: heldKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["held"] = &orchestratorSession{id: "held", serial: 1, name: "held", startedAt: time.Now()}
 
 	createOrchestratorNamed(t, app, "external")

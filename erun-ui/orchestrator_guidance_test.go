@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // createTestOrchestrator links a local-agent env to avoid workspace-sync wiring.
@@ -26,7 +28,7 @@ func TestRevealOrchestratorGuidanceResolvesBothLayers(t *testing.T) {
 	id := createTestOrchestrator(t, app)
 
 	var opened []string
-	app.deps.runIDECommand = func(_ context.Context, params startTerminalSessionParams) (string, error) {
+	app.deps.runIDECommand = func(_ context.Context, params terminal.StartParams) (string, error) {
 		opened = append(opened, params.Args[len(params.Args)-1])
 		return "", nil
 	}
@@ -56,7 +58,7 @@ func TestRevealOrchestratorGuidanceSeedsAbsentRoleFile(t *testing.T) {
 		t.Fatalf("expected no role file before the orchestrator has launched, stat err = %v", err)
 	}
 
-	app.deps.runIDECommand = func(context.Context, startTerminalSessionParams) (string, error) {
+	app.deps.runIDECommand = func(context.Context, terminal.StartParams) (string, error) {
 		return "", nil
 	}
 	if err := app.RevealOrchestratorGuidance(id, "role", "vscode"); err != nil {

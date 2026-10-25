@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // A persisted orchestrator runs as a Claude background agent named after its id;
@@ -54,7 +55,7 @@ var newDefaultClaudeAgents = func() claudeAgentCLI { return execClaudeAgentCLI{}
 func (execClaudeAgentCLI) run(dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeAgentCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, defaultAITool, args...)
+	cmd := exec.CommandContext(ctx, terminal.DefaultAITool, args...)
 	cmd.Dir = dir
 	core.HideConsoleWindow(cmd)
 	return cmd.CombinedOutput()
@@ -63,7 +64,7 @@ func (execClaudeAgentCLI) run(dir string, args ...string) ([]byte, error) {
 func (cli execClaudeAgentCLI) List() ([]claudeBackgroundAgent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeAgentCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, defaultAITool, "agents", "--json", "--all")
+	cmd := exec.CommandContext(ctx, terminal.DefaultAITool, "agents", "--json", "--all")
 	core.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -388,10 +389,10 @@ func orchestratorAgentRecreatedNotice(id string, agent claudeBackgroundAgent, er
 
 // Runs through the host shell: an npm claude.cmd shim only resolves there.
 func orchestratorAttachCommand(goos, agentID string) (string, []string) {
-	shell, shellArgs := resolveLocalShellCommand(goos)
+	shell, shellArgs := terminal.LocalShellCommand(goos)
 	flag := "-lc"
 	if goos == "windows" {
 		flag = "-Command"
 	}
-	return shell, append(shellArgs, flag, defaultAITool+" attach "+agentID)
+	return shell, append(shellArgs, flag, terminal.DefaultAITool+" attach "+agentID)
 }

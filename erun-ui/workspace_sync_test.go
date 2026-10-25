@@ -8,6 +8,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -16,7 +17,7 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:          workspaceSyncStore(true),
 		resolveCLIPath: func() string { return "/tmp/erun" },
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		canConnectLocalPort: func(int) bool {

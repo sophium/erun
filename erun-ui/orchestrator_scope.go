@@ -21,7 +21,7 @@ func envInfos(envs []configpkg.OrchestratorEnvConfig, envActivity map[string]run
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
 		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory, Role: env.Role}
-		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
+		key := uimodel.SelectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		if state, ok := envActivity[key]; ok {
 			info.Activity = runtimeview.ActivitySnapshotFrom(state)
 		}

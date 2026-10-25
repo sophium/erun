@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // The role layer (CLAUDE.<id>.md) is seeded once; the shared layer (CLAUDE.md) is
@@ -63,12 +65,12 @@ func (a *App) RevealOrchestratorGuidance(id, layer, ide string) error {
 	if err != nil {
 		return err
 	}
-	executable, args, err := localOpenIDECommand(runtime.GOOS, ide, path)
+	executable, args, err := terminal.LocalOpenIDECommand(runtime.GOOS, ide, path)
 	if err != nil {
 		return err
 	}
 	ctx := a.context()
-	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
+	output, err := a.deps.runIDECommand(ctx, terminal.StartParams{
 		Dir:        dir,
 		Executable: executable,
 		Args:       args,
@@ -77,5 +79,5 @@ func (a *App) RevealOrchestratorGuidance(id, layer, ide string) error {
 	if err == nil {
 		return nil
 	}
-	return formatOpenIDEError(ide, output, err)
+	return terminal.FormatOpenIDEError(ide, output, err)
 }

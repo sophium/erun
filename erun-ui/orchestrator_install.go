@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // buildSkillsSource is the build checkout's erun-skills/skills, stamped by the
@@ -85,10 +86,11 @@ func isExistingDir(path string) bool {
 // reportSkillsNotInstalled warns once per run but logs every time.
 func (a *App) reportSkillsNotInstalled(cause error) {
 	log.Printf("erun-app: orchestrator skills not installed: %v", cause)
-	a.mu.Lock()
-	reported := a.skillsSourceReported
-	a.skillsSourceReported = true
-	a.mu.Unlock()
+	var reported bool
+	a.terminal.WithLock(func(*terminal.Locked) {
+		reported = a.skillsSourceReported
+		a.skillsSourceReported = true
+	})
 	if !reported {
 		a.emitAppNotification("warning", orchestratorSkillsNotInstalledNotice(cause))
 	}
@@ -186,10 +188,11 @@ func agentsSourceNearExecutable() (string, string) {
 
 func (a *App) reportAgentsNotInstalled(cause error) {
 	log.Printf("erun-app: orchestrator agents not installed: %v", cause)
-	a.mu.Lock()
-	reported := a.agentsSourceReported
-	a.agentsSourceReported = true
-	a.mu.Unlock()
+	var reported bool
+	a.terminal.WithLock(func(*terminal.Locked) {
+		reported = a.agentsSourceReported
+		a.agentsSourceReported = true
+	})
 	if !reported {
 		a.emitAppNotification("warning", orchestratorAgentsNotInstalledNotice(cause))
 	}

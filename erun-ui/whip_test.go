@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 func whipTestStore(t *testing.T) stubUIStore {
@@ -186,8 +187,8 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	})
 
 	aliveSession := newCallRecordingSession()
-	aliveKey := orchestratorSessionKey("alive")
-	app.sessions[aliveKey] = &managedTerminal{session: aliveSession, key: aliveKey, serial: 1, kind: sessionKindOrchestrator}
+	aliveKey := terminal.OrchestratorSessionKey("alive")
+	setTestSession(app, aliveKey, &terminal.Session{PTY: aliveSession, Key: aliveKey, Serial: 1, Kind: terminal.KindOrchestrator})
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "alive", startedAt: time.Now()}
 
 	report, err := app.WhipNow([]uiWhipTargetRef{
@@ -319,8 +320,8 @@ func TestWhipNowRefusesAnUnknownTargetKind(t *testing.T) {
 func TestWhipTargetsListsEnvironmentsAndOrchestrators(t *testing.T) {
 	app := NewApp(erunUIDeps{store: whipTestStore(t)})
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "Alive", startedAt: time.Now()}
-	key := orchestratorSessionKey("alive")
-	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+	key := terminal.OrchestratorSessionKey("alive")
+	setTestSession(app, key, &terminal.Session{PTY: newCallRecordingSession(), Key: key, Serial: 1, Kind: terminal.KindOrchestrator})
 
 	list, err := app.WhipTargets()
 	if err != nil {

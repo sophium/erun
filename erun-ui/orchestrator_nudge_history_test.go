@@ -8,14 +8,15 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 )
 
 // nudgeOrchestratorOnce nudges through the real reconciler path so persistence runs.
 func nudgeOrchestratorOnce(t *testing.T, app *App, id string) {
 	t.Helper()
-	app.mu.Lock()
+	_, unlock := lockTerminalForTest(app)
 	session := app.orchestrators[id]
-	app.mu.Unlock()
+	unlock()
 	if session == nil {
 		t.Fatalf("expected a live session for %q", id)
 	}
@@ -23,8 +24,8 @@ func nudgeOrchestratorOnce(t *testing.T, app *App, id string) {
 }
 
 func orchestratorAutoNudgeSnapshot(app *App, id string) (count int, lastAtUnix int64) {
-	app.mu.Lock()
-	defer app.mu.Unlock()
+	_, unlock := lockTerminalForTest(app)
+	defer unlock()
 	session := app.orchestrators[id]
 	if session == nil {
 		return 0, 0
@@ -164,7 +165,7 @@ func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *te
 	app := NewApp(erunUIDeps{
 		store:                        newOrchestratorStubStore(t.TempDir()),
 		orchestratorNudgeHistoryPath: path,
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {

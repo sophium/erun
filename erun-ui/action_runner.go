@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -241,7 +242,7 @@ func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
 	return activityQueueEntry{}, false
 }
 
-type gatedSessionStarter func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error)
+type gatedSessionStarter func(ctx context.Context) (uimodel.StartSessionResult, *terminal.Session, error)
 
 // gatedSessionMaxSetup is a safety net so the queue drains if every ready marker
 // is missed; it spans a cold build+deploy.
@@ -294,7 +295,7 @@ func (a *App) enqueueGatedSession(selection uimodel.Selection, kind gatedSession
 			if managed == nil {
 				return nil
 			}
-			waitErr := managed.waitReady(ctx, gatedSessionMaxSetup)
+			waitErr := managed.WaitReady(ctx, gatedSessionMaxSetup)
 			// A timeout releases successfully: the session is usable, only its marker was missed.
 			if errors.Is(waitErr, context.DeadlineExceeded) {
 				return nil

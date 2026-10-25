@@ -27,8 +27,6 @@ const notificationSourceDeployFailed = "deploy-failed"
 // notificationSourceOrchestratorEdgeUnreachable is posted per linked env, carrying that env's deploy action.
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
 
-const notificationSourceMCPUnreachable = "mcp-unreachable"
-
 const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
 
 const notificationActionDeploy = uimodel.NotificationActionDeploy
@@ -77,5 +75,18 @@ func (a *App) emitClearEnvNotification(tenant, environment, source string) {
 		Tenant:      tenant,
 		Environment: environment,
 		Source:      source,
+	})
+}
+
+func (a *App) emitEvent(name string, payload any) {
+	a.emit(name, payload)
+}
+
+// emitEnvStatus publishes the env's condition for the sidebar row; "" clears.
+func (a *App) emitEnvStatus(selection uimodel.Selection, status string) {
+	a.emitEvent(uimodel.EnvStatusEvent, uimodel.EnvStatusPayload{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+		Status:      status,
 	})
 }

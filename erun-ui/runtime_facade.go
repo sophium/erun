@@ -134,7 +134,7 @@ func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			if activity, ok := observed[selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]; ok {
+			if activity, ok := observed[uimodel.SelectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]; ok {
 				env.Activity = runtimeview.ActivitySnapshotFrom(activity)
 			}
 		}
@@ -149,7 +149,7 @@ func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			if reading, ok := readings[selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]; ok {
+			if reading, ok := readings[uimodel.SelectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]; ok {
 				env.Usage = runtimeview.UsageSnapshotFrom(reading)
 			}
 		}
@@ -163,7 +163,7 @@ func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result lifecycle.List
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			link, ok := links[selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]
+			link, ok := links[uimodel.SelectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]
 			if !ok {
 				continue
 			}
@@ -181,7 +181,7 @@ func cloudContextLinksByEnvironment(result lifecycle.ListResult) map[string]clou
 	links := make(map[string]cloudContextLink)
 	for _, tenant := range result.Tenants {
 		for _, environment := range tenant.Environments {
-			key := selectionKey(uimodel.Selection{
+			key := uimodel.SelectionKey(uimodel.Selection{
 				Tenant:      strings.TrimSpace(tenant.Name),
 				Environment: strings.TrimSpace(environment.Name),
 			})
