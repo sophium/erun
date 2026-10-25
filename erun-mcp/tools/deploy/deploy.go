@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/deploy/run"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
@@ -86,7 +86,7 @@ func DeployTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Cal
 				if err := run.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return runtimeversion.PersistRuntimeVersionFromDeploySpecs(runCtx, []seam.DeploySpec{execution}, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
+				return runtimeversion.PersistRuntimeVersionFromDeploySpecs(runCtx, []helmdeploy.DeploySpec{execution}, runtime.Store.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 			}
 
 			executions, err := spec.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)

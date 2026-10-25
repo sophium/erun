@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -123,7 +124,7 @@ func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string
 	listURL := githubRuleSuitesURL(inputs.owner, inputs.repo, inputs.targetBranch, inputs.since)
 	ctx.Trace("github: GET " + listURL)
 
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, cloudDeps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, cloudDeps)
 	if err != nil {
 		return model.ReconcileBypassResult{}, err
 	}
@@ -147,7 +148,7 @@ func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string
 func traceReconcileBypassFollowUpCalls(ctx core.Context, provider model.CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/compare/{beforeSha}...{afterSha} per push whose tip has no successful build, to account for every commit the push added",
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo))
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/tags?per_page=100 (once, up to %d pages) to tell a release's own push from an ungated one",

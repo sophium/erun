@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -45,7 +46,7 @@ func newAIOccupancyTestApp(t *testing.T) (*Service, *int) {
 
 func takeTestLease(t *testing.T, name string) {
 	t.Helper()
-	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	if _, err := activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      "erun",
 		Environment: "remote",
 		Name:        name,

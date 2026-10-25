@@ -14,7 +14,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/ratelimit"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 // InviteRequestStore reads invite requests for the protected routes.
@@ -309,7 +309,7 @@ func parseSubmitInviteRequestParams(req *http.Request, claims security.Claims) (
 			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, "tenantName is required"
 		}
 	case model.InviteRequestKindCreateTenant:
-		if err := configpkg.ValidateTenantName(tenantName); err != nil {
+		if err := runtimetarget.ValidateTenantName(tenantName); err != nil {
 			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, err.Error()
 		}
 	default:

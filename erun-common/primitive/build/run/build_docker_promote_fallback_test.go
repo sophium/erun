@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/build/dockerimage"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
@@ -133,8 +133,8 @@ func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testin
 	}
 }
 
-func testPromoteBuildInput() seam.DockerBuildSpec {
-	return seam.DockerBuildSpec{
+func testPromoteBuildInput() imagebuild.DockerBuildSpec {
+	return imagebuild.DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
 		Image: model.DockerImageReference{

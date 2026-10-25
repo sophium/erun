@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 )
 
 const testStageDockerfile = "FROM golang:1.26.0 AS test\nRUN --network=host go test ./...\n\nFROM scratch AS runtime\nCOPY --from=test /out/app /app\n"
@@ -53,9 +53,9 @@ func callsStartingWith(calls []string, prefix string) []string {
 	return out
 }
 
-func testStageBuild(t *testing.T) []seam.DockerBuildSpec {
+func testStageBuild(t *testing.T) []imagebuild.DockerBuildSpec {
 	t.Helper()
-	return []seam.DockerBuildSpec{{DockerfilePath: writeTestDockerfile(t, t.TempDir(), testStageDockerfile)}}
+	return []imagebuild.DockerBuildSpec{{DockerfilePath: writeTestDockerfile(t, t.TempDir(), testStageDockerfile)}}
 }
 
 func TestEnsureBuildDaemonEndpointForwardsWhereNothingAnswers(t *testing.T) {

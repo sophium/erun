@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -29,7 +31,7 @@ func resolveRouteCheckRoutesDir(explicit string) (string, error) {
 	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
 		return trimmed, nil
 	}
-	_, root, err := config.FindProjectRoot()
+	_, root, err := projectroot.FindProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve routes directory: %w (pass --routes-dir explicitly outside a checkout of the erun repository)", err)
 	}
@@ -50,12 +52,12 @@ func RunRouteCheck(ctx core.Context, store config.CloudReadStore, alias string, 
 	}
 	ctx.Trace(fmt.Sprintf("route-check: %d route(s) registered", len(inventory)))
 
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return model.RouteCheckResult{}, err
 	}
 
-	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/whoami",
+	platformapi.TracePlatformCall(ctx, provider, "GET", "/v1/whoami",
 		"sanity probe: the plane must answer before any route in the inventory is probed")
 	if ctx.DryRun {
 		traceRouteCheckInventory(ctx, provider, inventory)
@@ -86,7 +88,7 @@ func sortRoutes(routes []mcpauth.APIRoute) {
 
 func traceRouteCheckInventory(ctx core.Context, provider model.CloudProviderConfig, inventory []mcpauth.APIRoute) {
 	for _, route := range inventory {
-		cloud.TracePlatformCall(ctx, provider, "GET", substitutePathParameters(route.Path),
+		platformapi.TracePlatformCall(ctx, provider, "GET", substitutePathParameters(route.Path),
 			fmt.Sprintf("probing registered route %s %s", route.Method, route.Path))
 	}
 }
@@ -95,7 +97,7 @@ func probeRouteInventory(ctx core.Context, provider model.CloudProviderConfig, c
 	var result model.RouteCheckResult
 	for _, route := range inventory {
 		probePath := substitutePathParameters(route.Path)
-		cloud.TracePlatformCall(ctx, provider, "GET", probePath, fmt.Sprintf("probing registered route %s %s", route.Method, route.Path))
+		platformapi.TracePlatformCall(ctx, provider, "GET", probePath, fmt.Sprintf("probing registered route %s %s", route.Method, route.Path))
 		probe := probeOneRoute(client, route, probePath)
 		result.RoutesChecked++
 		result.Routes = append(result.Routes, probe)

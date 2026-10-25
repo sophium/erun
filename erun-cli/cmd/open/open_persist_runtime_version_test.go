@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 // A cached no-op deploy mints an unpushed version, so open heals to the running one.
@@ -17,7 +18,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 
-	newRunner := func(resolver seam.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
+	newRunner := func(resolver helmdeploy.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
 		return &resolvedOpenRunner{
 			ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
 			result: config.OpenResult{
@@ -28,14 +29,14 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 			resolveDeployedVersion: resolver,
 		}
 	}
-	skipHelmExecution := seam.DeploySpec{
+	skipHelmExecution := helmdeploy.DeploySpec{
 		Target: config.OpenResult{
 			Tenant:    tenant,
 			EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 		},
 		SkipHelm: true,
-		Deploy: seam.HelmDeploySpec{
-			ReleaseName:       config.RuntimeReleaseName(tenant),
+		Deploy: helmdeploy.HelmDeploySpec{
+			ReleaseName:       runtimetarget.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
 			ContainerRegistry: registry,
@@ -88,11 +89,11 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 		}},
 		resolveDeployedVersion: func(core.Context, string, string, string) (string, error) { return version, nil },
 	}
-	execution := seam.DeploySpec{
+	execution := helmdeploy.DeploySpec{
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
-		Deploy: seam.HelmDeploySpec{
-			ReleaseName:          config.RuntimeReleaseName(tenant),
+		Deploy: helmdeploy.HelmDeploySpec{
+			ReleaseName:          runtimetarget.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",
 			ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,

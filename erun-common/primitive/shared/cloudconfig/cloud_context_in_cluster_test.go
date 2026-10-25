@@ -7,8 +7,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 // inClusterPodEnv has a cloud provider set, but the pod is the workload, not an instance.
@@ -35,7 +37,7 @@ func countingRunAWS(calls *int) func(core.Context, model.CloudProviderConfig, st
 	}
 }
 
-func inClusterPreflightStore(t *testing.T) seam.CloudContextStore {
+func inClusterPreflightStore(t *testing.T) cloudstore.CloudContextStore {
 	t.Helper()
 	injected, ok := ResolveInjectedRuntimeConfig(inClusterPodEnv())
 	if !ok {
@@ -55,8 +57,8 @@ func TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the pod's env to resolve to an injected runtime config")
 	}
-	if got := injected.Env.KubernetesContext; got != cloud.InClusterKubernetesContext {
-		t.Fatalf("injected kubernetes context = %q, want %q", got, cloud.InClusterKubernetesContext)
+	if got := injected.Env.KubernetesContext; got != providerconfig.InClusterKubernetesContext {
+		t.Fatalf("injected kubernetes context = %q, want %q", got, providerconfig.InClusterKubernetesContext)
 	}
 	if len(injected.Contexts) != 1 {
 		t.Fatalf("injected contexts = %+v, want exactly the pod's own context", injected.Contexts)
@@ -65,7 +67,7 @@ func TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel(t *testing.T) {
 	if context.InstanceID != "" {
 		t.Fatalf("injected instance ID = %q, want empty (a pod has no instance)", context.InstanceID)
 	}
-	if !cloud.IsInClusterCloudContext(context) {
+	if !cloudcontext.IsInClusterCloudContext(context) {
 		t.Fatalf("injected context %+v is not recognized as in-cluster", context)
 	}
 }
@@ -73,9 +75,9 @@ func TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel(t *testing.T) {
 // The working-hours gate lives inside StartCloudContext, so no start means no gate.
 func TestCloudContextPreflightInClusterIsAlreadyRunning(t *testing.T) {
 	calls := 0
-	deps := cloud.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}
-	preflight := cloud.CloudContextPreflight(inClusterPreflightStore(t), deps)
-	if err := preflight(inClusterPreflightTestContext(), cloud.InClusterKubernetesContext); err != nil {
+	deps := cloudcontext.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}
+	preflight := contextpower.CloudContextPreflight(inClusterPreflightStore(t), deps)
+	if err := preflight(inClusterPreflightTestContext(), providerconfig.InClusterKubernetesContext); err != nil {
 		t.Fatalf("in-cluster preflight failed: %v", err)
 	}
 	if calls != 0 {
@@ -85,10 +87,10 @@ func TestCloudContextPreflightInClusterIsAlreadyRunning(t *testing.T) {
 
 func TestCloudContextPreflightInClusterRepeatedCallsStayClean(t *testing.T) {
 	calls := 0
-	deps := cloud.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}
-	preflight := cloud.CloudContextPreflight(inClusterPreflightStore(t), deps)
+	deps := cloudcontext.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}
+	preflight := contextpower.CloudContextPreflight(inClusterPreflightStore(t), deps)
 	for i := 0; i < 2; i++ {
-		if err := preflight(inClusterPreflightTestContext(), cloud.InClusterKubernetesContext); err != nil {
+		if err := preflight(inClusterPreflightTestContext(), providerconfig.InClusterKubernetesContext); err != nil {
 			t.Fatalf("in-cluster preflight call %d failed: %v", i+1, err)
 		}
 	}

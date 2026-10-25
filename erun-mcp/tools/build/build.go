@@ -9,7 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
@@ -127,7 +127,7 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime runtimecfg.RuntimeCo
 		if build == nil {
 			return dockerspec.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		execution := spec.BuildExecutionSpecFromDockerBuilds([]seam.DockerBuildSpec{*build})
+		execution := spec.BuildExecutionSpecFromDockerBuilds([]imagebuild.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = buildrun.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
@@ -155,7 +155,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 		if err != nil {
 			return dockerspec.DockerPushExecutionSpec{}, err
 		}
-		builds := make([]seam.DockerBuildSpec, 0, 1)
+		builds := make([]imagebuild.DockerBuildSpec, 0, 1)
 		if buildInput != nil {
 			builds = append(builds, *buildInput)
 		}
@@ -171,7 +171,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 	}
 	build.Push = true
 
-	return buildrun.DockerPushExecutionSpecFromSpecs([]seam.DockerBuildSpec{*build}, []model.DockerPushSpec{
+	return buildrun.DockerPushExecutionSpecFromSpecs([]imagebuild.DockerBuildSpec{*build}, []model.DockerPushSpec{
 		spec.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

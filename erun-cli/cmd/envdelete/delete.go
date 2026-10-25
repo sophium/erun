@@ -11,12 +11,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
 	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/spf13/cobra"
 )
 
-func NewDeleteCmd(store seam.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace seam.NamespaceDeleterFunc) *cobra.Command {
+func NewDeleteCmd(store envstore.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace kubeapi.NamespaceDeleterFunc) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete TENANT ENVIRONMENT",
@@ -37,7 +38,7 @@ func NewDeleteCmd(store seam.DeleteStore, promptRunner prompt.PromptRunner, dele
 	return cmd
 }
 
-func runDeleteCommand(ctx core.Context, store seam.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace seam.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
+func runDeleteCommand(ctx core.Context, store envstore.DeleteStore, promptRunner prompt.PromptRunner, deleteNamespace kubeapi.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	expected := envdelete.DeleteEnvironmentConfirmation(tenant, environment)

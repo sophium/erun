@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
@@ -211,13 +211,13 @@ func HelmChartRuntimeSubchartKey(chartPath string) (string, error) {
 		return "", fmt.Errorf("parse Chart.yaml at %s: %w", chartPath, err)
 	}
 	for _, dep := range chart.Dependencies {
-		if strings.TrimSpace(dep.Name) != config.DevopsComponentName {
+		if strings.TrimSpace(dep.Name) != runtimetarget.DevopsComponentName {
 			continue
 		}
 		if alias := strings.TrimSpace(dep.Alias); alias != "" {
 			return alias, nil
 		}
-		return config.DevopsComponentName, nil
+		return runtimetarget.DevopsComponentName, nil
 	}
 	return "", nil
 }

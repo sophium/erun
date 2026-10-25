@@ -7,7 +7,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 )
 
 func testPlatformAliasProvider() model.CloudProviderConfig {
@@ -18,9 +19,9 @@ func testPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
 		},
 	}
 }
@@ -67,9 +68,9 @@ func secondPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
 		},
 	}
 }
@@ -78,7 +79,7 @@ func secondPlatformAliasProvider() model.CloudProviderConfig {
 func ambiguousHostStore(t *testing.T) staticCloudStore {
 	t.Helper()
 	redirectConfigHomeForTest(t)
-	secretStore, err := cloud.DefaultCloudSecretStore()
+	secretStore, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}

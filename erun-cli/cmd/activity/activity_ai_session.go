@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/aisession"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +77,7 @@ func runActivityAISessionHook(cmd *cobra.Command, tenant, environment, tool, eve
 			return fmt.Errorf("%s hook: %w", toolLabelForHook(tool), err)
 		}
 	}
-	return activity.RecordAISessionEvent(model.AISessionEventParams{
+	return aisession.RecordAISessionEvent(model.AISessionEventParams{
 		Tenant:      resolvedTenant,
 		Environment: resolvedEnvironment,
 		SessionID:   sessionID,
@@ -163,7 +163,7 @@ func newActivityAISessionReportCmd() *cobra.Command {
 			if cmd.Flags().Changed("exit-code") {
 				params.ExitCode = &exitCode
 			}
-			return activity.RecordAISessionEvent(params)
+			return aisession.RecordAISessionEvent(params)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -206,13 +206,13 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID != "" {
-		status, err := activity.LoadAISessionStatus(tenant, environment, sessionID)
+		status, err := aisession.LoadAISessionStatus(tenant, environment, sessionID)
 		if err != nil {
 			return err
 		}
 		return WriteAISessionStatuses(cmd, []model.AISessionStatus{status}, jsonOutput)
 	}
-	statuses, err := activity.LoadAISessionStatuses(tenant, environment)
+	statuses, err := aisession.LoadAISessionStatuses(tenant, environment)
 	if err != nil {
 		return err
 	}

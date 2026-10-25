@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +53,7 @@ func runServicesCommand(ctx core.Context, resolveOpen envscope.OpenResolver, par
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	services, err := expose.RunListEnvironmentServices(ctx, req)
 	if err != nil {
 		return fmt.Errorf("cannot list this environment's Services: %w", err)

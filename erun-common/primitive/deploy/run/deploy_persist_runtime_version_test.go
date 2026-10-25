@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
 )
 
@@ -17,11 +18,11 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	const runningVersion = "1.0.86-snapshot-20260605090000"
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 
-	spec := seam.DeploySpec{
+	spec := helmdeploy.DeploySpec{
 		Target:        config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
-		DeployContext: model.KubernetesDeployContext{ComponentName: config.RuntimeReleaseName(tenant)},
-		Deploy: seam.HelmDeploySpec{
-			ReleaseName:       config.RuntimeReleaseName(tenant),
+		DeployContext: model.KubernetesDeployContext{ComponentName: runtimetarget.RuntimeReleaseName(tenant)},
+		Deploy: helmdeploy.HelmDeploySpec{
+			ReleaseName:       runtimetarget.RuntimeReleaseName(tenant),
 			Version:           mintedVersion,
 			ContainerRegistry: "ghcr.io/sophium",
 		},
@@ -30,11 +31,11 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 
 	helmed := false
 	var savedVersion string
-	deploy := func(seam.HelmDeployParams) error { helmed = true; return nil }
+	deploy := func(helmdeploy.HelmDeployParams) error { helmed = true; return nil }
 	save := func(_ string, cfg config.EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil }
 	resolveRunning := func(core.Context, string, string, string) (string, error) { return runningVersion, nil }
 
-	specs := []seam.DeploySpec{spec}
+	specs := []helmdeploy.DeploySpec{spec}
 	if err := RunDeploySpecs(ctx, specs, deploy); err != nil {
 		t.Fatalf("RunDeploySpecs: %v", err)
 	}

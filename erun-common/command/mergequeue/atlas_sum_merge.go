@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
 )
 
 // atlasSumBasename is a hash chain over its directory's migrations, so it conflicts on
@@ -31,7 +31,7 @@ func runAtlasMigrateHash(root, migrationsDir string) error {
 
 // resolveAtlasSumConflicts regenerates and stages each conflicted atlas.sum, returning
 // the other conflicts. The .sql files on disk are already the merge result.
-func resolveAtlasSumConflicts(root string, runGit seam.GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
+func resolveAtlasSumConflicts(root string, runGit gitcmd.GitCommandRunnerFunc, runAtlasHash AtlasMigrateHashRunnerFunc, conflicted []string) ([]string, error) {
 	var remaining []string
 	for _, file := range conflicted {
 		if filepath.Base(file) != atlasSumBasename {

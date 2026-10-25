@@ -8,9 +8,12 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
 )
@@ -23,9 +26,9 @@ func testPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
 		},
 	}
 }
@@ -48,7 +51,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatalf("write the pod's config: %v", err)
 	}
-	rootPath := configpkg.RuntimeRootConfigPath(boot.configHome())
+	rootPath := runtimesync.RuntimeRootConfigPath(boot.configHome())
 	unprovisioned, err := os.ReadFile(rootPath)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +71,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if resolved.Alias != provider.Alias {
 		t.Fatalf("got alias %q, want %q", resolved.Alias, provider.Alias)
 	}
-	store := cloud.NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
+	store := secretstore.NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
 	token, err := store.LoadCloudSecret(resolved.ERun.RefreshTokenRef)
 	if err != nil {
 		t.Fatalf("the pod's secret store cannot read the token at the ref the resolved alias names: %v", err)
@@ -85,7 +88,7 @@ func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 		t.Fatalf("the unprovisioned config does not parse: %v", err)
 	}
 	_, err := cloudconfig.ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
-	if !errors.Is(err, cloud.ErrPlatformAliasUnusable) {
+	if !errors.Is(err, providerconfig.ErrPlatformAliasUnusable) {
 		t.Fatalf("expected the reported unusable-alias failure before provisioning, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "no erun platform cloud provider alias is configured") {

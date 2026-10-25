@@ -7,14 +7,16 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/erun-common/base/config"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func NewExposeCmd(store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func NewExposeCmd(store envstore.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var backendService string
 	var servicePort int
@@ -103,15 +105,15 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func findExposeProjectRoot(findProjectRoot seam.ProjectFinderFunc) (string, error) {
+func findExposeProjectRoot(findProjectRoot seamprojectroot.ProjectFinderFunc) (string, error) {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, root, err := findProjectRoot()
 	return root, err
 }
 
-func runExposeCommand(ctx core.Context, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx core.Context, store envstore.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seamprojectroot.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// The zone/namespace overrides let a caller with no checkout (the hosted deploy Job) run expose.

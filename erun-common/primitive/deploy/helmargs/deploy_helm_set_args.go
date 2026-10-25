@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/config/claudedefaults"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 func FormatHelmBool(value bool) string {
@@ -72,7 +74,7 @@ func HelmIdleTimezone(config configpkg.EnvironmentIdleConfig) string {
 
 // HelmCloudContextSetArgs omits an empty region: the chart turns it into
 // AWS_REGION, and an empty AWS_REGION overrides the pod's own AWS profile.
-func HelmCloudContextSetArgs(d seam.HelmDeploySpec) []string {
+func HelmCloudContextSetArgs(d helmdeploy.HelmDeploySpec) []string {
 	args := []string{
 		"--set-string", "cloudContext.name=" + d.CloudContextName,
 		"--set-string", "cloudContext.provider=" + d.CloudProvider,
@@ -89,7 +91,7 @@ func HelmCloudContextSetArgs(d seam.HelmDeploySpec) []string {
 
 // HelmRegistrySetArgs guards each value on presence so older charts are
 // unaffected.
-func HelmRegistrySetArgs(d seam.HelmDeploySpec) []string {
+func HelmRegistrySetArgs(d helmdeploy.HelmDeploySpec) []string {
 	var args []string
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
 		args = append(args, "--set-string", "containerRegistry="+registry)
@@ -183,12 +185,12 @@ func HelmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 	args := make([]string, 0, 12)
 	// Claude Code reads CLAUDE_CODE_USE_BEDROCK/_MANTLE ahead of ANTHROPIC_BASE_URL,
 	// so a gateway must turn them off.
-	gatewayOn := configpkg.EffectiveGateway(config, gateway).Configured()
-	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, configpkg.DefaultClaudeUseMantle)
-	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, configpkg.DefaultClaudeUseBedrock)
+	gatewayOn := openrouter.EffectiveGateway(config, gateway).Configured()
+	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, claudedefaults.DefaultClaudeUseMantle)
+	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, claudedefaults.DefaultClaudeUseBedrock)
 	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(useMantle))
 	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(useBedrock))
-	if models := configpkg.FormatClaudeModels(config.Models); models != "" {
+	if models := claudedefaults.FormatClaudeModels(config.Models); models != "" {
 		args = append(args, "--set-string", "claude.availableModels="+EscapeHelmSetValue(models))
 	}
 	if config.MaxOutputTokens != nil {
@@ -196,9 +198,9 @@ func HelmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 	}
 	// The gateway credential never passes through helm; applyGatewayCredentialsSecret
 	// delivers it.
-	if gateway := configpkg.EffectiveGateway(config, gateway); gateway.Configured() {
+	if gateway := openrouter.EffectiveGateway(config, gateway); gateway.Configured() {
 		args = append(args, "--set-string", "claude.openRouterBaseURL="+EscapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
-		if ids := configpkg.FormatClaudeModels(gateway.ModelIDs()); ids != "" {
+		if ids := claudedefaults.FormatClaudeModels(gateway.ModelIDs()); ids != "" {
 			args = append(args, "--set-string", "claude.openRouterAvailableModels="+EscapeHelmSetValue(ids))
 		}
 		// Pod-wide default so Claude outside the AI tab uses a model the gateway serves.
@@ -208,8 +210,8 @@ func HelmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
 			}
 		}
-		args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+configpkg.GatewaySecretName)
-		args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+configpkg.GatewaySecretKey)
+		args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+openrouter.GatewaySecretName)
+		args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+openrouter.GatewaySecretKey)
 	}
 	return args
 }

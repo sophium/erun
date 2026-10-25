@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 )
 
 func ResolveKubernetesDeployContextsAtDir(dir string) ([]model.KubernetesDeployContext, error) {
@@ -56,7 +57,7 @@ func KubernetesDeployContextsUnderDir(dir string) ([]model.KubernetesDeployConte
 	return deployContexts, nil
 }
 
-func ResolveCurrentDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
+func ResolveCurrentDevopsK8sDir(findProjectRoot projectroot.ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil
@@ -70,7 +71,7 @@ func ResolveCurrentDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, dir, pro
 	return resolveConventionDevopsK8sDir(findProjectRoot, dir, projectRootOverride)
 }
 
-func resolveConventionDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
+func resolveConventionDevopsK8sDir(findProjectRoot projectroot.ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
 	if k8sDir, ok, err := resolveDirDevopsK8sDir(dir); err != nil || ok {
 		return k8sDir, ok, err
 	}
@@ -94,7 +95,7 @@ func resolveConventionDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, dir, 
 	return ResolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
 }
 
-func configuredK8sDirForDeploy(findProjectRoot seam.ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
+func configuredK8sDirForDeploy(findProjectRoot projectroot.ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
 	projectRoot := strings.TrimSpace(projectRootOverride)
 	if projectRoot == "" {
 		resolved, err := ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
@@ -111,11 +112,11 @@ func configuredK8sDirForDeploy(findProjectRoot seam.ProjectFinderFunc, projectRo
 
 // ConfiguredK8sDir fails on a non-chart override rather than fall back to convention.
 func ConfiguredK8sDir(projectRoot string) (string, bool, error) {
-	paths, err := configpkg.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
-	k8sDir := configpkg.ResolveProjectPath(projectRoot, paths.K8s)
+	k8sDir := projectpaths.ResolveProjectPath(projectRoot, paths.K8s)
 	if k8sDir == "" {
 		return "", false, nil
 	}
@@ -168,7 +169,7 @@ func resolveAncestorDevopsK8sDir(dir string) (string, bool, error) {
 	}
 }
 
-func ResolveProjectRootDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func ResolveProjectRootDevopsK8sDir(findProjectRoot projectroot.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	if projectRoot == "" {
 		return "", false, nil
@@ -193,12 +194,12 @@ func ResolveProjectRootDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, proj
 	}
 }
 
-func detectedProjectRootDevopsK8sDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func detectedProjectRootDevopsK8sDir(findProjectRoot projectroot.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	tenant, ok := DetectedProjectTenant(findProjectRoot, projectRoot)
 	if !ok {
 		return "", false, nil
 	}
-	k8sDir := filepath.Join(projectRoot, configpkg.RuntimeReleaseName(tenant), "k8s")
+	k8sDir := filepath.Join(projectRoot, runtimetarget.RuntimeReleaseName(tenant), "k8s")
 	if ok, err := IsKubernetesDeployModuleDir(k8sDir); err != nil {
 		return "", false, err
 	} else if ok {
@@ -254,7 +255,7 @@ func HasHelmChart(chartFilePath string) bool {
 	return !info.IsDir()
 }
 
-func DetectedProjectTenant(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool) {
+func DetectedProjectTenant(findProjectRoot projectroot.ProjectFinderFunc, projectRoot string) (string, bool) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
 		return "", false

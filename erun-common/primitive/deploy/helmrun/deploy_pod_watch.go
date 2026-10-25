@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
@@ -252,7 +252,7 @@ func describePullingContainer(podName string, container observe.ContainerStatusE
 }
 
 func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
-	if config.CurrentExecutionMode(kubectlPodWatchExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kubectlPodWatchExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryListReleasePods(parent, params)
 	}
 	return defaultRunKubectlGetPods(parent, params)

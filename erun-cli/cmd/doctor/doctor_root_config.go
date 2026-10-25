@@ -9,9 +9,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/awssso"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextrecover"
 )
 
 func rootConfigSkipsInspection(inspection model.RootConfigInspection, options doctorOptions) bool {
@@ -24,8 +28,8 @@ func rootConfigSkipsInspection(inspection model.RootConfigInspection, options do
 	return strings.TrimSpace(options.restoreConfigFromBackup) == ""
 }
 
-func runRootConfigDoctor(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions) (bool, error) {
-	inspection, err := config.InspectRootConfig(configStore)
+func runRootConfigDoctor(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions) (bool, error) {
+	inspection, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return false, err
 	}
@@ -65,7 +69,7 @@ func runRootConfigRestoreSelector(ctx core.Context, configStore config.ConfigSto
 	if !restored {
 		return inspection, false, nil
 	}
-	refreshed, err := config.InspectRootConfig(configStore)
+	refreshed, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return inspection, true, err
 	}
@@ -182,7 +186,7 @@ func shouldOfferRootConfigRepair(ctx core.Context, promptRunner prompt.PromptRun
 	return true, nil
 }
 
-func runRootConfigRepair(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection) (bool, error) {
+func runRootConfigRepair(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection) (bool, error) {
 	inspection, restored, err := runRootConfigRepairRestore(ctx, configStore, promptRunner, inspection)
 	if err != nil {
 		return restored, err
@@ -197,12 +201,12 @@ func runRootConfigRepair(ctx core.Context, configStore config.ConfigStore, cloud
 	return runRootConfigRepairOrphans(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, inspection, restored)
 }
 
-func runRootConfigRepairOrphans(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection, restored bool) (bool, error) {
+func runRootConfigRepairOrphans(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection, restored bool) (bool, error) {
 	repaired, err := runRootConfigRepairAliases(ctx, configStore, cloudDeps, promptRunner, inspection)
 	if err != nil {
 		return restored || repaired, err
 	}
-	refreshed, refreshErr := config.InspectRootConfig(configStore)
+	refreshed, refreshErr := configbackup.InspectRootConfig(configStore)
 	if refreshErr != nil {
 		return restored || repaired, refreshErr
 	}
@@ -218,7 +222,7 @@ func runRootConfigRepairRestore(ctx core.Context, configStore config.ConfigStore
 	if err != nil || !restored {
 		return inspection, false, err
 	}
-	refreshed, err := config.InspectRootConfig(configStore)
+	refreshed, err := configbackup.InspectRootConfig(configStore)
 	if err != nil {
 		return inspection, true, err
 	}
@@ -242,7 +246,7 @@ func runRootConfigRepairAliases(ctx core.Context, configStore config.ConfigStore
 	return handled, nil
 }
 
-func runRootConfigRepairContexts(ctx core.Context, configStore config.ConfigStore, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection) (bool, error) {
+func runRootConfigRepairContexts(ctx core.Context, configStore config.ConfigStore, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, inspection model.RootConfigInspection) (bool, error) {
 	handled := false
 	for _, orphan := range inspection.OrphanedContexts {
 		recovered, err := offerOrphanedCloudContextRecovery(ctx, configStore, cloudContextDeps, promptRunner, orphan)
@@ -256,7 +260,7 @@ func runRootConfigRepairContexts(ctx core.Context, configStore config.ConfigStor
 	return handled, nil
 }
 
-func offerOrphanedCloudContextRecovery(ctx core.Context, configStore config.ConfigStore, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, orphan model.OrphanedCloudContext) (bool, error) {
+func offerOrphanedCloudContextRecovery(ctx core.Context, configStore config.ConfigStore, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, orphan model.OrphanedCloudContext) (bool, error) {
 	if reason, blocked := contextRecoveryBlockedReason(orphan); blocked {
 		_, err := fmt.Fprintln(ctx.Stdout, reason)
 		return false, err
@@ -280,7 +284,7 @@ func offerOrphanedCloudContextRecovery(ctx core.Context, configStore config.Conf
 	if _, err := fmt.Fprintf(ctx.Stdout, "Recovering cloud context %s...\n", orphan.KubernetesContext); err != nil {
 		return false, err
 	}
-	result, err := cloud.RecoverCloudContextFromAWS(ctx, configStore, params, cloudContextDeps)
+	result, err := contextrecover.RecoverCloudContextFromAWS(ctx, configStore, params, cloudContextDeps)
 	if err != nil {
 		_, _ = fmt.Fprintf(ctx.Stdout, "Recovery failed for %s: %v\n", orphan.KubernetesContext, err)
 		return false, nil
@@ -367,7 +371,7 @@ func runRootConfigRestore(ctx core.Context, livePath string, backup model.Config
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry-run: would restore root config from %s\n", backup.Path)
 		return true, err
 	}
-	if err := config.RestoreRootConfigFromBackup(backup.Path, livePath); err != nil {
+	if err := configbackup.RestoreRootConfigFromBackup(backup.Path, livePath); err != nil {
 		return false, err
 	}
 	_, err := fmt.Fprintf(ctx.Stdout, "Restored root config from %s\n", backup.Path)
@@ -434,7 +438,7 @@ func buildOrphanRepairParams(ctx core.Context, orphan model.OrphanedAlias) (mode
 		AccountID: orphan.AccountID,
 		Region:    preferredRegionForOrphan(orphan),
 	}
-	profile, ok, err := config.LookupAWSSSOProfileByAccountID(orphan.AccountID)
+	profile, ok, err := awssso.LookupAWSSSOProfileByAccountID(orphan.AccountID)
 	if err != nil {
 		w.Linef("Note: could not scan ~/.aws/config for SSO defaults: %v", err)
 		writeSSOLookupHelp(w, orphan)
@@ -452,7 +456,7 @@ func buildOrphanRepairParams(ctx core.Context, orphan model.OrphanedAlias) (mode
 	return params, w.Err()
 }
 
-func applyOrphanRepairProfile(w *lineWriter, params *model.InitAWSCloudProviderParams, profile config.AWSSSOProfile) {
+func applyOrphanRepairProfile(w *lineWriter, params *model.InitAWSCloudProviderParams, profile awssso.AWSSSOProfile) {
 	w.Linef("Found existing AWS SSO profile %q in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.", profile.Profile)
 	if profile.SSOStartURL != "" {
 		params.SSOStartURL = profile.SSOStartURL

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
@@ -50,13 +51,13 @@ func (c runtimeChartCandidate) describe() string {
 func runtimeChartCandidates(target config.OpenResult, chartRegistry string) []runtimeChartCandidate {
 	chartRegistry = strings.TrimSpace(chartRegistry)
 	candidates := make([]runtimeChartCandidate, 0, 3)
-	if tenantChart := config.RuntimeReleaseName(target.Tenant); tenantChart != config.DevopsComponentName {
+	if tenantChart := runtimetarget.RuntimeReleaseName(target.Tenant); tenantChart != runtimetarget.DevopsComponentName {
 		candidates = append(candidates, runtimeChartCandidate{chartRegistry, tenantChart, "the tenant's own umbrella"})
 	}
-	candidates = append(candidates, runtimeChartCandidate{chartRegistry, config.DevopsComponentName, "the shared platform chart"})
+	candidates = append(candidates, runtimeChartCandidate{chartRegistry, runtimetarget.DevopsComponentName, "the shared platform chart"})
 	platformRegistry, why := platformChartRegistry(target)
 	if platformRegistry != "" && platformRegistry != chartRegistry {
-		candidates = append(candidates, runtimeChartCandidate{platformRegistry, config.DevopsComponentName, why})
+		candidates = append(candidates, runtimeChartCandidate{platformRegistry, runtimetarget.DevopsComponentName, why})
 	}
 	return candidates
 }
@@ -113,7 +114,7 @@ func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenR
 		outcomes = append(outcomes, candidate.describe()+": confirmed absent")
 	}
 	if deferToOverride {
-		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), config.DevopsComponentName, "the shared platform chart"}
+		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), runtimetarget.DevopsComponentName, "the shared platform chart"}
 		ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; --runtime-chart names the coordinate to install instead")
 		return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates, searched: true}, nil
 	}
@@ -135,7 +136,7 @@ func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, r
 		}
 		if runtimeimage.StockRuntimePinMovesWithDeployVersion(target.Tenant, target.EnvConfig, chart.name, chartVersion, version) {
 			ctx.Trace("deploy: the env's runtime chart " + reference + " is pinned at " + chartVersion +
-				", which is behind this deploy's " + version + " on " + config.DevopsComponentName + "'s own release line; moving the pin to the deploy version")
+				", which is behind this deploy's " + version + " on " + runtimetarget.DevopsComponentName + "'s own release line; moving the pin to the deploy version")
 			chart.version = strings.TrimSpace(version)
 			chart.movedPin = true
 			return chart, nil
@@ -197,12 +198,12 @@ func isTenantRuntimeUmbrella(tenant, chartName string) bool {
 	if tenant == "" || chartName == "" {
 		return false
 	}
-	return chartName == config.RuntimeReleaseName(tenant) && chartName != config.DevopsComponentName
+	return chartName == runtimetarget.RuntimeReleaseName(tenant) && chartName != runtimetarget.DevopsComponentName
 }
 
 func tenantUmbrellaHoldTrace(chart resolvedRuntimeChart, name, stated, version, reason string) string {
 	return "deploy: holding back the env's runtime umbrella " + chart.reference + " at " + stated + ": the tenant's own " + name + " " +
-		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + config.DevopsComponentName +
+		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + runtimetarget.DevopsComponentName +
 		" than the one deployed; publish the tenant's charts at " + version + " (`erun push --version " + version + "`) and redeploy"
 }
 
@@ -260,14 +261,14 @@ func EnsureTenantChartsPublished(ctx core.Context, target config.OpenResult, ver
 	registry := publishedTenantComponentChartRegistry(target)
 
 	required := make([]string, 0, len(components)+1)
-	runtimeChart := config.RuntimeReleaseName(target.Tenant)
+	runtimeChart := runtimetarget.RuntimeReleaseName(target.Tenant)
 	// An env stating its runtime chart is coherent without a tenant runtime chart; its components are still verified.
 	runtimeChartStated := strings.TrimSpace(target.EnvConfig.RuntimeChart) != ""
 	runtimeRegistry := registry
 	switch {
 	case runtimeSelected && runtimeChartStated:
 		ctx.Trace("deploy: the env states its runtime chart " + strings.TrimSpace(target.EnvConfig.RuntimeChart) + "; verifying only the tenant's component charts at " + version)
-	case runtimeSelected && runtimeChart != config.DevopsComponentName:
+	case runtimeSelected && runtimeChart != runtimetarget.DevopsComponentName:
 		runtimeRegistry = publishedDevopsChartRegistry(target)
 		if runtimeRegistry == registry {
 			required = append(required, runtimeChart)

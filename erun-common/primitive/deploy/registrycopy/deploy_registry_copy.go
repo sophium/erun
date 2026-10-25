@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartfiles"
 )
@@ -36,7 +37,7 @@ func joinRegistryImage(registry, image string) string {
 
 // RunDeployRegistryCopies mirrors images FROM -> each TO registry, tracing every
 // copy even under --dry-run.
-func RunDeployRegistryCopies(ctx core.Context, execution seam.DeploySpec) error {
+func RunDeployRegistryCopies(ctx core.Context, execution helmdeploy.DeploySpec) error {
 	copies, err := ResolveDeployRegistryCopies(execution)
 	if err != nil {
 		return err
@@ -61,8 +62,8 @@ func RunDeployRegistryCopies(ctx core.Context, execution seam.DeploySpec) error 
 	return nil
 }
 
-func ResolveDeployRegistryCopies(execution seam.DeploySpec) ([]registryCopy, error) {
-	list, err := config.DeployTargetContainerRegistries(execution.Target)
+func ResolveDeployRegistryCopies(execution helmdeploy.DeploySpec) ([]registryCopy, error) {
+	list, err := containerregistry.DeployTargetContainerRegistries(execution.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +88,7 @@ func ResolveDeployRegistryCopies(execution seam.DeploySpec) ([]registryCopy, err
 	return copies, nil
 }
 
-func deployCopyImages(execution seam.DeploySpec) []string {
+func deployCopyImages(execution helmdeploy.DeploySpec) []string {
 	seen := make(map[string]struct{})
 	images := make([]string, 0, 2)
 	add := func(name, version string) {
@@ -103,7 +104,7 @@ func deployCopyImages(execution seam.DeploySpec) []string {
 		seen[ref] = struct{}{}
 		images = append(images, ref)
 	}
-	if execution.Deploy.ReleaseName == config.RuntimeReleaseName(execution.Target.Tenant) {
+	if execution.Deploy.ReleaseName == runtimetarget.RuntimeReleaseName(execution.Target.Tenant) {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
@@ -116,11 +117,11 @@ func deployCopyImages(execution seam.DeploySpec) []string {
 	return images
 }
 
-func runtimeCopyImage(execution seam.DeploySpec) (string, string) {
-	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[config.DevopsComponentName]); override != "" {
+func runtimeCopyImage(execution helmdeploy.DeploySpec) (string, string) {
+	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[runtimetarget.DevopsComponentName]); override != "" {
 		return imageNameVersion(override)
 	}
-	return config.DevopsComponentName, execution.Deploy.Version
+	return runtimetarget.DevopsComponentName, execution.Deploy.Version
 }
 
 func imageNameVersion(reference string) (string, string) {

@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 )
 
@@ -17,7 +18,7 @@ import (
 // deploying host's own config is what gets read.
 func signedInDefaultHostStore(t *testing.T, provider model.CloudProviderConfig) {
 	t.Helper()
-	store, err := cloud.DefaultCloudSecretStore()
+	store, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
@@ -37,12 +38,12 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
 	mustSaveEnvConfig(t, configpkg.EnvConfig{Name: "dev"})
 
-	spec := seam.DeploySpec{
+	spec := helmdeploy.DeploySpec{
 		Target: configpkg.OpenResult{Tenant: "team", Environment: "dev", EnvConfig: mustLoadEnvConfig(t)},
-		Deploy: seam.HelmDeploySpec{
+		Deploy: helmdeploy.HelmDeploySpec{
 			Tenant:               "team",
 			Environment:          "dev",
-			ReleaseName:          configpkg.RuntimeReleaseName("team"),
+			ReleaseName:          runtimetarget.RuntimeReleaseName("team"),
 			Namespace:            "team-dev",
 			Version:              "1.0.0",
 			ResolvedRuntimeImage: "registry.example/test/team-devops:1.0.0",

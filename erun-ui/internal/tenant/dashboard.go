@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -426,7 +426,7 @@ func tenantDashboardTime(value time.Time) string {
 }
 
 func (s *Service) tenantDashboardUsernameHint(alias string) string {
-	provider, err := cloud.ResolveCloudProvider(s.d.Store, strings.TrimSpace(alias))
+	provider, err := providerconfig.ResolveCloudProvider(s.d.Store, strings.TrimSpace(alias))
 	if err != nil {
 		return ""
 	}

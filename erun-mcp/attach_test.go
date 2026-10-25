@@ -12,7 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-mcp/tools/attach"
@@ -25,7 +25,7 @@ import (
 // the pod's session-start script would.
 func newAttachTestRuntime(t *testing.T) runtimecfg.RuntimeConfig {
 	t.Helper()
-	if err := os.MkdirAll(activity.RemoteAppSessionSocketDir, 0o700); err != nil {
+	if err := os.MkdirAll(remotesession.RemoteAppSessionSocketDir, 0o700); err != nil {
 		t.Fatalf("create session socket dir: %v", err)
 	}
 	return runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
@@ -224,7 +224,7 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 // Nothing in the image boot path creates the session directory; the handler must.
 func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	runtime := newAttachTestRuntime(t)
-	if err := os.RemoveAll(activity.RemoteAppSessionSocketDir); err != nil {
+	if err := os.RemoveAll(remotesession.RemoteAppSessionSocketDir); err != nil {
 		t.Fatalf("simulating a pod that has never run a session: %v", err)
 	}
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityAttach))

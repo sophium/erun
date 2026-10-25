@@ -8,8 +8,9 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/primitive/open/podwait"
 	"github.com/sophium/erun/erun-common/primitive/open/shell"
@@ -20,7 +21,7 @@ type OpenShellRunner func(core.Context, config.ShellLaunchParams) error
 
 const desktopAppSessionEnvVar = orchestrator.DesktopSessionEnvVar
 
-func NewOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell seam.ShellLauncherFunc) OpenShellRunner {
+func NewOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell runtimepod.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
 		waitForShellDeployment = podwait.WaitForShellDeployment
 	}
@@ -42,8 +43,8 @@ func runOpenShellWait(ctx core.Context, req config.ShellLaunchParams, waitForShe
 	}
 	return runWithSpinner(
 		ctx,
-		" waiting for "+config.RuntimeReleaseName(req.Tenant)+" in "+req.Namespace,
-		"deployment available: "+config.RuntimeReleaseName(req.Tenant)+"\n",
+		" waiting for "+runtimetarget.RuntimeReleaseName(req.Tenant)+" in "+req.Namespace,
+		"deployment available: "+runtimetarget.RuntimeReleaseName(req.Tenant)+"\n",
 		func() error {
 			return waitForShellDeployment(req)
 		},

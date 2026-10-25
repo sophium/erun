@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
@@ -70,7 +73,7 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 	}
 	repository := config.DefaultRuntimeImageName
 	if tenant = strings.TrimSpace(tenant); tenant != "" {
-		repository = config.RuntimeReleaseName(tenant)
+		repository = runtimetarget.RuntimeReleaseName(tenant)
 	}
 	return a.deps.resolveImageRegistry(ctx, namespace, repository)
 }
@@ -109,7 +112,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 		return suggestions, appendVersionNotice(nil, notice)
 	}
 
-	tenantImage := config.RuntimeReleaseName(tenant)
+	tenantImage := runtimetarget.RuntimeReleaseName(tenant)
 	suggestions := make([]uiVersion, 0, 8)
 	notices := make([]uimodel.VersionNotice, 0, 4)
 	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
@@ -171,7 +174,7 @@ func (a *App) environmentDiscoveryRegistries(tenant, environment string) []strin
 	}
 	add(a.runtimeRegistryNamespace(tenant, environment))
 	if env, ok := a.lookupEnvConfig(tenant, environment); ok {
-		for _, registry := range config.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
+		for _, registry := range containerregistry.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
 			add(registry)
 		}
 	}
@@ -275,7 +278,7 @@ func stateFromListResult(result list.ListResult, info model.BuildInfo) uiState {
 }
 
 func mcpEndpointForOpenResult(result config.OpenResult) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 }
 
 func mcpEndpointForListEnvironment(environment list.ListEnvironmentResult) string {

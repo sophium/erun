@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	diagnosispkg "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 )
 
 func agentCredentialDiagnosis(state model.RuntimeAgentCredentialState) model.DeployDiagnosisResult {
-	status := model.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
+	status := model.RuntimeAgentCredentialStatus{State: state, Container: runtimetarget.DevopsComponentName}
 	if state == model.RuntimeAgentCredentialMissing || state == model.RuntimeAgentCredentialConfigured {
 		status.GatewayBaseURL = "https://openrouter.ai/api"
 	}

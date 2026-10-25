@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/build/ignore"
 	"github.com/sophium/erun/erun-common/primitive/build/order"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
@@ -109,7 +109,7 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 
 // computeBuildFingerprint derives a build's content identity from its inputs only, never
 // the pod it runs in, so a pod roll does not force a cold rebuild.
-func computeBuildFingerprint(buildInput seam.DockerBuildSpec) (string, error) {
+func computeBuildFingerprint(buildInput imagebuild.DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)
 	if contextDir == "" {
 		return "", errors.New("empty context dir")
@@ -174,7 +174,7 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 
 // hashBuildVersionInto folds ERUN_VERSION into builds that consume it, so a version bump
 // does not promote an image reporting the old version.
-func hashBuildVersionInto(w io.Writer, buildInput seam.DockerBuildSpec) error {
+func hashBuildVersionInto(w io.Writer, buildInput imagebuild.DockerBuildSpec) error {
 	if !order.DockerfileConsumesVersion(buildInput.DockerfilePath) {
 		return nil
 	}
@@ -191,7 +191,7 @@ func hashBuildVersionInto(w io.Writer, buildInput seam.DockerBuildSpec) error {
 }
 
 // hashComponentChartInto folds the component's chart in, so a chart-only edit is not dropped by promotion.
-func hashComponentChartInto(w io.Writer, buildInput seam.DockerBuildSpec) error {
+func hashComponentChartInto(w io.Writer, buildInput imagebuild.DockerBuildSpec) error {
 	// A version-pinned base's chart is bumped every release; folding it in would churn its fingerprint.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
@@ -223,7 +223,7 @@ func hashComponentChartInto(w io.Writer, buildInput seam.DockerBuildSpec) error 
 }
 
 // componentChartDirForBuild returns the component's chart dir, or "" when it has none.
-func componentChartDirForBuild(buildInput seam.DockerBuildSpec) string {
+func componentChartDirForBuild(buildInput imagebuild.DockerBuildSpec) string {
 	dockerfilePath := strings.TrimSpace(buildInput.DockerfilePath)
 	if dockerfilePath == "" {
 		return ""
@@ -246,7 +246,7 @@ func componentChartDirForBuild(buildInput seam.DockerBuildSpec) string {
 // the one that ships; it never fails the build.
 func componentChartDirCandidate(projectRoot, dockerDir string) string {
 	component := filepath.Base(dockerDir)
-	if k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
+	if k8sDir, ok, err := dockerbuild.ResolveCurrentDevopsK8sDir(projectroot.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
 		return filepath.Join(k8sDir, component)
 	}
 	return filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", component)
@@ -346,7 +346,7 @@ func ApplyIncrementalToBuildExecution(ctx core.Context, execution dockerspec.Bui
 
 // ApplyIncrementalToDockerBuilds is the single incremental-promotion entry point for every
 // command. In dry-run, configured fingerprint tags are treated as present.
-func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []seam.DockerBuildSpec, noIncremental bool) ([]seam.DockerBuildSpec, error) {
+func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []imagebuild.DockerBuildSpec, noIncremental bool) ([]imagebuild.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}
@@ -371,14 +371,14 @@ func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []seam.DockerBuildS
 
 // applyIncrementalPromotion promotes builds whose fp-tagged image exists locally; a rebuilt
 // local base forces its dependents to rebuild.
-func applyIncrementalPromotion(builds []seam.DockerBuildSpec, inspect LocalDockerImageInspector) ([]seam.DockerBuildSpec, error) {
+func applyIncrementalPromotion(builds []imagebuild.DockerBuildSpec, inspect LocalDockerImageInspector) ([]imagebuild.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}
 	if inspect == nil {
 		inspect = dockerregistry.DockerImageExists
 	}
-	out := make([]seam.DockerBuildSpec, len(builds))
+	out := make([]imagebuild.DockerBuildSpec, len(builds))
 	copy(out, builds)
 	rebuildSet := make(map[string]struct{}, len(out))
 	for i := range out {
@@ -408,7 +408,7 @@ func applyIncrementalPromotion(builds []seam.DockerBuildSpec, inspect LocalDocke
 	return out, nil
 }
 
-func inspectFingerprintTags(build seam.DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
+func inspectFingerprintTags(build imagebuild.DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
 	if build.Fingerprint == "" {
 		return nil, nil
 	}
@@ -425,7 +425,7 @@ func inspectFingerprintTags(build seam.DockerBuildSpec, inspect LocalDockerImage
 	return missing, nil
 }
 
-func cascadeRebuildsThroughLocalDeps(builds []seam.DockerBuildSpec, rebuildSet map[string]struct{}) {
+func cascadeRebuildsThroughLocalDeps(builds []imagebuild.DockerBuildSpec, rebuildSet map[string]struct{}) {
 	if len(rebuildSet) == 0 {
 		return
 	}

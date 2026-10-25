@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 )
 
 // resourceQuotaExceededError marks a caller-facing 409, distinct from a repository 500.
@@ -51,7 +51,7 @@ func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Conte
 // The runtime floor sums every container in the pod plus its PVCs, as a
 // ResourceQuota does; checking it early turns a silent rollout timeout into a 409.
 var minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB = func() (int, int, int) {
-	cpu, memory, storage := config.MinimumRuntimeNamespaceQuota()
+	cpu, memory, storage := runtimeresources.MinimumRuntimeNamespaceQuota()
 	return int(cpu), int(memory), int(storage)
 }()
 

@@ -4,13 +4,6 @@ import (
 	"strings"
 )
 
-// Fixed names for the gateway credential Secret erun writes into each namespace;
-// the creator and the chart both read them from here.
-const (
-	GatewaySecretName = "erun-claude-gateway"
-	GatewaySecretKey  = "token"
-)
-
 // DefaultOpenRouterAuthTokenRef is the operator secret store ref for the gateway
 // credential; config.yaml holds only the ref.
 const DefaultOpenRouterAuthTokenRef = "claude-gateway"
@@ -50,18 +43,6 @@ func modelRequiresReasoningEcho(id string) bool {
 
 func (m OpenRouterModel) driveable() bool {
 	return !m.RequiresReasoningEcho && !modelRequiresReasoningEcho(m.ID)
-}
-
-// EffectiveGateway returns the catalog unless the environment explicitly opted out
-// (false); unset and true both inherit.
-func EffectiveGateway(claude EnvironmentClaudeConfig, catalog *OpenRouterConfig) *OpenRouterConfig {
-	if !catalog.Configured() {
-		return nil
-	}
-	if claude.UseGateway != nil && !*claude.UseGateway {
-		return nil
-	}
-	return catalog
 }
 
 // AuthTokenRefName returns the catalog's ref or the default, and "" only when no
@@ -175,24 +156,6 @@ func (c *OpenRouterConfig) ResolveDefaultModel() string {
 		return ids[0]
 	}
 	return ""
-}
-
-type RootConfigStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-}
-
-// ResolveOpenRouterConfig reads the catalog; a missing root config means no
-// gateway rather than an error, so AI launches keep working.
-func ResolveOpenRouterConfig(store RootConfigStore) (*OpenRouterConfig, error) {
-	var config ERunConfig
-	if store != nil {
-		loaded, _, err := store.LoadERunConfig()
-		if err != nil {
-			return nil, err
-		}
-		config = loaded
-	}
-	return config.OpenRouter, nil
 }
 
 // GatewayEnvVars returns the non-secret env Claude Code needs for the gateway;

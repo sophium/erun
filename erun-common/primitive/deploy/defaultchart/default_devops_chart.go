@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -27,7 +27,7 @@ func MigrateDefaultDevopsChartAppVersion(ctx core.Context, projectRoot, tenant, 
 	}
 	projectRoot = filepath.Clean(projectRoot)
 
-	moduleName := config.RuntimeReleaseName(tenant)
+	moduleName := runtimetarget.RuntimeReleaseName(tenant)
 	chartPath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "Chart.yaml")
 	if _, err := os.Stat(chartPath); err != nil {
 		if os.IsNotExist(err) {

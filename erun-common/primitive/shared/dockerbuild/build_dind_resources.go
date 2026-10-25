@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 )
 
 var (
@@ -44,7 +46,7 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 
 // ApplyDindResourceBuildArgs passes the sidecar's limits because a RUN step's
 // cgroup is a sibling of the sidecar's and cannot read them itself.
-func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment string, build *seam.DockerBuildSpec) {
+func ApplyDindResourceBuildArgs(store buildtarget.DockerStore, projectRoot, environment string, build *imagebuild.DockerBuildSpec) {
 	needsCPU := dockerfileConsumesDindCPULimit(build.DockerfilePath)
 	needsMemory := dockerfileConsumesDindMemoryLimit(build.DockerfilePath)
 	if !needsCPU && !needsMemory {
@@ -65,25 +67,25 @@ func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment
 // ResolveDockerBuildDindPodResources prefers the downward-API vars per field,
 // then the config store, then the normalized defaults — never the host node's
 // capacity.
-func ResolveDockerBuildDindPodResources(store seam.DockerStore, projectRoot, environment string) model.RuntimePodResources {
+func ResolveDockerBuildDindPodResources(store buildtarget.DockerStore, projectRoot, environment string) model.RuntimePodResources {
 	fallback := model.RuntimePodResources{}
 	if envConfig := ResolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
 		fallback = envConfig.RuntimeDindPod
 	}
-	return config.NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
+	return runtimeresources.NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
 }
 
 // dindPodResourcesPreferEnv ignores malformed vars; the memory var is plain MiB.
 func dindPodResourcesPreferEnv(fallback model.RuntimePodResources) model.RuntimePodResources {
 	resources := fallback
 	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
-		if _, err := config.ParseKubernetesCPUToMilli(cpu); err == nil {
+		if _, err := runtimeresources.ParseKubernetesCPUToMilli(cpu); err == nil {
 			resources.CPU = cpu
 		}
 	}
 	if memoryMiB := strings.TrimSpace(os.Getenv(DindMemoryLimitMiBEnvVar)); memoryMiB != "" {
 		memory := memoryMiB + "Mi"
-		if _, err := config.ParseKubernetesMemoryToMi(memory); err == nil {
+		if _, err := runtimeresources.ParseKubernetesMemoryToMi(memory); err == nil {
 			resources.Memory = memory
 		}
 	}
@@ -93,14 +95,14 @@ func dindPodResourcesPreferEnv(fallback model.RuntimePodResources) model.Runtime
 // dindResourceBuildArgValues floors CPU to whole cores (min 1) because the
 // Dockerfile uses shell integer arithmetic.
 func dindResourceBuildArgValues(resources model.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
-	if milli, err := config.ParseKubernetesCPUToMilli(resources.CPU); err == nil {
+	if milli, err := runtimeresources.ParseKubernetesCPUToMilli(resources.CPU); err == nil {
 		cores := milli / 1000
 		if cores < 1 {
 			cores = 1
 		}
 		cpuLimit = strconv.FormatInt(cores, 10)
 	}
-	if mi, err := config.ParseKubernetesMemoryToMi(resources.Memory); err == nil {
+	if mi, err := runtimeresources.ParseKubernetesMemoryToMi(resources.Memory); err == nil {
 		memoryLimitMiB = strconv.FormatInt(mi, 10)
 	}
 	return cpuLimit, memoryLimitMiB

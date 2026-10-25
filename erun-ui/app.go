@@ -10,13 +10,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
@@ -39,7 +42,7 @@ const appSessionEnvVar = orchestratorpkg.DesktopSessionEnvVar
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
 
 type erunUIStore interface {
-	seam.ListStore
+	envstore.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
@@ -47,13 +50,13 @@ type erunUIStore interface {
 
 type erunUIDeps struct {
 	store                  erunUIStore
-	findProjectRoot        seam.ProjectFinderFunc
+	findProjectRoot        projectroot.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
 	resolveImageRegistry   func(context.Context, string, string) (model.RuntimeRegistryVersions, error)
 	cloudDeps              cloud.CloudDependencies
-	cloudContextDeps       cloud.CloudContextDependencies
-	deleteNamespace        seam.NamespaceDeleterFunc
+	cloudContextDeps       cloudcontext.CloudContextDependencies
+	deleteNamespace        kubeapi.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, runtimeview.ResourceInput) (runtimeview.ResourceStatus, error)
 	loadClusterRegistry    func(context.Context, runtimeview.ResourceInput) (runtimeview.ClusterRegistryStatus, error)

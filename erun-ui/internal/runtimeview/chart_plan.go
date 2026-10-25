@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -55,7 +56,7 @@ func (s *Service) probedRuntimeChartPlan(tenant, environment, version string) ui
 	}
 
 	unknown := false
-	if tenantChart := config.RuntimeReleaseName(tenant); tenantChart != config.DevopsComponentName {
+	if tenantChart := runtimetarget.RuntimeReleaseName(tenant); tenantChart != runtimetarget.DevopsComponentName {
 		published, known := s.probePublishedChart(tenant, environment, version, tenantChart)
 		if published {
 			return uimodel.ChartPlan{Reference: repo(tenantChart), Version: version, Chart: tenantChart, Source: "tenant"}
@@ -63,7 +64,7 @@ func (s *Service) probedRuntimeChartPlan(tenant, environment, version string) ui
 		unknown = !known
 	}
 
-	canonical := config.DevopsComponentName
+	canonical := runtimetarget.DevopsComponentName
 	plan := uimodel.ChartPlan{Reference: repo(canonical), Version: version, Chart: canonical, Source: "canonical"}
 	published, known := s.probePublishedChart(tenant, environment, version, canonical)
 	switch {

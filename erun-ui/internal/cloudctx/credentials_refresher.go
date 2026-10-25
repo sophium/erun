@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -74,7 +76,7 @@ func (s *Service) resolveRefreshTarget(selection uimodel.Selection) (string, con
 		return "", config.OpenResult{}, false
 	}
 	// Defense in depth: never export temporary credentials from a token-based provider.
-	provider, err := cloud.ResolveCloudProvider(s.d.Store, envConfig.CloudProviderAlias)
+	provider, err := providerconfig.ResolveCloudProvider(s.d.Store, envConfig.CloudProviderAlias)
 	if err != nil || provider.Provider != config.CloudProviderAWS {
 		return "", config.OpenResult{}, false
 	}
@@ -137,13 +139,13 @@ func (s *Service) ReconcileRefresher(selection uimodel.Selection, enabled bool) 
 
 func (s *Service) runRefresher(ctx context.Context, selection uimodel.Selection, alias string, result config.OpenResult) {
 	endpoint := s.d.MCPEndpoint(result)
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	notifiedFailure := false
 	for {
 		if err := s.waitForMCPReady(ctx, mcpPort); err != nil {
 			return
 		}
-		creds, err := cloud.ExportCloudProviderCredentials(core.Context{}, s.d.Store, alias, s.d.Cloud)
+		creds, err := providertoken.ExportCloudProviderCredentials(core.Context{}, s.d.Store, alias, s.d.Cloud)
 		if err != nil {
 			s.surfaceRefreshFailure(selection, fmt.Errorf("export host credentials: %w", err), &notifiedFailure)
 			if !sleepWithCancel(ctx, credentialRefreshBackoff) {

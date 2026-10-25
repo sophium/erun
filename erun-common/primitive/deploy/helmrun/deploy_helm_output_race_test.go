@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 // Run with -race: helmOutput is written by both stream copier goroutines.
 func TestConfigureHelmDeployCmdOutputConcurrentStreams(t *testing.T) {
 	cmd := exec.Command("sh", "-c", `for i in $(seq 1 400); do echo "out-$i"; echo "err-$i" >&2; done`)
-	params := seam.HelmDeployParams{}
+	params := helmdeploy.HelmDeployParams{}
 
 	helmOutput, stderr := configureHelmDeployCmdOutput(cmd, params)
 

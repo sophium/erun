@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestop"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -30,8 +30,8 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	assertRecentStopTarget(t, result, "tenant-a", "dev")
 
 	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
-	if entry.Source != activity.StopHistorySourceHostManual {
-		t.Fatalf("expected source=%q, got %q", activity.StopHistorySourceHostManual, entry.Source)
+	if entry.Source != idlestop.StopHistorySourceHostManual {
+		t.Fatalf("expected source=%q, got %q", idlestop.StopHistorySourceHostManual, entry.Source)
 	}
 	if entry.Reason != "Manual stop via desktop" {
 		t.Fatalf("expected reason carried through, got %q", entry.Reason)
@@ -66,7 +66,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 			Timezone:     "Europe/Riga",
 		},
 	}
-	if err := activity.SaveEnvironmentStopPending("tenant-a", "dev", pending); err != nil {
+	if err := idlestop.SaveEnvironmentStopPending("tenant-a", "dev", pending); err != nil {
 		t.Fatalf("SaveEnvironmentStopPending: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	}
 
 	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
-	if entry.Source != activity.StopHistorySourceHostManual {
+	if entry.Source != idlestop.StopHistorySourceHostManual {
 		t.Fatalf("expected source=host-manual even with armed grace, got %q", entry.Source)
 	}
 	if entry.GraceSeconds != 600 {
@@ -122,7 +122,7 @@ func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, e
 
 func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) model.EnvironmentStopHistoryEntry {
 	t.Helper()
-	entries, err := activity.LoadEnvironmentStopHistory(tenant, env)
+	entries, err := idlestop.LoadEnvironmentStopHistory(tenant, env)
 	if err != nil {
 		t.Fatalf("LoadEnvironmentStopHistory: %v", err)
 	}
@@ -134,7 +134,7 @@ func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) model.Environm
 
 func assertStopPendingCleared(t *testing.T, tenant, env, home string) {
 	t.Helper()
-	pendingPath, err := activity.EnvironmentStopPendingPath(tenant, env)
+	pendingPath, err := idlestop.EnvironmentStopPendingPath(tenant, env)
 	if err != nil {
 		t.Fatalf("EnvironmentStopPendingPath: %v", err)
 	}

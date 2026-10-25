@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 // InjectedRuntimeConfig is the config the chart-injected ERUN_* vars describe.
@@ -39,7 +40,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
-		kubernetesContext = cloud.InClusterKubernetesContext
+		kubernetesContext = providerconfig.InClusterKubernetesContext
 	}
 	provider := get("ERUN_CLOUD_PROVIDER")
 	alias := get("ERUN_CLOUD_PROVIDER_ALIAS")
@@ -79,7 +80,7 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	}
 	// Normalize like every writer does, or the injected "" never matches the
 	// on-disk default and drift never clears.
-	contexts := []model.CloudContextConfig{configpkg.NormalizeCloudContextConfig(model.CloudContextConfig{
+	contexts := []model.CloudContextConfig{cloudcontext.NormalizeCloudContextConfig(model.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,

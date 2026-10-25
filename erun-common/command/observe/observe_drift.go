@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -63,10 +64,10 @@ func foundReleaseDrift(req config.ShellLaunchParams, release *model.ObservedHelm
 	}
 
 	if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
-		if recorded, ok := release.ImageOverrides[config.DevopsComponentName]; ok && recorded != runtimeImage {
+		if recorded, ok := release.ImageOverrides[runtimetarget.DevopsComponentName]; ok && recorded != runtimeImage {
 			findings = append(findings, fmt.Sprintf(
 				"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
-				runtimeImage, config.DevopsComponentName, recorded))
+				runtimeImage, runtimetarget.DevopsComponentName, recorded))
 		}
 	}
 	return findings

@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 	"gopkg.in/yaml.v3"
 )
@@ -110,7 +111,7 @@ func describeRuntimePlatformAlias(boot runtimeBoot) string {
 	if _, err := os.Stat(boot.platformAliasEntryPath()); err != nil {
 		return ""
 	}
-	return "add the platform alias in " + boot.platformAliasDir + " to " + config.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
+	return "add the platform alias in " + boot.platformAliasDir + " to " + runtimesync.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
 }
 
 // syncRuntimePlatformAlias seeds the platform alias `erun init` minted so an unattended
@@ -121,20 +122,20 @@ func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSuperv
 		return err
 	}
 	configHome := boot.configHome()
-	root, _, err := config.LoadRuntimeRootConfigForSync(configHome)
+	root, _, err := runtimesync.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = config.ERunConfig{}
 	}
 	changed := false
 	for _, provider := range providers {
-		if _, found := config.FindCloudProvider(root.CloudProviders, provider.Alias); found {
+		if _, found := runtimesync.FindCloudProvider(root.CloudProviders, provider.Alias); found {
 			continue
 		}
-		root.CloudProviders = cloud.UpsertCloudProvider(root.CloudProviders, provider)
+		root.CloudProviders = providerconfig.UpsertCloudProvider(root.CloudProviders, provider)
 		changed = true
 	}
 	if changed {
-		if err := writeRuntimeBootYAML(config.RuntimeRootConfigPath(configHome), root); err != nil {
+		if err := writeRuntimeBootYAML(runtimesync.RuntimeRootConfigPath(configHome), root); err != nil {
 			return err
 		}
 	}

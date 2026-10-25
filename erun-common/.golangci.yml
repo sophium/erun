@@ -74,16 +74,27 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: base/config may import only base/core and base/model
-        base-seam:
+        base-config-concerns:
           list-mode: lax
-          files: ["**/erun-common/base/seam/*.go"]
+          files: ["**/erun-common/base/config/*/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/model
             - github.com/sophium/erun/erun-common/base/core
-            - github.com/sophium/erun/erun-common/base/config
+            - github.com/sophium/erun/erun-common/base/config$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: base/seam may import only base/config, base/core and base/model
+              desc: base/config/<concern> may import only base/config, base/core and base/model, never another concern
+        base-seam:
+          list-mode: lax
+          files: ["**/erun-common/base/seam/**/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+            - github.com/sophium/erun/erun-common/base/core
+            - github.com/sophium/erun/erun-common/base/config$
+            - github.com/sophium/erun/erun-common/base/seam/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/seam/* may import only base/config, base/core, base/model and sibling seams
         infra-mcptools:
           list-mode: lax
           files: ["**/erun-common/infra/mcptools/*.go"]
@@ -137,12 +148,13 @@ linters:
               desc: infra/helm may import base/* and no other infra package
         infra-activity:
           list-mode: lax
-          files: ["**/erun-common/infra/activity/*.go"]
+          files: ["**/erun-common/infra/activity/**/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/activity
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: infra/activity may import base/* and no other infra package
+              desc: infra/activity/* may import base/* and its own concerns, no other infra package
         infra-platformclient:
           list-mode: lax
           files: ["**/erun-common/infra/platformclient/*.go"]
@@ -153,15 +165,16 @@ linters:
               desc: infra/platformclient may import base/* and no other infra package
         infra-cloud:
           list-mode: lax
-          files: ["**/erun-common/infra/cloud/*.go"]
+          files: ["**/erun-common/infra/cloud/**/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/
-            - github.com/sophium/erun/erun-common/infra/activity$
+            - github.com/sophium/erun/erun-common/infra/cloud
+            - github.com/sophium/erun/erun-common/infra/activity
             - github.com/sophium/erun/erun-common/infra/kube$
             - github.com/sophium/erun/erun-common/infra/platformclient$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: infra/cloud may import base/* and infra/activity, infra/kube, infra/platformclient
+              desc: infra/cloud/* may import base/*, its own concerns, infra/activity/*, infra/kube and infra/platformclient
         infra-mcp:
           list-mode: lax
           files: ["**/erun-common/infra/mcp/*.go"]

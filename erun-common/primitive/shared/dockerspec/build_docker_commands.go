@@ -5,7 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 )
 
 const FingerprintTagPrefix = "fp-"
@@ -64,7 +64,7 @@ func platformShortSuffix(platform string) string {
 	return strings.ReplaceAll(platform, "/", "-")
 }
 
-func DockerBuildArgs(buildInput seam.DockerBuildSpec, platform string) []string {
+func DockerBuildArgs(buildInput imagebuild.DockerBuildSpec, platform string) []string {
 	tag := PlatformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
 	// Provenance would make each per-arch tag a manifest list, which
 	// `docker manifest create` rejects.
@@ -100,7 +100,7 @@ func DockerBuildArgs(buildInput seam.DockerBuildSpec, platform string) []string 
 // dockerBuildEntitlementArgs grants network.host only to Dockerfiles with a
 // `test` stage, which need it for container fixtures; it exposes the pod's
 // network, including the unauthenticated dind listener.
-func dockerBuildEntitlementArgs(buildInput seam.DockerBuildSpec) []string {
+func dockerBuildEntitlementArgs(buildInput imagebuild.DockerBuildSpec) []string {
 	if !DockerfileDeclaresTestStage(buildInput.DockerfilePath) {
 		return nil
 	}
@@ -109,7 +109,7 @@ func dockerBuildEntitlementArgs(buildInput seam.DockerBuildSpec) []string {
 
 // DockerBuildArgVersion is shared with the fingerprint so the cache identity
 // and the baked-in version cannot disagree.
-func DockerBuildArgVersion(buildInput seam.DockerBuildSpec) string {
+func DockerBuildArgVersion(buildInput imagebuild.DockerBuildSpec) string {
 	if base := strings.TrimSpace(buildInput.Image.BaseVersion); base != "" {
 		return base
 	}

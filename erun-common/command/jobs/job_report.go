@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -34,10 +35,10 @@ type ReportJobStartParams struct {
 // ReportJobStart records a job starting, best-effort, returning its platform id
 // or "" (nothing to report against, not an error). Failures are traces only.
 func ReportJobStart(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportJobStartParams) string {
-	if !cloud.HasAnyErunPlatformAlias(store) {
+	if !platformapi.HasAnyErunPlatformAlias(store) {
 		return ""
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("job record to erun platform skipped: " + err.Error())
 		return ""
@@ -47,7 +48,7 @@ func ReportJobStart(ctx core.Context, store config.CloudReadStore, deps cloud.Cl
 		ctx.Trace("job record to erun platform skipped: " + err.Error())
 		return ""
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobReportTraceDetails(params)...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/jobs", jobReportTraceDetails(params)...)
 	if ctx.DryRun {
 		return ""
 	}
@@ -91,15 +92,15 @@ func ReportJobOutcome(ctx core.Context, store config.CloudReadStore, deps cloud.
 	if strings.TrimSpace(params.JobID) == "" {
 		return
 	}
-	if !cloud.HasAnyErunPlatformAlias(store) {
+	if !platformapi.HasAnyErunPlatformAlias(store) {
 		return
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("job outcome report to erun platform skipped: " + err.Error())
 		return
 	}
-	cloud.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID,
+	platformapi.TracePlatformCall(ctx, provider, "PATCH", "/v1/jobs/"+params.JobID,
 		"status="+params.Status)
 	if ctx.DryRun {
 		return
@@ -124,7 +125,7 @@ func resolveJobReportEnvironment(client *platformclient.PlatformClient, environm
 	}
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), jobReportTimeout)
 	defer cancel()
-	return cloud.ResolvePlatformEnvironmentID(timeoutCtx, client, environment)
+	return platformapi.ResolvePlatformEnvironmentID(timeoutCtx, client, environment)
 }
 
 func jobReportTraceDetails(params ReportJobStartParams) []string {

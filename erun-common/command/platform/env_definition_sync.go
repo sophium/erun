@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -25,7 +28,7 @@ type PlatformEnvDefinitionClient interface {
 type envDefinitionConfigStore interface {
 	LoadEnvConfig(tenant, envName string) (configpkg.EnvConfig, string, error)
 	SaveEnvConfig(tenant string, config configpkg.EnvConfig) error
-	configpkg.EnvironmentPortStore
+	localports.EnvironmentPortStore
 }
 
 type EnvDefinitionPushResult struct {
@@ -46,22 +49,22 @@ type EnvDefinitionPullParams struct {
 	// LocalPortRangeStart zero allocates the lowest free range.
 	LocalPortRangeStart int
 	// Confirm is asked about a two-sided edit; nil makes that a refusal, never an overwrite.
-	Confirm func(configpkg.EnvDefinitionPlan) (bool, error)
+	Confirm func(envdefinition.EnvDefinitionPlan) (bool, error)
 }
 
 type EnvDefinitionPullResult struct {
-	Marker      configpkg.HostedEnvironment `json:"marker"`
-	Environment model.PlatformEnvironment   `json:"environment"`
-	Plan        configpkg.EnvDefinitionPlan `json:"plan"`
-	Config      configpkg.EnvConfig         `json:"config"`
-	Revision    int                         `json:"revision"`
+	Marker      configpkg.HostedEnvironment     `json:"marker"`
+	Environment model.PlatformEnvironment       `json:"environment"`
+	Plan        envdefinition.EnvDefinitionPlan `json:"plan"`
+	Config      configpkg.EnvConfig             `json:"config"`
+	Revision    int                             `json:"revision"`
 	// Created is true when this pull created the local environment.
 	Created bool `json:"created,omitempty"`
 }
 
 // HostedDefinitionConflictsError carries the plan of an unconfirmable two-sided edit.
 type HostedDefinitionConflictsError struct {
-	Plan configpkg.EnvDefinitionPlan
+	Plan envdefinition.EnvDefinitionPlan
 }
 
 func (e *HostedDefinitionConflictsError) Error() string {
@@ -87,14 +90,14 @@ func (e *HostedDefinitionRefusedError) Error() string {
 // ErrDefinitionPullDeclined lets a caller exit without printing a failure.
 var ErrDefinitionPullDeclined = errors.New("pull declined")
 
-func confirmDefinitionConflicts(confirm func(configpkg.EnvDefinitionPlan) (bool, error), plan configpkg.EnvDefinitionPlan) (bool, error) {
+func confirmDefinitionConflicts(confirm func(envdefinition.EnvDefinitionPlan) (bool, error), plan envdefinition.EnvDefinitionPlan) (bool, error) {
 	if confirm == nil {
 		return false, &HostedDefinitionConflictsError{Plan: plan}
 	}
 	return confirm(plan)
 }
 
-func renderDefinitionConflicts(conflicts []configpkg.EnvDefinitionConflict) string {
+func renderDefinitionConflicts(conflicts []envdefinition.EnvDefinitionConflict) string {
 	rendered := make([]string, 0, len(conflicts))
 	for _, conflict := range conflicts {
 		rendered = append(rendered, fmt.Sprintf("%s: %s -> %s", conflict.Label, conflict.OrUnsetLocal(), conflict.OrUnsetPlatform()))
@@ -109,7 +112,7 @@ func PushEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSto
 	if err != nil {
 		return EnvDefinitionPushResult{}, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
 	}
-	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+	marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return EnvDefinitionPushResult{}, notHostedError(params.Tenant, params.Environment)
 	}
@@ -123,7 +126,7 @@ func PushEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSto
 
 // uploadDefinition stamps the marker only after the write lands.
 func uploadDefinition(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, config configpkg.EnvConfig, row model.PlatformEnvironment, tenant string) (EnvDefinitionPushResult, error) {
-	definition := configpkg.BuildPlatformEnvDefinition(config)
+	definition := envdefinition.BuildPlatformEnvDefinition(config)
 	record, err := client.PutEnvironmentDefinition(ctx, row.EnvironmentID, definition)
 	if err != nil {
 		return EnvDefinitionPushResult{}, err
@@ -150,7 +153,7 @@ func AdoptEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSt
 	if err != nil {
 		return EnvDefinitionPushResult{}, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
 	}
-	if existing, ok := configpkg.HostedEnvironmentFromConfig(config); ok {
+	if existing, ok := envdefinition.HostedEnvironmentFromConfig(config); ok {
 		registered := markerFor(row, client.APIHost(), existing.DefinitionRevision)
 		if !existing.SameRow(registered) {
 			return EnvDefinitionPushResult{}, fmt.Errorf(
@@ -158,7 +161,7 @@ func AdoptEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSt
 				params.Tenant, params.Environment, existing.Describe(), registered.Describe())
 		}
 	}
-	refusals := configpkg.PlatformOwnedMismatches(configpkg.EnvDefinitionPlanParams{
+	refusals := envdefinition.PlatformOwnedMismatches(envdefinition.EnvDefinitionPlanParams{
 		Local:                     config,
 		PlatformName:              row.Name,
 		PlatformType:              row.Type,
@@ -192,7 +195,7 @@ func PullEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSto
 	if err != nil {
 		return EnvDefinitionPullResult{}, err
 	}
-	plan := configpkg.BuildEnvDefinitionPlan(configpkg.EnvDefinitionPlanParams{
+	plan := envdefinition.BuildEnvDefinitionPlan(envdefinition.EnvDefinitionPlanParams{
 		Local:                     config,
 		Definition:                record.Definition,
 		PlatformName:              row.Name,
@@ -235,7 +238,7 @@ func loadPullBase(store envDefinitionConfigStore, params EnvDefinitionPullParams
 	return configpkg.EnvConfig{}, false, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
 }
 
-func confirmPullPlan(plan configpkg.EnvDefinitionPlan, confirm func(configpkg.EnvDefinitionPlan) (bool, error)) error {
+func confirmPullPlan(plan envdefinition.EnvDefinitionPlan, confirm func(envdefinition.EnvDefinitionPlan) (bool, error)) error {
 	if len(plan.Refusals) > 0 {
 		return &HostedDefinitionRefusedError{Refusals: plan.Refusals}
 	}
@@ -253,7 +256,7 @@ func confirmPullPlan(plan configpkg.EnvDefinitionPlan, confirm func(configpkg.En
 }
 
 func applyPulledDefinition(config configpkg.EnvConfig, definition configpkg.PlatformEnvDefinition, marker configpkg.HostedEnvironment) (configpkg.EnvConfig, error) {
-	updated, err := configpkg.ApplyPlatformEnvDefinition(config, definition)
+	updated, err := envdefinition.ApplyPlatformEnvDefinition(config, definition)
 	if err != nil {
 		return configpkg.EnvConfig{}, err
 	}
@@ -263,7 +266,7 @@ func applyPulledDefinition(config configpkg.EnvConfig, definition configpkg.Plat
 // resolvePullTarget resolves the row from the marker, or from params for a pull-as-new.
 func resolvePullTarget(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, params EnvDefinitionPullParams, config configpkg.EnvConfig, created bool) (configpkg.HostedEnvironment, model.PlatformEnvironment, error) {
 	if !created {
-		marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+		marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 		if !ok {
 			return configpkg.HostedEnvironment{}, model.PlatformEnvironment{}, notHostedError(params.Tenant, params.Environment)
 		}
@@ -306,11 +309,11 @@ func resolveHostedRow(ctx context.Context, client PlatformEnvDefinitionClient, c
 	if err != nil {
 		return model.PlatformEnvironment{}, err
 	}
-	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), row.TenantID, row.EnvironmentID); err != nil {
+	if err := envdefinition.CheckHostedMarkerTarget(marker, client.APIHost(), row.TenantID, row.EnvironmentID); err != nil {
 		return model.PlatformEnvironment{}, err
 	}
 	// A platform-owned mismatch refuses a push too, or settings land on the wrong environment.
-	refusals := configpkg.PlatformOwnedMismatches(configpkg.EnvDefinitionPlanParams{
+	refusals := envdefinition.PlatformOwnedMismatches(envdefinition.EnvDefinitionPlanParams{
 		Local:                     config,
 		PlatformName:              row.Name,
 		PlatformType:              row.Type,
@@ -325,7 +328,7 @@ func resolveHostedRow(ctx context.Context, client PlatformEnvDefinitionClient, c
 func notHostedError(tenant, environment string) error {
 	return fmt.Errorf(
 		"%s/%s is not marked as hosted (%w). Register it first with `erun platform env register --adopt --definition %s/%s`, which records the platform row this machine's copy corresponds to",
-		tenant, environment, configpkg.ErrEnvironmentNotHosted, tenant, environment)
+		tenant, environment, envdefinition.ErrEnvironmentNotHosted, tenant, environment)
 }
 
 func markerFor(row model.PlatformEnvironment, apiHost string, revision int) configpkg.HostedEnvironment {
@@ -342,27 +345,27 @@ func stampHostedMarker(config configpkg.EnvConfig, marker configpkg.HostedEnviro
 	if err := configpkg.ValidateStatePathSegment("environment", config.Name); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	marker.DefinitionDigest = configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(config))
+	marker.DefinitionDigest = envdefinition.DefinitionDigest(envdefinition.BuildPlatformEnvDefinition(config))
 	config.Hosted = marker
 	return config, nil
 }
 
 // PlanPullLocalPortRangeStart refuses a range start another environment claims, before the
 // write rather than at the next command.
-func PlanPullLocalPortRangeStart(store configpkg.EnvironmentPortStore, tenant, environment string, requested int) (int, error) {
-	claimed, err := claimedPortRangeIndexes(store, configpkg.EnvironmentPortKey(tenant, environment))
+func PlanPullLocalPortRangeStart(store localports.EnvironmentPortStore, tenant, environment string, requested int) (int, error) {
+	claimed, err := claimedPortRangeIndexes(store, localports.EnvironmentPortKey(tenant, environment))
 	if err != nil {
 		return 0, err
 	}
 	if requested > 0 {
-		return checkRequestedPortRangeStart(claimed, requested, configpkg.EnvironmentPortKey(tenant, environment))
+		return checkRequestedPortRangeStart(claimed, requested, localports.EnvironmentPortKey(tenant, environment))
 	}
-	return lowestFreePortRangeStart(claimed, configpkg.EnvironmentPortKey(tenant, environment))
+	return lowestFreePortRangeStart(claimed, localports.EnvironmentPortKey(tenant, environment))
 }
 
 // claimedPortRangeIndexes skips the environment's own claim.
-func claimedPortRangeIndexes(store configpkg.EnvironmentPortStore, key string) (map[int]string, error) {
-	persisted, _, err := configpkg.CollectEnvironmentPortRefs(store)
+func claimedPortRangeIndexes(store localports.EnvironmentPortStore, key string) (map[int]string, error) {
+	persisted, _, err := localports.CollectEnvironmentPortRefs(store)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +374,7 @@ func claimedPortRangeIndexes(store configpkg.EnvironmentPortStore, key string) (
 		if ref.Key == key {
 			continue
 		}
-		index, err := configpkg.EnvironmentPortIndexForRangeStart(ref.Env.LocalPortRangeStart, ref.Key)
+		index, err := localports.EnvironmentPortIndexForRangeStart(ref.Env.LocalPortRangeStart, ref.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -381,12 +384,12 @@ func claimedPortRangeIndexes(store configpkg.EnvironmentPortStore, key string) (
 }
 
 func checkRequestedPortRangeStart(claimed map[int]string, requested int, key string) (int, error) {
-	index, err := configpkg.EnvironmentPortIndexForRangeStart(requested, key)
+	index, err := localports.EnvironmentPortIndexForRangeStart(requested, key)
 	if err != nil {
 		return 0, err
 	}
 	if other, taken := claimed[index]; taken {
-		return 0, configpkg.LocalPortRangeOverlapError{A: other, B: key, RangeStart: requested}
+		return 0, localports.LocalPortRangeOverlapError{A: other, B: key, RangeStart: requested}
 	}
 	return requested, nil
 }
@@ -413,7 +416,7 @@ func NewPullAsNewEnvironment(row model.PlatformEnvironment, repoPath string, por
 	if !IsHostableEnvironmentType(envType) {
 		return configpkg.EnvConfig{}, fmt.Errorf("a %s environment cannot be hosted: it has no pod and no cluster, and a platform environment record exists to manage a pod lifecycle", envType)
 	}
-	if err := configpkg.ValidateEnvRepoPath(envType, repoPath); err != nil {
+	if err := repopath.ValidateEnvRepoPath(envType, repoPath); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
 	return configpkg.EnvConfig{

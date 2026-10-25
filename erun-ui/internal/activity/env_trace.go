@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -78,7 +79,7 @@ func hostEnvTraceTail(result config.OpenResult) (string, string) {
 
 // Pod read failures degrade to a notice so the host side still renders.
 func (s *Service) podEnvTraceTail(result config.OpenResult) (string, string) {
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if mcpPort <= 0 || !s.d.CanReachMCPEndpoint(mcpPort) {
 		return "", "in-pod trace unavailable — open the environment to include it"
 	}

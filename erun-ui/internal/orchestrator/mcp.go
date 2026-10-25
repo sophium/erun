@@ -11,6 +11,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -308,7 +309,7 @@ func (s *Service) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnv
 
 // Shared with the builder so the forward opened is the one about to be wired.
 func (s *Service) orchestratorMCPPort(tenant, environment string) int {
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, tenant, environment)
+	ports, err := localports.ResolveEnvironmentLocalPorts(s.d.Store, tenant, environment)
 	if err != nil {
 		return 0
 	}

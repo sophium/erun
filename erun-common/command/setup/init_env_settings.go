@@ -6,8 +6,11 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/managedcloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
 )
 
@@ -68,7 +71,7 @@ func (s *bootstrapRunState) applyEnvRuntimeVersion() {
 }
 
 func (s *bootstrapRunState) applyEnvImagePullSecrets() {
-	pullSecrets := configpkg.NormalizeImagePullSecrets(s.params.ImagePullSecrets)
+	pullSecrets := containerregistry.NormalizeImagePullSecrets(s.params.ImagePullSecrets)
 	if len(pullSecrets) == 0 {
 		s.traceEnvSettingKept("image pull secrets", strings.Join(s.envConfig.ImagePullSecrets, ","))
 		return
@@ -96,7 +99,7 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 		s.traceEnvSettingKept("runtime pod resources", formatRuntimePodResources(s.envConfig.RuntimePod))
 		return
 	}
-	s.envConfig.RuntimePod = configpkg.NormalizeRuntimePodResources(desired)
+	s.envConfig.RuntimePod = runtimeresources.NormalizeRuntimePodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
 }
@@ -113,7 +116,7 @@ func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
 		s.traceEnvSettingKept("erun-dind sidecar resources", formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 		return
 	}
-	s.envConfig.RuntimeDindPod = configpkg.NormalizeRuntimeDindPodResources(desired)
+	s.envConfig.RuntimeDindPod = runtimeresources.NormalizeRuntimeDindPodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: erun-dind sidecar resources set to " + formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 }
@@ -166,7 +169,7 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested configpkg.Enviro
 	if err != nil {
 		return err
 	}
-	if err := configpkg.ValidateHostRepoPath(requested, projectRoot); err != nil {
+	if err := repopath.ValidateHostRepoPath(requested, projectRoot); err != nil {
 		return fmt.Errorf("cannot change %s/%s to type %s: %w", s.tenant, s.envName, requested, err)
 	}
 	projectRoot = strings.TrimSpace(projectRoot)
@@ -187,12 +190,12 @@ func describeEnvType(envType configpkg.EnvironmentType) string {
 }
 
 func formatRuntimePodResources(resources model.RuntimePodResources) string {
-	resources = configpkg.NormalizeRuntimePodResources(resources)
+	resources = runtimeresources.NormalizeRuntimePodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
 func formatRuntimeDindPodResources(resources model.RuntimePodResources) string {
-	resources = configpkg.NormalizeRuntimeDindPodResources(resources)
+	resources = runtimeresources.NormalizeRuntimeDindPodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
@@ -221,7 +224,7 @@ func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) err
 		s.envConfig.CloudProviderAlias = cloudProviderAlias
 		s.envConfigChanged = true
 	}
-	managedCloud, err := activity.ManagedCloudEnvironment(s.runner.Store, s.envConfig)
+	managedCloud, err := managedcloud.ManagedCloudEnvironment(s.runner.Store, s.envConfig)
 	if err != nil {
 		return err
 	}
@@ -238,7 +241,7 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 		if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, "", s.params); err != nil {
 			return err
 		}
-		desired := configpkg.ClusterContainerRegistries(*s.params.ClusterRegistry)
+		desired := containerregistry.ClusterContainerRegistries(*s.params.ClusterRegistry)
 		if !s.envConfig.ContainerRegistries.Equal(desired) {
 			s.envConfig.ContainerRegistries = desired
 			s.envConfigChanged = true

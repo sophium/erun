@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -26,7 +26,7 @@ func AttachEnvironmentJob(ctx core.Context, params model.AttachEnvironmentJobPar
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		return jobstate.EnvironmentJob{}, err
 	}
-	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	if _, err := activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
 		Environment: params.Environment,
 		Name:        job.Name,

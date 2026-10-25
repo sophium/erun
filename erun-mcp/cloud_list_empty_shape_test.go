@@ -7,6 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	cloudpkg "github.com/sophium/erun/erun-mcp/tools/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/kubecontext"
 )
@@ -20,12 +23,12 @@ func (unconfiguredStore) LoadERunConfig() (config.ERunConfig, string, error) {
 // An empty collection must serialize as [] not be omitted; omitempty drops empty slices
 // as well as nil ones.
 func TestCollectionToolsReportAnEmptyCollectionAsAnArray(t *testing.T) {
-	providers, err := cloud.ListCloudProviderStatuses(unconfiguredStore{}, cloud.CloudDependencies{})
+	providers, err := providertoken.ListCloudProviderStatuses(unconfiguredStore{}, cloud.CloudDependencies{})
 	if err != nil {
 		t.Fatalf("list cloud provider statuses: %v", err)
 	}
-	contexts, err := cloud.RefreshCloudContextList(
-		core.Context{}, unconfiguredStore{}, cloud.CloudContextDependencies{})
+	contexts, err := contextpower.RefreshCloudContextList(
+		core.Context{}, unconfiguredStore{}, cloudcontext.CloudContextDependencies{})
 	if err != nil {
 		t.Fatalf("refresh cloud context list: %v", err)
 	}

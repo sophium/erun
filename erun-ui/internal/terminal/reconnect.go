@@ -7,8 +7,9 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -23,7 +24,7 @@ func (s *Service) ClassifyMCPUnreachable(port int) mcp.LocalMCPUnreachableKind {
 }
 
 func (s *Service) EnsureMCPAvailable(ctx context.Context, result configpkg.OpenResult) error {
-	mcpPort := configpkg.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	// A stale forward holds the port but answers nothing, so test a round trip.
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		s.emitEnvNotification("warning", result.Tenant, result.EnvConfig.Name, SourceMCPUnreachable,
@@ -190,7 +191,7 @@ func (s *Service) shouldRespawnForCloudContext(managed *Session) bool {
 		return true
 	}
 	switch strings.TrimSpace(cloudContext.Status) {
-	case cloud.CloudContextStatusRunning, cloud.CloudContextStatusPending:
+	case cloudcontext.CloudContextStatusRunning, cloudcontext.CloudContextStatusPending:
 		return true
 	case "":
 		return true

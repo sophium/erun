@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
@@ -32,7 +33,7 @@ func E2eTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallTo
 		version := strings.TrimSpace(input.Version)
 		execute := runcmd.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			runCtx.MCPTool = "e2e"
-			plan, err := e2e.ResolveE2EPlan(config.FindProjectRoot, component)
+			plan, err := e2e.ResolveE2EPlan(projectroot.FindProjectRoot, component)
 			if err != nil {
 				return err
 			}
@@ -45,7 +46,7 @@ func E2eTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallTo
 				Target: model.E2ETarget{
 					Tenant:            runtime.Context.Tenant,
 					Environment:       runtime.Context.Environment,
-					Namespace:         config.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),
+					Namespace:         runtimetarget.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),
 					KubernetesContext: strings.TrimSpace(runtime.Context.KubernetesContext),
 				},
 				BaseURL:     baseURL,

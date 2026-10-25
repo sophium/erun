@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/components"
@@ -36,7 +37,7 @@ func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget
 	}
 	tenant := strings.TrimSpace(resolvedTarget.Tenant)
 	environment := strings.TrimSpace(resolvedTarget.Environment)
-	runtimeName := config.RuntimeReleaseName(tenant)
+	runtimeName := runtimetarget.RuntimeReleaseName(tenant)
 	return fmt.Errorf("deploy %s/%s: refusing to roll the runtime chart alone (%s) from inside this environment's own runtime pod — the in-pod config store is only the projection the chart injects (see `erun doctor --sync-config`), and it carries no deploy.components, so this process cannot tell a genuinely empty selection from the one saved on the host. Rolling on that fallback would upgrade the runtime chart, leave every component the operator selected on its previous version, and still report success. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI, where the saved selection resolves and the rollout is resolved from the host config store rather than from this pod",
 		tenant, environment, runtimeName, tenant, environment, inPodGuardVersionHint(target.VersionOverride))
 }

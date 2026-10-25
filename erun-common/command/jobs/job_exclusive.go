@@ -9,7 +9,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
+	"github.com/sophium/erun/erun-common/infra/activity/versionskew"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -29,7 +30,7 @@ func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) 
 }
 
 func environmentExclusivityHoldsWholeEnvironment(scope string) bool {
-	return strings.TrimSpace(scope) == activity.EnvironmentActivityLeaseScopeEnvironment
+	return strings.TrimSpace(scope) == activitylease.EnvironmentActivityLeaseScopeEnvironment
 }
 
 // startingEnvironmentJobID is the parent job of this start: the explicit
@@ -79,14 +80,14 @@ func resolveEnvironmentJobExclusivity(ctx core.Context, dir string, params Start
 // takeEnvironmentJobExclusivityClaim claims at start so refusal is synchronous.
 // pid is 0 until the supervisor's first heartbeat; only the TTL bounds it until then.
 func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now time.Time) (model.EnvironmentActivityLease, error) {
-	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
+	return activitylease.TakeEnvironmentActivityLease(activitylease.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
 		Environment: params.Environment,
 		Name:        params.Name,
 		ID:          environmentJobExclusiveLeaseID(params.ID),
 		TTL:         params.LeaseTTL,
 		Exclusive:   true,
-		Scope:       activity.EnvironmentActivityLeaseScopeEnvironment,
+		Scope:       activitylease.EnvironmentActivityLeaseScopeEnvironment,
 		Holder:      environmentJobHolder(params.Tenant),
 		Now:         now,
 	})
@@ -103,13 +104,13 @@ func environmentJobHolder(tenant string) model.EnvironmentActivityLeaseHolder {
 
 // releaseEnvironmentJobExclusivityClaim drops this job's own claim; idempotent.
 func releaseEnvironmentJobExclusivityClaim(tenant, environment, id string) error {
-	_, err := activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, activity.EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	_, err := activitylease.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, activitylease.EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
 	return err
 }
 
 // environmentJobExclusivityTakeError reports a lost create race as the usual refusal.
 func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err error, now time.Time) error {
-	var conflict *activity.EnvironmentActivityLeaseConflictError
+	var conflict *activitylease.EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
 		return err
 	}
@@ -119,7 +120,7 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 // DescribeExclusiveJobStartVersionSkew explains an edge that predates --exclusive
 // rejecting the flag, instead of surfacing a raw schema error.
 func DescribeExclusiveJobStartVersionSkew(tenant, environment string, exclusive bool, err error) error {
-	return activity.DescribeExclusiveClaimVersionSkew(tenant, environment, "job start",
+	return versionskew.DescribeExclusiveClaimVersionSkew(tenant, environment, "job start",
 		"upgrade the environment (erun pin / erun deploy) to run this job exclusively there, or drop --exclusive to accept concurrent jobs",
 		exclusive, err)
 }

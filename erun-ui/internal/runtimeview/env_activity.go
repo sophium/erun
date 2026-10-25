@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -208,7 +208,7 @@ func environmentBusyFromIdleStatus(status model.EnvironmentIdleStatus) (bool, st
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
 		}
-		if detail := activity.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
+		if detail := idlestatus.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
 			return true, detail
 		}
 	}

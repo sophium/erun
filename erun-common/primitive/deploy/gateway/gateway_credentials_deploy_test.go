@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
@@ -14,7 +15,7 @@ const testGatewayURL = "https://openrouter.ai/api"
 
 func TestResolveGatewayCredentialTrimsWhatItDelivers(t *testing.T) {
 	// A pasted token's trailing newline would be rejected by the gateway.
-	store := cloud.NewFileCloudSecretStore(t.TempDir())
+	store := secretstore.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "  sk-or-v1-abc\n"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -28,11 +29,11 @@ func TestResolveGatewayCredentialTrimsWhatItDelivers(t *testing.T) {
 }
 
 func TestRenderGatewayCredentialsSecret(t *testing.T) {
-	manifest := renderGatewayCredentialsSecret(config.GatewaySecretName, "team-dev", "sk-or-v1-abc")
+	manifest := renderGatewayCredentialsSecret(openrouter.GatewaySecretName, "team-dev", "sk-or-v1-abc")
 	for _, want := range []string{
 		"namespace: team-dev",
-		"name: " + config.GatewaySecretName,
-		config.GatewaySecretKey + ":",
+		"name: " + openrouter.GatewaySecretName,
+		openrouter.GatewaySecretKey + ":",
 		"sk-or-v1-abc",
 		"app.kubernetes.io/managed-by: erun-deploy",
 	} {
@@ -46,7 +47,7 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 	no := false
-	spec := seam.HelmDeploySpec{
+	spec := helmdeploy.HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
 		Claude:      config.EnvironmentClaudeConfig{UseGateway: &no},
@@ -55,7 +56,7 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	if err := ApplyGatewayCredentialsSecret(ctx, spec); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(trace.String(), config.GatewaySecretName) {
+	if strings.Contains(trace.String(), openrouter.GatewaySecretName) {
 		t.Fatalf("an opted-out environment must get no gateway Secret, trace:\n%s", trace.String())
 	}
 }

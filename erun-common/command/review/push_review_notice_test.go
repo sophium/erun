@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 )
 
 type pushNoticeStore struct {
@@ -51,7 +52,7 @@ func pushNoticeStoreWithAlias(apiURL string) pushNoticeStore {
 
 func pushNoticeDeps(t *testing.T) cloud.CloudDependencies {
 	t.Helper()
-	cached, err := json.Marshal(cloud.ErunAccessTokenCache{
+	cached, err := json.Marshal(providertoken.ErunAccessTokenCache{
 		AccessToken: "push-notice-token",
 		ExpiresAt:   time.Now().Add(time.Hour),
 	})
@@ -59,7 +60,7 @@ func pushNoticeDeps(t *testing.T) cloud.CloudDependencies {
 		t.Fatalf("encode cached access token: %v", err)
 	}
 	return cloud.CloudDependencies{CloudSecretStore: pushNoticeSecrets{
-		secrets: map[string]string{cloud.ErunAccessTokenCacheRef(pushNoticeAlias): string(cached)},
+		secrets: map[string]string{providertoken.ErunAccessTokenCacheRef(pushNoticeAlias): string(cached)},
 	}}
 }
 

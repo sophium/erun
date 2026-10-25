@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -26,7 +28,7 @@ func (r GatewayRouting) Drifted() bool {
 
 // WantedGatewayEndpoint is the base URL deploy renders for an environment.
 func WantedGatewayEndpoint(claude config.EnvironmentClaudeConfig, catalog *config.OpenRouterConfig) string {
-	return config.EffectiveGateway(claude, catalog).Endpoint()
+	return openrouter.EffectiveGateway(claude, catalog).Endpoint()
 }
 
 func normalizeGatewayEndpoint(endpoint string) string {
@@ -82,8 +84,8 @@ var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, nam
 // ReadGatewayRouting compares the running runtime pod with its saved configuration.
 func ReadGatewayRouting(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (routing GatewayRouting, found bool, err error) {
 	routing.Wanted = WantedGatewayEndpoint(env.Claude, catalog)
-	namespace := config.KubernetesNamespaceName(tenant, env.Name)
-	raw, found, err := loadRuntimeDeploymentJSON(ctx, env.KubernetesContext, namespace, config.RuntimeReleaseName(tenant))
+	namespace := runtimetarget.KubernetesNamespaceName(tenant, env.Name)
+	raw, found, err := loadRuntimeDeploymentJSON(ctx, env.KubernetesContext, namespace, runtimetarget.RuntimeReleaseName(tenant))
 	if err != nil || !found {
 		return routing, found, err
 	}

@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmspec"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
@@ -167,7 +169,7 @@ const defaultExposeWildcardTTL = 60
 // RunExposeService ensures the per-env wildcard A record and applies a
 // Host-routing Ingress for <service>.<tenant>-<env>.<servicesZone>. Dry-run
 // traces the complete plan without side effects.
-func RunExposeService(ctx core.Context, params ExposeServiceParams, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
+func RunExposeService(ctx core.Context, params ExposeServiceParams, store envstore.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, applyIngress = normalizeExposeDependencies(store, applyIngress)
 
 	if params.SkipIfUnconfigured && !exposePlatformConfigured(params) {
@@ -205,7 +207,7 @@ func RunExposeService(ctx core.Context, params ExposeServiceParams, store seam.E
 	return result, nil
 }
 
-func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, model.CloudProviderConfig, error) {
+func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store envstore.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, model.CloudProviderConfig, error) {
 	result, err := resolveExposeServicePlan(params, store)
 	if err != nil {
 		return ExposeServiceResult{}, nil, model.CloudProviderConfig{}, err
@@ -241,8 +243,8 @@ func traceExposeDNSWritePlan(ctx core.Context, result ExposeServiceResult, dnsPa
 		ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
 		return
 	}
-	cloud.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
-	cloud.TracePlatformCall(ctx, dnsProvider, "PUT", "/v1/environments/{environment_id}/hostname", "targetIp="+result.TargetIP)
+	platformapi.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+	platformapi.TracePlatformCall(ctx, dnsProvider, "PUT", "/v1/environments/{environment_id}/hostname", "targetIp="+result.TargetIP)
 }
 
 // applyExposeWrites requires the target env's context for the Ingress; the
@@ -327,7 +329,7 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 	if tenant == "" || environment == "" || service == "" {
 		return "", "", "", fmt.Errorf("tenant, environment, and service are required")
 	}
-	if err := config.ValidateTenantName(tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(tenant); err != nil {
 		return "", "", "", err
 	}
 	// Validate before any DNS record is written: the name becomes a DNS label.
@@ -353,7 +355,7 @@ func ProjectHasExposablePlatform(projectRoot string) bool {
 }
 
 // resolveExposeServicePlan does no tracing, so RunExposeService owns the trace order.
-func resolveExposeServicePlan(params ExposeServiceParams, store seam.ExposeStore) (ExposeServiceResult, error) {
+func resolveExposeServicePlan(params ExposeServiceParams, store envstore.ExposeStore) (ExposeServiceResult, error) {
 	tenant, environment, service, err := validateExposeTarget(params)
 	if err != nil {
 		return ExposeServiceResult{}, err
@@ -374,7 +376,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store seam.ExposeStore
 	if servicePort <= 0 {
 		servicePort = defaultExposeServicePort
 	}
-	envLabel := config.KubernetesNamespaceName(tenant, environment)
+	envLabel := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	tlsEnabled, ingressClass, tlsSecret, scheme, tlsDisabledReason := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,
@@ -401,7 +403,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store seam.ExposeStore
 	return result, nil
 }
 
-func resolveExposePlatformCoordinates(params ExposeServiceParams, store seam.ExposeStore) (zone, namespace, powerDNSDeployment, platformContext string, err error) {
+func resolveExposePlatformCoordinates(params ExposeServiceParams, store envstore.ExposeStore) (zone, namespace, powerDNSDeployment, platformContext string, err error) {
 	zone = strings.TrimSpace(params.ServicesZone)
 	namespace = strings.TrimSpace(params.PlatformNamespace)
 	if zone != "" || namespace != "" {
@@ -467,7 +469,7 @@ func resolveExposeTLSPlan(params ExposeServiceParams, envLabel string) (tlsEnabl
 }
 
 // resolvePlatformContext is best-effort: "" falls back to the current context.
-func resolvePlatformContext(store seam.ExposeStore, platformEnv string) string {
+func resolvePlatformContext(store envstore.ExposeStore, platformEnv string) string {
 	platTenant, platEnvName, ok := splitTenantEnv(platformEnv)
 	if !ok {
 		return ""
@@ -489,7 +491,7 @@ func splitTenantEnv(label string) (tenant, env string, ok bool) {
 	return label[:i], label[i+1:], true
 }
 
-func normalizeExposeDependencies(store seam.ExposeStore, applyIngress IngressApplierFunc) (seam.ExposeStore, IngressApplierFunc) {
+func normalizeExposeDependencies(store envstore.ExposeStore, applyIngress IngressApplierFunc) (envstore.ExposeStore, IngressApplierFunc) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}

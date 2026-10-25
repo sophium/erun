@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
@@ -115,7 +115,7 @@ func sortedUsageRequestContainers(containers map[string]model.KubernetesRequests
 func formatUsageRequests(requests model.KubernetesRequests) string {
 	cpu := "none"
 	if requests.CPUMilli > 0 {
-		cpu = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+		cpu = runtimeresources.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
 	}
 	memory := "none"
 	if requests.MemoryBytes > 0 {

@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -21,7 +22,7 @@ type Store interface {
 type Deps struct {
 	Store       Store
 	Cloud       cloud.CloudDependencies
-	ContextDeps cloud.CloudContextDependencies
+	ContextDeps cloudcontext.CloudContextDependencies
 	// MCPBearer signs the per-environment bearer the credential calls present.
 	MCPBearer func(tenant, environment string) string
 	// MCPReachable checks traffic, not a dial: a stale port-forward accepts and never answers.

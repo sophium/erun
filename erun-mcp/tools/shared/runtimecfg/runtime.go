@@ -4,29 +4,36 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/imageregistry"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type RuntimeStore interface {
-	seam.BootstrapStore
-	seam.ListStore
-	seam.DockerStore
-	seam.DeployStore
+	envstore.BootstrapStore
+	envstore.ListStore
+	buildtarget.DockerStore
+	deploytarget.DeployStore
 }
 
 type RuntimeConfig struct {
 	Context                        toolio.RuntimeContext
 	Store                          RuntimeStore
-	BuildScriptRunner              seam.BuildScriptRunnerFunc
-	BuildDockerImage               seam.DockerImageBuilderFunc
-	PushDockerImage                seam.DockerImagePusherFunc
-	DeployHelmChart                seam.HelmChartDeployerFunc
-	EnsureKubernetesNamespace      seam.NamespaceEnsurerFunc
-	DeleteKubernetesNamespace      seam.NamespaceDeleterFunc
-	WaitForRemoteRuntime           seam.RemoteRuntimeWaitFunc
-	RunRemoteCommand               seam.RemoteCommandRunnerFunc
-	ResolveRuntimeRegistryVersions seam.RuntimeRegistryVersionResolverFunc
+	BuildScriptRunner              imagebuild.BuildScriptRunnerFunc
+	BuildDockerImage               imagebuild.DockerImageBuilderFunc
+	PushDockerImage                imagebuild.DockerImagePusherFunc
+	DeployHelmChart                helmdeploy.HelmChartDeployerFunc
+	EnsureKubernetesNamespace      kubeapi.NamespaceEnsurerFunc
+	DeleteKubernetesNamespace      kubeapi.NamespaceDeleterFunc
+	WaitForRemoteRuntime           runtimepod.RemoteRuntimeWaitFunc
+	RunRemoteCommand               runtimepod.RemoteCommandRunnerFunc
+	ResolveRuntimeRegistryVersions imageregistry.RuntimeRegistryVersionResolverFunc
 }
 
 // ResolveLocalTarget resolves the tool's tenant/environment and refuses any other

@@ -11,16 +11,17 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imageregistry"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/clouddefaults"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // ResolveControlPlaneVersionDrift compares each erun-hosted plane (or only alias) against the
 // published version; under DryRun it makes no network calls.
-func ResolveControlPlaneVersionDrift(ctx core.Context, result list.ListResult, alias string, deps cloud.CloudDependencies, resolvePublished seam.RuntimeRegistryVersionResolverFunc) (model.ControlPlaneVersionDrift, error) {
-	deps = cloud.NormalizeCloudDependencies(deps)
+func ResolveControlPlaneVersionDrift(ctx core.Context, result list.ListResult, alias string, deps cloud.CloudDependencies, resolvePublished imageregistry.RuntimeRegistryVersionResolverFunc) (model.ControlPlaneVersionDrift, error) {
+	deps = clouddefaults.NormalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
 	if err != nil {
 		return model.ControlPlaneVersionDrift{}, err
@@ -248,7 +249,7 @@ func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL st
 	ctx.Trace("list: GET " + surfaceURL + "/version.json (" + surface + " version check for " + alias + ")")
 	version, err := fetchVersionJSON(ctx, surfaceURL)
 	if err != nil {
-		var contentErr *cloud.VersionSurfaceUnexpectedContentError
+		var contentErr *clouddefaults.VersionSurfaceUnexpectedContentError
 		if errors.As(err, &contentErr) {
 			// The surface answered, so it is reachable; the fault is the document it served.
 			status.Reachable = true

@@ -5,8 +5,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
@@ -85,7 +86,7 @@ func guardRuntimeChartLineSwitch(ctx core.Context, target config.OpenResult, res
 // chart, whose init containers and dind sidecar run the image's own erun. It
 // applies even to an explicit image; tenant images are not checked.
 func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) error {
-	if strings.TrimSpace(chartName) != config.DevopsComponentName || !runtimeimage.RuntimeImageIsStockDevops(image) {
+	if strings.TrimSpace(chartName) != runtimetarget.DevopsComponentName || !runtimeimage.RuntimeImageIsStockDevops(image) {
 		return nil
 	}
 	_, _, tag, ok := chartref.ParseDockerImageReference(strings.TrimSpace(image))
@@ -98,7 +99,7 @@ func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) e
 		return nil
 	}
 	return fmt.Errorf("deploy: runtime image %s is from erun %s, older than the %s %s chart this deploy installs; the chart runs its init containers and dind sidecar on the image's own erun, so the rollout would fail after the running pod is torn down -- deploy an image at %s or newer with --runtime-image, or the chart matching the image with --runtime-chart %s:%s",
-		image, registry.FormatSemver(imageRelease), config.DevopsComponentName, strings.TrimSpace(chartVersion), registry.FormatSemver(chartRelease), config.DevopsComponentName, tag)
+		image, registry.FormatSemver(imageRelease), runtimetarget.DevopsComponentName, strings.TrimSpace(chartVersion), registry.FormatSemver(chartRelease), runtimetarget.DevopsComponentName, tag)
 }
 
 // runtimeReleaseBase maps 1.0.307, 1.0.307-rc.1, 1.0.307-snapshot-<ts>-arm64 to
@@ -108,7 +109,7 @@ func runtimeReleaseBase(version string) (registry.Semver, bool) {
 	return registry.ParseRegistryStableVersion(base)
 }
 
-func guardRuntimeCoordinate(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput seam.HelmDeploySpec, explicitLineChange bool) error {
+func guardRuntimeCoordinate(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput helmdeploy.HelmDeploySpec, explicitLineChange bool) error {
 	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
 		return err
 	}

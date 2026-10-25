@@ -12,6 +12,8 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
@@ -49,7 +51,7 @@ func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), ru
 			}
 			resolvedPort := port
 			if !cmd.Flags().Changed("port") {
-				resolvedPort = config.MCPPortForResult(result)
+				resolvedPort = localports.MCPPortForResult(result)
 			}
 
 			runtime := mcpLaunchContext{
@@ -57,7 +59,7 @@ func NewMCPCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), ru
 				Environment:       result.Environment,
 				RepoPath:          result.RepoPath,
 				KubernetesContext: result.EnvConfig.KubernetesContext,
-				Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
+				Namespace:         runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment),
 			}
 			commandArgs := mcpCommandArgs(host, resolvedPort, path, runtime)
 			ctx.TraceCommand("", "emcp", commandArgs...)

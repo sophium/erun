@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
@@ -47,7 +47,7 @@ func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (jo
 	ctx.Trace(fmt.Sprintf("job: detaching %q as job %s, output at %s", params.Name, params.ID, logPath))
 	ctx.Trace(fmt.Sprintf("job: holding activity lease %s for the job's lifetime", environmentJobLeaseID(params.ID)))
 	if params.Exclusive {
-		ctx.Trace(fmt.Sprintf("job: holding exclusive claim %s on scope %q, refusing every other job start here while it runs", environmentJobExclusiveLeaseID(params.ID), activity.EnvironmentActivityLeaseScopeEnvironment))
+		ctx.Trace(fmt.Sprintf("job: holding exclusive claim %s on scope %q, refusing every other job start here while it runs", environmentJobExclusiveLeaseID(params.ID), activitylease.EnvironmentActivityLeaseScopeEnvironment))
 	}
 	ctx.TraceCommand(params.Dir, params.SupervisorPath, args...)
 	if ctx.DryRun {
@@ -135,7 +135,7 @@ func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJo
 	if !params.Exclusive {
 		return
 	}
-	if supervisorPID > 0 && activity.ProcessAlive(supervisorPID) {
+	if supervisorPID > 0 && activitylease.ProcessAlive(supervisorPID) {
 		return
 	}
 	_ = releaseEnvironmentJobExclusivityClaim(params.Tenant, params.Environment, params.ID)
@@ -147,7 +147,7 @@ func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 	if !ok {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, jobhost.CurrentJobHostname())
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activitylease.ProcessAlive, jobhost.CurrentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}
@@ -180,7 +180,7 @@ func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (jobstate.Envi
 			}
 			return jobstate.EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
-		if !activity.ProcessAlive(supervisorPID) {
+		if !activitylease.ProcessAlive(supervisorPID) {
 			return jobstate.EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
 		}
 		time.Sleep(20 * time.Millisecond)

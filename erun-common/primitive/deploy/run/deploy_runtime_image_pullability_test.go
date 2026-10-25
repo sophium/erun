@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
@@ -21,9 +21,9 @@ func TestEnsureRuntimeImagePullSecretRefusesOnInconclusiveProbe(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 
 	ctx, _ := runtimeImagePullTraceContext(false)
-	spec := seam.HelmDeploySpec{
+	spec := helmdeploy.HelmDeploySpec{
 		Tenant:         "frs",
-		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
+		ImageOverrides: map[string]string{runtimetarget.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}
 	probeErr := errors.New("dial tcp ghcr.io: connection refused")
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, probeErr }

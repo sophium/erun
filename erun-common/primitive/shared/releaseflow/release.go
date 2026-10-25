@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
@@ -17,7 +17,7 @@ import (
 
 type ReleasePackagingSyncerFunc func(core.Context, model.ReleasePackagingSyncSpec) ([]model.ReleaseFileUpdate, error)
 
-func RunReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func RunReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit gitcmd.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
 	}
@@ -36,7 +36,7 @@ func RunReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCom
 
 // RunClaimedReleaseSpec runs once the version is claimed. A nil publisher (erun release)
 // skips everything the publish owns, so a tag never implies artifacts exist.
-func RunClaimedReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func RunClaimedReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit gitcmd.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
 		return err
@@ -88,7 +88,7 @@ func ensureReleaseCouldPublish(spec model.ReleaseSpec, publisher *ReleasePublish
 }
 
 // publishClaimedRelease publishes, or says nothing was published (erun release).
-func publishClaimedRelease(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
+func publishClaimedRelease(ctx core.Context, spec model.ReleaseSpec, runGit gitcmd.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		if spec.Version != "" {
 			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
@@ -103,7 +103,7 @@ func publishClaimedRelease(ctx core.Context, spec model.ReleaseSpec, runGit seam
 	return runReleasePublication(ctx, *publisher)
 }
 
-func runReleaseStages(ctx core.Context, spec model.ReleaseSpec, stages []model.ReleaseStage, runGit seam.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStages(ctx core.Context, spec model.ReleaseSpec, stages []model.ReleaseStage, runGit gitcmd.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	for _, stage := range stages {
 		stepCtx, finish := ctx.StartTimingStep(stage.Name)
 		err := runReleaseStage(stepCtx, spec, stage, runGit, syncPackagingChecksums)
@@ -137,7 +137,7 @@ func ensureReleaseWorktreeClean(ctx core.Context, projectRoot string) error {
 	return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
 }
 
-func runReleaseStage(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, runGit seam.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStage(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, runGit gitcmd.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	ctx.Trace("stage: " + stage.Name)
 	stageFileUpdates, err := releaseStageFileUpdates(ctx, stage, syncPackagingChecksums)
 	if err != nil {
@@ -186,7 +186,7 @@ func releaseStageCommands(ctx core.Context, stage model.ReleaseStage, updates []
 	return stage.GitCommands
 }
 
-func RunReleaseCommand(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, command model.ReleaseCommandSpec, runGit seam.GitCommandRunnerFunc) error {
+func RunReleaseCommand(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, command model.ReleaseCommandSpec, runGit gitcmd.GitCommandRunnerFunc) error {
 	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
 		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
@@ -215,7 +215,7 @@ func RunReleaseCommand(ctx core.Context, spec model.ReleaseSpec, stage model.Rel
 }
 
 // runReleaseStageCommand captures a push's stderr, the only stream GitHub's bypass notice uses.
-func runReleaseStageCommand(ctx core.Context, command model.ReleaseCommandSpec, runGit seam.GitCommandRunnerFunc) error {
+func runReleaseStageCommand(ctx core.Context, command model.ReleaseCommandSpec, runGit gitcmd.GitCommandRunnerFunc) error {
 	if !isGitPushArgs(command.Args) {
 		return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
@@ -41,7 +41,7 @@ var runBuildDaemonCommand = func(args ...string) (string, error) {
 
 // ensureBuildDaemonEndpoint forwards the build's daemon to buildDaemonEndpointAddr on the
 // daemon host's loopback when nothing provides it, for the build's duration.
-func ensureBuildDaemonEndpoint(ctx core.Context, builds []seam.DockerBuildSpec) (func(), error) {
+func ensureBuildDaemonEndpoint(ctx core.Context, builds []imagebuild.DockerBuildSpec) (func(), error) {
 	noop := func() {}
 	if !anyBuildDeclaresTestStage(builds) {
 		return noop, nil
@@ -126,7 +126,7 @@ func buildDaemonForwarderArgs(ownerPID string) []string {
 	}
 }
 
-func anyBuildDeclaresTestStage(builds []seam.DockerBuildSpec) bool {
+func anyBuildDeclaresTestStage(builds []imagebuild.DockerBuildSpec) bool {
 	for _, build := range builds {
 		if dockerspec.DockerfileDeclaresTestStage(build.DockerfilePath) {
 			return true

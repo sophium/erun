@@ -12,7 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
@@ -33,7 +34,7 @@ var whipNudgeSleep = time.Sleep
 // environmentWhipSessionAlive runs RemoteAppSessionHeartbeatScript's /proc scan locally.
 func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment string) (bool, error) {
 	socket := appsession.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
-	script := strings.Join(append(activitypkg.RemoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
+	script := strings.Join(append(remotesession.RemoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
 	out, err := runner("sh", "-c", script)
 	if err != nil {
 		return false, fmt.Errorf("whip: probing environment session liveness: %w", err)
@@ -108,12 +109,12 @@ func saveWhipEnvironmentState(tenant, environment string, state whipEnvironmentS
 
 // latestEnvironmentAgentActivity reuses the idle machinery's AI activity markers for rearming.
 func latestEnvironmentAgentActivity(tenant, environment string) time.Time {
-	activity, err := activitypkg.LoadEnvironmentActivity(tenant, environment)
+	activity, err := records.LoadEnvironmentActivity(tenant, environment)
 	if err != nil {
 		return time.Time{}
 	}
 	var latest time.Time
-	for _, kind := range []string{config.ActivityKindCodex, activitypkg.ActivityKindProcess} {
+	for _, kind := range []string{config.ActivityKindCodex, records.ActivityKindProcess} {
 		if snapshot, ok := activity[kind]; ok && snapshot.LastActivity.After(latest) {
 			latest = snapshot.LastActivity
 		}

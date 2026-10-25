@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -22,7 +23,7 @@ var dockerfileE2EStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+e2e
 const e2eMigrationRemedy = "move each suite to <tenant>-devops/e2e/<component>/Dockerfile, whose `AS e2e` stage installs the suite's dependencies and runs it (for example `npx playwright test`) against the ERUN_E2E_BASE_URL build arg"
 
 // ResolveE2EPlan discovers the suites to run; an empty component runs them all.
-func ResolveE2EPlan(findProjectRoot seam.ProjectFinderFunc, component string) (model.E2EPlan, error) {
+func ResolveE2EPlan(findProjectRoot projectroot.ProjectFinderFunc, component string) (model.E2EPlan, error) {
 	component = strings.TrimSpace(component)
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 	if err != nil {
@@ -137,7 +138,7 @@ func refuseHostRunPlaywrightSuites(projectRoot string) error {
 
 // A configured paths.e2e must exist rather than silently falling back to convention.
 func resolveE2EDir(projectRoot, override string) (string, error) {
-	if dir := config.ResolveProjectPath(projectRoot, override); dir != "" {
+	if dir := projectpaths.ResolveProjectPath(projectRoot, override); dir != "" {
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
 			return "", fmt.Errorf("configured e2e path %q (.erun/config.yaml paths.e2e) is not a directory: expected one subdirectory per suite, each holding a Dockerfile with an `e2e` stage", strings.TrimSpace(override))

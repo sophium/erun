@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -27,7 +28,7 @@ func (s *Service) LoadIdleStatus(selection uimodel.Selection) (IdleStatus, error
 	if err != nil {
 		return IdleStatus{}, err
 	}
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		status, err := s.loadLocalIdleStatus(result)
 		if err == nil {
@@ -57,7 +58,7 @@ type resolvedUIIdleStatus struct {
 // loadLocalIdleStatus is the host-side fallback when the pod cannot be asked;
 // FromPod is always false and the reading may be stale.
 func (s *Service) loadLocalIdleStatus(result config.OpenResult) (resolvedUIIdleStatus, error) {
-	status, err := activity.ResolveStoredEnvironmentIdleStatus(s.d.Store, result.Tenant, result.Environment, time.Now())
+	status, err := idlestatus.ResolveStoredEnvironmentIdleStatus(s.d.Store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return resolvedUIIdleStatus{}, err
 	}
@@ -76,7 +77,7 @@ func (s *Service) idleStatusToUI(result config.OpenResult, status model.Environm
 	ui.CloudContextStatus = strings.TrimSpace(cloudContext.Status)
 	ui.CloudContextLabel = CloudContextLabel(cloudContext)
 	// idle-stop.log outlives restarts; hide its error once the context runs again.
-	if ui.CloudContextStatus == cloud.CloudContextStatusRunning {
+	if ui.CloudContextStatus == cloudcontext.CloudContextStatusRunning {
 		ui.StopError = ""
 	}
 	return ui
@@ -175,12 +176,12 @@ func idleMarkerClientsToUI(clients []model.EnvironmentIdleMarkerClient) []IdleMa
 }
 
 func (s *Service) mergeLocalIdleActivity(result config.OpenResult, status model.EnvironmentIdleStatus) model.EnvironmentIdleStatus {
-	local, err := activity.ResolveStoredEnvironmentIdleStatus(s.d.Store, result.Tenant, result.Environment, time.Now())
+	local, err := idlestatus.ResolveStoredEnvironmentIdleStatus(s.d.Store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return status
 	}
 	if len(status.Activity) > 0 {
-		remoteWithLocalPolicy, err := activity.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, status.Leases, time.Now())
+		remoteWithLocalPolicy, err := idlestatus.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, status.Leases, time.Now())
 		if err == nil {
 			remoteWithLocalPolicy.ManagedCloud = status.ManagedCloud
 			remoteWithLocalPolicy.StopBlockedReason = status.StopBlockedReason
@@ -269,7 +270,7 @@ func (s *Service) maybeStopIdleCloudEnvironment(result config.OpenResult, _ mode
 	if err != nil || !ok {
 		return
 	}
-	if strings.TrimSpace(cloudContext.Status) == cloud.CloudContextStatusRunning {
+	if strings.TrimSpace(cloudContext.Status) == cloudcontext.CloudContextStatusRunning {
 		s.ClearIdleStopsForCloudContext(cloudContext.Name)
 	}
 }
@@ -310,7 +311,7 @@ func (s *Service) RecordManualStopForCloudContext(ctx context.Context, cloudCont
 			s.emitAppNotification("warning", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 			continue
 		}
-		mcpPort := config.MCPPortForResult(result)
+		mcpPort := localports.MCPPortForResult(result)
 		if !s.d.CanReachMCPEndpoint(mcpPort) {
 			continue
 		}

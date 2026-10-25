@@ -7,11 +7,17 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	"github.com/sophium/erun/erun-common/infra/activity/managedcloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartfiles"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmspec"
@@ -24,10 +30,10 @@ import (
 
 // resolveInstallExistingVersionDeploySpec installs the image already published at
 // the pinned version, verifying it exists; it never builds.
-func resolveInstallExistingVersionDeploySpec(ctx core.Context, store seam.DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, version string, versionFromPersist bool) (seam.DeploySpec, error) {
+func resolveInstallExistingVersionDeploySpec(ctx core.Context, store deploytarget.DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, version string, versionFromPersist bool) (helmdeploy.DeploySpec, error) {
 	deployInput, err := helmspec.NewHelmDeploySpec(target, deployContext, version)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	// Reuse the previous deploy's registry so a reopen survives a registry edit.
 	if versionFromPersist && chartref.DeployContextOwnsRuntimeChart(deployContext, target.Tenant) {
@@ -43,21 +49,21 @@ func resolveInstallExistingVersionDeploySpec(ctx core.Context, store seam.Deploy
 	// A released, non-snapshot version must never wipe the database.
 	deployInput.ResetDatabase = deployResetsDatabase(deployInput.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 
 	ctx.Trace("deploy: version " + deployInput.Version + " pinned; installing the published image by reference (deploy never builds)")
 	images, err := chartfiles.FindDockerImagesInChart(deployContext.ChartPath, deployInput.Version)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	for _, image := range images {
 		if err := verifyExistingDeployImage(ctx, image, deployInput.Version, deployInput.ContainerRegistry, target.ClusterRegistryInsecure); err != nil {
-			return seam.DeploySpec{}, err
+			return helmdeploy.DeploySpec{}, err
 		}
 	}
 
-	return seam.DeploySpec{
+	return helmdeploy.DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
 		Deploy:        deployInput,
@@ -112,19 +118,19 @@ func confirmDeployImagePresent(ctx core.Context, tag, version string, insecure b
 	return fmt.Errorf("deploy --version %s: image %s is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first", version, tag)
 }
 
-func configureDeployInputMetadata(store seam.DeployStore, target configpkg.OpenResult, deployInput *seam.HelmDeploySpec) error {
-	issuers, err := cloud.ResolveTenantCloudProviderIssuers(store, target.TenantConfig)
+func configureDeployInputMetadata(store deploytarget.DeployStore, target configpkg.OpenResult, deployInput *helmdeploy.HelmDeploySpec) error {
+	issuers, err := providerconfig.ResolveTenantCloudProviderIssuers(store, target.TenantConfig)
 	if err != nil {
 		return err
 	}
 	deployInput.OIDCAllowedIssuers = joinOIDCAllowedIssuers(issuers, deployInput.Platform)
-	managedCloud, err := activity.ManagedCloudEnvironment(store, target.EnvConfig)
+	managedCloud, err := managedcloud.ManagedCloudEnvironment(store, target.EnvConfig)
 	if err != nil {
 		return err
 	}
 	deployInput.ManagedCloud = managedCloud
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
-	gateway, err := configpkg.ResolveOpenRouterConfig(store)
+	gateway, err := openrouter.ResolveOpenRouterConfig(store)
 	if err != nil {
 		return err
 	}
@@ -152,19 +158,19 @@ func joinOIDCAllowedIssuers(cloudIssuers []string, platform configpkg.PlatformCo
 
 // resolveDeploySpecForCurrentDockerBuild references the image the build phase
 // already pushed; it never builds.
-func resolveDeploySpecForCurrentDockerBuild(store seam.DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, build seam.DockerBuildSpec) (seam.DeploySpec, error) {
+func resolveDeploySpecForCurrentDockerBuild(store deploytarget.DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, build imagebuild.DockerBuildSpec) (helmdeploy.DeploySpec, error) {
 	deployInput, err := helmspec.NewHelmDeploySpec(target, deployContext, "")
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	deployInput.ResetDatabase = deployResetsDatabase(build.Image.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	deployInput.ImageOverrides = map[string]string{
 		build.Image.ImageName: build.Image.Tag,
 	}
-	if build.Image.ImageName == configpkg.DevopsComponentName {
+	if build.Image.ImageName == runtimetarget.DevopsComponentName {
 		deployInput.ResolvedRuntimeImage = build.Image.Tag
 		// Persist the bare name so later deploys read back the line this build chose.
 		if name := configpkg.RuntimeImageComponentName(build.Image.Tag); name != "" {
@@ -172,14 +178,14 @@ func resolveDeploySpecForCurrentDockerBuild(store seam.DeployStore, target confi
 		}
 	}
 
-	return seam.DeploySpec{
+	return helmdeploy.DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
 		Deploy:        deployInput,
 	}, nil
 }
 
-func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, projectRoot, environment, versionOverride string) (*seam.DockerBuildSpec, error) {
+func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, projectRoot, environment, versionOverride string) (*imagebuild.DockerBuildSpec, error) {
 	store, _, resolveDockerBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	buildContext, ok, err := currentDockerComponentBuildContext(resolveDockerBuildContext)
 	if err != nil || !ok {
@@ -193,7 +199,7 @@ func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store seam.Do
 	return &build, nil
 }
 
-func currentDockerComponentBuildContext(resolveDockerBuildContext seam.BuildContextResolverFunc) (model.DockerBuildContext, bool, error) {
+func currentDockerComponentBuildContext(resolveDockerBuildContext buildtarget.BuildContextResolverFunc) (model.DockerBuildContext, bool, error) {
 	if resolveDockerBuildContext == nil {
 		return model.DockerBuildContext{}, false, nil
 	}
@@ -205,7 +211,7 @@ func currentDockerComponentBuildContext(resolveDockerBuildContext seam.BuildCont
 	return buildContext, ok, nil
 }
 
-func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, build seam.DockerBuildSpec) bool {
+func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, build imagebuild.DockerBuildSpec) bool {
 	chartPath := filepath.Clean(strings.TrimSpace(deployContext.ChartPath))
 	dockerfilePath := filepath.Clean(strings.TrimSpace(build.DockerfilePath))
 	if chartPath == "" || dockerfilePath == "" {
@@ -221,27 +227,27 @@ func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, b
 	return !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && relative != ".."
 }
 
-func applyDeployKubernetesContext(store seam.DeployStore, target configpkg.OpenResult) configpkg.OpenResult {
+func applyDeployKubernetesContext(store deploytarget.DeployStore, target configpkg.OpenResult) configpkg.OpenResult {
 	if resolver, ok := store.(deployKubernetesContextResolver); ok {
 		target.EnvConfig.KubernetesContext = resolver.ResolveDeployKubernetesContext(target.Environment, target.EnvConfig.KubernetesContext)
 	}
 	return target
 }
 
-func ResolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target configpkg.OpenResult, allowLocalBuilds bool) (seam.DeploySpec, error) {
+func ResolveOpenRuntimeDeploySpec(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target configpkg.OpenResult, allowLocalBuilds bool) (helmdeploy.DeploySpec, error) {
 	if err := targetpkg.RefuseHostEnvironmentOperation("deploy", target); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = targetpkg.FreezeNow(now)
 	spec, err := resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	// Rethread the recorded MCP-auth key, or a reopen would replace the pod with an
 	// unauthenticated edge.
 	if err := mcpauth.ApplyMCPAuthToRuntimeSpec(ctx, model.DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	return spec, nil
 }

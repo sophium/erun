@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 )
@@ -35,14 +36,14 @@ type ReportBuildOutcomeParams struct {
 // ReportBuildOutcome self-reports the build outcome, best-effort, never failing the build.
 // No alias is silent with no network call; any other failure is a traced skip.
 func ReportBuildOutcome(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportBuildOutcomeParams) {
-	if !cloud.HasAnyErunPlatformAlias(store) {
+	if !platformapi.HasAnyErunPlatformAlias(store) {
 		return
 	}
 	if strings.TrimSpace(params.Environment) == "" {
 		ctx.Trace("build report to erun platform skipped: no environment resolved to report against")
 		return
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("build report to erun platform skipped: " + err.Error())
 		return
@@ -52,7 +53,7 @@ func ReportBuildOutcome(ctx core.Context, store config.CloudReadStore, deps clou
 		ctx.Trace("build report to erun platform skipped: " + err.Error())
 		return
 	}
-	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/builds", buildReportTraceDetails(params, commitID)...)
+	platformapi.TracePlatformCall(ctx, provider, "POST", "/v1/builds", buildReportTraceDetails(params, commitID)...)
 	if ctx.DryRun {
 		return
 	}
@@ -92,7 +93,7 @@ func createUnattachedBuildReport(client *platformclient.PlatformClient, params R
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), buildReportTimeout)
 	defer cancel()
 
-	environmentID, err := cloud.ResolvePlatformEnvironmentID(timeoutCtx, client, params.Environment)
+	environmentID, err := platformapi.ResolvePlatformEnvironmentID(timeoutCtx, client, params.Environment)
 	if err != nil {
 		return model.PlatformBuild{}, err
 	}

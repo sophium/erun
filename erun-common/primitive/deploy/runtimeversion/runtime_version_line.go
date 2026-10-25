@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 )
@@ -28,7 +29,7 @@ func ResolveRuntimeVersionLine(tenant string, env config.EnvConfig) model.Runtim
 	return model.RuntimeVersionLine{
 		Line:      config.ImageReleaseLine(name),
 		Image:     reference,
-		Disagrees: stock && config.RuntimeReleaseName(tenant) != config.DevopsComponentName,
+		Disagrees: stock && runtimetarget.RuntimeReleaseName(tenant) != runtimetarget.DevopsComponentName,
 	}
 }
 

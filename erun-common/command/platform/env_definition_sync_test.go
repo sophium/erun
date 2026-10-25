@@ -11,6 +11,8 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -37,7 +39,7 @@ func TestPlanPullLocalPortRangeStartRefusesAClaimedRange(t *testing.T) {
 	}
 
 	_, err := PlanPullLocalPortRangeStart(configpkg.ConfigStore{}, "team", "fresh", configpkg.LowerServicePort)
-	var overlap configpkg.LocalPortRangeOverlapError
+	var overlap localports.LocalPortRangeOverlapError
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a claimed range start was accepted: err = %v", err)
 	}
@@ -141,7 +143,7 @@ func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
 		// An unspecified start allocates the lowest free range and never collides.
 		LocalPortRangeStart: configpkg.LowerServicePort,
 	})
-	var overlap configpkg.LocalPortRangeOverlapError
+	var overlap localports.LocalPortRangeOverlapError
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a pull-as-new onto a claimed range start was not refused: err = %v", err)
 	}
@@ -233,11 +235,11 @@ func pushOnce(t *testing.T, config configpkg.EnvConfig) configpkg.EnvConfig {
 func TestPushStampsTheDigestOfWhatItSent(t *testing.T) {
 	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
 
-	want := configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev")))
+	want := envdefinition.DefinitionDigest(envdefinition.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev")))
 	if stamped.Hosted.DefinitionDigest != want {
 		t.Fatalf("stamped digest = %q, want %q", stamped.Hosted.DefinitionDigest, want)
 	}
-	if change := configpkg.HostedDefinitionLocalChangeFor(stamped); !change.Available || change.Changed {
+	if change := envdefinition.HostedDefinitionLocalChangeFor(stamped); !change.Available || change.Changed {
 		t.Fatalf("a just-pushed config reads as %+v, want available and unchanged", change)
 	}
 }
@@ -246,7 +248,7 @@ func TestALocalEditAfterATransferReadsAsChanged(t *testing.T) {
 	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
 	stamped.RuntimeVersion = "2.0.0"
 
-	change := configpkg.HostedDefinitionLocalChangeFor(stamped)
+	change := envdefinition.HostedDefinitionLocalChangeFor(stamped)
 	if !change.Available || !change.Changed {
 		t.Fatalf("an edited portable setting reads as %+v, want available and changed", change)
 	}
@@ -261,7 +263,7 @@ func TestAHostOwnedEditIsNotADivergence(t *testing.T) {
 	stamped.LocalRepoPath = "/somewhere/else"
 	stamped.RuntimeRunningImage = "registry.example.test/erun-devops:9.9.9"
 
-	change := configpkg.HostedDefinitionLocalChangeFor(stamped)
+	change := envdefinition.HostedDefinitionLocalChangeFor(stamped)
 	if !change.Available || change.Changed {
 		t.Fatalf("a host-owned edit reads as %+v, want available and unchanged", change)
 	}
@@ -275,7 +277,7 @@ func TestAHostOwnedEditIsNotADivergence(t *testing.T) {
 func TestAMarkerWithNoDigestCannotTell(t *testing.T) {
 	legacy := hostedDefinitionFixture("dev")
 
-	change := configpkg.HostedDefinitionLocalChangeFor(legacy)
+	change := envdefinition.HostedDefinitionLocalChangeFor(legacy)
 	if change.Available || change.Changed {
 		t.Fatalf("a marker with no digest reads as %+v, want neither available nor changed", change)
 	}
@@ -309,23 +311,23 @@ func TestPullStampsTheDigestToo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull: %v", err)
 	}
-	if change := configpkg.HostedDefinitionLocalChangeFor(result.Config); !change.Available || change.Changed {
+	if change := envdefinition.HostedDefinitionLocalChangeFor(result.Config); !change.Available || change.Changed {
 		t.Fatalf("a just-pulled config reads as %+v, want available and unchanged", change)
 	}
 }
 
 func TestDefinitionDigestIsStableAndSensitive(t *testing.T) {
-	base := configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))
-	if configpkg.DefinitionDigest(base) != configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))) {
+	base := envdefinition.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))
+	if envdefinition.DefinitionDigest(base) != envdefinition.DefinitionDigest(envdefinition.BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))) {
 		t.Fatal("two builds of the same settings produced different digests")
 	}
-	if configpkg.DefinitionDigest(base) == "" {
+	if envdefinition.DefinitionDigest(base) == "" {
 		t.Fatal("the digest is empty, which no marker could ever match")
 	}
 
 	changed := hostedDefinitionFixture("dev")
 	changed.RuntimeVersion = "2.0.0"
-	if configpkg.DefinitionDigest(base) == configpkg.DefinitionDigest(configpkg.BuildPlatformEnvDefinition(changed)) {
+	if envdefinition.DefinitionDigest(base) == envdefinition.DefinitionDigest(envdefinition.BuildPlatformEnvDefinition(changed)) {
 		t.Fatal("a changed portable setting produced the same digest")
 	}
 }

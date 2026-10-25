@@ -11,6 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,9 +24,9 @@ func testPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
 		},
 	}
 }
@@ -71,7 +73,7 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 	if platform.Provider != configpkg.CloudProviderERun || platform.Alias != "erun+api.erunpaas.com@erun" {
 		t.Fatalf("platform alias did not round-trip: %+v", platform)
 	}
-	if platform.ERun == nil || platform.ERun.APIURL != cloud.HostedPlatformAPIURL {
+	if platform.ERun == nil || platform.ERun.APIURL != providertoken.HostedPlatformAPIURL {
 		t.Fatalf("platform api configuration did not round-trip: %+v", platform.ERun)
 	}
 }
@@ -81,16 +83,16 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	provider := testPlatformAliasProvider()
 	ref := provider.ERun.RefreshTokenRef
-	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
+	store := secretstore.NewFileCloudSecretStore(filepath.Join(t.TempDir(), secretstore.CloudSecretStoreDirName))
 	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	fileStore, ok := store.(cloud.FileCloudSecretStore)
+	fileStore, ok := store.(secretstore.FileCloudSecretStore)
 	if !ok {
 		t.Fatalf("store is %T, want cloud.FileCloudSecretStore", store)
 	}
 	written := filepath.Base(fileStore.Path(ref))
-	if got := cloud.CloudSecretFileName(ref); got != written {
+	if got := secretstore.CloudSecretFileName(ref); got != written {
 		t.Fatalf("cloudSecretFileName = %q, but the store wrote %q", got, written)
 	}
 }
@@ -115,7 +117,7 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 
 func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) {
 	captured := installCapturingKubectl(t)
-	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: secretstore.NewFileCloudSecretStore(filepath.Join(t.TempDir(), secretstore.CloudSecretStoreDirName))}
 	provider := testPlatformAliasProvider()
 	if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 		t.Fatalf("save: %v", err)
@@ -138,9 +140,9 @@ func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) 
 		PlatformAliasSecretFileKey,
 		PlatformAliasSecretTokenKey,
 		"alias: erun+api.erunpaas.com@erun",
-		"apiurl: " + cloud.HostedPlatformAPIURL,
+		"apiurl: " + providertoken.HostedPlatformAPIURL,
 		"refresh-token-value",
-		cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef),
+		secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef),
 	} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)

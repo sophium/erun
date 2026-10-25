@@ -12,11 +12,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/cmd/shared/sshdlink"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-common/primitive/open/shell"
@@ -67,7 +69,7 @@ func resolveOpenTarget(
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment kubeapi.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (helmdeploy.DeploySpec, error), deployHelmChart helmdeploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -196,7 +198,7 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams,
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment kubeapi.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (helmdeploy.DeploySpec, error), deployHelmChart helmdeploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -226,10 +228,10 @@ type resolvedOpenRunner struct {
 	promptRunner              prompt.PromptRunner
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
-	checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error)
-	deployHelmChart           seam.HelmChartDeployerFunc
-	resolveDeployedVersion    seam.HelmReleaseVersionResolverFunc
+	checkKubernetesDeployment kubeapi.KubernetesDeploymentCheckerFunc
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (helmdeploy.DeploySpec, error)
+	deployHelmChart           helmdeploy.HelmChartDeployerFunc
+	resolveDeployedVersion    helmdeploy.HelmReleaseVersionResolverFunc
 	activateMCP               portfwd.MCPForwarder
 	activateAPI               portfwd.APIForwarder
 	activateSSHD              sshdlink.SSHDActivator
@@ -250,7 +252,7 @@ func (r *resolvedOpenRunner) run() error {
 		return err
 	}
 
-	shellReq := cloud.ShellLaunchParamsFromResult(r.result)
+	shellReq := shelllaunch.ShellLaunchParamsFromResult(r.result)
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
@@ -320,7 +322,7 @@ func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 
 func (r *resolvedOpenRunner) recordActivity() {
 	if !r.ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
-		_ = activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
+		_ = records.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 			Tenant:      r.result.Tenant,
 			Environment: r.result.Environment,
 			Kind:        config.ActivityKindCLI,
@@ -410,7 +412,7 @@ func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
 }
 
 func (r *resolvedOpenRunner) emitNoShellSetup() error {
-	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	namespace := runtimetarget.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	r.ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(r.result.EnvConfig.KubernetesContext))
 	r.ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 	r.ctx.TraceCommand("", "cd", r.result.RepoPath)

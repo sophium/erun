@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/lifecycle/diff"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/codesign"
@@ -20,7 +20,7 @@ import (
 // A host workspace is the local-agent worktree or the remote-agent sync mirror;
 // it lets host-side actions skip the pod, which matters on Windows.
 
-func hostWorkspacePath(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) string {
+func hostWorkspacePath(result config.OpenResult, findProjectRoot projectroot.ProjectFinderFunc) string {
 	if !result.RemoteRepo() {
 		return strings.TrimSpace(result.RepoPath)
 	}

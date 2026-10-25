@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -14,7 +16,7 @@ import (
 var InPodDeclaredRegistryAuth map[string]RegistryBasicAuth
 
 // readDeclaredImagePullSecretAuths is a test seam.
-var readDeclaredImagePullSecretAuths = func(namespace, kubernetesContext, name string) (map[string]config.DockerConfigJSONAuthEntry, error) {
+var readDeclaredImagePullSecretAuths = func(namespace, kubernetesContext, name string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 	return ExistingImagePullSecretAuths(kubernetesContext, namespace, name, ImagePullSecretGetArgs(namespace, kubernetesContext, name))
 }
 
@@ -29,7 +31,7 @@ func ConfigureInPodDeclaredRegistryAuth(ctx core.Context, target config.OpenResu
 	if !runningInTargetRuntimePod(target) {
 		return
 	}
-	names := config.NormalizeImagePullSecrets(target.EnvConfig.ImagePullSecrets)
+	names := containerregistry.NormalizeImagePullSecrets(target.EnvConfig.ImagePullSecrets)
 	credentials := readDeclaredRegistryCredentials(ctx, inPodNamespace(target), target.EnvConfig.KubernetesContext, names)
 	if len(credentials) == 0 {
 		return
@@ -50,7 +52,7 @@ func inPodNamespace(target config.OpenResult) string {
 	if namespace := strings.TrimSpace(os.Getenv("ERUN_NAMESPACE")); namespace != "" {
 		return namespace
 	}
-	return config.KubernetesNamespaceName(target.Tenant, target.Environment)
+	return runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment)
 }
 
 // readDeclaredRegistryCredentials decodes each Secret's auths, first Secret wins a host.

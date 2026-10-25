@@ -10,10 +10,14 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	diagnosispkg "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/spf13/cobra"
@@ -36,7 +40,7 @@ type doctorOptions struct {
 	repairWorkspaceSync        bool
 }
 
-func NewDoctorCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner) *cobra.Command {
+func NewDoctorCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner) *cobra.Command {
 	options := doctorOptions{}
 	cmd := &cobra.Command{
 		Use:   "doctor [tenant] [environment]",
@@ -93,9 +97,9 @@ func NewDoctorCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error),
 	return cmd
 }
 
-func runDoctorCommand(ctx core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions, args []string) error {
+func runDoctorCommand(ctx core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions, args []string) error {
 	// The host root config does not exist in the pod.
-	if config.IsInRuntimeEnvironment(os.Getenv) {
+	if runtimeresources.IsInRuntimeEnvironment(os.Getenv) {
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
 
@@ -137,7 +141,7 @@ func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, prompt
 	if err := reportProjectConfigAndExecutionModes(ctx, result); err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {
 		return err
@@ -187,12 +191,12 @@ func reportProjectConfigTracked(ctx core.Context, result config.OpenResult) erro
 	if !projectConfigGitIgnored(ctx, result.RepoPath) {
 		return nil
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", config.ProjectConfigGitIgnoreFix)
+	_, err := fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", projectpaths.ProjectConfigGitIgnoreFix)
 	return err
 }
 
 func projectConfigGitIgnored(ctx core.Context, repoPath string) bool {
-	present, ignored, err := config.ProjectConfigGitIgnored(ctx, repoPath)
+	present, ignored, err := projectpaths.ProjectConfigGitIgnored(ctx, repoPath)
 	return err == nil && present && ignored
 }
 
@@ -208,7 +212,7 @@ func runDoctorPostSyncActions(ctx core.Context, promptRunner prompt.PromptRunner
 }
 
 // runDoctorConfigRepairs runs before resolveOpen, which a broken config would block.
-func runDoctorConfigRepairs(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions, args []string) (bool, error) {
+func runDoctorConfigRepairs(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloudcontext.CloudContextDependencies, promptRunner prompt.PromptRunner, options doctorOptions, args []string) (bool, error) {
 	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
 		return false, err
 	}

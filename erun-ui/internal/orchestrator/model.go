@@ -7,6 +7,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/orchestratorrole"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -154,12 +155,12 @@ type Info struct {
 
 // orchestratableEnv reports whether role may be linked against env.
 func orchestratableEnv(env configpkg.EnvConfig, role model.OrchestratorEnvRole) bool {
-	return configpkg.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
+	return orchestratorrole.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
 
 // orchestratorIneligibilityReason returns "" when the link is allowed.
 func orchestratorIneligibilityReason(env configpkg.EnvConfig, role model.OrchestratorEnvRole) string {
-	return configpkg.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
+	return orchestratorrole.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
 }
 
 type orchestratorShellSnapshot struct {

@@ -4,8 +4,10 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -62,7 +64,7 @@ func environmentCloudAliasSlots(store configpkg.CloudReadStore, config configpkg
 
 func configuredCloudAliasesByType(store configpkg.CloudReadStore) map[string][]string {
 	grouped := make(map[string][]string)
-	providers, err := cloud.ListCloudProviders(store)
+	providers, err := providerconfig.ListCloudProviders(store)
 	if err != nil {
 		return grouped
 	}
@@ -90,7 +92,7 @@ func cloudAliasListContains(values []string, target string) bool {
 }
 
 func environmentCloudProviderAliases(store configpkg.CloudReadStore, current string) []string {
-	providers, err := cloud.ListCloudProviders(store)
+	providers, err := providerconfig.ListCloudProviders(store)
 	if err != nil {
 		return nil
 	}
@@ -153,12 +155,12 @@ func (s *Service) LinkedCloudContextFor(cloudProviderAlias, kubernetesContext st
 	if kubernetesContext == "" {
 		return model.CloudContextStatus{}, false, nil
 	}
-	statuses, err := cloud.ListCloudContextStatuses(s.d.Store)
+	statuses, err := cloudcloudcontext.ListCloudContextStatuses(s.d.Store)
 	if err != nil {
 		return model.CloudContextStatus{}, false, err
 	}
 	for _, status := range statuses {
-		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
+		context := configcloudcontext.NormalizeCloudContextConfig(status.CloudContextConfig)
 		if cloudProviderAlias != "" && strings.TrimSpace(context.CloudProviderAlias) != cloudProviderAlias {
 			continue
 		}

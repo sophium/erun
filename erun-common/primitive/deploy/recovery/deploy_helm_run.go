@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
-func ClearHelmReleasePendingOperation(params seam.HelmReleaseRecoveryParams) error {
+func ClearHelmReleasePendingOperation(params helmdeploy.HelmReleaseRecoveryParams) error {
 	if strings.TrimSpace(params.ReleaseName) == "" {
 		return fmt.Errorf("helm release name is required")
 	}

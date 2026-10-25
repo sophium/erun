@@ -8,9 +8,11 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/config"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/command/lifecycle/diff"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
@@ -19,7 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewExecCmd(findProjectRoot seam.ProjectFinderFunc, runGit seam.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen envscope.OpenResolver, store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
+func NewExecCmd(findProjectRoot seamprojectroot.ProjectFinderFunc, runGit gitcmd.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen envscope.OpenResolver, store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	// supervise mounts only under exec; supervisor re-execs always use `exec job supervise`.
 	jobCmd := newJobCmd(resolveOpen)
 	jobCmd.AddCommand(newJobSuperviseCmd())
@@ -43,7 +45,7 @@ func NewExecCmd(findProjectRoot seam.ProjectFinderFunc, runGit seam.GitCommandRu
 	)
 }
 
-func newExecDiffCmd(findProjectRoot seam.ProjectFinderFunc, runGit seam.GitCommandRunnerFunc) *cobra.Command {
+func newExecDiffCmd(findProjectRoot seamprojectroot.ProjectFinderFunc, runGit gitcmd.GitCommandRunnerFunc) *cobra.Command {
 	var (
 		jsonOutput     bool
 		scope          string
@@ -70,7 +72,7 @@ func newExecDiffCmd(findProjectRoot seam.ProjectFinderFunc, runGit seam.GitComma
 	return cmd
 }
 
-func newExecRawCmd(findProjectRoot seam.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc) *cobra.Command {
+func newExecRawCmd(findProjectRoot seamprojectroot.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "raw COMMAND [ARG...]",
 		Short: "Run a raw command from the project root",
@@ -139,7 +141,7 @@ func extractDryRunFlag(args []string) ([]string, bool) {
 	return cleaned, dryRun
 }
 
-func newExecWriteCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func newExecWriteCmd(findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "write PATH",
 		Short: "Write stdin to a file in the project working tree",
@@ -158,9 +160,9 @@ func newExecWriteCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecWriteCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, path string) error {
+func runExecWriteCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, path string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -184,7 +186,7 @@ func runExecWriteCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFun
 	return ctx.WriteResult(result)
 }
 
-func newExecCommitCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func newExecCommitCmd(findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "commit BRANCH [PATH...]",
 		Short: "Commit every change, or only the declared paths, in the project working tree",
@@ -208,9 +210,9 @@ func newExecCommitCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecCommitCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, branch string, paths []string) error {
+func runExecCommitCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, branch string, paths []string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -235,7 +237,7 @@ func runExecCommitCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFu
 	return ctx.WriteResult(result)
 }
 
-func newExecPushCmd(findProjectRoot seam.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
+func newExecPushCmd(findProjectRoot seamprojectroot.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	var remote string
 	cmd := &cobra.Command{
 		Use:   "push BRANCH",
@@ -258,9 +260,9 @@ func newExecPushCmd(findProjectRoot seam.ProjectFinderFunc, store config.CloudRe
 	return cmd
 }
 
-func runExecPushCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies, pushDeps gitx.PushWorkingTreeBranchDependencies, branch, remote string) error {
+func runExecPushCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies, pushDeps gitx.PushWorkingTreeBranchDependencies, branch, remote string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -291,7 +293,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc
 	return ctx.WriteResult(result)
 }
 
-func newExecMergeCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
+func newExecMergeCmd(findProjectRoot seamprojectroot.ProjectFinderFunc) *cobra.Command {
 	var remote string
 	cmd := &cobra.Command{
 		Use:   "merge TARGET_BRANCH",
@@ -318,9 +320,9 @@ func newExecMergeCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecMergeCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, targetBranch, remote string) error {
+func runExecMergeCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, targetBranch, remote string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -346,9 +348,9 @@ type execDiffOptions struct {
 	SelectedCommit string
 }
 
-func runExecDiffCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, runGit seam.GitCommandRunnerFunc, opts execDiffOptions) error {
+func runExecDiffCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, runGit gitcmd.GitCommandRunnerFunc, opts execDiffOptions) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -370,7 +372,7 @@ func runExecDiffCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc
 	return diff.WriteRawDiff(ctx.Stdout, result)
 }
 
-func resolveExecDiff(projectRoot string, runGit seam.GitCommandRunnerFunc, opts execDiffOptions) (model.DiffResult, error) {
+func resolveExecDiff(projectRoot string, runGit gitcmd.GitCommandRunnerFunc, opts execDiffOptions) (model.DiffResult, error) {
 	if opts.Scope == "" && opts.SelectedCommit == "" {
 		return diff.ResolveGitDiff(projectRoot, runGit)
 	}
@@ -383,9 +385,9 @@ func resolveExecDiff(projectRoot string, runGit seam.GitCommandRunnerFunc, opts 
 	}, runGit)
 }
 
-func runExecRawCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc, args []string) error {
+func runExecRawCommand(ctx core.Context, findProjectRoot seamprojectroot.ProjectFinderFunc, runRaw core.RawCommandRunnerFunc, args []string) error {
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {

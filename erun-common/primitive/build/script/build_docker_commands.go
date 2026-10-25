@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
@@ -25,7 +25,7 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 	return cmd.Run()
 }
 
-func RunScriptSpec(ctx core.Context, script dockerspec.ScriptSpec, run seam.BuildScriptRunnerFunc) error {
+func RunScriptSpec(ctx core.Context, script dockerspec.ScriptSpec, run imagebuild.BuildScriptRunnerFunc) error {
 	if run == nil {
 		run = BuildScriptRunner
 	}

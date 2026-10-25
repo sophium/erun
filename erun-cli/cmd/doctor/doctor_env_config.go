@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -37,7 +37,7 @@ func runEnvConfigRestoreFromArgs(ctx core.Context, args []string, selector strin
 }
 
 func availableEnvBackupDates(tenant, environment string) string {
-	backups, err := config.ListEnvConfigBackups(tenant, environment)
+	backups, err := configbackup.ListEnvConfigBackups(tenant, environment)
 	if err != nil || len(backups) == 0 {
 		return ""
 	}
@@ -55,11 +55,11 @@ func resolveEnvConfigBackupSelector(tenant, environment, selector string) (model
 	if _, err := time.Parse("2006-01-02", selector); err != nil {
 		return model.ConfigBackup{}, false, fmt.Errorf("invalid backup date %q (expected YYYY-MM-DD or an absolute path)", selector)
 	}
-	return config.FindEnvConfigBackupByDate(tenant, environment, selector)
+	return configbackup.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
 
 func runEnvConfigRestore(ctx core.Context, tenant, environment string, backup model.ConfigBackup) (bool, error) {
-	livePath, err := config.EnvConfigPath(tenant, environment)
+	livePath, err := configbackup.EnvConfigPath(tenant, environment)
 	if err != nil {
 		return false, err
 	}
@@ -68,7 +68,7 @@ func runEnvConfigRestore(ctx core.Context, tenant, environment string, backup mo
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry-run: would restore %s/%s config from %s\n", tenant, environment, backup.Path)
 		return true, err
 	}
-	if err := config.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
+	if err := configbackup.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
 		return false, err
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "Restored %s/%s config from %s\n", tenant, environment, backup.Path)

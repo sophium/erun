@@ -10,7 +10,11 @@ import (
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/deploy/run"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
 	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
@@ -18,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc) *cobra.Command {
+func NewDeployCmd(store deploytarget.DeployStore, saveEnvConfig deploytarget.EnvConfigSaver, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
@@ -100,7 +104,7 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, deployHelmChart seam.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
+func runDeploy(ctx core.Context, store deploytarget.DeployStore, saveEnvConfig deploytarget.EnvConfigSaver, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
 	deploySpecs, err := spec.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -117,7 +121,7 @@ func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvC
 	return nil
 }
 
-func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage seam.DockerImageBuilderFunc, push seam.DockerPushFunc, deployHelmChart seam.HelmChartDeployerFunc) *cobra.Command {
+func NewK8sDeployCmd(store deploytarget.DeployStore, saveEnvConfig deploytarget.EnvConfigSaver, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, resolveDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, buildDockerImage imagebuild.DockerImageBuilderFunc, push imagebuild.DockerPushFunc, deployHelmChart helmdeploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
@@ -134,7 +138,7 @@ func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, 
 			if err := run.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
 				return err
 			}
-			return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, []seam.DeploySpec{deploySpec}, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
+			return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, []helmdeploy.DeploySpec{deploySpec}, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 		},
 	}
 	clicmd.AddDryRunFlag(cmd)

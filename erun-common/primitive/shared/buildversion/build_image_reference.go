@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 )
 
 func ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent string) (string, bool, string, error) {
@@ -58,7 +58,7 @@ func replaceProjectRootVersionCandidate(candidates []string, projectRoot, config
 }
 
 func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (string, bool, string, error) {
-	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
+	name, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -71,7 +71,7 @@ func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (st
 }
 
 func configuredVersionFile(projectRoot string) (string, bool, error) {
-	paths, err := config.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -81,7 +81,7 @@ func configuredVersionFile(projectRoot string) (string, bool, error) {
 
 // resolveVersionFilePath maps a configured directory to <dir>/VERSION.
 func resolveVersionFilePath(projectRoot, override string) (string, bool) {
-	versionPath := config.ResolveProjectPath(projectRoot, override)
+	versionPath := projectpaths.ResolveProjectPath(projectRoot, override)
 	if versionPath == "" {
 		return "", false
 	}

@@ -55,13 +55,13 @@ linters:
           files: ["$all"]
           allow:
             - github.com/sophium/erun/erun-common/base/
-            - github.com/sophium/erun/erun-common/infra/cloud$
+            - github.com/sophium/erun/erun-common/infra/cloud
             - github.com/sophium/erun/erun-common/infra/mcpauth$
             - github.com/sophium/erun/erun-common/infra/mcptools$
             - github.com/sophium/erun/erun-common/infra/platformclient$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: erun-backend-api may import erun-common's base/* and infra/{cloud,mcpauth,mcptools,platformclient} only
+              desc: erun-backend-api may import erun-common's base/*, infra/cloud/* and infra/{mcpauth,mcptools,platformclient} only
     funlen:
       lines: 100
       statements: 50

@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"gopkg.in/yaml.v3"
@@ -21,7 +23,7 @@ import (
 
 // PlatformAliasSecretName names the per-environment Secret `erun init` mints from the operator's alias.
 func PlatformAliasSecretName(tenant string) string {
-	return config.RuntimeReleaseName(tenant) + "-platform-alias"
+	return runtimetarget.RuntimeReleaseName(tenant) + "-platform-alias"
 }
 
 // The runtime chart mounts these keys at /etc/erun/platform-alias, where the runtime
@@ -147,7 +149,7 @@ func ProvisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore,
 	if ctx.DryRun {
 		return name, nil
 	}
-	manifest := RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef), token)
+	manifest := RenderPlatformAliasSecret(name, namespace, entry, secretstore.CloudSecretFileName(provider.ERun.RefreshTokenRef), token)
 	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "platform alias secret", manifest, args); err != nil {
 		return "", err
 	}
@@ -158,8 +160,8 @@ func ProvisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore,
 // An env that names one is left alone: the Secret carries the delegating operator's
 // identity, so re-provisioning would silently change who the env acts as. Only the
 // several-aliases ambiguity is traced; having nothing to give stays silent.
-func ReconcilePlatformAliasSecret(ctx core.Context, deployInput *seam.HelmDeploySpec) error {
-	if deployInput == nil || deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
+func ReconcilePlatformAliasSecret(ctx core.Context, deployInput *helmdeploy.HelmDeploySpec) error {
+	if deployInput == nil || deployInput.ReleaseName != runtimetarget.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	if strings.TrimSpace(deployInput.PlatformAliasSecretName) != "" {

@@ -10,10 +10,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/configbackup"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
@@ -116,7 +118,7 @@ func restoreDoctorEnvConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx c
 	if err != nil {
 		return err
 	}
-	livePath, err := config.EnvConfigPath(tenant, environment)
+	livePath, err := configbackup.EnvConfigPath(tenant, environment)
 	if err != nil {
 		return err
 	}
@@ -131,7 +133,7 @@ func restoreDoctorEnvConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx c
 		return fmt.Errorf("no env config backup matches %q for %s/%s (no backups exist yet)", selector, tenant, environment)
 	}
 	if !runCtx.DryRun {
-		if err := config.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
+		if err := configbackup.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
 			return err
 		}
 	}
@@ -141,7 +143,7 @@ func restoreDoctorEnvConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx c
 }
 
 func availableEnvBackupDates(tenant, environment string) string {
-	backups, err := config.ListEnvConfigBackups(tenant, environment)
+	backups, err := configbackup.ListEnvConfigBackups(tenant, environment)
 	if err != nil || len(backups) == 0 {
 		return ""
 	}
@@ -156,7 +158,7 @@ func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (model
 	if strings.ContainsAny(selector, "/\\") {
 		return model.ConfigBackup{Path: selector}, true, nil
 	}
-	return config.FindEnvConfigBackupByDate(tenant, environment, selector)
+	return configbackup.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
 
 func onlyEnvConfigRestoreInput(input DoctorInput) bool {
@@ -172,7 +174,7 @@ func runDoctorTenantEnvActions(runtime runtimecfg.RuntimeConfig, input DoctorInp
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(target)
+	req := shelllaunch.ShellLaunchParamsFromResult(target)
 	diagnosis, err := writeDoctorDeployDiagnosis(runCtx, req)
 	if err != nil {
 		return err
@@ -216,7 +218,7 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 // runDoctorRootConfigToolFlow returns fatal=true when the root config must stop
 // the flow, e.g. it is corrupted and no repair input was given.
 func runDoctorRootConfigToolFlow(runtime runtimecfg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*toolio.DoctorRootConfigReport, bool, error) {
-	inspection, err := config.InspectRootConfig(runtime.Store)
+	inspection, err := configbackup.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return nil, false, err
 	}
@@ -256,7 +258,7 @@ func restoreDoctorRootConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx 
 		return inspection, fmt.Errorf("no root config backup matches %q", selector)
 	}
 	if !runCtx.DryRun {
-		if err := config.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
+		if err := configbackup.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
 			return inspection, err
 		}
 	}
@@ -266,7 +268,7 @@ func restoreDoctorRootConfigFromBackup(runtime runtimecfg.RuntimeConfig, runCtx 
 }
 
 func refreshDoctorInspection(runtime runtimecfg.RuntimeConfig, report *toolio.DoctorRootConfigReport) (model.RootConfigInspection, error) {
-	refreshed, err := config.InspectRootConfig(runtime.Store)
+	refreshed, err := configbackup.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return model.RootConfigInspection{}, err
 	}
@@ -317,7 +319,7 @@ func resolveDoctorBackupSelector(inspection model.RootConfigInspection, selector
 	if strings.ContainsAny(selector, "/\\") {
 		return model.ConfigBackup{Path: selector}, true, nil
 	}
-	backup, ok, err := config.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
+	backup, ok, err := configbackup.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
 	if err != nil {
 		return model.ConfigBackup{}, false, err
 	}

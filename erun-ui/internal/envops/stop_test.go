@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
@@ -116,8 +117,8 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 			return model.StopEnvironmentResult{
 				Tenant:      params.Result.Tenant,
 				Environment: params.Result.Environment,
-				Release:     config.RuntimeReleaseName(params.Result.Tenant),
-				Namespace:   config.KubernetesNamespaceName(params.Result.Tenant, params.Result.Environment),
+				Release:     runtimetarget.RuntimeReleaseName(params.Result.Tenant),
+				Namespace:   runtimetarget.KubernetesNamespaceName(params.Result.Tenant, params.Result.Environment),
 				Stopped:     true,
 			}, nil
 		},

@@ -9,7 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 func (b runtimeBoot) kubeconfigPath() string {
@@ -39,9 +39,9 @@ func writeRuntimeKubeconfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 		return nil
 	}
 	server := "https://" + boot.get("KUBERNETES_SERVICE_HOST") + ":" + boot.getOr("KUBERNETES_SERVICE_PORT_HTTPS", "443")
-	contexts := []string{cloud.InClusterKubernetesContext}
+	contexts := []string{providerconfig.InClusterKubernetesContext}
 	outer := boot.getOr("ERUN_CLOUD_CONTEXT_NAME", boot.get("ERUN_KUBERNETES_CONTEXT"))
-	if outer != "" && outer != cloud.InClusterKubernetesContext {
+	if outer != "" && outer != providerconfig.InClusterKubernetesContext {
 		contexts = append(contexts, outer)
 	}
 	var config strings.Builder

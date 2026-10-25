@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
@@ -32,7 +34,7 @@ type RuntimeAgentCredentialParams struct {
 // ResolveRuntimeAgentCredentialStatus is pure and never infers Missing from an unread template.
 func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) model.RuntimeAgentCredentialStatus {
 	status := model.RuntimeAgentCredentialStatus{Container: strings.TrimSpace(params.Container)}
-	gateway := config.EffectiveGateway(params.Claude, params.Gateway)
+	gateway := openrouter.EffectiveGateway(params.Claude, params.Gateway)
 	if !gateway.Configured() {
 		status.State = model.RuntimeAgentCredentialNotApplicable
 		return status
@@ -55,8 +57,8 @@ func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) mo
 // runtimeDeploymentEnvArgs reads the Deployment, not a pod: its template is what
 // the chart rendered, independent of rollout progress.
 func runtimeDeploymentEnvArgs(req config.ShellLaunchParams) []string {
-	args := config.KubectlTargetArgs(req)
-	return append(args, "get", "deployment", config.RuntimeReleaseName(req.Tenant), "-o", "json")
+	args := runtimetarget.KubectlTargetArgs(req)
+	return append(args, "get", "deployment", runtimetarget.RuntimeReleaseName(req.Tenant), "-o", "json")
 }
 
 type runtimeDeploymentDoc struct {
@@ -105,7 +107,7 @@ func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) model.Run
 	return ResolveRuntimeAgentCredentialStatus(RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
-		Container: config.DevopsComponentName,
+		Container: runtimetarget.DevopsComponentName,
 	})
 }
 
@@ -114,9 +116,9 @@ func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchPara
 	params := RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
-		Container: config.DevopsComponentName,
+		Container: runtimetarget.DevopsComponentName,
 	}
-	if !config.EffectiveGateway(req.Claude, req.Gateway).Configured() {
+	if !openrouter.EffectiveGateway(req.Claude, req.Gateway).Configured() {
 		return ResolveRuntimeAgentCredentialStatus(params)
 	}
 
@@ -128,10 +130,10 @@ func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchPara
 		status.ReadError = fmt.Sprintf("read the runtime pod template: %v", observe.KubectlErrorMessage(err, stderr))
 		return status
 	}
-	names, found := RuntimeDeploymentContainerEnvNames(stdout, config.DevopsComponentName)
+	names, found := RuntimeDeploymentContainerEnvNames(stdout, runtimetarget.DevopsComponentName)
 	if !found {
 		status := ResolveRuntimeAgentCredentialStatus(params)
-		status.ReadError = fmt.Sprintf("the runtime deployment %q declares no %q container", config.RuntimeReleaseName(req.Tenant), config.DevopsComponentName)
+		status.ReadError = fmt.Sprintf("the runtime deployment %q declares no %q container", runtimetarget.RuntimeReleaseName(req.Tenant), runtimetarget.DevopsComponentName)
 		return status
 	}
 	params.ContainerEnvObserved = true

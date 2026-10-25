@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -115,7 +117,7 @@ func (s *Service) startAppForward(ctx context.Context, selection uimodel.Selecti
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("resolve environment: %w", err)
 	}
-	port := config.ContributeAppPortForResult(result)
+	port := localports.ContributeAppPortForResult(result)
 	if port <= 0 {
 		return nil, nil, 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
 	}
@@ -225,12 +227,12 @@ func kubectlPortForwardArgs(result config.OpenResult, localPort int) []string {
 	if c := strings.TrimSpace(result.EnvConfig.KubernetesContext); c != "" {
 		args = append(args, "--context", c)
 	}
-	if ns := config.KubernetesNamespaceName(result.Tenant, result.Environment); ns != "" {
+	if ns := runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment); ns != "" {
 		args = append(args, "--namespace", ns)
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+config.RuntimeReleaseName(result.Tenant),
+		"deployment/"+runtimetarget.RuntimeReleaseName(result.Tenant),
 		fmt.Sprintf("%d:%d", localPort, localPort),
 		"--address", "127.0.0.1",
 	)

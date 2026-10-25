@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -88,7 +89,7 @@ func LibraryPersistentVolumeClaimExists(contextName, namespace, claim string) (b
 }
 
 // LibraryImagePullSecretAuths needs no base64 decode: a typed Secret's Data is already decoded.
-func LibraryImagePullSecretAuths(contextName, namespace, name string) (map[string]configpkg.DockerConfigJSONAuthEntry, error) {
+func LibraryImagePullSecretAuths(contextName, namespace, name string) (map[string]containerregistry.DockerConfigJSONAuthEntry, error) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
 	name = strings.TrimSpace(name)
@@ -103,13 +104,13 @@ func LibraryImagePullSecretAuths(contextName, namespace, name string) (map[strin
 		}
 		return nil, fmt.Errorf("read existing image pull secret %s: %w", name, err)
 	}
-	encoded, ok := secret.Data[configpkg.DockerConfigJSONSecretKey]
+	encoded, ok := secret.Data[containerregistry.DockerConfigJSONSecretKey]
 	if !ok {
 		return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 	}
-	var file configpkg.DockerConfigJSONFile
+	var file containerregistry.DockerConfigJSONFile
 	if err := json.Unmarshal(encoded, &file); err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, configpkg.DockerConfigJSONSecretKey)
+		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, containerregistry.DockerConfigJSONSecretKey)
 	}
 	return file.Auths, nil
 }
@@ -141,7 +142,7 @@ func KubectlGetDeploymentArgs(contextName, namespace, name string) []string {
 
 // DeploymentPresent distinguishes "not there" from "unknown" so an unreadable cluster is never "absent".
 func DeploymentPresent(contextName, namespace, name string) (bool, error) {
-	if configpkg.CurrentExecutionMode(kubectlDeploymentGetExecutionOperation) == configpkg.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kubectlDeploymentGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryDeploymentPresent(contextName, namespace, name)
 	}
 	return defaultDeploymentPresent(contextName, namespace, name)

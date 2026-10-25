@@ -10,9 +10,15 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/deploytarget"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
@@ -24,40 +30,40 @@ import (
 	targetpkg "github.com/sophium/erun/erun-common/primitive/deploy/target"
 )
 
-func ResolveDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget, componentName, versionOverride string) (seam.DeploySpec, error) {
+func ResolveDeploySpec(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DeployTarget, componentName, versionOverride string) (helmdeploy.DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = targetpkg.ResolveDeployVersionOverride(target, versionOverride)
 
 	resolvedTarget, err := targetpkg.ResolveDeployTarget(ctx.Command, ctx.CommandScopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, nil)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	override, ok, err := resolveRolloutTimeoutOverride(target.RolloutTimeout)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	if ok {
 		spec.Deploy.Timeout = override
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
-			return seam.DeploySpec{}, fmt.Errorf("namespace quota override: %w", err)
+		if err := runtimeresources.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+			return helmdeploy.DeploySpec{}, fmt.Errorf("namespace quota override: %w", err)
 		}
 		spec.Deploy.NamespaceQuota = target.NamespaceQuotaOverride
 	}
-	specs := []seam.DeploySpec{spec}
+	specs := []helmdeploy.DeploySpec{spec}
 	if err := finalizeRuntimeChartSpecs(ctx, target, resolvedTarget, specs); err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 	return specs[0], nil
 }
 
 // ResolveCurrentDeploySpecs resolves specs for `erun deploy`, which installs by reference and never builds.
-func ResolveCurrentDeploySpecs(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) ([]seam.DeploySpec, error) {
+func ResolveCurrentDeploySpecs(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DeployTarget) ([]helmdeploy.DeploySpec, error) {
 	specs, err := ResolveCurrentDeploySpecsOrchestrated(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, false)
 	if err != nil {
 		return nil, err
@@ -72,7 +78,7 @@ func ResolveCurrentDeploySpecs(ctx core.Context, store seam.DeployStore, findPro
 		}
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+		if err := runtimeresources.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
 			return nil, fmt.Errorf("namespace quota override: %w", err)
 		}
 		for i := range specs {
@@ -101,7 +107,7 @@ func resolveRolloutTimeoutOverride(raw string) (string, bool, error) {
 
 // ResolveCurrentDeploySpecsOrchestrated serves both `erun deploy` and `build --deploy`;
 // with buildOrchestration it references the image the build phase already pushed.
-func ResolveCurrentDeploySpecsOrchestrated(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget, buildOrchestration bool) ([]seam.DeploySpec, error) {
+func ResolveCurrentDeploySpecsOrchestrated(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target model.DeployTarget, buildOrchestration bool) ([]helmdeploy.DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = targetpkg.FreezeNow(now)
 
@@ -128,7 +134,7 @@ func ResolveCurrentDeploySpecsOrchestrated(ctx core.Context, store seam.DeploySt
 
 // finalizeRuntimeChartSpecs is the single seam every resolve path funnels through
 // so runtime-chart guards and overrides apply to all of them.
-func finalizeRuntimeChartSpecs(ctx core.Context, target model.DeployTarget, resolvedTarget configpkg.OpenResult, specs []seam.DeploySpec) error {
+func finalizeRuntimeChartSpecs(ctx core.Context, target model.DeployTarget, resolvedTarget configpkg.OpenResult, specs []helmdeploy.DeploySpec) error {
 	for i := range specs {
 		applyRuntimeChartOverride(ctx, target, &specs[i])
 		if err := mcpauth.ApplyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
@@ -141,7 +147,7 @@ func finalizeRuntimeChartSpecs(ctx core.Context, target model.DeployTarget, reso
 	return guardInPodRuntimeDeploy(os.Getenv, resolvedTarget, specs)
 }
 
-func resolveDeploySpecsForResolvedTarget(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]seam.DeploySpec, error) {
+func resolveDeploySpecsForResolvedTarget(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]helmdeploy.DeploySpec, error) {
 	// Configure registry auth before any chart probe so probes are not refused as anonymous.
 	registrypkg.ConfigureInPodDeclaredRegistryAuth(ctx, resolvedTarget)
 	if resolvedTarget.RemoteRepo() {
@@ -152,7 +158,7 @@ func resolveDeploySpecsForResolvedTarget(ctx core.Context, store seam.DeployStor
 
 // resolveSelectedLocalDeploySpecs deploys exactly the selected charts; an empty
 // selection means the runtime alone, via the published chart when none is vendored.
-func resolveSelectedLocalDeploySpecs(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]seam.DeploySpec, error) {
+func resolveSelectedLocalDeploySpecs(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]helmdeploy.DeploySpec, error) {
 	plan, err := planpkg.LoadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
 	if err != nil {
 		return nil, err
@@ -170,7 +176,7 @@ func resolveSelectedLocalDeploySpecs(ctx core.Context, store seam.DeployStore, f
 	runtimeSelected := components.DeploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)
 	hasLocalRuntime := components.ContainsRuntimeContext(deployContexts, resolvedTarget.Tenant)
 
-	var currentBuild *seam.DockerBuildSpec
+	var currentBuild *imagebuild.DockerBuildSpec
 	if buildOrchestration && resolvedTarget.EnvConfig.BuildsHere() {
 		// Reference the built image by tag: install-by-reference would verify a tag the
 		// build has not pushed yet.
@@ -251,7 +257,7 @@ func guardSavedSelectionShadowingPlan(missing, selected []string, tenant, enviro
 
 // resolvePublishedDeploySpecs installs every selected chart by reference from the
 // published registry, for a target whose repo is not local.
-func resolvePublishedDeploySpecs(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget) ([]seam.DeploySpec, error) {
+func resolvePublishedDeploySpecs(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolvedTarget configpkg.OpenResult, target model.DeployTarget) ([]helmdeploy.DeploySpec, error) {
 	plan, err := planpkg.ResolvePublishedDeployPlan(ctx, findProjectRoot, resolvedTarget)
 	if err != nil {
 		return nil, err
@@ -288,8 +294,8 @@ func resolvePublishedDeploySpecs(ctx core.Context, store seam.DeployStore, findP
 	return specs, nil
 }
 
-func resolvePublishedComponentDeploySpecs(ctx core.Context, store seam.DeployStore, resolvedTarget configpkg.OpenResult, tenantComponents []string, versionOverride string) ([]seam.DeploySpec, error) {
-	specs := make([]seam.DeploySpec, 0, len(tenantComponents))
+func resolvePublishedComponentDeploySpecs(ctx core.Context, store deploytarget.DeployStore, resolvedTarget configpkg.OpenResult, tenantComponents []string, versionOverride string) ([]helmdeploy.DeploySpec, error) {
+	specs := make([]helmdeploy.DeploySpec, 0, len(tenantComponents))
 	for _, component := range tenantComponents {
 		spec, err := published.ResolvePublishedComponentDeploySpec(ctx, resolvedTarget, component, versionOverride)
 		if err != nil {
@@ -303,7 +309,7 @@ func resolvePublishedComponentDeploySpecs(ctx core.Context, store seam.DeploySto
 	return specs, nil
 }
 
-func appendPublishedRuntimeDeploySpecs(ctx core.Context, store seam.DeployStore, resolvedTarget configpkg.OpenResult, target model.DeployTarget, runtimeSelected bool, specs []seam.DeploySpec) ([]seam.DeploySpec, error) {
+func appendPublishedRuntimeDeploySpecs(ctx core.Context, store deploytarget.DeployStore, resolvedTarget configpkg.OpenResult, target model.DeployTarget, runtimeSelected bool, specs []helmdeploy.DeploySpec) ([]helmdeploy.DeploySpec, error) {
 	if !runtimeSelected {
 		return specs, nil
 	}
@@ -328,11 +334,11 @@ func ensureTenantChartsPublishedFromDeployRegistry(ctx core.Context, target conf
 	return target, nil
 }
 
-func appendRuntimeFallbackSpecs(ctx core.Context, store seam.DeployStore, resolvedTarget configpkg.OpenResult, versionOverride, runtimeChartOverride string, specs []seam.DeploySpec, runtimeSelected, hasLocalRuntime, runtimeImageExplicit bool) ([]seam.DeploySpec, error) {
+func appendRuntimeFallbackSpecs(ctx core.Context, store deploytarget.DeployStore, resolvedTarget configpkg.OpenResult, versionOverride, runtimeChartOverride string, specs []helmdeploy.DeploySpec, runtimeSelected, hasLocalRuntime, runtimeImageExplicit bool) ([]helmdeploy.DeploySpec, error) {
 	if !runtimeSelected || hasLocalRuntime {
 		return specs, nil
 	}
-	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + configpkg.DevopsComponentName + " chart")
+	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + runtimetarget.DevopsComponentName + " chart")
 	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
 	if err != nil {
 		return nil, err
@@ -340,8 +346,8 @@ func appendRuntimeFallbackSpecs(ctx core.Context, store seam.DeployStore, resolv
 	return append(specs, publishedSpecs...), nil
 }
 
-func resolveDeploySpecsForContexts(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target configpkg.OpenResult, deployContexts []model.KubernetesDeployContext, versionOverride string, currentBuild *seam.DockerBuildSpec, runtimeImageOverride string) ([]seam.DeploySpec, error) {
-	specs := make([]seam.DeploySpec, 0, len(deployContexts))
+func resolveDeploySpecsForContexts(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target configpkg.OpenResult, deployContexts []model.KubernetesDeployContext, versionOverride string, currentBuild *imagebuild.DockerBuildSpec, runtimeImageOverride string) ([]helmdeploy.DeploySpec, error) {
+	specs := make([]helmdeploy.DeploySpec, 0, len(deployContexts))
 	for _, deployContext := range deployContexts {
 		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild, runtimeImageOverride)
 		if err != nil {
@@ -354,7 +360,7 @@ func resolveDeploySpecsForContexts(ctx core.Context, store seam.DeployStore, fin
 
 // runtimeImageExplicit is true only for an operator --runtime-image on this
 // invocation, not a persisted memo.
-func resolvePublishedDevopsDeploySpecs(ctx core.Context, store seam.DeployStore, resolvedTarget configpkg.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) ([]seam.DeploySpec, error) {
+func resolvePublishedDevopsDeploySpecs(ctx core.Context, store deploytarget.DeployStore, resolvedTarget configpkg.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) ([]helmdeploy.DeploySpec, error) {
 	spec, err := published.ResolvePublishedDevopsDeploySpecWithOverrides(ctx, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
 	if err != nil {
 		return nil, err
@@ -362,11 +368,11 @@ func resolvePublishedDevopsDeploySpecs(ctx core.Context, store seam.DeployStore,
 	if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
 		return nil, err
 	}
-	return []seam.DeploySpec{spec}, nil
+	return []helmdeploy.DeploySpec{spec}, nil
 }
 
 // A missing or empty k8s tree is not an error: the runtime then comes from the published chart.
-func resolveCurrentLocalDeployContexts(findProjectRoot seam.ProjectFinderFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, resolvedTarget configpkg.OpenResult, selected []string, plan configpkg.ProjectK8sConfig) ([]model.KubernetesDeployContext, error) {
+func resolveCurrentLocalDeployContexts(findProjectRoot projectroot.ProjectFinderFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, resolvedTarget configpkg.OpenResult, selected []string, plan configpkg.ProjectK8sConfig) ([]model.KubernetesDeployContext, error) {
 	deployContexts, err := kubecheck.ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
 	if err != nil {
 		if !isNoLocalDeployChartsError(err) {
@@ -392,24 +398,24 @@ func isNoLocalDeployChartsError(err error) bool {
 	return err.Error() == "helm chart not found in current directory"
 }
 
-func resolveDeploySpecForOpenResult(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target configpkg.OpenResult, componentName, versionOverride string, currentBuild *seam.DockerBuildSpec) (seam.DeploySpec, error) {
+func resolveDeploySpecForOpenResult(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target configpkg.OpenResult, componentName, versionOverride string, currentBuild *imagebuild.DockerBuildSpec) (helmdeploy.DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = targetpkg.FreezeNow(now)
 
 	deployContext, err := targetpkg.ResolveDeployContextForTarget(findProjectRoot, resolveKubernetesDeployContext, target, componentName)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 
 	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild, "")
 }
 
-func resolveDeploySpecForContext(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string, currentBuild *seam.DockerBuildSpec, runtimeImageOverride string) (seam.DeploySpec, error) {
+func resolveDeploySpecForContext(ctx core.Context, store deploytarget.DeployStore, findProjectRoot projectroot.ProjectFinderFunc, resolveDockerBuildContext buildtarget.BuildContextResolverFunc, resolveKubernetesDeployContext deploytarget.DeployContextResolverFunc, now buildtarget.NowFunc, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string, currentBuild *imagebuild.DockerBuildSpec, runtimeImageOverride string) (helmdeploy.DeploySpec, error) {
 	store, _, _, _, _ = targetpkg.NormalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 	target, err := kube.ConcretizeDeployTargetRegistries(ctx, target)
 	if err != nil {
-		return seam.DeploySpec{}, err
+		return helmdeploy.DeploySpec{}, err
 	}
 
 	if currentBuild != nil && deployContextOwnsDockerBuild(deployContext, *currentBuild) {
@@ -427,7 +433,7 @@ func resolveDeploySpecForContext(ctx core.Context, store seam.DeployStore, findP
 		}
 	}
 	if version == "" {
-		return seam.DeploySpec{}, fmt.Errorf("deploy: a version is required — pass a version produced by `erun build`/`erun push`, or `--current` to redeploy the version this environment already runs")
+		return helmdeploy.DeploySpec{}, fmt.Errorf("deploy: a version is required — pass a version produced by `erun build`/`erun push`, or `--current` to redeploy the version this environment already runs")
 	}
 	if runtimeImageOverride != "" && chartref.DeployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		return published.ResolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "bypassing the repo-local runtime chart for the runtime image override "+runtimeImageOverride, "", true)

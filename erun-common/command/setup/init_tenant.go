@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
@@ -222,7 +223,7 @@ func (s *bootstrapRunState) loadTenantConfig() error {
 }
 
 func (s *bootstrapRunState) createTenantConfig() error {
-	if err := configpkg.ValidateTenantName(s.tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(s.tenant); err != nil {
 		return err
 	}
 	projectRoot, err := s.tenantProjectRoot()
@@ -264,7 +265,7 @@ func tenantNameList(tenants []model.TenantConfig) []string {
 	return names
 }
 
-func (s BootstrapRunner) selectTenant(params seam.BootstrapInitParams, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
+func (s BootstrapRunner) selectTenant(params bootstrap.BootstrapInitParams, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
 		return model.TenantSelectionResult{Initialize: true}, nil
 	}

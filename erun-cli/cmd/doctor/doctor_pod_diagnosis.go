@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -34,7 +35,7 @@ func reportRuntimeImageRegistryMismatch(ctx core.Context, result config.OpenResu
 			"the runtime pod can only pull if a credential for %s also resolves where `erun deploy`/`erun open --deploy` runs "+
 			"(the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is "+
 			"available there, or realign the two with `erun init %s %s --runtime-registry %s` to match the image.\n\n",
-		imageRegistry, runtimeRegistry, config.DevopsComponentName, imageRegistry, runtimeRegistry, imageRegistry,
+		imageRegistry, runtimeRegistry, runtimetarget.DevopsComponentName, imageRegistry, runtimeRegistry, imageRegistry,
 		result.Tenant, result.Environment, imageRegistry)
 	return err
 }

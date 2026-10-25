@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-mcp"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -131,7 +131,7 @@ func TestWithRuntimeDefaultsWiresEverySeamAndEnsuresTheNamespaceTwicePerDeploy(t
 	})
 	if err := runner(context.Background(), model.BuildInfo{}, erunmcp.HTTPConfig{}, erunmcp.MetricsConfig{}, runtimecfg.RuntimeConfig{
 		EnsureKubernetesNamespace: func(string, string) error { ensured++; return nil },
-		DeployHelmChart:           func(seam.HelmDeployParams) error { deployed++; return nil },
+		DeployHelmChart:           func(helmdeploy.HelmDeployParams) error { deployed++; return nil },
 	}); err != nil {
 		t.Fatalf("runner failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestWithRuntimeDefaultsWiresEverySeamAndEnsuresTheNamespaceTwicePerDeploy(t
 	if slices.Contains(unwired, true) {
 		t.Fatalf("expected every runtime seam to be wired, got %+v", got)
 	}
-	if err := got.DeployHelmChart(seam.HelmDeployParams{}); err != nil {
+	if err := got.DeployHelmChart(helmdeploy.HelmDeployParams{}); err != nil {
 		t.Fatalf("DeployHelmChart failed: %v", err)
 	}
 	if ensured != 2 || deployed != 1 {

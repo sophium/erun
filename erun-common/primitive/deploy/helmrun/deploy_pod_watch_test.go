@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
@@ -126,7 +127,7 @@ const pullingPodListJSON = `{
 func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	if err := config.SaveERunConfig(config.ERunConfig{Execution: config.ExecutionConfig{Modes: map[string]string{
-		kubectlPodWatchExecutionOperation: config.ExecutionModeLibrary,
+		kubectlPodWatchExecutionOperation: execmode.ExecutionModeLibrary,
 	}}}); err != nil {
 		t.Fatalf("SaveERunConfig: %v", err)
 	}

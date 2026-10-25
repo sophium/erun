@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/primitive/deploy/recovery"
 )
 
@@ -25,7 +25,7 @@ func (s *Service) RecoverPendingHelmRelease(id string) RecoveryResult {
 		return *errResult
 	}
 	var stdout, stderr bytes.Buffer
-	err := recovery.ClearHelmReleasePendingOperation(seam.HelmReleaseRecoveryParams{
+	err := recovery.ClearHelmReleasePendingOperation(helmdeploy.HelmReleaseRecoveryParams{
 		ReleaseName:       strings.TrimSpace(entry.Release),
 		Namespace:         strings.TrimSpace(entry.Namespace),
 		KubernetesContext: strings.TrimSpace(entry.KubernetesContext),

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
@@ -80,7 +80,7 @@ func TestIsInRuntimeEnvironment(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lookup := func(key string) string { return tc.env[key] }
-			if got := config.IsInRuntimeEnvironment(lookup); got != tc.want {
+			if got := runtimeresources.IsInRuntimeEnvironment(lookup); got != tc.want {
 				t.Errorf("IsInRuntimeEnvironment() = %v, want %v", got, tc.want)
 			}
 		})

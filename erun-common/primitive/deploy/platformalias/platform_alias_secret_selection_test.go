@@ -7,10 +7,13 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
@@ -22,9 +25,9 @@ func secondPlatformAliasProvider() model.CloudProviderConfig {
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
 		ERun: &model.ERunProviderConfig{
-			APIURL:          cloud.HostedPlatformAPIURL,
+			APIURL:          providertoken.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
+			RefreshTokenRef: providertoken.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
 		},
 	}
 }
@@ -33,7 +36,7 @@ func secondPlatformAliasProvider() model.CloudProviderConfig {
 func ambiguousHostStore(t *testing.T) staticCloudStore {
 	t.Helper()
 	redirectConfigHomeForTest(t)
-	secretStore, err := cloud.DefaultCloudSecretStore()
+	secretStore, err := secretstore.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
@@ -117,7 +120,7 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 	})
 
 	t.Run("names a configured alias with no session", func(t *testing.T) {
-		empty := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
+		empty := cloud.CloudDependencies{CloudSecretStore: secretstore.NewFileCloudSecretStore(filepath.Join(t.TempDir(), secretstore.CloudSecretStoreDirName))}
 		assertSelectionRejected(t, store, empty, testPlatformAliasProvider().Alias, "erun cloud login")
 	})
 
@@ -151,10 +154,10 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -193,10 +196,10 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -233,10 +236,10 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             configpkg.RuntimeReleaseName("team"),
+		ReleaseName:             runtimetarget.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -268,10 +271,10 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             configpkg.RuntimeReleaseName("team"),
+		ReleaseName:             runtimetarget.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -299,10 +302,10 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	}
 
 	const alias = "erun+api.nowhere.example@erun"
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: configpkg.RuntimeReleaseName("team"),
+		ReleaseName: runtimetarget.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -331,7 +334,7 @@ func TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease(t *testing.
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
 
-	deployInput := seam.HelmDeploySpec{
+	deployInput := helmdeploy.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: "team-dev-api",

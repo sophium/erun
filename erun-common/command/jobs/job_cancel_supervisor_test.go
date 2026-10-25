@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
@@ -58,7 +58,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	if !strings.Contains(err.Error(), "work's process") {
 		t.Fatalf("cancel error = %q, want one naming the missing work pid so a caller knows to retry", err)
 	}
-	if !activity.ProcessAlive(supervisor.Pid) {
+	if !activitylease.ProcessAlive(supervisor.Pid) {
 		t.Fatalf("cancel killed the job's supervisor (pid %d): nothing is left to record the outcome, which is the unknown-outcome failure this guards", supervisor.Pid)
 	}
 }

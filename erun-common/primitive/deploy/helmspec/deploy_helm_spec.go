@@ -8,35 +8,41 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/helmargs"
 )
 
-func NewHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (seam.HelmDeploySpec, error) {
+func NewHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (helmdeploy.HelmDeploySpec, error) {
 	valuesFilePath, err := resolveKubernetesDeployValuesFile(deployContext.ChartPath, target.Environment)
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 	return NewHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
 }
 
-func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (seam.HelmDeploySpec, error) {
+func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (helmdeploy.HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
-	ports := configpkg.LocalPortsForResult(target)
+	ports := localports.LocalPortsForResult(target)
 
 	// Validated here so a bad marker list fails at deploy time, not in-pod.
-	containerRegistries, err := configpkg.DeployTargetContainerRegistries(target)
+	containerRegistries, err := containerregistry.DeployTargetContainerRegistries(target)
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 
 	rolloutTimeout, err := target.EnvConfig.Deploy.Resolve()
 	if err != nil {
-		return seam.HelmDeploySpec{}, err
+		return helmdeploy.HelmDeploySpec{}, err
 	}
 
 	// helm won't pass --sets into subchart scope, so command() prefixes them with
@@ -45,7 +51,7 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 	if chartref.DeployContextOwnsRuntimeChart(deployContext, target.Tenant) && !chartref.IsOCIChartReference(deployContext.ChartPath) {
 		subchartKey, err = helm.HelmChartRuntimeSubchartKey(deployContext.ChartPath)
 		if err != nil {
-			return seam.HelmDeploySpec{}, err
+			return helmdeploy.HelmDeploySpec{}, err
 		}
 	}
 
@@ -58,14 +64,14 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		insecureRegistry = strings.TrimSpace(target.ClusterPullRegistry)
 	}
 
-	return seam.HelmDeploySpec{
+	return helmdeploy.HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
 		ValuesFilePath:      valuesFilePath,
 		SubchartKey:         subchartKey,
 		Tenant:              target.Tenant,
 		Environment:         target.Environment,
-		Namespace:           configpkg.KubernetesNamespaceName(target.Tenant, target.Environment),
+		Namespace:           runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext:   target.EnvConfig.KubernetesContext,
 		WorktreeStorage:     resolveWorktreeStorage(target),
 		WorktreeRepoName:    resolveWorktreeRepoName(target.RepoPath),
@@ -85,8 +91,8 @@ func NewHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
-		RuntimePod:          configpkg.NormalizeRuntimePodResources(configpkg.ResolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, configpkg.DefaultCgroupRoot)),
-		RuntimeDindPod:      configpkg.NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
+		RuntimePod:          runtimeresources.NormalizeRuntimePodResources(runtimeresources.ResolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, runtimeresources.DefaultCgroupRoot)),
+		RuntimeDindPod:      runtimeresources.NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
@@ -127,11 +133,11 @@ func ResolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	return projectConfig.Platform.Resolve()
 }
 
-func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
+func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *helmdeploy.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return
 	}
@@ -142,7 +148,7 @@ func ApplyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg
 	deployInput.CloudInstanceID = status.InstanceID
 }
 
-func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
+func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *helmdeploy.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -152,7 +158,7 @@ func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 		deployInput.CloudProvider = resolveCloudProviderForAlias(store, alias, deployInput.CloudProvider)
 	}
 
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err == nil && ok {
 		if alias == "" || strings.TrimSpace(status.CloudProviderAlias) == alias {
 			deployInput.CloudContextName = status.Name
@@ -164,12 +170,12 @@ func ApplyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 	}
 	// Without a region every AWS call in the pod would need one by hand.
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == configpkg.CloudProviderAWS {
-		deployInput.CloudRegion = cloud.ResolveEnvironmentAWSRegion(store, env)
+		deployInput.CloudRegion = cloudcloudcontext.ResolveEnvironmentAWSRegion(store, env)
 	}
 }
 
 func resolveCloudProviderForAlias(store configpkg.CloudReadStore, alias, current string) string {
-	if provider, err := cloud.ResolveCloudProvider(store, alias); err == nil {
+	if provider, err := providerconfig.ResolveCloudProvider(store, alias); err == nil {
 		return provider.Provider
 	}
 	if provider := cloudProviderFromAlias(alias); provider != "" {

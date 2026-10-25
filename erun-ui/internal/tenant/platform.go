@@ -10,7 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerlifecycle"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
@@ -87,7 +89,7 @@ func (s *Service) Platform(tenant, aliasOverride string) (Resolution, error) {
 }
 
 func (s *Service) tenantPlatformBearer(alias string) (string, bool) {
-	token, err := cloud.CloudProviderBearerToken(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: alias}, s.d.Cloud)
+	token, err := providertoken.CloudProviderBearerToken(core.Context{}, s.d.Store, model.CloudBearerParams{Alias: alias}, s.d.Cloud)
 	bearer := strings.TrimSpace(token.Token)
 	return bearer, err == nil && bearer != ""
 }
@@ -108,7 +110,7 @@ func (s *Service) resolveTenantERunPlatformAlias(tenantConfig model.TenantConfig
 	if chosen == "" {
 		return model.CloudProviderConfig{}, &Resolution{State: tenantPlatformStateChooseAlias, AliasChoices: tenantERunAliases}, nil
 	}
-	provider, err = cloud.ResolveCloudProvider(s.d.Store, chosen)
+	provider, err = providerconfig.ResolveCloudProvider(s.d.Store, chosen)
 	if err != nil {
 		return model.CloudProviderConfig{}, nil, err
 	}
@@ -132,7 +134,7 @@ func (s *Service) tenantSelectedERunAliases(tenantConfig model.TenantConfig) []s
 		if alias == "" {
 			continue
 		}
-		candidate, err := cloud.ResolveCloudProvider(s.d.Store, alias)
+		candidate, err := providerconfig.ResolveCloudProvider(s.d.Store, alias)
 		if err != nil || candidate.Provider != configpkg.CloudProviderERun {
 			continue
 		}
@@ -195,7 +197,7 @@ type ConnectERunPlatformInput struct {
 // ConnectERunPlatform attaches a hosted erun platform alias to the tenant the
 // click came from and returns the alias's token status.
 func (s *Service) ConnectERunPlatform(input ConnectERunPlatformInput) (model.CloudProviderStatus, error) {
-	provider, err := cloud.InitERunCloudProvider(core.Context{}, s.d.Store, model.InitERunCloudProviderParams{
+	provider, err := providerlifecycle.InitERunCloudProvider(core.Context{}, s.d.Store, model.InitERunCloudProviderParams{
 		APIURL: strings.TrimSpace(input.APIURL),
 	}, s.d.Cloud)
 	if err != nil {
@@ -206,7 +208,7 @@ func (s *Service) ConnectERunPlatform(input ConnectERunPlatformInput) (model.Clo
 			return model.CloudProviderStatus{}, err
 		}
 	}
-	return cloud.CloudProviderTokenStatus(provider, s.d.Cloud), nil
+	return providertoken.CloudProviderTokenStatus(provider, s.d.Cloud), nil
 }
 
 // A tenant with no config yet gets one naming just this alias.
@@ -216,7 +218,7 @@ func (s *Service) attachTenantCloudProviderAlias(tenant, alias string) error {
 		return err
 	}
 	config.Name = tenant
-	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = cloud.AttachTenantCloudProviderAlias(
+	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = providerconfig.AttachTenantCloudProviderAlias(
 		config.CloudProviderAliases, config.PrimaryCloudProviderAlias, alias)
 	return s.d.Store.SaveTenantConfig(config)
 }

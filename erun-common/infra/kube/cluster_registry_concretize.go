@@ -2,6 +2,7 @@ package kube
 
 import (
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -22,7 +23,7 @@ func ConcretizeRegistriesForContext(ctx core.Context, kubeContext string, list c
 // ConcretizeDeployTargetRegistries stores the concrete list on EnvConfig and the pull
 // host on ClusterPullRegistry; targets without a cluster entry are unchanged.
 func ConcretizeDeployTargetRegistries(ctx core.Context, target config.OpenResult) (config.OpenResult, error) {
-	list, err := config.DeployTargetContainerRegistries(target)
+	list, err := containerregistry.DeployTargetContainerRegistries(target)
 	if err != nil {
 		return target, err
 	}

@@ -2,11 +2,11 @@ package dockerimage
 
 import (
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 )
 
-func testPromoteBuildInput() seam.DockerBuildSpec {
-	return seam.DockerBuildSpec{
+func testPromoteBuildInput() imagebuild.DockerBuildSpec {
+	return imagebuild.DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
 		Image: model.DockerImageReference{

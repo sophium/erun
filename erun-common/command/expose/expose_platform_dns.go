@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -19,10 +20,10 @@ func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, c
 	if explicit != nil {
 		return explicit, model.CloudProviderConfig{}, nil
 	}
-	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
+	if hasDirectOverride || !platformapi.HasAnyErunPlatformAlias(cloudStore) {
 		return upsertPowerDNSRecord, model.CloudProviderConfig{}, nil
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
 		return nil, model.CloudProviderConfig{}, err
 	}
@@ -33,10 +34,10 @@ func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, 
 	if explicit != nil {
 		return explicit, model.CloudProviderConfig{}, nil
 	}
-	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
+	if hasDirectOverride || !platformapi.HasAnyErunPlatformAlias(cloudStore) {
 		return deletePowerDNSRecord, model.CloudProviderConfig{}, nil
 	}
-	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
+	client, provider, err := platformapi.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
 		return nil, model.CloudProviderConfig{}, err
 	}
@@ -46,7 +47,7 @@ func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, 
 // The environment id lookup happens at call time so it never runs under --dry-run.
 func platformDNSRecordUpserter(client *platformclient.PlatformClient, environment string) DNSRecordUpserterFunc {
 	return func(params DNSRecordUpsertParams) error {
-		environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
+		environmentID, err := platformapi.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 		if err != nil {
 			return err
 		}
@@ -57,7 +58,7 @@ func platformDNSRecordUpserter(client *platformclient.PlatformClient, environmen
 
 func platformDNSRecordDeleter(client *platformclient.PlatformClient, environment string) DNSRecordDeleterFunc {
 	return func(DNSRecordDeleteParams) error {
-		environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
+		environmentID, err := platformapi.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 		if err != nil {
 			return err
 		}

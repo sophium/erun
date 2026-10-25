@@ -13,7 +13,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolmetrics"
@@ -148,7 +149,7 @@ func sampleIdleMetrics(runtime runtimecfg.RuntimeConfig, recorder *toolmetrics.M
 		return
 	}
 	now := time.Now()
-	status, err := activitypkg.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, now)
+	status, err := idlestatus.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, now)
 	if err != nil {
 		// Keep the last known gauge values on a transient failure.
 		return
@@ -204,7 +205,7 @@ func sampleTrafficWindow(runtime runtimecfg.RuntimeConfig, recorder *toolmetrics
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	sshBytes := lastSSHBytes
 	if tenant != "" && environment != "" {
-		if activity, err := activitypkg.LoadEnvironmentActivity(tenant, environment); err == nil {
+		if activity, err := records.LoadEnvironmentActivity(tenant, environment); err == nil {
 			sshBytes = activity[config.ActivityKindSSH].Bytes
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/desktop"
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/shell"
@@ -220,7 +221,7 @@ func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect)
 	if dialect == openNoShellDialectPowerShell {
 		commands := []string{
 			"kubectl config use-context " + powerShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext)) + " | Out-Null",
-			"kubectl config set-context --current " + powerShellQuote("--namespace="+config.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
+			"kubectl config set-context --current " + powerShellQuote("--namespace="+runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
 			"Set-Location -LiteralPath " + powerShellQuote(result.RepoPath),
 		}
 		return strings.Join(commands, "\n") + "\n"

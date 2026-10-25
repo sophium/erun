@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 )
 
 // TenantRuntimeImage is the tenant's own <tenant>-devops runtime image.
@@ -14,7 +14,7 @@ func TenantRuntimeImage(registry, tenant, version string) string {
 
 // CanonicalRuntimeImage is the published erun-devops fallback image.
 func CanonicalRuntimeImage(registry, version string) string {
-	return fmt.Sprintf("%s/%s:%s", registry, config.DevopsComponentName, version)
+	return fmt.Sprintf("%s/%s:%s", registry, runtimetarget.DevopsComponentName, version)
 }
 
 // ResolveRuntimeImage returns the tenant's image unless the registry confirms it

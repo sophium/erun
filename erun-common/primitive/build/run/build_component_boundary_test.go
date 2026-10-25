@@ -10,7 +10,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	specpkg "github.com/sophium/erun/erun-common/primitive/build/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -28,7 +30,7 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 	return projectRoot, componentDir, suiteDir
 }
 
-func boundaryResolvers(projectRoot, cwd string) (seam.ProjectFinderFunc, seam.BuildContextResolverFunc) {
+func boundaryResolvers(projectRoot, cwd string) (projectroot.ProjectFinderFunc, buildtarget.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
 	resolveBuildContext := func() (model.DockerBuildContext, error) { return dockerspec.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext
@@ -51,10 +53,10 @@ func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 	}
 }
 
-func testOutcomeBuild(t *testing.T, dockerfile string) seam.DockerBuildSpec {
+func testOutcomeBuild(t *testing.T, dockerfile string) imagebuild.DockerBuildSpec {
 	t.Helper()
 	dir := t.TempDir()
-	return seam.DockerBuildSpec{
+	return imagebuild.DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, dockerfile),
 		Image:          model.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
@@ -62,7 +64,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) seam.DockerBuildSpec {
 	}
 }
 
-func runOutcomeBuild(t *testing.T, buildInput seam.DockerBuildSpec, build seam.DockerImageBuilderFunc) (string, error) {
+func runOutcomeBuild(t *testing.T, buildInput imagebuild.DockerBuildSpec, build imagebuild.DockerImageBuilderFunc) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
@@ -76,7 +78,7 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 	promoted.Fingerprint = "abc123"
 	promoted.Promote = true
 
-	log, err := runOutcomeBuild(t, promoted, func(input seam.DockerBuildSpec, _, _ io.Writer) error {
+	log, err := runOutcomeBuild(t, promoted, func(input imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		input.Cache.NotePromoteFallback()
 		return nil
 	})
@@ -94,11 +96,11 @@ func TestConcurrentBuildsReportTestOutcomesInBuildOrder(t *testing.T) {
 	slow.Image.ImageName = "slow"
 	fast := buildSpecFromDockerfile(t, dir, "fast", "debian:bookworm")
 	fast.Image.ImageName = "fast"
-	ordered, dependencies := resolveTestDependencies(t, []seam.DockerBuildSpec{slow, fast})
+	ordered, dependencies := resolveTestDependencies(t, []imagebuild.DockerBuildSpec{slow, fast})
 
 	var released sync.WaitGroup
 	released.Add(1)
-	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec imagebuild.DockerBuildSpec, _, _ io.Writer) error {
 		if spec.Image.ImageName == "fast" {
 			released.Done()
 			return nil

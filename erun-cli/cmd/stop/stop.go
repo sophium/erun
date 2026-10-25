@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
@@ -64,7 +65,7 @@ func runStopCommand(ctx core.Context, args []string, overrides model.OpenParams,
 	defer closeEnvTrace()
 	ctx.Trace(fmt.Sprintf("stop: tenant=%s environment=%s kubernetes-context=%s release=%s namespace=%s",
 		result.Tenant, result.Environment, result.EnvConfig.KubernetesContext,
-		config.RuntimeReleaseName(result.Tenant), config.KubernetesNamespaceName(result.Tenant, result.Environment)))
+		runtimetarget.RuntimeReleaseName(result.Tenant), runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment)))
 	if err := ctx.RequireKubernetesContext(result.EnvConfig.KubernetesContext); err != nil {
 		return err
 	}

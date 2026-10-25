@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -54,7 +55,7 @@ func inertDeps() Deps {
 		CanConnectLocalPort:       func(int) bool { return false },
 		CanReachMCPEndpoint:       func(int) bool { return false },
 		MCPEndpoint: func(result configpkg.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", configpkg.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer: func(string, string) string { return "" },
 		LoadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {

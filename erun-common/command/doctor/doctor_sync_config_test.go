@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
@@ -116,7 +116,7 @@ func TestSyncConfigRootNotRewrittenWhenInSync(t *testing.T) {
 	mustNoErr(t, err, "first inspect")
 	mustNoErr(t, RunRuntimeConfigSync(testTraceContext(false), first), "first sync")
 
-	rootPath := config.RuntimeRootConfigPath(configHome)
+	rootPath := runtimesync.RuntimeRootConfigPath(configHome)
 	rootDir := filepath.Dir(rootPath)
 	before, err := os.ReadFile(rootPath)
 	mustNoErr(t, err, "read root config after first sync")

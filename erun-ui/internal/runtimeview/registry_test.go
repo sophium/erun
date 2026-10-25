@@ -4,14 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
 )
 
 func TestLoadHostedRegistryDelegatesToDeps(t *testing.T) {
 	service := newTestService(Deps{
 		LoadHostedRegistry: func(context.Context) HostedRegistryStatus {
 			return HostedRegistryStatus{
-				Host:     config.HostedRegistryHost,
+				Host:     containerregistry.HostedRegistryHost,
 				Reason:   "does not resolve",
 				Recovery: "Choose a different registry instead.",
 			}
@@ -38,8 +38,8 @@ func TestLoadHostedRegistryDefaultMapsAnUnreachableProbe(t *testing.T) {
 	if status.Available {
 		t.Fatal("expected a canceled probe context to report unavailable")
 	}
-	if status.Host != config.HostedRegistryHost {
-		t.Fatalf("host = %q, want %q", status.Host, config.HostedRegistryHost)
+	if status.Host != containerregistry.HostedRegistryHost {
+		t.Fatalf("host = %q, want %q", status.Host, containerregistry.HostedRegistryHost)
 	}
 	if status.Reason == "" {
 		t.Fatal("expected a reason naming why the registry is unavailable")

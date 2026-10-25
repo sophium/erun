@@ -9,8 +9,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerlifecycle"
 )
 
 // CloudDependencies leaves the secret store nil when it cannot be created; callers needing it fail clearly.
@@ -18,7 +20,7 @@ func CloudDependencies() cloud.CloudDependencies {
 	return cloud.DefaultCloudDependencies()
 }
 
-func RunCloudInitAWSCommand(ctx core.Context, store seam.CloudStore, promptRunner promptpkg.PromptRunner, params model.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
+func RunCloudInitAWSCommand(ctx core.Context, store cloudstore.CloudStore, promptRunner promptpkg.PromptRunner, params model.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
 	var err error
 	if strings.TrimSpace(params.Profile) == "" && awsInitParamsNeedPrompt(params) {
 		printAWSInitGuidance(ctx)
@@ -30,7 +32,7 @@ func RunCloudInitAWSCommand(ctx core.Context, store seam.CloudStore, promptRunne
 	if ctx.DryRun {
 		return traceAWSCloudInitDryRun(ctx, params)
 	}
-	provider, err := cloud.InitAWSCloudProvider(ctx, store, params, deps)
+	provider, err := providerlifecycle.InitAWSCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
@@ -205,8 +207,8 @@ func traceAWSEnableOIDCCommand(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", args...)
 }
 
-func SelectCloudAliasPrompt(store seam.CloudStore, selectRunner promptpkg.SelectRunner) (string, error) {
-	providers, err := cloud.ListCloudProviders(store)
+func SelectCloudAliasPrompt(store cloudstore.CloudStore, selectRunner promptpkg.SelectRunner) (string, error) {
+	providers, err := providerconfig.ListCloudProviders(store)
 	if err != nil {
 		return "", err
 	}

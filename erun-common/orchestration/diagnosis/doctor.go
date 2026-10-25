@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
@@ -24,7 +25,7 @@ func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, scr
 	}
 }
 
-func RunTracedRuntimeContainerCommand(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, container, label, script string) (model.RemoteCommandResult, error) {
+func RunTracedRuntimeContainerCommand(ctx core.Context, runner runtimepod.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, container, label, script string) (model.RemoteCommandResult, error) {
 	preview := PreviewRuntimeContainerCommand(req, container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
@@ -40,7 +41,7 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner seam.RuntimeConta
 	}
 	result, err := runner(req, container, script)
 	if err != nil {
-		return result, cloud.NormalizeDoctorKubectlError(req, result.Stderr, err)
+		return result, runtimewait.NormalizeDoctorKubectlError(req, result.Stderr, err)
 	}
 	return result, nil
 }
@@ -59,8 +60,8 @@ func RunRuntimeContainerCommand(req config.ShellLaunchParams, container, script 
 }
 
 func kubectlContainerExecArgs(req config.ShellLaunchParams, container, script string) []string {
-	args := config.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "exec", "-c", strings.TrimSpace(container))
-	args = append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/platformapi"
 )
 
 // UnexposeResult is the resolved teardown plan.
@@ -24,7 +26,7 @@ type UnexposeResult struct {
 
 // RunUnexposeService removes the wildcard record expose created so a later env
 // reusing the name does not inherit it. Dry-run traces the full plan.
-func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store envstore.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -59,8 +61,8 @@ func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store sea
 		ctx.Trace(fmt.Sprintf("unexpose: platform powerdns namespace %s", result.PlatformNamespace))
 		ctx.TraceCommand("", "kubectl", powerDNSDeleteArgs(deleteParams)...)
 	} else {
-		cloud.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
-		cloud.TracePlatformCall(ctx, dnsProvider, "DELETE", "/v1/environments/{environment_id}/hostname")
+		platformapi.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+		platformapi.TracePlatformCall(ctx, dnsProvider, "DELETE", "/v1/environments/{environment_id}/hostname")
 	}
 	if ctx.DryRun {
 		return result, nil
@@ -72,13 +74,13 @@ func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store sea
 	return result, nil
 }
 
-func resolveUnexposeServicePlan(params model.UnexposeParams, store seam.ExposeStore) (UnexposeResult, error) {
+func resolveUnexposeServicePlan(params model.UnexposeParams, store envstore.ExposeStore) (UnexposeResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
 		return UnexposeResult{}, err
 	}
-	if err := config.ValidateTenantName(tenant); err != nil {
+	if err := runtimetarget.ValidateTenantName(tenant); err != nil {
 		return UnexposeResult{}, err
 	}
 
@@ -91,7 +93,7 @@ func resolveUnexposeServicePlan(params model.UnexposeParams, store seam.ExposeSt
 		return UnexposeResult{}, err
 	}
 
-	envLabel := config.KubernetesNamespaceName(tenant, environment)
+	envLabel := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	return UnexposeResult{
 		Tenant:                     tenant,
 		Environment:                environment,

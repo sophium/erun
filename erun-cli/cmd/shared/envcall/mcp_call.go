@@ -9,10 +9,10 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/cmd/shared/envscope"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/internal"
@@ -73,7 +73,7 @@ func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen envscope.OpenResolver, p
 	if err != nil {
 		return McpEdgeTarget{}, err
 	}
-	port := config.MCPPortForResult(result)
+	port := localports.MCPPortForResult(result)
 	if port <= 0 {
 		return McpEdgeTarget{}, fmt.Errorf("no local MCP port is configured for %s/%s", result.Tenant, result.Environment)
 	}
@@ -88,7 +88,7 @@ func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen envscope.OpenResolver, p
 }
 
 // McpEdgeTokenMinter mints per request so long tool calls still start with a fresh token.
-func McpEdgeTokenMinter(target McpEdgeTarget) seam.MCPTokenMinter {
+func McpEdgeTokenMinter(target McpEdgeTarget) runtimepod.MCPTokenMinter {
 	return func() (string, error) {
 		return mcpauth.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.Tenant, target.Environment, time.Now())
 	}

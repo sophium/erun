@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
@@ -156,12 +157,12 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (jobstate
 		}
 		return jobstate.EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activity.ProcessAlive, jobhost.CurrentJobHostname()), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activitylease.ProcessAlive, jobhost.CurrentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning aged-out records.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]jobstate.EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activity.ProcessAlive, jobhost.CurrentJobHostname())
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activitylease.ProcessAlive, jobhost.CurrentJobHostname())
 }
 
 func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]jobstate.EnvironmentJob, error) {
@@ -205,7 +206,7 @@ func reconcileEnvironmentJob(dir string, job jobstate.EnvironmentJob, now time.T
 	return reconcileEnvironmentJobWithRestartCheck(dir, job, now, alive, hostname, opentarget.RunOpenKubectl)
 }
 
-func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner seam.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
+func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner kubeapi.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
 	// Never persisted: it is meaningless without the read time.
 	job.AliveAgeMs = environmentJobAliveAgeMs(job.LastAliveAt, now)
 	if job.State != EnvironmentJobStateRunning {
@@ -232,7 +233,7 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.Environmen
 	return job
 }
 
-func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, hostname string, restartRunner seam.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
+func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, hostname string, restartRunner kubeapi.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
 	job.State = jobstate.EnvironmentJobStateUnknown
 	job.EndedAt = now
 	job.ExitCode = nil
@@ -255,8 +256,8 @@ func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, h
 
 // reconcileSamePodUnknownReason credits a container restart only when it lands
 // at or after the job was last alive.
-func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner seam.OpenKubectlRunnerFunc) (kind, reason string) {
-	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, config.DevopsComponentName, restartRunner)
+func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner kubeapi.OpenKubectlRunnerFunc) (kind, reason string) {
+	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, runtimetarget.DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
 		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
 		if summary := environmentJobResourceStateSummaryFunc(); summary != "" {
@@ -267,7 +268,7 @@ func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string,
 	if terminatedReason == "" {
 		terminatedReason = "no reason reported"
 	}
-	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, config.DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
+	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, runtimetarget.DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
 }
 
 // environmentJobResourceStateSummaryFunc reports cgroup numbers, never a
@@ -275,7 +276,7 @@ func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string,
 var environmentJobResourceStateSummaryFunc = environmentJobResourceStateSummary
 
 func environmentJobResourceStateSummary() string {
-	usage := config.ReadLocalRuntimeUsage(config.DefaultCgroupRoot)
+	usage := runtimeresources.ReadLocalRuntimeUsage(runtimeresources.DefaultCgroupRoot)
 	var parts []string
 	if usage.Memory.Unavailable == "" && !usage.Memory.Unlimited && usage.Memory.LimitBytes > 0 {
 		part := fmt.Sprintf("memory %.2f/%.2f GiB", gibibytes(usage.Memory.CurrentBytes), gibibytes(usage.Memory.LimitBytes))
@@ -321,7 +322,7 @@ func environmentJobChildren(dir, parentID string, now time.Time) []jobstate.Envi
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
-		children = append(children, reconcileEnvironmentJob(dir, job, now, activity.ProcessAlive, hostname))
+		children = append(children, reconcileEnvironmentJob(dir, job, now, activitylease.ProcessAlive, hostname))
 	}
 	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 	return children

@@ -7,12 +7,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // InspectGitPushAccess runs a read-only script that never invokes gh's interactive subcommands.
-func InspectGitPushAccess(ctx core.Context, runner seam.RemoteCommandRunnerFunc, req config.ShellLaunchParams, repoPath string) (model.GitPushAccessStatus, error) {
+func InspectGitPushAccess(ctx core.Context, runner runtimepod.RemoteCommandRunnerFunc, req config.ShellLaunchParams, repoPath string) (model.GitPushAccessStatus, error) {
 	out, err := kube.RunTracedRemoteCommand(ctx, runner, req, "git-push-access-script", gitPushAccessScript(repoPath))
 	if err != nil {
 		return model.GitPushAccessStatus{}, fmt.Errorf("read git push access%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)

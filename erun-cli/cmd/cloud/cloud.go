@@ -12,16 +12,20 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/hostcreds"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerlifecycle"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/spf13/cobra"
 )
 
 type cloudCommandStoreInterface interface {
-	seam.CloudStore
-	seam.EnvironmentCloudAliasStore
+	cloudstore.CloudStore
+	cloudstore.EnvironmentCloudAliasStore
 	configpkg.OpenStore
 }
 
@@ -73,7 +77,7 @@ func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, 
 	}
 	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
-	refresh, err := cloud.RefreshHostAWSCredentials(ctx, store, result, deps)
+	refresh, err := hostcreds.RefreshHostAWSCredentials(ctx, store, result, deps)
 	if err != nil {
 		return err
 	}
@@ -94,7 +98,7 @@ func writeHostCredentialsRefreshed(ctx core.Context, result configpkg.OpenResult
 	return err
 }
 
-func newCloudLoginCmd(store seam.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudLoginCmd(store cloudstore.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var flow string
 	var scopes []string
@@ -116,7 +120,7 @@ func newCloudLoginCmd(store seam.CloudStore, promptRunner prompt.PromptRunner, s
 	return cmd
 }
 
-func runCloudLoginCommand(ctx core.Context, store seam.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
+func runCloudLoginCommand(ctx core.Context, store cloudstore.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
 		if ctx.DryRun {
@@ -130,7 +134,7 @@ func runCloudLoginCommand(ctx core.Context, store seam.CloudStore, promptRunner 
 		}
 		alias = selected
 	}
-	provider, err := cloud.ResolveCloudProvider(store, alias)
+	provider, err := providerconfig.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
@@ -140,7 +144,7 @@ func runCloudLoginCommand(ctx core.Context, store seam.CloudStore, promptRunner 
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry run: cloud login planned for %s.\n", provider.Alias)
 		return err
 	}
-	status := cloud.CloudProviderTokenStatus(provider, deps)
+	status := providertoken.CloudProviderTokenStatus(provider, deps)
 	if status.Status == configpkg.CloudTokenStatusActive && !params.Force {
 		return finishCloudLogin(ctx, store, status, deps)
 	}
@@ -148,7 +152,7 @@ func runCloudLoginCommand(ctx core.Context, store seam.CloudStore, promptRunner 
 }
 
 // A declined login reports the unchanged status, not a failure.
-func confirmAndLoginCloudProvider(ctx core.Context, store seam.CloudStore, promptRunner prompt.PromptRunner, alias, providerAlias string, status model.CloudProviderStatus, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
+func confirmAndLoginCloudProvider(ctx core.Context, store cloudstore.CloudStore, promptRunner prompt.PromptRunner, alias, providerAlias string, status model.CloudProviderStatus, params model.CloudLoginParams, deps cloud.CloudDependencies) error {
 	login, err := prompt.ConfirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
 	if err != nil {
 		return err
@@ -156,7 +160,7 @@ func confirmAndLoginCloudProvider(ctx core.Context, store seam.CloudStore, promp
 	if !login {
 		return writeCloudStatus(ctx, status)
 	}
-	status, err = cloud.LoginCloudProviderAlias(ctx, store, model.CloudLoginParams{Alias: alias, Force: true, Flow: params.Flow, Scopes: params.Scopes}, deps)
+	status, err = providerlifecycle.LoginCloudProviderAlias(ctx, store, model.CloudLoginParams{Alias: alias, Force: true, Flow: params.Flow, Scopes: params.Scopes}, deps)
 	if err != nil {
 		return err
 	}
@@ -164,7 +168,7 @@ func confirmAndLoginCloudProvider(ctx core.Context, store seam.CloudStore, promp
 }
 
 // finishCloudLogin proves an active erun-hosted session with GET /v1/whoami.
-func finishCloudLogin(ctx core.Context, store seam.CloudStore, status model.CloudProviderStatus, deps cloud.CloudDependencies) error {
+func finishCloudLogin(ctx core.Context, store cloudstore.CloudStore, status model.CloudProviderStatus, deps cloud.CloudDependencies) error {
 	if err := writeCloudStatus(ctx, status); err != nil {
 		return err
 	}
@@ -174,8 +178,8 @@ func finishCloudLogin(ctx core.Context, store seam.CloudStore, status model.Clou
 	return writeERunWhoami(ctx, store, status.Alias, deps)
 }
 
-func writeERunWhoami(ctx core.Context, store seam.CloudStore, alias string, deps cloud.CloudDependencies) error {
-	provider, err := cloud.ResolveCloudProvider(store, alias)
+func writeERunWhoami(ctx core.Context, store cloudstore.CloudStore, alias string, deps cloud.CloudDependencies) error {
+	provider, err := providerconfig.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
@@ -183,7 +187,7 @@ func writeERunWhoami(ctx core.Context, store seam.CloudStore, alias string, deps
 		return nil
 	}
 	client := platformclient.NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
-		token, err := cloud.CloudProviderBearerToken(ctx, store, model.CloudBearerParams{Alias: alias}, deps)
+		token, err := providertoken.CloudProviderBearerToken(ctx, store, model.CloudBearerParams{Alias: alias}, deps)
 		if err != nil {
 			return "", err
 		}
@@ -216,7 +220,7 @@ func traceCloudLoginPlan(ctx core.Context, provider model.CloudProviderConfig) {
 	}
 }
 
-func newCloudOIDCCmd(store seam.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudOIDCCmd(store cloudstore.CloudStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	var audience string
 	cmd := &cobra.Command{
@@ -237,7 +241,7 @@ func newCloudOIDCCmd(store seam.CloudStore, promptRunner prompt.PromptRunner, se
 	return cmd
 }
 
-func runCloudOIDCCommand(ctx core.Context, store seam.CloudStore, _ prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudBearerParams, deps cloud.CloudDependencies) error {
+func runCloudOIDCCommand(ctx core.Context, store cloudstore.CloudStore, _ prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.CloudBearerParams, deps cloud.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
 		selected, err := cloudcli.SelectCloudAliasPrompt(store, selectRunner)
@@ -246,14 +250,14 @@ func runCloudOIDCCommand(ctx core.Context, store seam.CloudStore, _ prompt.Promp
 		}
 		alias = selected
 	}
-	provider, err := cloud.ResolveCloudProvider(store, alias)
+	provider, err := providerconfig.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
 	}
 	if provider.Provider != configpkg.CloudProviderAWS {
 		return fmt.Errorf("cloud provider alias %q is a %q-type alias, which does not use AWS web-identity federation; its OIDC issuer is set at `cloud init`", provider.Alias, provider.Provider)
 	}
-	status, _, err := cloud.SetupCloudProviderOIDC(ctx, store, model.CloudBearerParams{
+	status, _, err := providerlifecycle.SetupCloudProviderOIDC(ctx, store, model.CloudBearerParams{
 		Alias:    alias,
 		Audience: params.Audience,
 	}, deps)
@@ -268,7 +272,7 @@ func runCloudOIDCCommand(ctx core.Context, store seam.CloudStore, _ prompt.Promp
 	return err
 }
 
-func newCloudSetCmd(store seam.EnvironmentCloudAliasStore) *cobra.Command {
+func newCloudSetCmd(store cloudstore.EnvironmentCloudAliasStore) *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
 		Use:          "set TENANT ENVIRONMENT",
@@ -291,8 +295,8 @@ func newCloudSetCmd(store seam.EnvironmentCloudAliasStore) *cobra.Command {
 	return cmd
 }
 
-func runCloudSetCommand(ctx core.Context, store seam.EnvironmentCloudAliasStore, params model.SetEnvironmentCloudAliasParams) error {
-	if _, err := cloud.SetEnvironmentCloudProviderAlias(ctx, store, params); err != nil {
+func runCloudSetCommand(ctx core.Context, store cloudstore.EnvironmentCloudAliasStore, params model.SetEnvironmentCloudAliasParams) error {
+	if _, err := providerlifecycle.SetEnvironmentCloudProviderAlias(ctx, store, params); err != nil {
 		return err
 	}
 	var err error

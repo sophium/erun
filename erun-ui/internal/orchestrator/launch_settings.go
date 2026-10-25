@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/openrouter"
 	"github.com/sophium/erun/erun-common/command/ai"
 	orchcmd "github.com/sophium/erun/erun-common/command/orchestrator"
 )
@@ -106,7 +107,7 @@ func clearedLaunchSetting(value string) string {
 // unhonourable settings refuse the start.
 func (s *Service) resolvePersistedOrchestratorLaunch(def config.OrchestratorConfig) (orchestratorLaunchPlan, error) {
 	settings := orchestratorLaunchSettingsOf(def)
-	catalog, err := config.ResolveOpenRouterConfig(s.d.Store)
+	catalog, err := openrouter.ResolveOpenRouterConfig(s.d.Store)
 	if err != nil && settings.UseGateway && !errors.Is(err, config.ErrNotInitialized) {
 		return orchestratorLaunchPlan{}, fmt.Errorf("start orchestrator %s: cannot read the gateway catalog: %w", def.ID, err)
 	}

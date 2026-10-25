@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/bootstrap"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
@@ -22,8 +22,8 @@ const (
 	enterKubernetesContextManuallyOption = "Enter Kubernetes context manually"
 )
 
-func NewInitCmd(runInit func(core.Context, seam.BootstrapInitParams) error) *cobra.Command {
-	params := seam.BootstrapInitParams{}
+func NewInitCmd(runInit func(core.Context, bootstrap.BootstrapInitParams) error) *cobra.Command {
+	params := bootstrap.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
 	clusterRegistry := false
@@ -77,20 +77,20 @@ func NewInitCmd(runInit func(core.Context, seam.BootstrapInitParams) error) *cob
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params seam.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry bool, envType string, components []string) (seam.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params bootstrap.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry bool, envType string, components []string) (bootstrap.BootstrapInitParams, error) {
 	runParams := params
 	applyPositionalInitArgs(&runParams, args)
 	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
-		return seam.BootstrapInitParams{}, err
+		return bootstrap.BootstrapInitParams{}, err
 	}
 	if err := applyErunRegistryFlag(&runParams, erunRegistry, clusterRegistry); err != nil {
-		return seam.BootstrapInitParams{}, err
+		return bootstrap.BootstrapInitParams{}, err
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
-		return seam.BootstrapInitParams{}, err
+		return bootstrap.BootstrapInitParams{}, err
 	}
 	if err := validateInitRunParams(runParams); err != nil {
-		return seam.BootstrapInitParams{}, err
+		return bootstrap.BootstrapInitParams{}, err
 	}
 	if cmd.Flags().Changed("set-default-tenant") {
 		runParams.ConfirmTenant = &setDefaultTenant
@@ -104,7 +104,7 @@ func initRunParams(cmd *cobra.Command, args []string, params seam.BootstrapInitP
 	return runParams, nil
 }
 
-func applyPositionalInitArgs(runParams *seam.BootstrapInitParams, args []string) {
+func applyPositionalInitArgs(runParams *bootstrap.BootstrapInitParams, args []string) {
 	if runParams.Tenant == "" && len(args) > 0 {
 		runParams.Tenant = args[0]
 	}
@@ -113,7 +113,7 @@ func applyPositionalInitArgs(runParams *seam.BootstrapInitParams, args []string)
 	}
 }
 
-func applyClusterRegistryFlag(runParams *seam.BootstrapInitParams, clusterRegistry bool) error {
+func applyClusterRegistryFlag(runParams *bootstrap.BootstrapInitParams, clusterRegistry bool) error {
 	if !clusterRegistry {
 		return nil
 	}
@@ -125,7 +125,7 @@ func applyClusterRegistryFlag(runParams *seam.BootstrapInitParams, clusterRegist
 	return nil
 }
 
-func applyErunRegistryFlag(runParams *seam.BootstrapInitParams, erunRegistry, clusterRegistry bool) error {
+func applyErunRegistryFlag(runParams *bootstrap.BootstrapInitParams, erunRegistry, clusterRegistry bool) error {
 	if !erunRegistry {
 		return nil
 	}
@@ -139,7 +139,7 @@ func applyErunRegistryFlag(runParams *seam.BootstrapInitParams, erunRegistry, cl
 	return nil
 }
 
-func applyInitTypeFlag(cmd *cobra.Command, runParams *seam.BootstrapInitParams, envType string) error {
+func applyInitTypeFlag(cmd *cobra.Command, runParams *bootstrap.BootstrapInitParams, envType string) error {
 	envType = strings.TrimSpace(envType)
 	if envType == "" {
 		return nil
@@ -149,7 +149,7 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *seam.BootstrapInitParams, 
 		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
 	// Derived from RemoteWorktree so host reports false.
-	expectedRemote := (seam.BootstrapInitParams{Type: parsed}).RemoteWorktree()
+	expectedRemote := (bootstrap.BootstrapInitParams{Type: parsed}).RemoteWorktree()
 	remoteFlag := cmd.Flags().Lookup("remote")
 	remoteChanged := remoteFlag != nil && remoteFlag.Changed
 	if remoteChanged && runParams.Remote != expectedRemote {
@@ -160,7 +160,7 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *seam.BootstrapInitParams, 
 	return nil
 }
 
-func validateInitRunParams(params seam.BootstrapInitParams) error {
+func validateInitRunParams(params bootstrap.BootstrapInitParams) error {
 	if params.RemoteWorktree() && params.Tenant == "" {
 		return fmt.Errorf("tenant is required for non-local-agent envs")
 	}

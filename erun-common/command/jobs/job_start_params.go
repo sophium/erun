@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 )
 
 // StartEnvironmentJobParams is the work to detach.
@@ -85,7 +85,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 	}
 	resolved := dir
 	if !filepath.IsAbs(resolved) {
-		if _, root, err := config.FindProjectRoot(); err == nil {
+		if _, root, err := projectroot.FindProjectRoot(); err == nil {
 			resolved = filepath.Join(root, resolved)
 		} else if abs, absErr := filepath.Abs(resolved); absErr == nil {
 			resolved = abs
@@ -220,7 +220,7 @@ func normalizeEnvironmentJobOutputLimit(limit int64) (int64, error) {
 
 func normalizeEnvironmentJobLeaseTTL(ttl time.Duration) (time.Duration, error) {
 	if ttl == 0 {
-		return activity.DefaultEnvironmentActivityLeaseTTL, nil
+		return activitylease.DefaultEnvironmentActivityLeaseTTL, nil
 	}
 	if ttl < 0 {
 		return 0, fmt.Errorf("lease ttl must be greater than zero")

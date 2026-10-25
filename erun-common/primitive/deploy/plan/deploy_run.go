@@ -8,12 +8,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 )
 
 // LoadProjectK8sPlanForDeploy reads the plan once: all specs share a repo and
 // environment. A malformed config errors rather than shipping a wrong plan.
-func LoadProjectK8sPlanForDeploy(executions []seam.DeploySpec) (configpkg.ProjectK8sConfig, error) {
+func LoadProjectK8sPlanForDeploy(executions []helmdeploy.DeploySpec) (configpkg.ProjectK8sConfig, error) {
 	for _, execution := range executions {
 		plan, err := LoadProjectK8sPlanForRepo(execution.Target.RepoPath, execution.Target.Environment)
 		if err != nil {
@@ -47,7 +48,7 @@ func LoadProjectK8sPlanForRepo(repoPath, environment string) (configpkg.ProjectK
 
 // ResolvePublishedDeployPlan falls back to the cwd project when the configured
 // repo path (the pod's own) is absent on this machine, tracing each branch.
-func ResolvePublishedDeployPlan(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
+func ResolvePublishedDeployPlan(ctx core.Context, findProjectRoot projectroot.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
 	configuredPath := strings.TrimSpace(resolvedTarget.RepoPath)
 	plan, err := LoadProjectK8sPlanForRepo(configuredPath, resolvedTarget.Environment)
 	if err != nil {
@@ -78,7 +79,7 @@ func ResolvePublishedDeployPlan(ctx core.Context, findProjectRoot seam.ProjectFi
 	return fallbackPlan, nil
 }
 
-func resolveDeployPlanFallbackPath(findProjectRoot seam.ProjectFinderFunc, configuredPath string) string {
+func resolveDeployPlanFallbackPath(findProjectRoot projectroot.ProjectFinderFunc, configuredPath string) string {
 	_, fallbackPath, err := findProjectRoot()
 	fallbackPath = strings.TrimSpace(fallbackPath)
 	if err != nil || fallbackPath == "" || filepath.Clean(fallbackPath) == filepath.Clean(configuredPath) {

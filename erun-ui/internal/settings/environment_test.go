@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -22,11 +23,11 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             cloud.DefaultCloudContextRegion,
+				Region:             cloudcloudcontext.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
-				InstanceType:       configpkg.DefaultCloudContextInstanceType,
-				DiskType:           configpkg.DefaultCloudContextDiskType,
-				DiskSizeGB:         configpkg.DefaultCloudContextDiskSizeGB,
+				InstanceType:       configcloudcontext.DefaultCloudContextInstanceType,
+				DiskType:           configcloudcontext.DefaultCloudContextDiskType,
+				DiskSizeGB:         configcloudcontext.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-old",
 			},
 		},
@@ -64,7 +65,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 	svc := newTestService(Deps{Store: store})
 	// Cloud-context Status is not persisted; seed the in-memory cache instead.
-	svc.d.CloudStatuses.SetStatus("team-context", cloud.CloudContextStatusStopped)
+	svc.d.CloudStatuses.SetStatus("team-context", cloudcloudcontext.CloudContextStatusStopped)
 
 	loaded, err := svc.LoadEnvironmentConfig(uimodel.Selection{Tenant: " frs ", Environment: " prod "})
 	if err != nil {
@@ -147,7 +148,7 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded EnvironmentConfig, proje
 	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
-	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != cloud.CloudContextStatusStopped {
+	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != cloudcloudcontext.CloudContextStatusStopped {
 		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
 	}
 	if loaded.RuntimePod.CPU != "4" || loaded.RuntimePod.Memory != "8916Mi" {

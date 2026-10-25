@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
 )
 
@@ -20,15 +20,15 @@ func (s failingSecretStore) LoadCloudSecret(string) (string, error) {
 }
 func (s failingSecretStore) DeleteCloudSecret(string) error { return nil }
 
-func emptySecretStore(t *testing.T) seam.CloudSecretStore {
+func emptySecretStore(t *testing.T) cloudstore.CloudSecretStore {
 	t.Helper()
-	return cloud.NewFileCloudSecretStore(t.TempDir())
+	return secretstore.NewFileCloudSecretStore(t.TempDir())
 }
 
 func TestResolveGatewayCredentialPrefersTheSavedValue(t *testing.T) {
 	// A saved key wins over the host's key for the same gateway.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_BASE_URL":"`+testGatewayURL+`","ANTHROPIC_AUTH_TOKEN":"from-host"}}`)
-	store := cloud.NewFileCloudSecretStore(t.TempDir())
+	store := secretstore.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "saved-by-operator"); err != nil {
 		t.Fatalf("save: %v", err)
 	}

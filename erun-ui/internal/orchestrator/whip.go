@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -103,7 +103,7 @@ func (s *Service) whipOneEnvironmentNow(ctx context.Context, tenant, environment
 			Error:     err.Error(),
 		}
 	}
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		if s.d.MCPForwardStale(mcpPort) {
 			return model.WhipResult{

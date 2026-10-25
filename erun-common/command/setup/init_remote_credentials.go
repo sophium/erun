@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -22,8 +24,8 @@ type remoteProvisionedSecrets struct {
 // resolveRegistryCredentialSecret mints the ghcr.io credential Secret that
 // ensureRemoteRegistryCredentials checks for in-pod.
 func (s BootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResult) (string, error) {
-	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
-	namespace := config.KubernetesNamespaceName(target.Tenant, target.Environment)
+	registries := ghcrRegistriesRequiringCredential(containerregistry.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+	namespace := runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment)
 	return registrypkg.ProvisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
 
@@ -31,7 +33,7 @@ func (s BootstrapRunner) resolveRegistryCredentialSecret(target config.OpenResul
 // calls are attributable, and falls back to the host's signed-in alias with a
 // trace.
 func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (string, error) {
-	namespace := config.KubernetesNamespaceName(target.Tenant, target.Environment)
+	namespace := runtimetarget.KubernetesNamespaceName(target.Tenant, target.Environment)
 	// Use the runner's store, not the default one.
 	var store config.CloudReadStore = config.ConfigStore{}
 	if s.Store != nil {
@@ -52,7 +54,7 @@ func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (s
 // ghcr.io registry has no credential source in the pod; validity is left to
 // release's preflight.
 func (s BootstrapRunner) ensureRemoteRegistryCredentials(target config.OpenResult, req config.ShellLaunchParams) error {
-	registries := ghcrRegistriesRequiringCredential(config.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+	registries := ghcrRegistriesRequiringCredential(containerregistry.EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	for _, registry := range registries {
 		configured, err := s.remoteGHCRCredentialConfigured(req, registry)
 		if err != nil {

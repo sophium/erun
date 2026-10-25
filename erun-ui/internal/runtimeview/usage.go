@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -52,7 +54,7 @@ func ReadUsageViaKubectl(parent context.Context, store config.OpenStore, selecti
 	if err != nil {
 		return Usage{}, err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
@@ -73,7 +75,7 @@ func quietContext() core.Context {
 }
 
 // erun-common's RunRuntimeContainerCommand has no timeout; a UI probe needs one.
-func runtimeUsageRunner(ctx context.Context) seam.RuntimeContainerCommandRunnerFunc {
+func runtimeUsageRunner(ctx context.Context) runtimepod.RuntimeContainerCommandRunnerFunc {
 	return func(req config.ShellLaunchParams, container, script string) (model.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
 		if kubernetesContext := strings.TrimSpace(req.KubernetesContext); kubernetesContext != "" {
@@ -83,7 +85,7 @@ func runtimeUsageRunner(ctx context.Context) seam.RuntimeContainerCommandRunnerF
 			args = append(args, "--namespace", namespace)
 		}
 		args = append(args, "exec", "-c", strings.TrimSpace(container),
-			"deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+			"deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		core.HideConsoleWindow(cmd)
 		var stdout, stderr bytes.Buffer
@@ -177,7 +179,7 @@ func uiRuntimeUsageRequestsFromReading(requests *model.RuntimeUsageRequests) *Us
 	}
 	return &UsageRequests{
 		Unavailable: requests.Unavailable,
-		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[config.DevopsComponentName]),
+		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[runtimetarget.DevopsComponentName]),
 	}
 }
 
@@ -188,7 +190,7 @@ func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) Co
 		MemoryBytes: requests.MemoryBytes,
 	}
 	if requests.CPUMilli > 0 {
-		rendered.CPU = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+		rendered.CPU = runtimeresources.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
 	}
 	if requests.MemoryBytes > 0 {
 		rendered.Memory = formatRuntimeUsageBytes(requests.MemoryBytes)

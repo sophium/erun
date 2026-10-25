@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/idlestatus"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
@@ -22,7 +22,7 @@ func IdleTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallT
 		if err != nil {
 			return nil, model.EnvironmentIdleStatus{}, err
 		}
-		status, err := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
+		status, err := idlestatus.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 		if err != nil {
 			return nil, model.EnvironmentIdleStatus{}, err
 		}

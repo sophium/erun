@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -309,7 +309,7 @@ func formatNamespaceConditions(raw string) string {
 }
 
 func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
-	if config.CurrentExecutionMode(kubectlNamespaceGetExecutionOperation) == config.ExecutionModeLibrary {
+	if execmode.CurrentExecutionMode(kubectlNamespaceGetExecutionOperation) == execmode.ExecutionModeLibrary {
 		return libraryKubernetesNamespaceExists(contextName, namespace)
 	}
 	return defaultKubernetesNamespaceExists(contextName, namespace)

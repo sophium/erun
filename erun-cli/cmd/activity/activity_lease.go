@@ -13,10 +13,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
+	"github.com/sophium/erun/erun-common/infra/activity/sampling"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 	"github.com/spf13/cobra"
 )
@@ -74,9 +77,9 @@ func newActivityLeaseTakeCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if exclusive && !cmd.Flags().Changed("ttl") {
-				ttl = activity.DefaultExclusiveEnvironmentActivityLeaseTTL
+				ttl = activitylease.DefaultExclusiveEnvironmentActivityLeaseTTL
 			}
-			return runActivityLeaseTake(cmd, resolveOpen, activity.TakeEnvironmentActivityLeaseParams{
+			return runActivityLeaseTake(cmd, resolveOpen, activitylease.TakeEnvironmentActivityLeaseParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -93,7 +96,7 @@ func newActivityLeaseTakeCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "What the lease is holding the environment for (shown to the operator)")
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to take or renew (defaults to the name)")
 	cmd.Flags().IntVar(&pid, "pid", 0, "Holder process in the environment to reconcile the lease against; the lease is reclaimed once it exits")
-	cmd.Flags().DurationVar(&ttl, "ttl", activity.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal (defaults to 5m instead when --exclusive is set)")
+	cmd.Flags().DurationVar(&ttl, "ttl", activitylease.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal (defaults to 5m instead when --exclusive is set)")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
@@ -102,7 +105,7 @@ func newActivityLeaseTakeCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runActivityLeaseTake(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
+func runActivityLeaseTake(cmd *cobra.Command, resolveOpen envscope.OpenResolver, params activitylease.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
 	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -123,20 +126,20 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen envscope.OpenResolver,
 	return err
 }
 
-func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params activity.TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, bool, error) {
+func takeLease(ctx context.Context, commandCtx core.Context, resolveOpen envscope.OpenResolver, params activitylease.TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, bool, error) {
 	if !envcall.EnvironmentTargetsItself() {
 		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
 		if params.Exclusive {
-			scope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
+			scope := activitylease.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name, "--exclusive", "--scope", scope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
 		}
 		return model.EnvironmentActivityLease{}, false, nil
 	}
-	lease, err := activity.TakeEnvironmentActivityLease(params)
+	lease, err := activitylease.TakeEnvironmentActivityLease(params)
 	if err != nil {
 		return model.EnvironmentActivityLease{}, false, err
 	}
@@ -193,7 +196,7 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen envscope.OpenResolv
 	// An unreadable note falls back to the plain summary; the release already succeeded.
 	note := ""
 	if outcome == model.EnvironmentActivityLeaseHeldElsewhere {
-		note, _ = activity.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
+		note, _ = activitylease.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id, note))
 	return err
@@ -221,7 +224,7 @@ func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen envs
 	}
 	if commandCtx.DryRun {
 		if exclusive {
-			resolvedScope := activity.NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
+			resolvedScope := activitylease.NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id, "--exclusive", "--scope", resolvedScope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
@@ -229,13 +232,13 @@ func releaseLease(ctx context.Context, commandCtx core.Context, resolveOpen envs
 		return model.EnvironmentActivityLeaseNotHeld, false, nil
 	}
 	if exclusive {
-		outcome, err := activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		outcome, err := activitylease.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		if err != nil {
 			return model.EnvironmentActivityLeaseNotHeld, false, err
 		}
 		return outcome, true, nil
 	}
-	outcome, err := activity.ReleaseEnvironmentActivityLease(tenant, environment, id)
+	outcome, err := activitylease.ReleaseEnvironmentActivityLease(tenant, environment, id)
 	if err != nil {
 		return model.EnvironmentActivityLeaseNotHeld, false, err
 	}
@@ -285,7 +288,7 @@ func listLeases(ctx context.Context, commandCtx core.Context, resolveOpen envsco
 		commandCtx.TraceCommand("", "activity", "lease-list", tenant, environment)
 		return nil, false, nil
 	}
-	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, false, err
 	}
@@ -319,7 +322,7 @@ func activityLeaseSummary(lease model.EnvironmentActivityLease, now time.Time) s
 	if lease.Exclusive {
 		value = fmt.Sprintf("%s, exclusive on %s, held by %s, expires in %s",
 			lease.Name,
-			activity.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
+			activitylease.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
 			lease.Holder.String(),
 			formatLeaseRemaining(lease, now))
 	}
@@ -355,8 +358,8 @@ func newActivitySampleCmd() *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().StringVar(&procRoot, "proc-root", activity.DefaultProcRoot, "Process filesystem to sample")
-	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", config.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
+	cmd.Flags().StringVar(&procRoot, "proc-root", sampling.DefaultProcRoot, "Process filesystem to sample")
+	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", runtimeresources.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON (alias for --output json)")
 	return cmd
 }
@@ -365,7 +368,7 @@ func recordActivityIf(found bool, tenant, environment, kind string) error {
 	if !found {
 		return nil
 	}
-	return activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
+	return records.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Kind:        kind,
@@ -376,24 +379,24 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
-	previous, err := activity.LoadResidentActivitySample(tenant, environment)
+	previous, err := sampling.LoadResidentActivitySample(tenant, environment)
 	if err != nil {
 		return err
 	}
-	result, err := activity.ScanResidentActivity(procRoot, os.Getpid(), previous, time.Now())
+	result, err := sampling.ScanResidentActivity(procRoot, os.Getpid(), previous, time.Now())
 	if err != nil {
 		return err
 	}
-	if err := activity.SaveResidentActivitySample(tenant, environment, result.Sample); err != nil {
+	if err := sampling.SaveResidentActivitySample(tenant, environment, result.Sample); err != nil {
 		return err
 	}
 	if err := retainRuntimeUsage(tenant, environment, cgroupRoot); err != nil {
 		return err
 	}
-	if err := recordActivityIf(result.Busy, tenant, environment, activity.ActivityKindProcess); err != nil {
+	if err := recordActivityIf(result.Busy, tenant, environment, records.ActivityKindProcess); err != nil {
 		return err
 	}
-	interactiveSSH, err := activity.ScanInteractiveSSHSession(procRoot)
+	interactiveSSH, err := sampling.ScanInteractiveSSHSession(procRoot)
 	if err != nil {
 		return err
 	}
@@ -417,7 +420,7 @@ func WriteActivitySampleResult(ctx core.Context, result model.ResidentActivityRe
 
 // retainRuntimeUsage records nothing when the host supplies no cgroup counters.
 func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
-	sample := config.ReadLocalRuntimeUsage(cgroupRoot)
+	sample := runtimeresources.ReadLocalRuntimeUsage(cgroupRoot)
 	if !sample.HasCounters() {
 		return nil
 	}

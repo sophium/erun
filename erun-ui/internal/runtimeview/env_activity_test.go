@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -61,7 +61,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 		{
 			name: "sampled processes describe themselves",
 			status: model.EnvironmentIdleStatus{Markers: []model.EnvironmentIdleMarker{
-				activeMarker(activitypkg.ActivityKindProcess),
+				activeMarker(records.ActivityKindProcess),
 			}},
 			wantBusy:   true,
 			wantDetail: "running build or agent processes",

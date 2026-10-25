@@ -7,13 +7,16 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -35,7 +38,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 		deps.store = config.ConfigStore{}
 	}
 	if deps.findProjectRoot == nil {
-		deps.findProjectRoot = config.FindProjectRoot
+		deps.findProjectRoot = projectroot.FindProjectRoot
 	}
 	if deps.resolveCLIPath == nil {
 		deps.resolveCLIPath = terminal.ResolveCLIExecutable
@@ -153,7 +156,7 @@ func loadHostedRegistryWithTestOverride(ctx context.Context) runtimeview.HostedR
 	if !ok {
 		return runtimeview.ProbeHostedRegistry(ctx)
 	}
-	status := runtimeview.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
+	status := runtimeview.HostedRegistryStatus{Host: containerregistry.HostedRegistryHost, Available: available}
 	if !available {
 		status.Reason = "does not resolve"
 		status.Recovery = "Choose a different registry instead."
@@ -311,11 +314,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.environmentUsageHistoryPath = runtimeview.DefaultUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
-		deps.recordActivity = activity.RecordEnvironmentActivity
+		deps.recordActivity = records.RecordEnvironmentActivity
 	}
 	if deps.stopCloudContext == nil {
 		deps.stopCloudContext = func(_ context.Context, name string) (model.CloudContextStatus, error) {
-			return cloud.StopCloudContext(core.Context{}, deps.store, model.CloudContextParams{Name: name}, deps.cloudContextDeps)
+			return contextpower.StopCloudContext(core.Context{}, deps.store, model.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
 	return deps

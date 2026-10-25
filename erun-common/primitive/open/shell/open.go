@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/remotesession"
+	"github.com/sophium/erun/erun-common/infra/cloud/runtimewait"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-common/primitive/open/podwait"
@@ -67,7 +68,7 @@ func EnsureLocalPortRangePersisted(ctx core.Context, saveEnvConfig func(string, 
 func LocalShellSetupScript(result configpkg.OpenResult) string {
 	commands := []string{
 		fmt.Sprintf("kubectl config use-context %s >/dev/null", core.ShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext))),
-		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", core.ShellQuote(configpkg.KubernetesNamespaceName(result.Tenant, result.Environment))),
+		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", core.ShellQuote(runtimetarget.KubernetesNamespaceName(result.Tenant, result.Environment))),
 		fmt.Sprintf("cd %s", core.ShellQuote(result.RepoPath)),
 	}
 	return strings.Join(commands, " &&\n") + "\n"
@@ -122,16 +123,16 @@ func PreviewShellLaunch(req configpkg.ShellLaunchParams) (ShellLaunchPreview, er
 
 	return ShellLaunchPreview{
 		SeedArgs: seedArgs,
-		WaitArgs: cloud.KubectlDeploymentWaitArgs(req),
+		WaitArgs: runtimewait.KubectlDeploymentWaitArgs(req),
 		ExecArgs: kubectlExecArgs(req, script),
 		Script:   script,
 	}, nil
 }
 
 func kubectlExecArgs(req configpkg.ShellLaunchParams, script string) []string {
-	args := configpkg.KubectlTargetArgs(req)
+	args := runtimetarget.KubectlTargetArgs(req)
 	args = append(args, "exec", "-it")
-	args = append(args, "deployment/"+configpkg.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }
 
@@ -247,7 +248,7 @@ func remoteShellLaunchLines(req configpkg.ShellLaunchParams, bashrcPath, markerD
 		redraw = "winch"
 	}
 	lines := []string{
-		fmt.Sprintf("mkdir -p \"%s\"", activity.RemoteAppSessionSocketDir),
+		fmt.Sprintf("mkdir -p \"%s\"", remotesession.RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
 	}
 	return append(lines, appsession.RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)

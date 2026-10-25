@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -54,7 +54,7 @@ func testBuildDryRunDockerfileDindArgsDefaultToConservativeConstantWhenUnconfigu
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	want := "--build-arg DIND_CPU_LIMIT=" + config.DefaultRuntimeDindCPU + " --build-arg DIND_MEMORY_LIMIT_MIB=20480"
+	want := "--build-arg DIND_CPU_LIMIT=" + runtimeresources.DefaultRuntimeDindCPU + " --build-arg DIND_MEMORY_LIMIT_MIB=20480"
 	if !strings.Contains(result.Combined, want) {
 		t.Errorf("expected the docker build to fall back to the conservative constant (%s), not the host's real capacity:\n%s", want, result.Combined)
 	}

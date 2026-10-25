@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/aisession"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
@@ -31,13 +31,13 @@ func AiSessionsTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp
 			return nil, AISessionsResult{}, err
 		}
 		if input.Session != "" {
-			status, err := activity.LoadAISessionStatus(tenant, environment, input.Session)
+			status, err := aisession.LoadAISessionStatus(tenant, environment, input.Session)
 			if err != nil {
 				return nil, AISessionsResult{}, err
 			}
 			return nil, AISessionsResult{Tenant: tenant, Environment: environment, Sessions: []model.AISessionStatus{status}}, nil
 		}
-		statuses, err := activity.LoadAISessionStatuses(tenant, environment)
+		statuses, err := aisession.LoadAISessionStatuses(tenant, environment)
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}

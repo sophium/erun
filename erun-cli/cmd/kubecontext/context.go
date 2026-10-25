@@ -10,15 +10,17 @@ import (
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/cmd/shared/textfmt"
-	"github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/base/seam/cloudstore"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/spf13/cobra"
 )
 
-func NewContextCmd(store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+func NewContextCmd(store cloudstore.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	return clicmd.NewCommandGroup(
 		"context",
 		"Manage ERun cloud Kubernetes contexts",
@@ -31,7 +33,7 @@ func NewContextCmd(store seam.CloudContextStore, promptRunner prompt.PromptRunne
 	)
 }
 
-func newContextListCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextListCmd(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	return &cobra.Command{
 		Use:          "list",
 		Short:        "List managed ERun cloud contexts",
@@ -43,9 +45,9 @@ func newContextListCmd(store seam.CloudContextStore, deps cloud.CloudContextDepe
 	}
 }
 
-func runContextListCommand(ctx core.Context, store seam.CloudContextStore, deps cloud.CloudContextDependencies) error {
+func runContextListCommand(ctx core.Context, store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) error {
 	// Status isn't persisted, so refresh it from AWS.
-	result, err := cloud.RefreshCloudContextList(ctx, store, deps)
+	result, err := contextpower.RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func WriteCloudContextList(ctx core.Context, result model.CloudContextListResult
 	return nil
 }
 
-func newContextInitCmd(store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextInitCmd(store cloudstore.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	var params model.InitCloudContextParams
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -99,10 +101,10 @@ func newContextInitCmd(store seam.CloudContextStore, promptRunner prompt.PromptR
 	}
 	cmd.Flags().StringVar(&params.CloudProviderAlias, "alias", "", "Cloud provider alias to use")
 	cmd.Flags().StringVar(&params.Name, "context", "", "Kubernetes context name to create")
-	cmd.Flags().StringVar(&params.Region, "region", cloud.DefaultCloudContextRegion, "Cloud region for the context")
-	cmd.Flags().StringVar(&params.InstanceType, "instance-type", config.DefaultCloudContextInstanceType, "EC2 instance type")
-	cmd.Flags().IntVar(&params.DiskSizeGB, "disk-size", config.DefaultCloudContextDiskSizeGB, "Root disk size in GB")
-	cmd.Flags().StringVar(&params.DiskType, "disk-type", config.DefaultCloudContextDiskType, "Root disk type")
+	cmd.Flags().StringVar(&params.Region, "region", cloudcloudcontext.DefaultCloudContextRegion, "Cloud region for the context")
+	cmd.Flags().StringVar(&params.InstanceType, "instance-type", configcloudcontext.DefaultCloudContextInstanceType, "EC2 instance type")
+	cmd.Flags().IntVar(&params.DiskSizeGB, "disk-size", configcloudcontext.DefaultCloudContextDiskSizeGB, "Root disk size in GB")
+	cmd.Flags().StringVar(&params.DiskType, "disk-type", configcloudcontext.DefaultCloudContextDiskType, "Root disk type")
 	cmd.Flags().StringVar(&params.SubnetID, "subnet-id", "", "Optional EC2 subnet ID")
 	cmd.Flags().StringVar(&params.SecurityGroupID, "security-group-id", "", "Optional EC2 security group ID")
 	cmd.Flags().StringVar(&params.KeyName, "key-name", "", "Optional EC2 key pair name")
@@ -110,7 +112,7 @@ func newContextInitCmd(store seam.CloudContextStore, promptRunner prompt.PromptR
 	return cmd
 }
 
-func runContextInitCommand(ctx core.Context, store seam.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
+func runContextInitCommand(ctx core.Context, store cloudstore.CloudContextStore, promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams, deps cloudcloudcontext.CloudContextDependencies) error {
 	var err error
 	params.CloudProviderAlias, err = contextProviderAlias(store, selectRunner, params.CloudProviderAlias)
 	if err != nil {
@@ -120,7 +122,7 @@ func runContextInitCommand(ctx core.Context, store seam.CloudContextStore, promp
 	if err != nil {
 		return err
 	}
-	status, err := cloud.InitCloudContext(ctx, store, params, deps)
+	status, err := contextinit.InitCloudContext(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
@@ -133,15 +135,15 @@ func runContextInitCommand(ctx core.Context, store seam.CloudContextStore, promp
 	return writeCloudContext(ctx, status)
 }
 
-func newContextStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
-	return newContextPowerCmd("stop", "Stop a managed ERun cloud context", false, store, deps, cloud.StopCloudContext)
+func newContextStopCmd(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
+	return newContextPowerCmd("stop", "Stop a managed ERun cloud context", false, store, deps, contextpower.StopCloudContext)
 }
 
-func newContextStartCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
-	return newContextPowerCmd("start", "Start a managed ERun cloud context", true, store, deps, cloud.StartCloudContext)
+func newContextStartCmd(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
+	return newContextPowerCmd("start", "Start a managed ERun cloud context", true, store, deps, contextpower.StartCloudContext)
 }
 
-func newContextDisableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextDisableAPIStopCmd(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	return newContextStopProtectionCmd(
 		"disable-api-stop",
 		"Lock a cloud context against stop calls (sets AWS DisableApiStop=true)",
@@ -150,7 +152,7 @@ func newContextDisableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudC
 	)
 }
 
-func newContextEnableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextEnableAPIStopCmd(store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	return newContextStopProtectionCmd(
 		"enable-api-stop",
 		"Restore normal stop behaviour for a cloud context (sets AWS DisableApiStop=false)",
@@ -160,7 +162,7 @@ func newContextEnableAPIStopCmd(store seam.CloudContextStore, deps cloud.CloudCo
 }
 
 // Stop protection also holds off the idle monitor.
-func newContextStopProtectionCmd(use, short string, enabled bool, store seam.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
+func newContextStopProtectionCmd(use, short string, enabled bool, store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
 		Short:        short,
@@ -168,7 +170,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store seam.Clo
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := clicmd.CommandContext(cmd)
-			status, err := cloud.SetCloudContextStopProtection(ctx, store, model.CloudContextStopProtectionParams{
+			status, err := contextpower.SetCloudContextStopProtection(ctx, store, model.CloudContextStopProtectionParams{
 				Name:    args[0],
 				Enabled: enabled,
 			}, deps)
@@ -182,7 +184,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store seam.Clo
 	return cmd
 }
 
-func newContextPowerCmd(use, short string, supportsForce bool, store seam.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, seam.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store cloudstore.CloudContextStore, deps cloudcloudcontext.CloudContextDependencies, run func(core.Context, cloudstore.CloudContextStore, model.CloudContextParams, cloudcloudcontext.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -205,7 +207,7 @@ func newContextPowerCmd(use, short string, supportsForce bool, store seam.CloudC
 	return cmd
 }
 
-func contextProviderAlias(store seam.CloudContextStore, selectRunner prompt.SelectRunner, alias string) (string, error) {
+func contextProviderAlias(store cloudstore.CloudContextStore, selectRunner prompt.SelectRunner, alias string) (string, error) {
 	alias = strings.TrimSpace(alias)
 	if alias != "" {
 		return alias, nil
@@ -216,16 +218,16 @@ func contextProviderAlias(store seam.CloudContextStore, selectRunner prompt.Sele
 func promptContextInitParams(promptRunner prompt.PromptRunner, selectRunner prompt.SelectRunner, params model.InitCloudContextParams) (model.InitCloudContextParams, error) {
 	var err error
 	if strings.TrimSpace(params.Region) == "" {
-		params.Region, err = selectOrKeepString(selectRunner, "Cloud region", cloud.CloudContextRegions(), params.Region)
+		params.Region, err = selectOrKeepString(selectRunner, "Cloud region", cloudcloudcontext.CloudContextRegions(), params.Region)
 		if err != nil {
 			return params, err
 		}
 	}
-	params.InstanceType, err = selectOrKeepString(selectRunner, "Instance type", cloud.CloudContextInstanceTypes(), params.InstanceType)
+	params.InstanceType, err = selectOrKeepString(selectRunner, "Instance type", cloudcloudcontext.CloudContextInstanceTypes(), params.InstanceType)
 	if err != nil {
 		return params, err
 	}
-	params.DiskSizeGB, err = selectOrKeepInt(selectRunner, "Disk size", cloud.CloudContextDiskSizesGB(), params.DiskSizeGB)
+	params.DiskSizeGB, err = selectOrKeepInt(selectRunner, "Disk size", cloudcloudcontext.CloudContextDiskSizesGB(), params.DiskSizeGB)
 	if err != nil {
 		return params, err
 	}

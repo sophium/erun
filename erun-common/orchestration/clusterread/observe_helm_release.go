@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
@@ -15,7 +16,7 @@ import (
 
 // ObserveHelmStatusArgs builds `helm status <release> -o json`.
 func ObserveHelmStatusArgs(req config.ShellLaunchParams) []string {
-	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
+	args := []string{"status", runtimetarget.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
 	}
@@ -89,7 +90,7 @@ func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 	release.RuntimePod = findRuntimePodResourceLimits(status.Config)
 	populateObservedChartFields(release, listArgs, releaseName, namespace)
 	if release.Chart != "" && !strings.Contains(strings.ToLower(release.Chart), "devops") {
-		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, config.DevopsComponentName, release.Name))
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, runtimetarget.DevopsComponentName, release.Name))
 	}
 	return release
 }

@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -205,7 +205,7 @@ func (s *Service) PinRepoCheckoutStatus(selection uimodel.Selection) (PinCheckou
 	if err != nil {
 		return PinCheckoutStatus{}, err
 	}
-	if _, ok := config.TenantLocalCheckoutRoot(siblings); ok {
+	if _, ok := repopath.TenantLocalCheckoutRoot(siblings); ok {
 		return PinCheckoutStatus{Resolvable: true}, nil
 	}
 	return PinCheckoutStatus{

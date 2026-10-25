@@ -14,7 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -396,7 +396,7 @@ func ResolveStartDir(preferred string) string {
 	return "."
 }
 
-func resolveDeployStartDir(findProjectRoot seam.ProjectFinderFunc, result config.OpenResult) string {
+func resolveDeployStartDir(findProjectRoot projectroot.ProjectFinderFunc, result config.OpenResult) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return ResolveStartDir(projectRoot)

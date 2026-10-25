@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -299,7 +299,7 @@ func (s *Service) aiSessionOccupants(selection uimodel.Selection) []uimodel.Envi
 		return status.Leases
 	}
 	now := time.Now()
-	leases, err := activity.LoadEnvironmentActivityLeases(selection.Tenant, selection.Environment, now)
+	leases, err := activitylease.LoadEnvironmentActivityLeases(selection.Tenant, selection.Environment, now)
 	if err != nil {
 		return nil
 	}

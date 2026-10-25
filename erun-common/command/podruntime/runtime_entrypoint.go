@@ -11,8 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/activity/sampling"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 // The runtime entrypoint is PID 1 of the erun-devops image. Every preparation step is
@@ -68,7 +68,7 @@ func newRuntimeBoot(params RuntimeEntrypointParams) runtimeBoot {
 		skillsRoot:             core.RuntimeBakedSkillsDir,
 		agentsRoot:             RuntimeBakedAgentsDir,
 		releaseDir:             RuntimeReleaseDir,
-		procRoot:               activity.DefaultProcRoot,
+		procRoot:               sampling.DefaultProcRoot,
 		sshdPath:               "/usr/sbin/sshd",
 	}
 }
@@ -108,7 +108,7 @@ func (b runtimeBoot) configHome() string {
 }
 
 func (b runtimeBoot) kubernetesContext() string {
-	return b.getOr("ERUN_KUBERNETES_CONTEXT", cloud.InClusterKubernetesContext)
+	return b.getOr("ERUN_KUBERNETES_CONTEXT", providerconfig.InClusterKubernetesContext)
 }
 
 func (b runtimeBoot) path(rel ...string) string {

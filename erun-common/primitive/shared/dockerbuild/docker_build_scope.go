@@ -9,18 +9,21 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func NormalizeDockerDependencies(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc) (seam.DockerStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.NowFunc) {
+func NormalizeDockerDependencies(store buildtarget.DockerStore, findProjectRoot seamprojectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc) (buildtarget.DockerStore, seamprojectroot.ProjectFinderFunc, buildtarget.BuildContextResolverFunc, buildtarget.NowFunc) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
 	if findProjectRoot == nil {
-		findProjectRoot = config.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	if resolveBuildContext == nil {
 		resolveBuildContext = dockerspec.ResolveDockerBuildContext
@@ -33,7 +36,7 @@ func NormalizeDockerDependencies(store seam.DockerStore, findProjectRoot seam.Pr
 
 // ConfiguredDockerDir fails on an unusable override rather than fall back to convention.
 func ConfiguredDockerDir(projectRoot string) (string, bool, error) {
-	paths, err := config.LoadProjectPaths(projectRoot)
+	paths, err := projectpaths.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -41,7 +44,7 @@ func ConfiguredDockerDir(projectRoot string) (string, bool, error) {
 }
 
 func ResolveAndValidateDockerDir(projectRoot, override, configKey string) (string, bool, error) {
-	dockerDir := config.ResolveProjectPath(projectRoot, override)
+	dockerDir := projectpaths.ResolveProjectPath(projectRoot, override)
 	if dockerDir == "" {
 		return "", false, nil
 	}
@@ -66,7 +69,7 @@ func IsDockerBuildModuleDir(dir string) (bool, error) {
 	return len(buildContexts) > 0, nil
 }
 
-func ResolveDockerBuildProjectRoot(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (string, error) {
+func ResolveDockerBuildProjectRoot(findProjectRoot seamprojectroot.ProjectFinderFunc, target model.DockerCommandTarget) (string, error) {
 	if projectRoot := strings.TrimSpace(target.ProjectRoot); projectRoot != "" {
 		return filepath.Clean(projectRoot), nil
 	}
@@ -81,7 +84,7 @@ func ResolveDockerBuildProjectRoot(findProjectRoot seam.ProjectFinderFunc, targe
 	return projectRoot, nil
 }
 
-func ResolveDockerBuildEnvironment(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, projectRoot, environment string) (string, error) {
+func ResolveDockerBuildEnvironment(store buildtarget.DockerStore, findProjectRoot seamprojectroot.ProjectFinderFunc, projectRoot, environment string) (string, error) {
 	if environment = strings.TrimSpace(environment); environment != "" {
 		return environment, nil
 	}
@@ -93,7 +96,7 @@ func ResolveDockerBuildEnvironment(store seam.DockerStore, findProjectRoot seam.
 	return dockerBuildEnvironmentFromDetectedProject(store, findProjectRoot, cleanProjectRoot)
 }
 
-func dockerBuildEnvironmentFromTenantConfigs(store seam.DockerStore, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromTenantConfigs(store buildtarget.DockerStore, cleanProjectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
@@ -112,7 +115,7 @@ func dockerBuildEnvironmentFromTenantConfigs(store seam.DockerStore, cleanProjec
 	return "", nil
 }
 
-func dockerBuildEnvironmentFromTenantEnvs(store seam.DockerStore, tenant, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromTenantEnvs(store buildtarget.DockerStore, tenant, cleanProjectRoot string) (string, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
@@ -132,7 +135,7 @@ func dockerBuildEnvironmentFromTenantEnvs(store seam.DockerStore, tenant, cleanP
 	return "", nil
 }
 
-func dockerBuildEnvironmentFromDetectedProject(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromDetectedProject(store buildtarget.DockerStore, findProjectRoot seamprojectroot.ProjectFinderFunc, cleanProjectRoot string) (string, error) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInGitRepository) {
@@ -154,7 +157,7 @@ func dockerBuildEnvironmentFromDetectedProject(store seam.DockerStore, findProje
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 
-func ResolveDockerBuildEnvConfigForProject(store seam.DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
+func ResolveDockerBuildEnvConfigForProject(store buildtarget.DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()

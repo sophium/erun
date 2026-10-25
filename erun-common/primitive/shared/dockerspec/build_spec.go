@@ -2,7 +2,7 @@ package dockerspec
 
 import (
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -18,14 +18,14 @@ func CheckImageDockerfile(dockerfilePath string) error {
 	return CheckDockerfileTestStageConsumed(dockerfilePath)
 }
 
-func DockerBuildTraceCommands(b seam.DockerBuildSpec) []helm.CommandSpec {
+func DockerBuildTraceCommands(b imagebuild.DockerBuildSpec) []helm.CommandSpec {
 	if b.Promote {
 		return promoteTraceCommands(b)
 	}
 	return multiPlatformTraceCommands(b)
 }
 
-func multiPlatformTraceCommands(b seam.DockerBuildSpec) []helm.CommandSpec {
+func multiPlatformTraceCommands(b imagebuild.DockerBuildSpec) []helm.CommandSpec {
 	commands := make([]helm.CommandSpec, 0, len(b.Platforms)*4+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
 	baseTag := StableBaseVersionTag(b.Image)
@@ -71,7 +71,7 @@ func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) 
 	return commands
 }
 
-func promoteTraceCommands(b seam.DockerBuildSpec) []helm.CommandSpec {
+func promoteTraceCommands(b imagebuild.DockerBuildSpec) []helm.CommandSpec {
 	commands := make([]helm.CommandSpec, 0, len(b.Platforms)*3+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
 	baseTag := StableBaseVersionTag(b.Image)

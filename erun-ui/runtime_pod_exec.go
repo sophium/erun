@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -30,9 +30,9 @@ func execInRuntimePodViaKubectl(ctx context.Context, selection uimodel.Selection
 		return "", fmt.Errorf("environment has no kubernetes context")
 	}
 	return kubectlText(ctx, kubernetesContext,
-		"--namespace", config.KubernetesNamespaceName(selection.Tenant, selection.Environment),
+		"--namespace", runtimetarget.KubernetesNamespaceName(selection.Tenant, selection.Environment),
 		"exec",
-		"deployment/"+config.RuntimeReleaseName(selection.Tenant),
+		"deployment/"+runtimetarget.RuntimeReleaseName(selection.Tenant),
 		"--",
 		"/bin/sh", "-c", script,
 	)

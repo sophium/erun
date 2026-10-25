@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
 	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -22,7 +22,7 @@ func (s *Service) DeleteEnvironment(selection uimodel.Selection, confirmation st
 		return DeleteEnvironmentResult{}, fmt.Errorf("delete confirmation did not match %q", expected)
 	}
 
-	store, ok := s.d.Store.(seam.DeleteStore)
+	store, ok := s.d.Store.(envstore.DeleteStore)
 	if !ok {
 		return DeleteEnvironmentResult{}, fmt.Errorf("environment deletion is not supported by the configured store")
 	}

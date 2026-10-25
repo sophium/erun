@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/deploy/chartref"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
@@ -30,7 +31,7 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 	if image := runtimeimage.ResolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
 		recorded := strings.TrimSpace(target.EnvConfig.RuntimeImage)
 		if runtimeImageExplicit {
-			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + config.DevopsComponentName + ")")
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + runtimetarget.DevopsComponentName + ")")
 			return image, recorded
 		}
 		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
@@ -38,10 +39,10 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 		if stale == "" {
 			if moved := runtimeimage.LaggingStockRuntimeImagePin(target, registry, image, staleChartName, version); moved != "" {
 				ctx.Trace("deploy: moving the env's runtime image pin " + image + " to " + moved +
-					" (the env rides " + config.DevopsComponentName + "'s own release line, so the pin moves with the deploy version)")
+					" (the env rides " + runtimetarget.DevopsComponentName + "'s own release line, so the pin moves with the deploy version)")
 				return moved, moved
 			}
-			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + config.DevopsComponentName + ")")
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + runtimetarget.DevopsComponentName + ")")
 			return image, recorded
 		}
 		ctx.Trace(stale)

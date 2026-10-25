@@ -7,7 +7,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
 	"github.com/sophium/erun/erun-common/primitive/build/linuxpkg"
 	"github.com/sophium/erun/erun-common/primitive/build/linuxpkgcheck"
@@ -18,7 +20,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func ResolveBuildExecution(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	spec.RecommendBuildEnvIfMissing(ctx, findProjectRoot, target)
@@ -83,7 +85,7 @@ func finalizeBuildExecution(ctx core.Context, execution dockerspec.BuildExecutio
 	return execution, nil
 }
 
-func resolveBuildExecutionTargetAndScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *dockerspec.ScriptSpec, error) {
+func resolveBuildExecutionTargetAndScript(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *dockerspec.ScriptSpec, error) {
 	target, releaseSpec, err := releasespec.ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
 		return model.DockerCommandTarget{}, nil, nil, err
@@ -95,13 +97,13 @@ func resolveBuildExecutionTargetAndScript(findProjectRoot seam.ProjectFinderFunc
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []seam.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
+func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []imagebuild.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
 	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
 // resolveLinuxPackagesForExecution resolves a plain build's packages and which
 // reuse a recorded pass; releases export theirs instead.
-func resolveLinuxPackagesForExecution(findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, target model.DockerCommandTarget, releaseSpec *model.ReleaseSpec) ([]model.LinuxPackageSpec, error) {
+func resolveLinuxPackagesForExecution(findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, target model.DockerCommandTarget, releaseSpec *model.ReleaseSpec) ([]model.LinuxPackageSpec, error) {
 	if releaseSpec != nil {
 		return nil, nil
 	}
@@ -126,7 +128,7 @@ func resolveLinuxPackagesForExecution(findProjectRoot seam.ProjectFinderFunc, re
 	return linuxpkgcheck.ApplyLinuxPackageReuse(packages), nil
 }
 
-func resolveBuildExecutionWithoutBuilds(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
+func resolveBuildExecutionWithoutBuilds(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
 	script, err := scriptpkg.ResolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return dockerspec.BuildExecutionSpec{}, err
@@ -167,7 +169,7 @@ func BuildExecutionUsesBuildScript(execution dockerspec.BuildExecutionSpec) bool
 // releaseDockerPushSpecs pushes every image, including version-pinned wrappers
 // missing from release.DockerImages whose charts still need them; unchanged
 // images are a cheap no-op.
-func releaseDockerPushSpecs(builds []seam.DockerBuildSpec) []model.DockerPushSpec {
+func releaseDockerPushSpecs(builds []imagebuild.DockerBuildSpec) []model.DockerPushSpec {
 	if len(builds) == 0 {
 		return nil
 	}

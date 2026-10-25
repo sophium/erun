@@ -12,9 +12,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -28,7 +29,7 @@ type UploadRuntimeInputResult struct {
 // UploadRuntimeInput streams a host file into the runtime pod over kubectl exec
 // stdin, so the bytes never touch the model's context or a command line.
 // It is host-only: the in-pod MCP edge has no path to the operator's filesystem.
-func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params model.UploadRuntimeInputParams, run seam.RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
+func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params model.UploadRuntimeInputParams, run runtimepod.RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
@@ -167,8 +168,8 @@ func parseRuntimeInputUploadResponse(stdout string) (size int64, sha string, err
 }
 
 func kubectlRemoteExecStdinArgs(req config.ShellLaunchParams, script string) []string {
-	args := config.KubectlTargetArgs(req)
-	args = append(args, "exec", "-i", "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
+	args := runtimetarget.KubectlTargetArgs(req)
+	args = append(args, "exec", "-i", "deployment/"+runtimetarget.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
 	return args
 }
 

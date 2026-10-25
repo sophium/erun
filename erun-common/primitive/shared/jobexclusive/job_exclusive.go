@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/activitylease"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -83,7 +83,7 @@ func formatEnvironmentExclusivityRemaining(remaining time.Duration) string {
 // shared worktree; any other scope names a separate resource.
 func environmentExclusivityCoversWorktree(scope string) bool {
 	switch strings.TrimSpace(scope) {
-	case activity.DefaultEnvironmentActivityLeaseScope, activity.EnvironmentActivityLeaseScopeEnvironment:
+	case activitylease.DefaultEnvironmentActivityLeaseScope, activitylease.EnvironmentActivityLeaseScopeEnvironment:
 		return true
 	default:
 		return false
@@ -92,7 +92,7 @@ func environmentExclusivityCoversWorktree(scope string) bool {
 
 // HeldEnvironmentExclusivityClaims returns every held exclusive claim whose scope satisfies covers.
 func HeldEnvironmentExclusivityClaims(tenant, environment string, now time.Time, covers func(string) bool) []model.EnvironmentActivityLease {
-	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
+	held, err := activitylease.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
 		return nil
 	}
@@ -121,7 +121,7 @@ func EnvironmentExclusivityConflict(operation, tenant, environment string, holde
 	holderJobID, _ := EnvironmentJobIDFromExclusiveLeaseID(holder.ID)
 	return &EnvironmentExclusivityConflictError{
 		Operation:   operation,
-		Scope:       activity.NormalizeExclusiveEnvironmentActivityLeaseScope(holder.Scope),
+		Scope:       activitylease.NormalizeExclusiveEnvironmentActivityLeaseScope(holder.Scope),
 		Holder:      holder,
 		HolderJobID: holderJobID,
 		Requested:   requested,
@@ -167,7 +167,7 @@ func environmentExclusivityClaimedByCaller(holder model.EnvironmentActivityLease
 	if strings.TrimSpace(underLeaseID) == "" {
 		return false
 	}
-	resolved, err := activity.ResolveEnvironmentActivityLeaseID(underLeaseID, underLeaseID)
+	resolved, err := activitylease.ResolveEnvironmentActivityLeaseID(underLeaseID, underLeaseID)
 	if err != nil {
 		return false
 	}

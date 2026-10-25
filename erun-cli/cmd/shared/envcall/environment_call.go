@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared/envscope"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -16,7 +16,7 @@ import (
 
 // EnvironmentTargetsItself reports whether this process is the target environment.
 func EnvironmentTargetsItself() bool {
-	return config.IsInRuntimeEnvironment(nil)
+	return runtimeresources.IsInRuntimeEnvironment(nil)
 }
 
 // CallEnvironmentTool runs one tool on the environment's MCP edge; the bool reports whether a call was made.

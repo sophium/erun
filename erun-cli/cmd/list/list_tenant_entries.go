@@ -7,6 +7,8 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/cmd/shared/usageview"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
+	"github.com/sophium/erun/erun-common/base/config/sshconfig"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle/list"
@@ -129,7 +131,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	if alias == "" {
 		return textfmt.ValueOrNone(alias)
 	}
-	configured, err := config.DefaultSSHConfigHasAlias(alias)
+	configured, err := sshconfig.DefaultSSHConfigHasAlias(alias)
 	if err != nil || configured {
 		return alias
 	}
@@ -149,7 +151,7 @@ func runtimeVersionLabel(tenantName string, env list.ListEnvironmentResult) stri
 	}
 	detail := line.Line + " line, " + line.Image
 	if line.Disagrees {
-		detail += " — release name " + config.RuntimeReleaseName(tenantName) + " disagrees with the image"
+		detail += " — release name " + runtimetarget.RuntimeReleaseName(tenantName) + " disagrees with the image"
 	}
 	return version + " (" + detail + ")"
 }

@@ -13,7 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextinit"
 )
 
 // ProvisionInput is the workflow input DBOS checkpoints; it must never carry a secret.
@@ -136,7 +137,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		DiskType:           input.DiskType,
 		DiskSizeGB:         input.DiskSizeGB,
 	}
-	status, err := cloud.InitCloudContext(ectx, store, params, cloud.CloudContextDependencies{
+	status, err := contextinit.InitCloudContext(ectx, store, params, cloudcontext.CloudContextDependencies{
 		RunAWS:     runner.runAWS(c),
 		RunKubectl: func(core.Context, []string) error { return nil },
 		// Deterministic per context so a crash-resumed re-run re-derives the

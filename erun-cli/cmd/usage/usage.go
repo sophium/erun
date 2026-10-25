@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/spf13/cobra"
 )
 
@@ -88,7 +88,7 @@ func runUsageCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, model.RuntimeUsageParams{
 		Interval: time.Duration(intervalSeconds * float64(time.Second)),
 	})

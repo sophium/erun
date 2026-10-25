@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
 )
 
 // hostedDefinitionDriftFor compares the hosted marker with the platform's
@@ -15,7 +16,7 @@ func (s *Service) hostedDefinitionDriftFor(ctx context.Context, tenant, environm
 	if err != nil {
 		return HostedDefinitionDrift{Error: fmt.Sprintf("Cannot read %s/%s's hosted marker: %s", tenant, environment, err)}
 	}
-	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+	marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return HostedDefinitionDrift{Error: fmt.Sprintf("%s/%s is not marked as hosted, so there is nothing to compare", tenant, environment)}
 	}
@@ -24,7 +25,7 @@ func (s *Service) hostedDefinitionDriftFor(ctx context.Context, tenant, environm
 	if err != nil {
 		return HostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
-			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
+			Describe:      envdefinition.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
 		}
 	}
@@ -34,12 +35,12 @@ func (s *Service) hostedDefinitionDriftFor(ctx context.Context, tenant, environm
 	if err != nil {
 		return HostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
-			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
+			Describe:      envdefinition.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
 		}
 	}
 	// Refuse a resolved row that is not the one the marker names.
-	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
+	if err := envdefinition.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
 		return HostedDefinitionDrift{
 			LocalRevision:    marker.DefinitionRevision,
 			PlatformRevision: record.Revision,
@@ -47,7 +48,7 @@ func (s *Service) hostedDefinitionDriftFor(ctx context.Context, tenant, environm
 		}
 	}
 
-	drift := configpkg.HostedDefinitionDrift{
+	drift := envdefinition.HostedDefinitionDrift{
 		LocalRevision:    marker.DefinitionRevision,
 		PlatformRevision: record.Revision,
 	}
@@ -74,7 +75,7 @@ func (s *Service) CheckHostedDefinitionDrift(tenant, environment string) (Hosted
 }
 
 func hostedEnvironmentToUI(config configpkg.EnvConfig) *HostedEnvironment {
-	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
+	marker, ok := envdefinition.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return nil
 	}
@@ -84,12 +85,12 @@ func hostedEnvironmentToUI(config configpkg.EnvConfig) *HostedEnvironment {
 		TenantID:           marker.TenantID,
 		EnvironmentID:      marker.EnvironmentID,
 		DefinitionRevision: marker.DefinitionRevision,
-		LocalChange:        hostedDefinitionLocalChangeToUI(configpkg.HostedDefinitionLocalChangeFor(config)),
+		LocalChange:        hostedDefinitionLocalChangeToUI(envdefinition.HostedDefinitionLocalChangeFor(config)),
 	}
 }
 
 // The sentence is carried, not reworded, so the panel and CLI agree.
-func hostedDefinitionLocalChangeToUI(change configpkg.HostedDefinitionLocalChange) HostedDefinitionLocalChange {
+func hostedDefinitionLocalChangeToUI(change envdefinition.HostedDefinitionLocalChange) HostedDefinitionLocalChange {
 	return HostedDefinitionLocalChange{
 		Available: change.Available,
 		Changed:   change.Changed,

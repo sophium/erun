@@ -12,9 +12,9 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/runtimepod"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
@@ -89,12 +89,12 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath string, limit int, run seam.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath string, limit int, run runtimepod.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	list, err := jobs.ResolveRuntimeOutputs(ctx, req, model.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
 	if err != nil {
 		return err
@@ -144,12 +144,12 @@ type outputsDownloadCLIResult struct {
 	Signing *model.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run seam.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run runtimepod.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := cloud.ShellLaunchParamsFromResult(result)
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
 	out, err := jobs.DownloadRuntimeOutput(ctx, req, model.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
 	if err != nil {
 		return err

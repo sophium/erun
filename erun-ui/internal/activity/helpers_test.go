@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -47,7 +48,7 @@ func inertDeps() Deps {
 			return nil, errors.New("container statuses are not wired in this test")
 		},
 		MCPEndpoint: func(result config.OpenResult) string {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", config.MCPPortForResult(result))
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", localports.MCPPortForResult(result))
 		},
 		MCPBearer:           func(string, string) string { return "" },
 		CanReachMCPEndpoint: func(int) bool { return false },

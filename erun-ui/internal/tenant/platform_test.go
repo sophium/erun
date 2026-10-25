@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/secretstore"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -156,7 +157,7 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	server := tenantDashboardAPI(t, "null", nil, &requests)
 	defer server.Close()
 
-	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
+	secrets := secretstore.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)

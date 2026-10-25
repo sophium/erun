@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -92,7 +93,7 @@ func (s *Service) ensureERunClone(selection uimodel.Selection) error {
 		return fmt.Errorf("resolve environment: %w", err)
 	}
 	ctx := s.d.Context()
-	mcpPort := config.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		return s.d.WrapMCPUnreachable(fmt.Errorf("mcp port %d is not reachable; open the environment first", mcpPort))
 	}
@@ -120,7 +121,7 @@ func (s *Service) resolveAppPort(selection uimodel.Selection) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("resolve environment: %w", err)
 	}
-	port := config.ContributeAppPortForResult(result)
+	port := localports.ContributeAppPortForResult(result)
 	if port <= 0 {
 		return 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
 	}

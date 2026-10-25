@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -14,7 +15,7 @@ import (
 // registryCredentialSecretName names the Secret `erun init` mints from the
 // operator's ghcr.io credential for pods that never authenticated themselves.
 func registryCredentialSecretName(tenant string) string {
-	return config.RuntimeReleaseName(tenant) + "-registry-credential"
+	return runtimetarget.RuntimeReleaseName(tenant) + "-registry-credential"
 }
 
 // ghcrCredentialOwner returns the namespace owner ("ghcr.io/sophium" -> "sophium").
@@ -48,17 +49,17 @@ func resolveHostGHCRCredentials(registries []string) map[string]RegistryBasicAut
 }
 
 // DockerConfigJSONAuthEntriesForCredentials encodes credentials as dockerconfigjson auth entries.
-func DockerConfigJSONAuthEntriesForCredentials(credentials map[string]RegistryBasicAuth) map[string]config.DockerConfigJSONAuthEntry {
-	entries := make(map[string]config.DockerConfigJSONAuthEntry, len(credentials))
+func DockerConfigJSONAuthEntriesForCredentials(credentials map[string]RegistryBasicAuth) map[string]containerregistry.DockerConfigJSONAuthEntry {
+	entries := make(map[string]containerregistry.DockerConfigJSONAuthEntry, len(credentials))
 	for host, auth := range credentials {
-		entries[host] = config.DockerConfigJSONAuthEntry{Auth: base64.StdEncoding.EncodeToString([]byte(auth.Username + ":" + auth.Secret))}
+		entries[host] = containerregistry.DockerConfigJSONAuthEntry{Auth: base64.StdEncoding.EncodeToString([]byte(auth.Username + ":" + auth.Secret))}
 	}
 	return entries
 }
 
 // DockerConfigJSONForAuthEntries renders a .dockerconfigjson from already-encoded entries.
-func DockerConfigJSONForAuthEntries(entries map[string]config.DockerConfigJSONAuthEntry) (string, error) {
-	data, err := json.Marshal(config.DockerConfigJSONFile{Auths: entries})
+func DockerConfigJSONForAuthEntries(entries map[string]containerregistry.DockerConfigJSONAuthEntry) (string, error) {
+	data, err := json.Marshal(containerregistry.DockerConfigJSONFile{Auths: entries})
 	if err != nil {
 		return "", err
 	}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/gitcmd"
 	"github.com/sophium/erun/erun-common/primitive/shared/releaseflow"
 )
 
@@ -42,7 +42,7 @@ func releaseBypassTestContext(out io.Writer) core.Context {
 	}
 }
 
-func releaseBypassPushRunner(stderrText string) seam.GitCommandRunnerFunc {
+func releaseBypassPushRunner(stderrText string) gitcmd.GitCommandRunnerFunc {
 	return func(_ string, _ io.Writer, stderr io.Writer, _ ...string) error {
 		if _, err := fmt.Fprint(stderr, stderrText); err != nil {
 			return err

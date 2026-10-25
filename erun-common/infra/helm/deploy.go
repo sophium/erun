@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 )
 
 func FindComponentHelmChartPath(projectRoot, componentName string) (string, error) {
@@ -18,12 +18,12 @@ func FindComponentHelmChartPath(projectRoot, componentName string) (string, erro
 	// A declared component scopes the search to its own k8s root, so same-named
 	// charts elsewhere cannot match.
 	searchRoot := projectRoot
-	declared, ok, err := configpkg.DeclaredComponentPaths(projectRoot, componentName)
+	declared, ok, err := projectpaths.DeclaredComponentPaths(projectRoot, componentName)
 	if err != nil {
 		return "", err
 	}
 	if ok {
-		if k8sRoot := configpkg.ResolveProjectPath(projectRoot, declared.K8s); k8sRoot != "" {
+		if k8sRoot := projectpaths.ResolveProjectPath(projectRoot, declared.K8s); k8sRoot != "" {
 			searchRoot = k8sRoot
 		}
 	}

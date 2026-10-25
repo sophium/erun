@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -89,7 +89,7 @@ func (s *Service) LoadDiff(selection uimodel.Selection, options uimodel.DiffOpti
 		return model.DiffResult{}, err
 	}
 	ctx := s.d.Context()
-	mcpPort := configpkg.MCPPortForResult(result)
+	mcpPort := localports.MCPPortForResult(result)
 	if !s.d.CanReachMCPEndpoint(mcpPort) {
 		return model.DiffResult{}, s.d.WrapMCPUnreachable(
 			s.ClassifyMCPUnreachable(mcpPort),

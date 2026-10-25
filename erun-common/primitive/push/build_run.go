@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
@@ -38,7 +38,7 @@ func RunPushCommand(ctx core.Context, op func(core.Context) error) (err error) {
 	return op(ctx)
 }
 
-func RunDockerPush(ctx core.Context, pushInput model.DockerPushSpec, push seam.DockerImagePusherFunc) error {
+func RunDockerPush(ctx core.Context, pushInput model.DockerPushSpec, push imagebuild.DockerImagePusherFunc) error {
 	if push == nil {
 		push = dockerregistry.DockerImagePusher
 	}
@@ -180,7 +180,7 @@ func PackageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec)
 
 // ComponentChartPublishVersion skips version-pinned bases; empty lets each chart
 // use its own image version.
-func ComponentChartPublishVersion(builds []seam.DockerBuildSpec) string {
+func ComponentChartPublishVersion(builds []imagebuild.DockerBuildSpec) string {
 	for _, buildInput := range builds {
 		if buildInput.Image.VersionFromBuildDir {
 			continue

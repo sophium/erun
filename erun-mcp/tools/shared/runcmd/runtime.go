@@ -5,7 +5,8 @@ import (
 	"io"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/contextpower"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -16,7 +17,7 @@ func RunRuntimeCommand(runtime runtimecfg.RuntimeConfig, preview bool, verbosity
 	traceOutput := new(bytes.Buffer)
 	traceSink := toolio.MirrorToJobLog(traceOutput, log)
 	ctx := toolio.RuntimeCallContext(preview, verbosity, nil, traceSink, traceSink)
-	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
+	ctx.KubernetesContextPreflight = contextpower.CloudContextPreflight(runtime.Store, cloudcontext.CloudContextDependencies{})
 	// The env trace feeds the desktop's Diagnostics console; read-only tools bypass
 	// RunRuntimeCommand so probe polls don't flood it.
 	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)

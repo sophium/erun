@@ -4,13 +4,14 @@ import (
 	"fmt"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/execmode"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportExecutionModes shows the effective subprocess/library mode per operation.
 func reportExecutionModes(ctx core.Context) error {
 	config, _, _ := configpkg.LoadERunConfig()
-	statuses := configpkg.ExecutionModeReport(config)
+	statuses := execmode.ExecutionModeReport(config)
 	if len(statuses) == 0 {
 		return nil
 	}

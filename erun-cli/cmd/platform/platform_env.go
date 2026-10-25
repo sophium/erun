@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
@@ -356,11 +357,11 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 
 // pullConfirmation asks about a two-sided edit. It returns nil under --yes or with no
 // prompt, which makes erun-common refuse the edit rather than resolve it silently.
-func pullConfirmation(ctx core.Context, promptRunner prompt.PromptRunner, tenant, environment string, yes bool) func(config.EnvDefinitionPlan) (bool, error) {
+func pullConfirmation(ctx core.Context, promptRunner prompt.PromptRunner, tenant, environment string, yes bool) func(envdefinition.EnvDefinitionPlan) (bool, error) {
 	if yes || promptRunner == nil {
 		return nil
 	}
-	return func(plan config.EnvDefinitionPlan) (bool, error) {
+	return func(plan envdefinition.EnvDefinitionPlan) (bool, error) {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  This environment and the platform have both changed since the last sync:"); err != nil {
 			return false, err
 		}

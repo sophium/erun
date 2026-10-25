@@ -1,0 +1,67 @@
+package activitylease
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// A hard link keeps a reader's inode across a write: replacing leaves it whole,
+// rewriting in place does not.
+
+func linkObserver(t *testing.T, path string) string {
+	t.Helper()
+	observer := path + ".observer"
+	if err := os.Link(path, observer); err != nil {
+		t.Fatalf("link %s: %v", path, err)
+	}
+	return observer
+}
+
+func readFileOrFail(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+func TestRenewingALeaseReplacesItsFileRatherThanRewritingItInPlace(t *testing.T) {
+	isolateActivityCache(t)
+	take := func(now time.Time) {
+		t.Helper()
+		if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+			Tenant: "acme", Environment: "dev", ID: "job-renew", Name: "renewing job", Now: now,
+		}); err != nil {
+			t.Fatalf("take lease: %v", err)
+		}
+	}
+	start := time.Now()
+	take(start)
+	dir, err := environmentActivityLeaseDir("acme", "dev")
+	if err != nil {
+		t.Fatalf("lease dir: %v", err)
+	}
+	path := filepath.Join(dir, "job-renew.json")
+	before := readFileOrFail(t, path)
+	observer := linkObserver(t, path)
+
+	take(start.Add(time.Minute))
+
+	if held := readFileOrFail(t, observer); !bytes.Equal(held, before) {
+		t.Fatalf("the renewal rewrote the lease a concurrent reader holds in place:\nbefore: %s\nreader now sees: %s", before, held)
+	}
+	if err := os.Remove(observer); err != nil {
+		t.Fatalf("remove observer: %v", err)
+	}
+	leases, err := LoadEnvironmentActivityLeases("acme", "dev", start.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("load leases: %v", err)
+	}
+	if len(leases) != 1 || leases[0].ID != "job-renew" || !leases[0].RenewedAt.Equal(start.Add(time.Minute)) {
+		t.Fatalf("expected the one renewed lease, got %+v", leases)
+	}
+}

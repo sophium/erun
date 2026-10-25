@@ -7,11 +7,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func ResolveDockerBuildTarget(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, error) {
+func ResolveDockerBuildTarget(findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, error) {
 	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
 	if !target.Release {
 		return target, nil, nil

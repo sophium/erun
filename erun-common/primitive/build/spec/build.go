@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectpaths"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/buildtarget"
+	"github.com/sophium/erun/erun-common/base/seam/imagebuild"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func ResolveCurrentDockerBuildSpecs(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) ([]seam.DockerBuildSpec, error) {
+func ResolveCurrentDockerBuildSpecs(ctx core.Context, store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, resolveBuildContext buildtarget.BuildContextResolverFunc, now buildtarget.NowFunc, target model.DockerCommandTarget) ([]imagebuild.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -21,7 +23,7 @@ func ResolveCurrentDockerBuildSpecs(ctx core.Context, store seam.DockerStore, fi
 		return nil, err
 	}
 
-	builds := make([]seam.DockerBuildSpec, 0, len(buildContexts))
+	builds := make([]imagebuild.DockerBuildSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		build, err := ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
@@ -40,13 +42,13 @@ func NewEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
 }
 
-func BuildEnvDisablesBuildScript(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) bool {
+func BuildEnvDisablesBuildScript(store buildtarget.DockerStore, findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) bool {
 	env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target)
 	return env != nil && env.DisableBuildScript
 }
 
 // RecommendBuildEnvIfMissing suggests a <tenant>-devops build environment; detection failures never block.
-func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) {
+func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
@@ -63,27 +65,27 @@ func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot seam.ProjectFi
 
 // projectDeclaresDockerRoot reports whether config declares a non-conventional docker root.
 func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
-	_, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
+	_, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err == nil && ok {
 		return strings.TrimSpace(paths.Docker) != ""
 	}
 	if ok {
 		return false
 	}
-	paths, err = config.LoadProjectPaths(projectRoot)
+	paths, err = projectpaths.LoadProjectPaths(projectRoot)
 	return err == nil && strings.TrimSpace(paths.Docker) != ""
 }
 
 // TraceConfiguredBuildPaths traces configured build path overrides as dry-run decisions,
 // and warns when the project config is gitignored.
-func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) {
+func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot projectroot.ProjectFinderFunc, target model.DockerCommandTarget) {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	config.WarnIfProjectConfigGitIgnored(ctx, projectRoot)
+	projectpaths.WarnIfProjectConfigGitIgnored(ctx, projectRoot)
 
-	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, target.Component)
+	name, paths, ok, err := projectpaths.ResolveProjectComponent(projectRoot, target.Component)
 	if err != nil {
 		ctx.Trace("build: component selection failed: " + err.Error())
 		return
@@ -93,7 +95,7 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot seam.ProjectFin
 		ctx.Trace("build: component " + name + " selected (.erun/config.yaml components)")
 		keyPrefix = "components." + name
 	} else {
-		paths, err = config.LoadProjectPaths(projectRoot)
+		paths, err = projectpaths.LoadProjectPaths(projectRoot)
 		if err != nil {
 			return
 		}
@@ -109,6 +111,6 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot seam.ProjectFin
 	}
 }
 
-func BuildExecutionSpecFromDockerBuilds(builds []seam.DockerBuildSpec) dockerspec.BuildExecutionSpec {
+func BuildExecutionSpecFromDockerBuilds(builds []imagebuild.DockerBuildSpec) dockerspec.BuildExecutionSpec {
 	return dockerspec.BuildExecutionSpec{DockerBuilds: builds}
 }

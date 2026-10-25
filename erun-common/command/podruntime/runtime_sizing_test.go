@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
@@ -194,7 +194,7 @@ func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 		"memory.max":     "max\n",
 		"memory.current": "1024\n",
 	})
-	usage := config.ReadLocalRuntimeUsage(root)
+	usage := runtimeresources.ReadLocalRuntimeUsage(root)
 	if usage.Memory.LimitBytes != 0 || usage.CPU.QuotaCores != 0 {
 		t.Fatalf("an unlimited cgroup must report no limit, got %+v", usage)
 	}

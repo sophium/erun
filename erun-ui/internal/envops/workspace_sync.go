@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -198,7 +199,7 @@ const (
 // prepareWorkspaceSyncPass sleeps before signalling retry so the loop does not
 // busy-spin on an unreachable SSHD.
 func (s *Service) prepareWorkspaceSyncPass(ctx context.Context, key string, result config.OpenResult, params workspace.WorkspaceSyncParams) workspaceSyncPassOutcome {
-	if !s.d.CanConnectLocalPort(config.SSHLocalPortForResult(result)) {
+	if !s.d.CanConnectLocalPort(localports.SSHLocalPortForResult(result)) {
 		if err := s.d.EnsureSSHD(ctx, result); err != nil {
 			s.setWorkspaceSyncError(key, result.Tenant, result.EnvConfig.Name, err)
 			if !sleepWorkspaceSyncInterval(ctx, s.d.WorkspaceSyncInterval) {

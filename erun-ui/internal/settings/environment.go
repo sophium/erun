@@ -7,6 +7,9 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	"github.com/sophium/erun/erun-common/base/config/repopath"
+	"github.com/sophium/erun/erun-common/base/config/runtimeresources"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
@@ -23,7 +26,7 @@ func (s *Service) LoadEnvironmentConfig(selection uimodel.Selection) (Environmen
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
+	ports, err := localports.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -44,7 +47,7 @@ func (s *Service) SaveEnvironmentConfig(selection uimodel.Selection, config Envi
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
+	ports, err := localports.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -92,7 +95,7 @@ func (s *Service) SetEnvironmentAutoStart(selection uimodel.Selection, mode stri
 	if err := s.d.Store.SaveEnvConfig(selection.Tenant, existing); err != nil {
 		return EnvironmentConfig{}, err
 	}
-	ports, err := configpkg.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
+	ports, err := localports.ResolveEnvironmentLocalPorts(s.d.Store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -119,13 +122,13 @@ func parseAutoStartMode(mode string) (*bool, error) {
 func (s *Service) updatedEnvironmentConfig(config EnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
 	// Shares ValidateEnvRepoPath with init so both accept exactly the same paths.
-	if err := configpkg.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
+	if err := repopath.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
 	if _, err := updated.Idle.Resolve(); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := configpkg.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
+	if err := runtimeresources.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
 	if err := s.validateWorkspaceSyncConfig(updated); err != nil {
@@ -163,7 +166,7 @@ func (s *Service) environmentConfigToUI(tenant string, config configpkg.EnvConfi
 	syncStatus, syncMessage := s.d.WorkspaceSyncStatus(uimodel.Selection{Tenant: tenant, Environment: name})
 	effectiveRegistries, registriesInherited := s.EffectiveContainerRegistries(tenant, fallbackName, config)
 	registries := containerRegistriesToUI(effectiveRegistries)
-	ports = configpkg.LocalPortsForResult(configpkg.OpenResult{
+	ports = localports.LocalPortsForResult(configpkg.OpenResult{
 		EnvConfig:  config,
 		LocalPorts: ports,
 	})
@@ -333,7 +336,7 @@ func copyStringPtr(value *string) *string {
 }
 
 func runtimePodConfigToUI(config model.RuntimePodResources) RuntimePodConfig {
-	config = configpkg.NormalizeRuntimePodResources(config)
+	config = runtimeresources.NormalizeRuntimePodResources(config)
 	return RuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
@@ -341,7 +344,7 @@ func runtimePodConfigToUI(config model.RuntimePodResources) RuntimePodConfig {
 }
 
 func runtimePodConfigFromUI(config RuntimePodConfig) model.RuntimePodResources {
-	return configpkg.NormalizeRuntimePodResources(model.RuntimePodResources{
+	return runtimeresources.NormalizeRuntimePodResources(model.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	})

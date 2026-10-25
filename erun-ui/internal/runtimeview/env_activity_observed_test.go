@@ -12,7 +12,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -82,7 +82,7 @@ func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
 func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 	got := observeWith(t, true, func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 		return model.EnvironmentIdleStatus{
-			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 		}, nil
 	})
 	if !got.Reachable || !got.Observed {
@@ -155,7 +155,7 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		data, err := json.Marshal(model.EnvironmentIdleStatus{
-			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 		})
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)

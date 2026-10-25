@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/activity/aisession"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -22,7 +22,7 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
-	if err := activity.RecordAISessionEvent(model.AISessionEventParams{
+	if err := aisession.RecordAISessionEvent(model.AISessionEventParams{
 		Tenant: "tenant-a", Environment: "dev", SessionID: "sess-1",
 		Tool: "claude", Event: model.AISessionEventTurnEnd,
 	}); err != nil {

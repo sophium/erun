@@ -3,7 +3,7 @@ package registrylogin
 import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/providerconfig"
 )
 
 // erunTestCloudStore persists saves, unlike stubCloudContextStore.
@@ -21,7 +21,7 @@ func (s *erunTestCloudStore) SaveERunConfig(config configpkg.ERunConfig) error {
 }
 
 func erunTestProvider() model.CloudProviderConfig {
-	return cloud.NormalizeCloudProviderConfig(model.CloudProviderConfig{
+	return providerconfig.NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:         "erun+api.example.test@erun",
 		Provider:      configpkg.CloudProviderERun,
 		OIDCIssuerURL: "https://auth.example.test",

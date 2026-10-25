@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimesync"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
@@ -31,7 +32,7 @@ func TestRuntimeBootConfigCloudContextDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			var root configpkg.ERunConfig
-			readTestYAML(t, configpkg.RuntimeRootConfigPath(boot.configHome()), &root)
+			readTestYAML(t, runtimesync.RuntimeRootConfigPath(boot.configHome()), &root)
 			if len(root.CloudContexts) != 1 || root.CloudContexts[0].Name != tc.wantName || root.CloudContexts[0].KubernetesContext != tc.wantKube {
 				t.Fatalf("got %+v, want name %q kubernetescontext %q", root.CloudContexts, tc.wantName, tc.wantKube)
 			}
@@ -48,7 +49,7 @@ func TestRuntimeBootConfigWritesTheEnvironmentAndKeepsUnknownKeys(t *testing.T) 
 		"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev", "ERUN_ENV_TYPE": "remote-agent",
 		"ERUN_RUNTIME_REGISTRY": "10.43.0.10:5000", "ERUN_REPO_PATH": "/home/erun/git/team",
 	})
-	envPath := configpkg.RuntimeEnvConfigPath(boot.configHome(), "team", "dev")
+	envPath := runtimesync.RuntimeEnvConfigPath(boot.configHome(), "team", "dev")
 	writeAssetFile(t, envPath, "name: dev\nsshd:\n  enabled: true\nfuturekey: keep\n")
 	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
@@ -71,7 +72,7 @@ func TestRuntimeBootConfigWritesTheEnvironmentAndKeepsUnknownKeys(t *testing.T) 
 
 func TestRuntimeBootConfigReplacesAnUnparsableFile(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev"})
-	envPath := configpkg.RuntimeEnvConfigPath(boot.configHome(), "team", "dev")
+	envPath := runtimesync.RuntimeEnvConfigPath(boot.configHome(), "team", "dev")
 	writeAssetFile(t, envPath, "name: [unterminated\n")
 	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)

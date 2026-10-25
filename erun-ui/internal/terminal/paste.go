@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
 )
 
 const pastedFileDir = "/home/erun/.codex/attachments"
@@ -53,8 +54,8 @@ func SavePastedFileToRuntime(params PasteParams) (string, error) {
 }
 
 func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath string) (string, []string, string) {
-	shellParams := cloud.ShellLaunchParamsFromResult(result)
-	release := config.RuntimeReleaseName(result.Tenant)
+	shellParams := shelllaunch.ShellLaunchParamsFromResult(result)
+	release := runtimetarget.RuntimeReleaseName(result.Tenant)
 	script := fmt.Sprintf("mkdir -p %s && base64 -d > %s", ShellQuote(remoteDir), ShellQuote(remotePath))
 
 	args := make([]string, 0, 12)
@@ -68,7 +69,7 @@ func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath 
 		"exec",
 		"-i",
 		"-c",
-		config.DevopsComponentName,
+		runtimetarget.DevopsComponentName,
 		"deployment/"+release,
 		"--",
 		"/bin/sh",

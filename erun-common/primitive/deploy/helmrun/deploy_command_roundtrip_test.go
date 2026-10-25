@@ -8,12 +8,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/helmdeploy"
 )
 
 // The executed helm command must match the traced one.
 func TestHelmDeployParamsPreservesCommand(t *testing.T) {
-	spec := seam.HelmDeploySpec{
+	spec := helmdeploy.HelmDeploySpec{
 		ReleaseName:          "frs-devops",
 		ChartPath:            "oci://ghcr.io/sophium/charts/frs-devops",
 		SubchartKey:          "erun-devops",

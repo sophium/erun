@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
@@ -26,7 +26,7 @@ func loadAPILog(ctx context.Context, input tenantsvc.DashboardInput) (string, er
 }
 
 func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, environment string) (string, error) {
-	namespace := config.KubernetesNamespaceName(tenant, environment)
+	namespace := runtimetarget.KubernetesNamespaceName(tenant, environment)
 	// A selector names the replica; Recreate rollouts briefly have two matching pods.
 	return kubectlText(ctx, kubernetesContext,
 		"--namespace", namespace,

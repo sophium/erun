@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
@@ -31,5 +32,5 @@ func OpenParamsForArgs(args []string) (model.OpenParams, error) {
 }
 
 func ResolveOpen(store configpkg.OpenStore, params model.OpenParams) (configpkg.OpenResult, error) {
-	return opentarget.ResolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
+	return opentarget.ResolveOpenWithFinder(store, projectroot.FindProjectRoot, params)
 }

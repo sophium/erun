@@ -8,9 +8,18 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	configcloudcontext "github.com/sophium/erun/erun-common/base/config/cloudcontext"
+	"github.com/sophium/erun/erun-common/base/config/containerregistry"
+	"github.com/sophium/erun/erun-common/base/config/envdefinition"
+	"github.com/sophium/erun/erun-common/base/config/localports"
+	configprojectroot "github.com/sophium/erun/erun-common/base/config/projectroot"
+	"github.com/sophium/erun/erun-common/base/config/sshconfig"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	seamprojectroot "github.com/sophium/erun/erun-common/base/seam/projectroot"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	cloudcloudcontext "github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/cloud/providertoken"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -62,7 +71,7 @@ type ListTenantResult struct {
 	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
-func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
+func ResolveListResult(store envstore.ListStore, findProjectRoot seamprojectroot.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
 	if store == nil {
 		return ListResult{}, fmt.Errorf("store is required")
 	}
@@ -88,11 +97,11 @@ func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderF
 	result := newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath, tenants)
 	result.CurrentDirectory = listCurrentDirectoryResult(result.CurrentDirectory, effectiveResult, effectiveErr)
 
-	portAllocations, err := configpkg.ResolveAllEnvironmentLocalPorts(store)
+	portAllocations, err := localports.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListResult{}, err
 	}
-	cloudProviders, err := cloud.ListCloudProviderStatuses(store, cloud.DefaultCloudDependencies())
+	cloudProviders, err := providertoken.ListCloudProviderStatuses(store, cloud.DefaultCloudDependencies())
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -119,7 +128,7 @@ func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderF
 
 // An unreadable ssh config is not a failure of this command.
 func listOrphanedSSHAliases(tenants []ListTenantResult) []model.SSHOrphanedAlias {
-	entries, err := configpkg.ReadDefaultSSHHostEntries()
+	entries, err := sshconfig.ReadDefaultSSHHostEntries()
 	if err != nil {
 		return nil
 	}
@@ -166,14 +175,14 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective co
 		CloudProviderAlias: strings.TrimSpace(effective.EnvConfig.CloudProviderAlias),
 		RepoPath:           effective.RepoPath,
 		LocalRepoPath:      strings.TrimSpace(effective.EnvConfig.LocalRepoPath),
-		APIURL:             APIURLForListEnvironment(effective.TenantConfig, configpkg.LocalPortsForResult(effective)),
-		LocalPorts:         configpkg.LocalPortsForResult(effective),
+		APIURL:             APIURLForListEnvironment(effective.TenantConfig, localports.LocalPortsForResult(effective)),
+		LocalPorts:         localports.LocalPortsForResult(effective),
 		SSH:                NewListSSHResult(effective),
 	}
 	return current
 }
 
-func listTenantResult(store seam.ListStore, tenant model.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) (ListTenantResult, error) {
+func listTenantResult(store envstore.ListStore, tenant model.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) (ListTenantResult, error) {
 	envs, err := store.ListEnvConfigs(tenant.Name)
 	if err != nil {
 		return ListTenantResult{}, err
@@ -207,9 +216,9 @@ func configuredTenantForRepo(repoName string, tenants []model.TenantConfig) stri
 	return ""
 }
 
-func detectCurrentRepo(findProjectRoot seam.ProjectFinderFunc) (string, string, error) {
+func detectCurrentRepo(findProjectRoot seamprojectroot.ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
-		findProjectRoot = configpkg.FindProjectRoot
+		findProjectRoot = configprojectroot.FindProjectRoot
 	}
 	name, path, err := findProjectRoot()
 	if err == nil {
@@ -224,7 +233,7 @@ func detectCurrentRepo(findProjectRoot seam.ProjectFinderFunc) (string, string, 
 	return "", "", err
 }
 
-func loadListDefaultTenant(store seam.ListStore) (string, error) {
+func loadListDefaultTenant(store envstore.ListStore) (string, error) {
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
 		return "", err
@@ -232,7 +241,7 @@ func loadListDefaultTenant(store seam.ListStore) (string, error) {
 	return strings.TrimSpace(config.DefaultTenant), nil
 }
 
-func loadListOrchestrators(store seam.ListStore) ([]model.ListOrchestratorResult, error) {
+func loadListOrchestrators(store envstore.ListStore) ([]model.ListOrchestratorResult, error) {
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil
@@ -266,7 +275,7 @@ func loadListOrchestrators(store seam.ListStore) ([]model.ListOrchestratorResult
 	return results, nil
 }
 
-func loadListDefaultEnvironment(store seam.ListStore, tenant string) (string, error) {
+func loadListDefaultEnvironment(store envstore.ListStore, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
 		return "", opentarget.ErrDefaultEnvironmentNotConfigured
@@ -314,7 +323,7 @@ type ListEnvironmentResult struct {
 	AutoStart          *bool                             `json:"autoStart,omitempty"`
 }
 
-func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) ListEnvironmentResult {
+func NewListEnvironmentResult(store envstore.ListStore, tenant model.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) ListEnvironmentResult {
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
 	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
 	return ListEnvironmentResult{
@@ -325,7 +334,7 @@ func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, e
 		CloudProviderAlias:       strings.TrimSpace(env.CloudProviderAlias),
 		RepoPath:                 env.EffectiveLocalRepoPath(),
 		LocalRepoPath:            strings.TrimSpace(env.LocalRepoPath),
-		ContainerRegistries:      configpkg.EffectiveEnvironmentContainerRegistries(env),
+		ContainerRegistries:      containerregistry.EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
 		RuntimeVersionLine:       runtimeVersionLine,
 		ErunVersion:              runtimeversion.ResolveErunVersion(env, runtimeVersionLine),
@@ -350,7 +359,7 @@ func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, e
 }
 
 func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment {
-	marker, ok := configpkg.HostedEnvironmentFromConfig(env)
+	marker, ok := envdefinition.HostedEnvironmentFromConfig(env)
 	if !ok {
 		return nil
 	}
@@ -408,11 +417,11 @@ func APIURLForListEnvironment(tenant model.TenantConfig, localPorts model.Enviro
 
 // Injected ERUN_*_PORT values override config when this process is the environment's own runtime pod.
 func listEnvironmentLocalPorts(tenant string, env configpkg.EnvConfig, portAllocations map[string]model.EnvironmentLocalPorts) model.EnvironmentLocalPorts {
-	localPorts := portAllocations[configpkg.EnvironmentPortKey(tenant, env.Name)]
+	localPorts := portAllocations[localports.EnvironmentPortKey(tenant, env.Name)]
 	if env.SSHD.LocalPort > 0 {
 		localPorts.SSH = env.SSHD.LocalPort
 	}
-	return configpkg.OverlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
+	return localports.OverlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
 }
 
 func listEnvironmentOpenResult(tenant model.TenantConfig, env configpkg.EnvConfig, localPorts model.EnvironmentLocalPorts) configpkg.OpenResult {
@@ -432,11 +441,11 @@ func listEnvironmentIsActive(store configpkg.CloudReadStore, env configpkg.EnvCo
 	if !env.RemoteWorktree() {
 		return false
 	}
-	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configcloudcontext.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return false
 	}
-	return strings.TrimSpace(status.Status) == cloud.CloudContextStatusRunning
+	return strings.TrimSpace(status.Status) == cloudcloudcontext.CloudContextStatusRunning
 }
 
 func NewListSSHResult(result configpkg.OpenResult) model.ListSSHResult {
