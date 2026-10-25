@@ -124,10 +124,7 @@ func (a *App) observeEnvironmentActivity(selection uimodel.Selection) environmen
 	if a.deps.loadIdleStatus == nil {
 		return observation
 	}
-	parent := a.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
+	parent := a.context()
 	ctx, cancel := context.WithTimeout(parent, environmentActivityTimeout)
 	defer cancel()
 	// Use the bound port, not today's config, which may have changed since.
@@ -160,10 +157,7 @@ func (a *App) observeEnvironmentActivityViaPod(selection uimodel.Selection, obse
 	if err != nil || strings.TrimSpace(envConfig.KubernetesContext) == "" {
 		return observation
 	}
-	parent := a.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
+	parent := a.context()
 	ctx, cancel := context.WithTimeout(parent, environmentActivityPodProbeTimeout)
 	defer cancel()
 	script := fmt.Sprintf("erun idle %s %s --json", shellQuote(selection.Tenant), shellQuote(selection.Environment))

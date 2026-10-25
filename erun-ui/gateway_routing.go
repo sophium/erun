@@ -98,10 +98,7 @@ func (a *App) gatewayRoutingCandidates() ([]gatewayRoutingCandidate, error) {
 
 // readGatewayRoutingDrift returns the zero value on a match or an unreadable pod.
 func (a *App) readGatewayRoutingDrift(tenant string, env config.EnvConfig, catalog *config.OpenRouterConfig) uiGatewayRouting {
-	parent := a.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
+	parent := a.context()
 	ctx, cancel := context.WithTimeout(parent, gatewayRoutingReadTimeout)
 	defer cancel()
 	routing, found, err := readGatewayRouting(ctx, env, tenant, catalog)
