@@ -1,4 +1,4 @@
-package main
+package contribute
 
 import (
 	"bytes"
@@ -19,8 +19,8 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// contributeAppForward port-forwards the contribute clone's in-pod headless app to the host.
-type contributeAppForward struct {
+// appForward port-forwards the contribute clone's in-pod headless app to the host.
+type appForward struct {
 	mu        sync.Mutex
 	gen       int
 	cmd       *exec.Cmd
@@ -30,13 +30,13 @@ type contributeAppForward struct {
 	stopped   bool
 }
 
-func newContributeAppForward(cmd *exec.Cmd, stderr *bytes.Buffer, localPort int) *contributeAppForward {
-	f := &contributeAppForward{cmd: cmd, stderr: stderr, localPort: localPort, gen: 1}
+func newAppForward(cmd *exec.Cmd, stderr *bytes.Buffer, localPort int) *appForward {
+	f := &appForward{cmd: cmd, stderr: stderr, localPort: localPort, gen: 1}
 	f.startReap(1, cmd)
 	return f
 }
 
-func (f *contributeAppForward) exitedWithError() (bool, string) {
+func (f *appForward) exitedWithError() (bool, string) {
 	if f == nil {
 		return false, ""
 	}
@@ -53,7 +53,7 @@ func (f *contributeAppForward) exitedWithError() (bool, string) {
 }
 
 // adopt returns false after stop(); the caller must then kill cmd.
-func (f *contributeAppForward) adopt(cmd *exec.Cmd, stderr *bytes.Buffer) bool {
+func (f *appForward) adopt(cmd *exec.Cmd, stderr *bytes.Buffer) bool {
 	if f == nil {
 		return false
 	}
@@ -73,7 +73,7 @@ func (f *contributeAppForward) adopt(cmd *exec.Cmd, stderr *bytes.Buffer) bool {
 }
 
 // startReap publishes the exit only for the current generation, so a stale Wait cannot mark a newer cmd exited.
-func (f *contributeAppForward) startReap(gen int, cmd *exec.Cmd) {
+func (f *appForward) startReap(gen int, cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
@@ -89,13 +89,13 @@ func (f *contributeAppForward) startReap(gen int, cmd *exec.Cmd) {
 
 // A cold in-pod erun-app build takes 2-3 minutes; incremental ~30s.
 var (
-	contributeAppPortReachableTimeout      = 5 * time.Minute
-	contributeAppPortReachablePollInterval = 500 * time.Millisecond
+	appReachableTimeout      = 5 * time.Minute
+	appReachablePollInterval = 500 * time.Millisecond
 )
 
-// spawnContributeAppForwardCmd captures stderr so real errors surface. The forward
+// spawnForwardCmd captures stderr so real errors surface. The forward
 // owns reaping; do not Wait here.
-var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*exec.Cmd, *bytes.Buffer, error) {
+var spawnForwardCmd = func(ctx context.Context, args []string) (*exec.Cmd, *bytes.Buffer, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	core.HideConsoleWindow(cmd)
 	stderr := new(bytes.Buffer)
@@ -107,8 +107,8 @@ var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*ex
 	return cmd, stderr, nil
 }
 
-func (a *App) startContributeAppForward(ctx context.Context, selection uimodel.Selection) (*contributeAppForward, []string, int, error) {
-	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
+func (s *Service) startAppForward(ctx context.Context, selection uimodel.Selection) (*appForward, []string, int, error) {
+	result, err := resolve.ResolveOpen(s.d.Store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -119,18 +119,18 @@ func (a *App) startContributeAppForward(ctx context.Context, selection uimodel.S
 	if port <= 0 {
 		return nil, nil, 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
 	}
-	if canConnectLocalContributeAppPort(port) {
+	if canConnectLocalAppPort(port) {
 		return nil, nil, port, nil
 	}
-	args := kubectlContributeAppPortForwardArgs(result, port)
-	cmd, stderr, err := spawnContributeAppForwardCmd(ctx, args)
+	args := kubectlPortForwardArgs(result, port)
+	cmd, stderr, err := spawnForwardCmd(ctx, args)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	return newContributeAppForward(cmd, stderr, port), args, port, nil
+	return newAppForward(cmd, stderr, port), args, port, nil
 }
 
-func (f *contributeAppForward) stop() {
+func (f *appForward) stop() {
 	if f == nil {
 		return
 	}
@@ -144,31 +144,31 @@ func (f *contributeAppForward) stop() {
 	_ = cmd.Process.Kill()
 }
 
-// waitForContributeAppReachable polls HTTP, not TCP: kubectl port-forward accepts
+// waitForAppReachable polls HTTP, not TCP: kubectl port-forward accepts
 // connections with no pod listener, then dies with "lost connection to pod" while
 // the app rebuilds. It respawns kubectl until the deadline, keeping the last stderr.
 // A nil forward with empty args means something already listens locally.
-func waitForContributeAppReachable(ctx context.Context, port int, forward *contributeAppForward, args []string) error {
-	deadline := time.Now().Add(contributeAppPortReachableTimeout)
+func waitForAppReachable(ctx context.Context, port int, forward *appForward, args []string) error {
+	deadline := time.Now().Add(appReachableTimeout)
 	var lastExitMsg string
 	for time.Now().Before(deadline) {
-		if canReachLocalContributeAppEndpoint(port) {
+		if canReachLocalAppEndpoint(port) {
 			return nil
 		}
 		if forward != nil && len(args) > 0 {
-			if err := respawnContributeAppForwardIfExited(ctx, port, forward, args, &lastExitMsg); err != nil {
+			if err := respawnForwardIfExited(ctx, port, forward, args, &lastExitMsg); err != nil {
 				return err
 			}
 		}
-		time.Sleep(contributeAppPortReachablePollInterval)
+		time.Sleep(appReachablePollInterval)
 	}
 	if lastExitMsg != "" {
-		return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s (last kubectl exit: %s)", port, contributeAppPortReachableTimeout, lastExitMsg)
+		return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s (last kubectl exit: %s)", port, appReachableTimeout, lastExitMsg)
 	}
-	return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s", port, contributeAppPortReachableTimeout)
+	return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s", port, appReachableTimeout)
 }
 
-func respawnContributeAppForwardIfExited(ctx context.Context, port int, forward *contributeAppForward, args []string, lastExitMsg *string) error {
+func respawnForwardIfExited(ctx context.Context, port int, forward *appForward, args []string, lastExitMsg *string) error {
 	exited, msg := forward.exitedWithError()
 	if !exited {
 		return nil
@@ -176,7 +176,7 @@ func respawnContributeAppForwardIfExited(ctx context.Context, port int, forward 
 	if msg != "" {
 		*lastExitMsg = msg
 	}
-	cmd, stderr, spawnErr := spawnContributeAppForwardCmd(ctx, args)
+	cmd, stderr, spawnErr := spawnForwardCmd(ctx, args)
 	if spawnErr != nil {
 		return fmt.Errorf("respawn kubectl port-forward for 127.0.0.1:%d after early exit (%s): %w", port, lastExitMsgOrPlaceholder(*lastExitMsg), spawnErr)
 	}
@@ -196,8 +196,8 @@ func lastExitMsgOrPlaceholder(msg string) string {
 	return msg
 }
 
-// canReachLocalContributeAppEndpoint treats any HTTP response, even 404, as a live server.
-func canReachLocalContributeAppEndpoint(port int) bool {
+// canReachLocalAppEndpoint treats any HTTP response, even 404, as a live server.
+func canReachLocalAppEndpoint(port int) bool {
 	if port <= 0 {
 		return false
 	}
@@ -210,8 +210,8 @@ func canReachLocalContributeAppEndpoint(port int) bool {
 	return true
 }
 
-// canConnectLocalContributeAppPort checks only that the forward accepts TCP.
-func canConnectLocalContributeAppPort(port int) bool {
+// canConnectLocalAppPort checks only that the forward accepts TCP.
+func canConnectLocalAppPort(port int) bool {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 	if err != nil {
 		return false
@@ -220,7 +220,7 @@ func canConnectLocalContributeAppPort(port int) bool {
 	return true
 }
 
-func kubectlContributeAppPortForwardArgs(result config.OpenResult, localPort int) []string {
+func kubectlPortForwardArgs(result config.OpenResult, localPort int) []string {
 	args := make([]string, 0, 8)
 	if c := strings.TrimSpace(result.EnvConfig.KubernetesContext); c != "" {
 		args = append(args, "--context", c)
@@ -237,37 +237,37 @@ func kubectlContributeAppPortForwardArgs(result config.OpenResult, localPort int
 	return args
 }
 
-type contributeAppForwards struct {
+type appForwards struct {
 	mu       sync.Mutex
-	forwards map[string]*contributeAppForward
+	forwards map[string]*appForward
 }
 
-func newContributeAppForwards() *contributeAppForwards {
-	return &contributeAppForwards{forwards: map[string]*contributeAppForward{}}
+func newAppForwards() *appForwards {
+	return &appForwards{forwards: map[string]*appForward{}}
 }
 
-func (c *contributeAppForwards) put(selection uimodel.Selection, forward *contributeAppForward) {
+func (c *appForwards) put(selection uimodel.Selection, forward *appForward) {
 	if c == nil || forward == nil {
 		return
 	}
 	c.mu.Lock()
-	c.forwards[contributeAppForwardKey(selection)] = forward
+	c.forwards[forwardKey(selection)] = forward
 	c.mu.Unlock()
 }
 
-func (c *contributeAppForwards) take(selection uimodel.Selection) *contributeAppForward {
+func (c *appForwards) take(selection uimodel.Selection) *appForward {
 	if c == nil {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	key := contributeAppForwardKey(selection)
+	key := forwardKey(selection)
 	forward := c.forwards[key]
 	delete(c.forwards, key)
 	return forward
 }
 
-func contributeAppForwardKey(selection uimodel.Selection) string {
+func forwardKey(selection uimodel.Selection) string {
 	selection = uimodel.NormalizeSelection(selection)
 	return selection.Tenant + "/" + selection.Environment
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
@@ -132,8 +133,6 @@ type App struct {
 	// skillsSourceReported warns once per run about unresolvable shipped skills.
 	skillsSourceReported bool
 	agentsSourceReported bool
-	contribute           *contributeStore
-	contributeApps       *contributeAppForwards
 
 	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
 	closeConfirmed bool
@@ -157,6 +156,7 @@ type App struct {
 	envops        *envops.Service
 	terminal      *terminal.Service
 	activity      *activitysvc.Service
+	contribute    *contribute.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -209,7 +209,7 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	app.investigations.onExpire = app.finishExpiredInvestigation
 	app.activity = app.newActivityService()
-	app.contribute = newContributeStore(deps.contributeStatePath)
+	app.contribute = app.newContributeService()
 	app.tenant = tenantsvc.New(tenantsvc.Deps{
 		Store:                 deps.store,
 		Cloud:                 deps.cloudDeps,

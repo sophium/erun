@@ -1,4 +1,4 @@
-package main
+package contribute
 
 import (
 	"bytes"
@@ -29,9 +29,12 @@ func freeTCPPort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	port := tcpListenerPort(t, ln)
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address %v is not TCP", ln.Addr())
+	}
 	_ = ln.Close()
-	return port
+	return addr.Port
 }
 
 func startTinyHTTPServerOn(t *testing.T, port int) func() {
@@ -49,15 +52,15 @@ func startTinyHTTPServerOn(t *testing.T, port int) func() {
 	return func() { _ = srv.Close() }
 }
 
-func shrinkContributeAppTimings(t *testing.T, deadline, poll time.Duration) {
+func shrinkAppTimings(t *testing.T, deadline, poll time.Duration) {
 	t.Helper()
-	origDeadline := contributeAppPortReachableTimeout
-	origPoll := contributeAppPortReachablePollInterval
-	contributeAppPortReachableTimeout = deadline
-	contributeAppPortReachablePollInterval = poll
+	origDeadline := appReachableTimeout
+	origPoll := appReachablePollInterval
+	appReachableTimeout = deadline
+	appReachablePollInterval = poll
 	t.Cleanup(func() {
-		contributeAppPortReachableTimeout = origDeadline
-		contributeAppPortReachablePollInterval = origPoll
+		appReachableTimeout = origDeadline
+		appReachablePollInterval = origPoll
 	})
 }
 
@@ -68,10 +71,10 @@ type spawnPlan struct {
 	onSpawn func()
 }
 
-func installFakeContributeSpawn(t *testing.T, plan func(n int) spawnPlan, counter *int32) {
+func installFakeSpawn(t *testing.T, plan func(n int) spawnPlan, counter *int32) {
 	t.Helper()
-	orig := spawnContributeAppForwardCmd
-	spawnContributeAppForwardCmd = func(ctx context.Context, _ []string) (*exec.Cmd, *bytes.Buffer, error) {
+	orig := spawnForwardCmd
+	spawnForwardCmd = func(ctx context.Context, _ []string) (*exec.Cmd, *bytes.Buffer, error) {
 		n := atomic.AddInt32(counter, 1)
 		p := plan(int(n))
 		if p.onSpawn != nil {
@@ -85,26 +88,26 @@ func installFakeContributeSpawn(t *testing.T, plan func(n int) spawnPlan, counte
 		// The forward reaps (startReap), as in production.
 		return cmd, bytes.NewBufferString(p.stderr), nil
 	}
-	t.Cleanup(func() { spawnContributeAppForwardCmd = orig })
+	t.Cleanup(func() { spawnForwardCmd = orig })
 }
 
-func initialContributeSpawn(t *testing.T, port int) (*contributeAppForward, []string) {
+func initialSpawn(t *testing.T, port int) (*appForward, []string) {
 	t.Helper()
 	args := []string{"port-forward", "deployment/test", fmt.Sprintf("%d:%d", port, port)}
-	cmd, stderr, err := spawnContributeAppForwardCmd(context.Background(), args)
+	cmd, stderr, err := spawnForwardCmd(context.Background(), args)
 	if err != nil {
 		t.Fatalf("initial spawn: %v", err)
 	}
-	return newContributeAppForward(cmd, stderr, port), args
+	return newAppForward(cmd, stderr, port), args
 }
 
 func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
-	shrinkContributeAppTimings(t, 2*time.Second, 25*time.Millisecond)
+	shrinkAppTimings(t, 2*time.Second, 25*time.Millisecond)
 	port := freeTCPPort(t)
 	closeFn := startTinyHTTPServerOn(t, port)
 	t.Cleanup(closeFn)
 
-	if err := waitForContributeAppReachable(context.Background(), port, nil, nil); err != nil {
+	if err := waitForAppReachable(context.Background(), port, nil, nil); err != nil {
 		t.Fatalf("expected reachable, got %v", err)
 	}
 }
@@ -112,12 +115,12 @@ func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
 // The first kubectl dies immediately, as when the in-pod listener has not bound yet.
 func TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit(t *testing.T) {
 	skipIfNoSh(t)
-	shrinkContributeAppTimings(t, 5*time.Second, 25*time.Millisecond)
+	shrinkAppTimings(t, 5*time.Second, 25*time.Millisecond)
 	port := freeTCPPort(t)
 
 	var spawnCount int32
 	var srvCloseFn func()
-	installFakeContributeSpawn(t, func(n int) spawnPlan {
+	installFakeSpawn(t, func(n int) spawnPlan {
 		if n == 1 {
 			return spawnPlan{script: "exit 1", stderr: "error: lost connection to pod"}
 		}
@@ -136,10 +139,10 @@ func TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit(t *testing.T) {
 		}
 	})
 
-	forward, args := initialContributeSpawn(t, port)
+	forward, args := initialSpawn(t, port)
 	t.Cleanup(forward.stop)
 
-	if err := waitForContributeAppReachable(context.Background(), port, forward, args); err != nil {
+	if err := waitForAppReachable(context.Background(), port, forward, args); err != nil {
 		t.Fatalf("expected reachable after one respawn, got %v", err)
 	}
 	if n := atomic.LoadInt32(&spawnCount); n != 2 {
@@ -150,19 +153,19 @@ func TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit(t *testing.T) {
 // The deadline error must include the last kubectl stderr.
 func TestWaitForContributeAppReachableTimesOutPreservesLastExit(t *testing.T) {
 	skipIfNoSh(t)
-	shrinkContributeAppTimings(t, 250*time.Millisecond, 25*time.Millisecond)
+	shrinkAppTimings(t, 250*time.Millisecond, 25*time.Millisecond)
 	port := freeTCPPort(t)
 
 	const exitStderr = "Error from server (NotFound): deployments.apps \"erun\" not found"
 	var spawnCount int32
-	installFakeContributeSpawn(t, func(_ int) spawnPlan {
+	installFakeSpawn(t, func(_ int) spawnPlan {
 		return spawnPlan{script: "exit 1", stderr: exitStderr}
 	}, &spawnCount)
 
-	forward, args := initialContributeSpawn(t, port)
+	forward, args := initialSpawn(t, port)
 	t.Cleanup(forward.stop)
 
-	err := waitForContributeAppReachable(context.Background(), port, forward, args)
+	err := waitForAppReachable(context.Background(), port, forward, args)
 	if err == nil {
 		t.Fatalf("expected deadline error, got nil")
 	}
@@ -179,19 +182,19 @@ func TestWaitForContributeAppReachableTimesOutPreservesLastExit(t *testing.T) {
 
 func TestStopAbortsRespawn(t *testing.T) {
 	skipIfNoSh(t)
-	shrinkContributeAppTimings(t, 5*time.Second, 25*time.Millisecond)
+	shrinkAppTimings(t, 5*time.Second, 25*time.Millisecond)
 	port := freeTCPPort(t)
 
 	var spawnCount int32
-	installFakeContributeSpawn(t, func(_ int) spawnPlan {
+	installFakeSpawn(t, func(_ int) spawnPlan {
 		return spawnPlan{script: "exit 1", stderr: "error: lost connection to pod"}
 	}, &spawnCount)
 
-	forward, args := initialContributeSpawn(t, port)
+	forward, args := initialSpawn(t, port)
 
 	done := make(chan error, 1)
 	go func() {
-		done <- waitForContributeAppReachable(context.Background(), port, forward, args)
+		done <- waitForAppReachable(context.Background(), port, forward, args)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	forward.stop()
@@ -210,7 +213,7 @@ func TestStopAbortsRespawn(t *testing.T) {
 }
 
 func TestAdoptRefusesAfterStop(t *testing.T) {
-	forward := &contributeAppForward{}
+	forward := &appForward{}
 	forward.stop()
 	if forward.adopt(&exec.Cmd{}, &bytes.Buffer{}) {
 		t.Fatalf("adopt should return false after stop()")
@@ -218,9 +221,9 @@ func TestAdoptRefusesAfterStop(t *testing.T) {
 }
 
 func TestContributeAppLaunchLeavesTheDesktopRebuildToTheWrapper(t *testing.T) {
-	got := contributeAppLaunchCommand(34567)
+	got := appLaunchCommand(34567)
 	want := "erun app --headless --port 34567\n"
 	if got != want {
-		t.Fatalf("contributeAppLaunchCommand(34567) = %q, want %q", got, want)
+		t.Fatalf("appLaunchCommand(34567) = %q, want %q", got, want)
 	}
 }

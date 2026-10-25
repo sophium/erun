@@ -1,4 +1,4 @@
-package main
+package contribute
 
 import (
 	"encoding/json"
@@ -9,35 +9,36 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-const contributeStateFileName = "contribute-state.json"
+const stateFileName = "contribute-state.json"
 
-// contributeState is a desktop-UI preference, kept out of env config.yaml.
-type contributeState struct {
+// persistedState is a desktop-UI preference, kept out of env config.yaml.
+type persistedState struct {
 	Flags map[string]bool `json:"flags,omitempty"`
 }
 
-// contributeStore serializes mutations so a toggle cannot race the initial load.
-type contributeStore struct {
+// flagStore serializes mutations so a toggle cannot race the initial load.
+type flagStore struct {
 	path string
 	mu   sync.Mutex
-	data contributeState
+	data persistedState
 }
 
-func defaultContributeStatePath() string {
+// DefaultStatePath is where the desktop keeps the contribute flags.
+func DefaultStatePath() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(configDir, "ERun", contributeStateFileName)
+	return filepath.Join(configDir, "ERun", stateFileName)
 }
 
-func newContributeStore(path string) *contributeStore {
-	store := &contributeStore{path: path, data: contributeState{Flags: map[string]bool{}}}
+func newFlagStore(path string) *flagStore {
+	store := &flagStore{path: path, data: persistedState{Flags: map[string]bool{}}}
 	store.loadFromDisk()
 	return store
 }
 
-func (s *contributeStore) loadFromDisk() {
+func (s *flagStore) loadFromDisk() {
 	if s.path == "" {
 		return
 	}
@@ -45,7 +46,7 @@ func (s *contributeStore) loadFromDisk() {
 	if err != nil {
 		return
 	}
-	var state contributeState
+	var state persistedState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return
 	}
@@ -57,12 +58,12 @@ func (s *contributeStore) loadFromDisk() {
 	s.mu.Unlock()
 }
 
-func (s *contributeStore) saveToDisk() error {
+func (s *flagStore) saveToDisk() error {
 	if s.path == "" {
 		return nil
 	}
 	s.mu.Lock()
-	snapshot := contributeState{Flags: cloneContributeFlags(s.data.Flags)}
+	snapshot := persistedState{Flags: cloneFlags(s.data.Flags)}
 	s.mu.Unlock()
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -75,14 +76,14 @@ func (s *contributeStore) saveToDisk() error {
 	return os.WriteFile(s.path, data, 0o644)
 }
 
-func (s *contributeStore) get(selection uimodel.Selection) bool {
+func (s *flagStore) get(selection uimodel.Selection) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.data.Flags[contributeFlagKey(selection)]
+	return s.data.Flags[flagKey(selection)]
 }
 
-func (s *contributeStore) set(selection uimodel.Selection, on bool) {
-	key := contributeFlagKey(selection)
+func (s *flagStore) set(selection uimodel.Selection, on bool) {
+	key := flagKey(selection)
 	s.mu.Lock()
 	if s.data.Flags == nil {
 		s.data.Flags = map[string]bool{}
@@ -95,7 +96,7 @@ func (s *contributeStore) set(selection uimodel.Selection, on bool) {
 	s.mu.Unlock()
 }
 
-func cloneContributeFlags(in map[string]bool) map[string]bool {
+func cloneFlags(in map[string]bool) map[string]bool {
 	out := make(map[string]bool, len(in))
 	for k, v := range in {
 		if v {
@@ -105,7 +106,7 @@ func cloneContributeFlags(in map[string]bool) map[string]bool {
 	return out
 }
 
-func contributeFlagKey(selection uimodel.Selection) string {
+func flagKey(selection uimodel.Selection) string {
 	selection = uimodel.NormalizeSelection(selection)
 	return selection.Tenant + "/" + selection.Environment
 }

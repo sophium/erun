@@ -18,6 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+	"github.com/sophium/erun/erun-ui/internal/contribute"
 	"github.com/sophium/erun/erun-ui/internal/envops"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
@@ -328,7 +329,7 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 		deps.cloneERun = cloneERunViaMCP
 	}
 	if deps.contributeStatePath == "" {
-		deps.contributeStatePath = defaultContributeStatePath()
+		deps.contributeStatePath = contribute.DefaultStatePath()
 	}
 	if deps.interruptedActivityPath == "" {
 		deps.interruptedActivityPath = activitysvc.DefaultInterruptedActivityPath()

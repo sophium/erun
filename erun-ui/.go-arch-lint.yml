@@ -37,6 +37,8 @@ components:
     in: "internal/activity"
   internal-cloudctx:
     in: "internal/cloudctx"
+  internal-contribute:
+    in: "internal/contribute"
   internal-envops:
     in: "internal/envops"
   internal-runtimeview:
@@ -63,6 +65,11 @@ deps:
       - internal-uimodel
     canUse:
       - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  internal-contribute:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
       - github-com-sophium-erun-erun-common
   internal-envops:
     mayDependOn:
@@ -102,6 +109,7 @@ deps:
       - headlessserver
       - internal-activity
       - internal-cloudctx
+      - internal-contribute
       - internal-envops
       - internal-runtimeview
       - internal-settings
