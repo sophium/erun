@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/envdelete"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
@@ -17,7 +17,7 @@ func (s *Service) DeleteEnvironment(selection uimodel.Selection, confirmation st
 	if err := uimodel.ErrMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
 		return DeleteEnvironmentResult{}, err
 	}
-	expected := lifecycle.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
+	expected := envdelete.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
 	if strings.TrimSpace(confirmation) != expected {
 		return DeleteEnvironmentResult{}, fmt.Errorf("delete confirmation did not match %q", expected)
 	}
@@ -37,7 +37,7 @@ func (s *Service) DeleteEnvironment(selection uimodel.Selection, confirmation st
 
 	// A later re-create of this env must fire environment-initialized again.
 	s.d.ClearInitEmitted(selection.Tenant, selection.Environment)
-	result, err := lifecycle.RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
+	result, err := envdelete.RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}, store, s.d.DeleteNamespace)

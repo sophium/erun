@@ -9,24 +9,24 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // stubGatewayRouting answers the cluster read from a "<tenant>/<env>" table.
-func stubGatewayRouting(deployed map[string]string, failing map[string]bool) (func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error), *[]string) {
+func stubGatewayRouting(deployed map[string]string, failing map[string]bool) (func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error), *[]string) {
 	var mu sync.Mutex
 	var asked []string
-	read := func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
+	read := func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error) {
 		key := tenant + "/" + env.Name
 		mu.Lock()
 		asked = append(asked, key)
 		mu.Unlock()
 		if failing[key] {
-			return lifecycle.GatewayRouting{}, false, errors.New("cluster unreachable")
+			return gatewayrouting.GatewayRouting{}, false, errors.New("cluster unreachable")
 		}
 		url, found := deployed[key]
-		return lifecycle.GatewayRouting{Deployed: url, Wanted: lifecycle.WantedGatewayEndpoint(env.Claude, catalog)}, found, nil
+		return gatewayrouting.GatewayRouting{Deployed: url, Wanted: gatewayrouting.WantedGatewayEndpoint(env.Claude, catalog)}, found, nil
 	}
 	return read, &asked
 }

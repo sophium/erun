@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/pin"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -48,7 +48,7 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 
 func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	root := t.TempDir()
-	if err := lifecycle.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
+	if err := pin.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 	runtime := runtimecfg.RuntimeConfig{
@@ -97,7 +97,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 }
 `)
 
-	if err := lifecycle.RecordPinPrevious(frsRoot, "frs", "prod", "1.0.050"); err != nil {
+	if err := pin.RecordPinPrevious(frsRoot, "frs", "prod", "1.0.050"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 

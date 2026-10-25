@@ -189,7 +189,7 @@ linters:
               desc: infra/codesign may import base/* and no other infra package
         command:
           list-mode: lax
-          files: ["**/erun-common/command/**/*.go", "!$test"]
+          files: ["**/erun-common/command/**/*.go", "!$test", "!**/erun-common/command/lifecycle/**"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
@@ -198,6 +198,18 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: a command package may import base/*, infra/*, primitive/* and orchestration/*, never another command package
+        command-lifecycle:
+          list-mode: lax
+          files: ["**/erun-common/command/lifecycle/**/*.go", "!$test"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/
+            - github.com/sophium/erun/erun-common/command/lifecycle/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: command/lifecycle/* may import base/*, infra/*, primitive/*, orchestration/* and its own sibling concerns, never another command
         primitive-shared:
           list-mode: lax
           files: ["**/erun-common/primitive/shared/**/*.go"]

@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	"github.com/spf13/cobra"
 )
 
@@ -72,7 +72,7 @@ func runListCommand(ctx core.Context, store seam.ListStore, findProjectRoot seam
 		return err
 	}
 
-	result, err := lifecycle.ResolveListResult(store, findProjectRoot, model.OpenParams{
+	result, err := list.ResolveListResult(store, findProjectRoot, model.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -91,7 +91,7 @@ func runListCommand(ctx core.Context, store seam.ListStore, findProjectRoot seam
 	return WriteListResult(ctx, result)
 }
 
-func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
+func WriteListResult(ctx core.Context, result list.ListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func orphanedSSHAliasLine(orphan model.SSHOrphanedAlias) string {
 	return line + ", and it names no port"
 }
 
-func writeListHeaderSections(ctx core.Context, result lifecycle.ListResult) error {
+func writeListHeaderSections(ctx core.Context, result list.ListResult) error {
 	if err := writeListConfigurationSection(ctx, result.ConfigDirectory); err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func writeListDefaultsSection(ctx core.Context, defaults model.ListDefaultsResul
 	return textfmt.WriteLabeledValue(ctx, "environment", textfmt.ValueOrNone(defaults.Environment))
 }
 
-func writeListCurrentDirectorySection(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
+func writeListCurrentDirectorySection(ctx core.Context, current list.ListCurrentDirectoryResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Current Directory:"); err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func writeListCurrentDirectorySection(ctx core.Context, current lifecycle.ListCu
 	return writeEffectiveOpen(ctx, current)
 }
 
-func writeListTenants(ctx core.Context, tenants []lifecycle.ListTenantResult) error {
+func writeListTenants(ctx core.Context, tenants []list.ListTenantResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Tenants:"); err != nil {
 		return err
 	}

@@ -42,7 +42,7 @@ erun-common/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
   primitive/     shared/<concern>/ build/<concern>/ deploy/<concern>/ open/<concern>/ push/ release/
   orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
-  command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
+  command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/<concern>/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
 
 Every package may import the Go standard library. Beyond that, a package may
@@ -60,7 +60,7 @@ import only the erun packages its row names:
 | `orchestration/build`, `/deploy`, `/clusterread`, `/diagnosis` | `base/*`, `infra/*`, `primitive/*` |
 | `orchestration/release` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build` |
 | `orchestration/execute` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build`, `/deploy`, `/release` |
-| `command/*` | `base/*`, `infra/*`, `primitive/*`, `orchestration/*`; never another `command/*` |
+| `command/*` | `base/*`, `infra/*`, `primitive/*`, `orchestration/*`, and for lifecycle its own `<concern>` siblings; never another `command/*` |
 | erun-backend-api | `base/*`, `infra/cloud`, `/mcpauth`, `/mcptools`, `/platformclient` |
 
 - `base/model` holds the data types modules exchange: every type another

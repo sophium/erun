@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/primitive/deploy/defaultchart"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/deploy/published"
@@ -165,7 +165,7 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 		r.ctx.Trace("open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started")
 		return nil
 	}
-	updated, err := lifecycle.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
+	updated, err := stop.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 
 // ensureRuntimeAwake scales a stopped env to one replica; a reconnect never scales.
 func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
-	wake, err := lifecycle.EnsureEnvironmentAwake(r.ctx, lifecycle.WakeEnvironmentParams{
+	wake, err := stop.EnsureEnvironmentAwake(r.ctx, stop.WakeEnvironmentParams{
 		Result:        r.result,
 		SaveEnvConfig: r.options.SaveEnvConfig,
 		Reconnect:     r.options.Reconnect,

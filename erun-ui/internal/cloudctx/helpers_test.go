@@ -6,33 +6,33 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/base/config"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type fakeStore struct {
-	config  config.ERunConfig
+	config  configpkg.ERunConfig
 	tenants map[string]model.TenantConfig
-	envs    map[string]config.EnvConfig
+	envs    map[string]configpkg.EnvConfig
 }
 
-func (s fakeStore) LoadERunConfig() (config.ERunConfig, string, error) {
+func (s fakeStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
 func (s fakeStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
 	cfg, ok := s.tenants[tenant]
 	if !ok {
-		return model.TenantConfig{}, "", config.ErrNotInitialized
+		return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return cfg, "", nil
 }
 
-func (s fakeStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
+func (s fakeStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	cfg, ok := s.envs[tenant+"/"+environment]
 	if !ok {
-		return config.EnvConfig{}, "", config.ErrNotInitialized
+		return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return cfg, "", nil
 }
@@ -46,8 +46,8 @@ func (s fakeStore) ListTenantConfigs() ([]model.TenantConfig, error) {
 	return tenants, nil
 }
 
-func (s fakeStore) ListEnvConfigs(tenant string) ([]config.EnvConfig, error) {
-	var envs []config.EnvConfig
+func (s fakeStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
+	var envs []configpkg.EnvConfig
 	for key, env := range s.envs {
 		if strings.HasPrefix(key, tenant+"/") {
 			envs = append(envs, env)
@@ -88,7 +88,7 @@ func newTestService(t *testing.T, store Store, notify *notifications) *Service {
 		Store:        store,
 		MCPBearer:    func(string, string) string { return "" },
 		MCPReachable: func(int) bool { return false },
-		MCPEndpoint:  func(config.OpenResult) string { return "http://127.0.0.1:0/mcp" },
+		MCPEndpoint:  func(configpkg.OpenResult) string { return "http://127.0.0.1:0/mcp" },
 		MCPTransport: func(string, string) mcp.Transport {
 			t.Fatal("unexpected MCP connection")
 			return nil

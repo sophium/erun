@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 	"github.com/sophium/erun/erun-ui/internal/runtimeview"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
@@ -158,7 +158,7 @@ func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 }
 
 // seedEnvironmentNodeSnapshots lets a reload see readings that only emit on transition.
-func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result lifecycle.ListResult) {
+func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result list.ListResult) {
 	links := cloudContextLinksByEnvironment(result)
 	for ti := range state.Tenants {
 		tenant := &state.Tenants[ti]
@@ -178,7 +178,7 @@ type cloudContextLink struct {
 	kubernetesContext  string
 }
 
-func cloudContextLinksByEnvironment(result lifecycle.ListResult) map[string]cloudContextLink {
+func cloudContextLinksByEnvironment(result list.ListResult) map[string]cloudContextLink {
 	links := make(map[string]cloudContextLink)
 	for _, tenant := range result.Tenants {
 		for _, environment := range tenant.Environments {

@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/upgrade"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/run"
 	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
@@ -67,7 +67,7 @@ func NewUpgradeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, fi
 			}
 			holder := model.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
-			deployer = lifecycle.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
+			deployer = upgrade.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
 			return runUpgrade(cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store), store, target, deployer)
 		},
 	}
@@ -113,7 +113,7 @@ func runUpgrade(ctx core.Context, store seam.DeployStore, target model.UpgradeTa
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",
 		target.Tenant, target.Environment, target.VersionOverride, target.Force, target.Fleet, target.GateEnvironment))
 
-	plan, err := lifecycle.ResolveUpgradePlanForStore(ctx, store, target, lifecycle.UpgradeVersionsResolverForStore(store, registry.ResolveRuntimeImageRegistryVersions))
+	plan, err := upgrade.ResolveUpgradePlanForStore(ctx, store, target, upgrade.UpgradeVersionsResolverForStore(store, registry.ResolveRuntimeImageRegistryVersions))
 	if err != nil {
 		ctx.Trace("upgrade: plan resolution failed: " + err.Error())
 		return err
@@ -131,7 +131,7 @@ func runUpgrade(ctx core.Context, store seam.DeployStore, target model.UpgradeTa
 			laggingSuffix(item), gateSuffix(item)))
 	}
 
-	result := lifecycle.RunUpgradePlan(ctx, plan, deploy)
+	result := upgrade.RunUpgradePlan(ctx, plan, deploy)
 	if err := printUpgradeDryRunMarker(ctx); err != nil {
 		return err
 	}

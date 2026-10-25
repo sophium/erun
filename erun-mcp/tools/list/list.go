@@ -8,7 +8,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
+	"github.com/sophium/erun/erun-common/command/lifecycle/versiondrift"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -32,7 +33,7 @@ type ListInput struct {
 
 // ListToolResult embeds ListResult so its fields stay top-level.
 type ListToolResult struct {
-	lifecycle.ListResult
+	list.ListResult
 	VersionDrift             *model.TenantVersionDrift       `json:"versionDrift,omitempty"`
 	ControlPlaneVersionDrift *model.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
 }
@@ -55,7 +56,7 @@ func ListTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallT
 			return nil, ListToolResult{}, err
 		}
 
-		result, err := lifecycle.ResolveListResult(runtime.Store, func() (string, string, error) {
+		result, err := list.ResolveListResult(runtime.Store, func() (string, string, error) {
 			return toolio.RuntimeFindProjectRoot(runtime.Context, workDir)
 		}, runtimeOpenParams(runtime.Context))
 		if err != nil {
@@ -79,17 +80,17 @@ func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string
 	return nil
 }
 
-func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
+func buildListToolResult(ctx core.Context, result list.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, alias, clouddeps.CloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := versiondrift.ResolveControlPlaneVersionDrift(ctx, result, alias, clouddeps.CloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}
 		toolResult.ControlPlaneVersionDrift = &drift
 	}
 	if tenant != "" {
-		drift, err := lifecycle.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
+		drift, err := versiondrift.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}

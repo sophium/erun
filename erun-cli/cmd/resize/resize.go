@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/resize"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +53,7 @@ func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, fin
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cloudcli.WithCloudContextPreflight(clicmd.CommandContext(cmd), store)
-			result, err := lifecycle.RunRuntimeResize(ctx, lifecycle.RuntimeResizeDependencies{
+			result, err := resize.RunRuntimeResize(ctx, resize.RuntimeResizeDependencies{
 				Store:                          store,
 				SaveEnvConfig:                  saveEnvConfig,
 				FindProjectRoot:                findProjectRoot,

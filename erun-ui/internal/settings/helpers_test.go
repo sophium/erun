@@ -14,7 +14,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -60,8 +60,8 @@ func inertDeps() Deps {
 			return nil, nil, nil, errors.New("the platform is not wired in this test")
 		},
 		PlatformRequestTimeout: 10 * time.Second,
-		ReadGatewayRouting: func(context.Context, configpkg.EnvConfig, string, *configpkg.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
-			return lifecycle.GatewayRouting{}, false, nil
+		ReadGatewayRouting: func(context.Context, configpkg.EnvConfig, string, *configpkg.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error) {
+			return gatewayrouting.GatewayRouting{}, false, nil
 		},
 	}
 }

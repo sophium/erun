@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/diff"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
@@ -61,10 +61,10 @@ func (s *Service) LoadDirectoryDiff(directory string, options uimodel.DiffOption
 	if !info.IsDir() {
 		return model.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
 	}
-	return lifecycle.ResolveGitDiffWithOptions(path, model.DiffOptions{
+	return diff.ResolveGitDiffWithOptions(path, model.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
-		Target:         lifecycle.DiffTargetEnv,
+		Target:         diff.DiffTargetEnv,
 	}, nil)
 }
 
@@ -79,10 +79,10 @@ func (s *Service) LoadHostDiff(selection uimodel.Selection, options uimodel.Diff
 	if err != nil {
 		return model.DiffResult{}, err
 	}
-	return lifecycle.ResolveGitDiffWithOptions(path, model.DiffOptions{
+	return diff.ResolveGitDiffWithOptions(path, model.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
-		Target:         lifecycle.DiffTargetEnv,
+		Target:         diff.DiffTargetEnv,
 	}, nil)
 }
 

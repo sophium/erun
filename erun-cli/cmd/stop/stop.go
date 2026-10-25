@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/spf13/cobra"
 )
 
@@ -69,7 +69,7 @@ func runStopCommand(ctx core.Context, args []string, overrides model.OpenParams,
 		return err
 	}
 
-	stopResult, err := lifecycle.RunStopEnvironment(ctx, lifecycle.StopEnvironmentParams{
+	stopResult, err := stop.RunStopEnvironment(ctx, stop.StopEnvironmentParams{
 		Result:        result,
 		SaveEnvConfig: saveEnvConfig,
 	})

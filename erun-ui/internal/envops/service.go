@@ -13,9 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	seampkg "github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
@@ -26,7 +26,7 @@ import (
 
 // Store is the slice of the desktop's config store the operations read and write.
 type Store interface {
-	seam.ListStore
+	seampkg.ListStore
 	SaveEnvConfig(string, config.EnvConfig) error
 }
 
@@ -45,7 +45,7 @@ type ReviewPolicy struct {
 type Deps struct {
 	Store           Store
 	Cloud           cloud.CloudDependencies
-	FindProjectRoot seam.ProjectFinderFunc
+	FindProjectRoot seampkg.ProjectFinderFunc
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context func() context.Context
 	// Started reports whether startup has run. Before it (and in unit tests) the
@@ -69,8 +69,8 @@ type Deps struct {
 	DeployInFlight    func(selection uimodel.Selection) bool
 	NoteEdgeAnswering func(selection uimodel.Selection)
 
-	StopRuntime          func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error)
-	ReadRuntimeRunState  func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error)
+	StopRuntime          func(core.Context, stop.StopEnvironmentParams) (model.StopEnvironmentResult, error)
+	ReadRuntimeRunState  func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error)
 	ResolveImageRegistry func(ctx context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error)
 
 	LoadJobs      func(ctx context.Context, endpoint, bearer string) ([]jobstate.EnvironmentJob, error)

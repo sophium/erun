@@ -7,21 +7,21 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/list"
 )
 
 func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
-	state := stateFromListResult(lifecycle.ListResult{
-		CurrentDirectory: lifecycle.ListCurrentDirectoryResult{
-			Effective: &lifecycle.ListEffectiveTargetResult{
+	state := stateFromListResult(list.ListResult{
+		CurrentDirectory: list.ListCurrentDirectoryResult{
+			Effective: &list.ListEffectiveTargetResult{
 				Tenant:      "erun",
 				Environment: "local",
 			},
 		},
-		Tenants: []lifecycle.ListTenantResult{
+		Tenants: []list.ListTenantResult{
 			{
 				Name: "erun",
-				Environments: []lifecycle.ListEnvironmentResult{
+				Environments: []list.ListEnvironmentResult{
 					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: model.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: model.ListSSHResult{Enabled: true}},
 					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: configpkg.EnvironmentTypeRemoteAgent, LocalPorts: model.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
@@ -62,12 +62,12 @@ func assertEffectiveSelectionEnvironments(t *testing.T, envs []uiEnvironment) {
 }
 
 func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
-	state := stateFromListResult(lifecycle.ListResult{
-		Tenants: []lifecycle.ListTenantResult{
+	state := stateFromListResult(list.ListResult{
+		Tenants: []list.ListTenantResult{
 			{Name: "empty"},
 			{
 				Name: "active",
-				Environments: []lifecycle.ListEnvironmentResult{
+				Environments: []list.ListEnvironmentResult{
 					{Name: "prod"},
 				},
 			},

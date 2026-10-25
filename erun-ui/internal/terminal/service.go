@@ -12,7 +12,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
+	seampkg "github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
@@ -20,7 +20,7 @@ import (
 // Store is the slice of the desktop's config store the sessions read. A delete
 // also needs seam.DeleteStore, which DeleteEnvironment asserts at call time.
 type Store interface {
-	seam.ListStore
+	seampkg.ListStore
 }
 
 // GatedStart starts a session once the per-env action runner admits it; the
@@ -29,7 +29,7 @@ type GatedStart func(ctx context.Context) (uimodel.StartSessionResult, *Session,
 
 type Deps struct {
 	Store           Store
-	FindProjectRoot seam.ProjectFinderFunc
+	FindProjectRoot seampkg.ProjectFinderFunc
 	// Context is read per call: the Wails context arrives after the service is built.
 	Context func() context.Context
 	// Started reports whether startup has run.
@@ -47,7 +47,7 @@ type Deps struct {
 	LoadIdleStatus            func(ctx context.Context, endpoint, bearer string) (model.EnvironmentIdleStatus, error)
 	EnsureMCP                 func(context.Context, config.OpenResult) error
 	ReconnectMCP              func(ctx context.Context, result config.OpenResult, onLine func(string)) error
-	DeleteNamespace           seam.NamespaceDeleterFunc
+	DeleteNamespace           seampkg.NamespaceDeleterFunc
 	// ExecRuntimePod uses kubectl exec rather than the MCP edge, so it works while the edge is down.
 	ExecRuntimePod   func(ctx context.Context, selection uimodel.Selection, script string) (string, error)
 	ProbePodSessions func(uimodel.Selection) ([]PodSession, error)

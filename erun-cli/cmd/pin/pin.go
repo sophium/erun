@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/lifecycle/pin"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
@@ -112,14 +112,14 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 		return err
 	}
 
-	plan, err := lifecycle.ResolvePinPlan(projectRoot, result.Tenant, result.Environment, result.EnvConfig, targetVersion)
+	plan, err := pin.ResolvePinPlan(projectRoot, result.Tenant, result.Environment, result.EnvConfig, targetVersion)
 	if err != nil {
 		return err
 	}
 	if viaCwdFallback {
-		plan.ProjectRootNote = lifecycle.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
+		plan.ProjectRootNote = pin.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
 	}
-	lifecycle.AnnotatePinPlanBaseFreshness(cmdCtx, &plan)
+	pin.AnnotatePinPlanBaseFreshness(cmdCtx, &plan)
 	tracePinPlan(cmdCtx, plan)
 
 	if plan.Aligned() {
@@ -135,17 +135,17 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 // applyPinCommand writes a resolved, drifted plan.
 func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan model.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	// Recorded first so a revert has a target even if the rewrite fails partway.
-	if err := lifecycle.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
+	if err := pin.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
 		return err
 	}
-	if err := lifecycle.ApplyPinPlan(plan); err != nil {
+	if err := pin.ApplyPinPlan(plan); err != nil {
 		return err
 	}
 	if err := savePinnedEnvConfig(result, plan, saveEnvConfig); err != nil {
 		return err
 	}
 	// Rewritten Chart.yaml files and their locks must agree or the next deploy fails.
-	if err := lifecycle.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
+	if err := pin.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
 		return err
 	}
 
@@ -158,7 +158,7 @@ func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.Open
 // resolvePinTarget refuses an unpublished version, which would only fail later at terraform init or chart pull.
 func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, projectRoot string) (string, error) {
 	if request.Revert {
-		previous, ok := lifecycle.PinPrevious(projectRoot, result.Tenant, result.Environment)
+		previous, ok := pin.PinPrevious(projectRoot, result.Tenant, result.Environment)
 		if !ok {
 			return "", fmt.Errorf("no previous pin recorded for %s/%s — nothing to revert to", result.Tenant, result.Environment)
 		}
@@ -237,7 +237,7 @@ func savePinnedEnvConfig(result config.OpenResult, plan model.PinPlan, saveEnvCo
 	if saveEnvConfig == nil {
 		return nil
 	}
-	updated, changed := lifecycle.ApplyPinnedEnvConfig(result.EnvConfig, plan)
+	updated, changed := pin.ApplyPinnedEnvConfig(result.EnvConfig, plan)
 	if !changed {
 		return nil
 	}
