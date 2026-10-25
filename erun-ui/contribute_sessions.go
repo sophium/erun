@@ -129,9 +129,11 @@ func (a *App) runContributeSession(ctx context.Context, selection uimodel.Select
 func (a *App) reuseExistingContributeSession(key string, slot int, kind terminal.Kind) (uimodel.StartSessionResult, *terminal.Session, bool) {
 	var existing *terminal.Session
 	a.terminal.WithLock(func(l *terminal.Locked) {
-		existing = l.Session(key)
+		if candidate := l.Session(key); candidate != nil && !candidate.Closed && candidate.PTY != nil {
+			existing = candidate
+		}
 	})
-	if existing == nil || existing.Closed || existing.PTY == nil {
+	if existing == nil {
 		return uimodel.StartSessionResult{}, nil, false
 	}
 	existing.SignalReady(nil)

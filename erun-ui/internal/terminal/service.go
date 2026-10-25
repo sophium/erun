@@ -80,7 +80,7 @@ type Deps struct {
 	// EnqueueGated runs start through the per-env action runner, so a parallel
 	// open cannot duplicate a build and deploy.
 	EnqueueGated func(selection uimodel.Selection, kind string, start GatedStart) (uimodel.StartSessionResult, error)
-	// OnOutput feeds each chunk to the activity trace; it must not take the terminal lock.
+	// OnOutput feeds each chunk to the activity trace; it is called without the terminal lock held.
 	OnOutput                      func(*Session, []byte)
 	RememberKubeContext           func(name string)
 	LockIfDeployInFlight          func(selection uimodel.Selection, serial int)
