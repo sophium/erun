@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"errors"
@@ -16,8 +16,8 @@ import (
 )
 
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
-	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
+	app := newTestService(t, Deps{Store: stubStore{}})
+	_, err := app.LoadTenantDashboard(DashboardInput{})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -29,14 +29,14 @@ func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 // Several erun aliases are reported as choices with none preselected.
 func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T) {
 	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
-		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
+		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://s.example", ClientID: "client-a"}},
 		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
 	}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
+	app := newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 	})
 
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 		t.Fatalf("PlatformAliasChoices = %v, want %v", got, want)
 	}
 
-	chosen, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs", PlatformAlias: "erun+b@erun"})
+	chosen, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs", PlatformAlias: "erun+b@erun"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard with an explicit alias failed: %v", err)
 	}
@@ -63,9 +63,9 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
 	}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
-		cloudDeps: cloud.CloudDependencies{
+	app := newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
+		Cloud: cloud.CloudDependencies{
 			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				t.Fatal("must not fetch discovery with no refresh token and no cache to check")
 				return cloud.OIDCDiscovery{}, nil
@@ -73,7 +73,7 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 		},
 	})
 
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -122,11 +122,11 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 		{Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team"},
 		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
 	}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
+	app := newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", CloudProviderAliases: []string{"team-cloud"}, PrimaryCloudProviderAlias: "team-cloud"},
 		}},
-		cloudDeps: cloud.CloudDependencies{
+		Cloud: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
 			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
 				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
@@ -134,7 +134,7 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 		},
 	})
 
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "erun"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "erun"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 		t.Fatalf("expected no platform alias or URL to be reported, got %+v", dashboard)
 	}
 
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"erun"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"erun"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentLocalOnly {
 		t.Fatalf("expected the sidebar dot to read local-only, not enrolled, got %+v", statuses)
 	}
@@ -167,11 +167,11 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
 		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
 	}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
+	app := newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", CloudProviderAliases: []string{otherERunAlias, testERunAlias}, PrimaryCloudProviderAlias: testERunAlias},
 		}},
-		cloudDeps: cloud.CloudDependencies{
+		Cloud: cloud.CloudDependencies{
 			CloudSecretStore: secrets,
 			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil

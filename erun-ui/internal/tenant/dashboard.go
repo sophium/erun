@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -14,19 +14,19 @@ import (
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboard, error) {
+func (s *Service) LoadTenantDashboard(input DashboardInput) (Dashboard, error) {
 	tenant, err := uimodel.RequireTenant("loading the tenant dashboard", input.Tenant)
 	if err != nil {
-		return uiTenantDashboard{}, err
+		return Dashboard{}, err
 	}
-	dashboard := uiTenantDashboard{
+	dashboard := Dashboard{
 		Tenant:      tenant,
 		Environment: strings.TrimSpace(input.Environment),
 	}
-	ctx := a.context()
+	ctx := s.d.Context()
 	if strings.TrimSpace(input.MCPURL) != "" || strings.TrimSpace(input.KubernetesContext) != "" {
-		input.mcpBearer = a.mcpBearer(tenant, strings.TrimSpace(input.Environment))
-		log, err := a.deps.loadAPILog(ctx, input)
+		input.MCPBearer = s.d.MCPBearer(tenant, strings.TrimSpace(input.Environment))
+		log, err := s.d.LoadAPILog(ctx, input)
 		if err != nil {
 			dashboard.APILogError = "Could not read this environment's API log. " + err.Error()
 		} else {
@@ -34,35 +34,35 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		}
 	}
 
-	resolution, err := a.resolveTenantPlatform(tenant, strings.TrimSpace(input.PlatformAlias))
+	resolution, err := s.Platform(tenant, strings.TrimSpace(input.PlatformAlias))
 	if err != nil {
-		return uiTenantDashboard{}, err
+		return Dashboard{}, err
 	}
-	dashboard.PlatformState = resolution.state
-	dashboard.PlatformAliasChoices = resolution.aliasChoices
-	dashboard.PlatformAlias = resolution.alias
-	dashboard.PlatformURL = resolution.apiURL
-	dashboard.PlatformIssuer = resolution.issuer
-	dashboard.PlatformSubject = resolution.subject
-	if resolution.state != tenantPlatformStateReady {
+	dashboard.PlatformState = resolution.State
+	dashboard.PlatformAliasChoices = resolution.AliasChoices
+	dashboard.PlatformAlias = resolution.Alias
+	dashboard.PlatformURL = resolution.APIURL
+	dashboard.PlatformIssuer = resolution.Issuer
+	dashboard.PlatformSubject = resolution.Subject
+	if resolution.State != StateReady {
 		return dashboard, nil
 	}
-	dashboard.APIURL = resolution.apiURL
+	dashboard.APIURL = resolution.APIURL
 
-	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
+	requestCtx, cancel := context.WithTimeout(ctx, RequestTimeout)
 	defer cancel()
-	capabilities := loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
+	capabilities := loadTenantDashboardData(requestCtx, resolution.Client, &dashboard, input)
 	if dashboard.PlatformState == tenantPlatformStateTenantMismatch {
 		// Every remaining read would be the other tenant's rows.
 		return dashboard, nil
 	}
 	// Needs only the bearer, not membership, so read it even for a not-enrolled caller.
-	loadTenantDashboardMyInviteRequest(requestCtx, resolution.client, &dashboard)
-	loadTenantDashboardAccessRemedies(requestCtx, resolution.client, capabilities, &dashboard)
+	loadTenantDashboardMyInviteRequest(requestCtx, resolution.Client, &dashboard)
+	loadTenantDashboardAccessRemedies(requestCtx, resolution.Client, capabilities, &dashboard)
 	return dashboard, nil
 }
 
-func loadTenantDashboardAccessRemedies(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardAccessRemedies(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) {
 	var userID string
 	if dashboard.User != nil {
 		userID = dashboard.User.UserID
@@ -74,7 +74,7 @@ func loadTenantDashboardAccessRemedies(ctx context.Context, client *platformclie
 	dashboard.AccessRemedies = loadAccessRemedies(ctx, client, capabilities, userID, reads...)
 }
 
-const tenantDashboardTimeout = 10 * time.Second
+const RequestTimeout = 10 * time.Second
 
 // Panel tab ids, shared with the frontend's tab strip.
 const (
@@ -91,13 +91,13 @@ const (
 // API reads per panel, in the route-template form the platform reports capabilities in.
 const (
 	tenantDashboardReadWhoami         = "GET /v1/whoami"
-	tenantDashboardReadReviews        = "GET /v1/reviews"
+	ReadReviews                       = "GET /v1/reviews"
 	tenantDashboardReadReview         = "GET /v1/reviews/{review_id}"
-	tenantDashboardReadMergeQueue     = "GET /v1/reviews/merge-queue"
+	ReadMergeQueue                    = "GET /v1/reviews/merge-queue"
 	tenantDashboardReadPipeline       = "GET /v1/pipeline"
 	tenantDashboardReadBuilds         = "GET /v1/reviews/{review_id}/builds"
 	tenantDashboardReadAllBuilds      = "GET /v1/builds"
-	tenantDashboardReadComments       = "GET /v1/reviews/{review_id}/comments"
+	ReadComments                      = "GET /v1/reviews/{review_id}/comments"
 	tenantDashboardWriteComment       = "POST /v1/reviews/{review_id}/comments"
 	tenantDashboardReadReviewers      = "GET /v1/reviews/{review_id}/reviewers"
 	tenantDashboardWriteReviewers     = "POST /v1/reviews/{review_id}/reviewers"
@@ -112,13 +112,13 @@ const (
 )
 
 // loadTenantDashboardData resolves each panel independently; a restricted panel must not read as empty.
-func loadTenantDashboardData(ctx context.Context, client *platformclient.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) model.PlatformCapabilities {
+func loadTenantDashboardData(ctx context.Context, client *platformclient.PlatformClient, dashboard *Dashboard, input DashboardInput) model.PlatformCapabilities {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
 		dashboard.PlatformState, dashboard.APIError = tenantDashboardIdentityFailure(err)
 		return nil
 	}
-	dashboard.User = &uiTenantDashboardUser{
+	dashboard.User = &DashboardUser{
 		TenantID: whoami.TenantID,
 		// The local tenant is a different namespace; only this says whose rows the panels show.
 		TenantName: whoami.TenantName,
@@ -153,11 +153,11 @@ func loadTenantDashboardData(ctx context.Context, client *platformclient.Platfor
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
 	loadTenantDashboardRegistration(ctx, client, capabilities, dashboard)
 	loadTenantDashboardInviteRequests(ctx, client, capabilities, dashboard)
-	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
-	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
-	dashboard.CanOverrideMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
-	dashboard.CanApproveInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteApproveInvite) == ""
-	dashboard.CanDeclineInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeclineInvite) == ""
+	dashboard.CanCreateReview = RestrictedRead(capabilities, tenantDashboardWriteCreateReview) == ""
+	dashboard.CanAdvanceMergeQueue = RestrictedRead(capabilities, WriteAdvanceMergeQueue) == ""
+	dashboard.CanOverrideMergeQueue = RestrictedRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
+	dashboard.CanApproveInviteRequests = RestrictedRead(capabilities, tenantDashboardWriteApproveInvite) == ""
+	dashboard.CanDeclineInviteRequests = RestrictedRead(capabilities, tenantDashboardWriteDeclineInvite) == ""
 	return capabilities
 }
 
@@ -175,9 +175,9 @@ func tenantDashboardTenantMismatch(localTenant, platformTenantName string) strin
 	return platformTenantName
 }
 
-func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabRequests}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadInviteRequests); restricted != "" {
+func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) {
+	panel := DashboardPanel{Tab: tenantDashboardTabRequests}
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadInviteRequests); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
@@ -190,7 +190,7 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclie
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	dashboard.InviteRequests = make([]uiInviteRequest, 0, len(requests))
+	dashboard.InviteRequests = make([]InviteRequest, 0, len(requests))
 	for _, request := range requests {
 		dashboard.InviteRequests = append(dashboard.InviteRequests, inviteRequestToUI(request))
 	}
@@ -201,9 +201,9 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclie
 
 // loadTenantDashboardUsers also returns the roster for resolving review authors,
 // so GET /v1/users is read once.
-func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []model.PlatformUser {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabUsers}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers); restricted != "" {
+func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) []model.PlatformUser {
+	panel := DashboardPanel{Tab: tenantDashboardTabUsers}
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadUsers); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return nil
@@ -218,9 +218,9 @@ func loadTenantDashboardUsers(ctx context.Context, client *platformclient.Platfo
 	if dashboard.User != nil {
 		selfUserID = strings.TrimSpace(dashboard.User.UserID)
 	}
-	dashboard.Users = make([]uiTenantDashboardUser, 0, len(users))
+	dashboard.Users = make([]DashboardUser, 0, len(users))
 	for _, user := range users {
-		row := uiTenantDashboardUser{
+		row := DashboardUser{
 			TenantID:  user.TenantID,
 			UserID:    user.UserID,
 			Username:  user.Username,
@@ -254,7 +254,7 @@ func tenantDashboardUsernamesFromRoster(users []model.PlatformUser) map[string]s
 
 // tenantDashboardUsernames is best-effort and returns an empty map on failure.
 func tenantDashboardUsernames(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) map[string]string {
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
+	if RestrictedRead(capabilities, tenantDashboardReadUsers) != "" {
 		return map[string]string{}
 	}
 	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
@@ -264,9 +264,9 @@ func tenantDashboardUsernames(ctx context.Context, client *platformclient.Platfo
 	return tenantDashboardUsernamesFromRoster(users)
 }
 
-func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, usernames map[string]string) {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabQueue}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue); restricted != "" {
+func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, usernames map[string]string) {
+	panel := DashboardPanel{Tab: tenantDashboardTabQueue}
+	if restricted := RestrictedRead(capabilities, ReadMergeQueue); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
@@ -274,7 +274,7 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 	// Shows every repository's queue; each row names its repository.
 	reviews, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{})
 	if err != nil {
-		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
+		panel.Error = tenantDashboardReadError(ReadMergeQueue, err)
 	} else {
 		dashboard.MergeQueue = tenantDashboardReviews(reviews, usernames)
 	}
@@ -282,15 +282,15 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 }
 
 // Builds are read concurrently per review to stay within the dashboard's single request timeout.
-func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
+func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, reviewsOutcome reviewsLoadOutcome) {
+	panel := DashboardPanel{Tab: tenantDashboardTabBuilds}
 	switch {
 	case reviewsOutcome.restricted != "":
 		panel.Restricted = reviewsOutcome.restricted
 	case reviewsOutcome.err != nil:
-		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, reviewsOutcome.err)
+		panel.Error = tenantDashboardReadError(ReadReviews, reviewsOutcome.err)
 	default:
-		if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
+		if restricted := RestrictedRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
 			panel.Restricted = restricted
 		} else {
 			builds, err := fetchReviewBuildsConcurrently(ctx, client, reviewsOutcome.reviews)
@@ -306,8 +306,8 @@ func loadTenantDashboardBuilds(ctx context.Context, client *platformclient.Platf
 
 // appendUnattachedTenantDashboardBuilds merges no-review builds best-effort; it
 // only sets the panel's restriction/error when the review-side read had none.
-func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, panel *uiTenantDashboardPanel) {
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAllBuilds); restricted != "" {
+func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, panel *DashboardPanel) {
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadAllBuilds); restricted != "" {
 		if panel.Restricted == "" && panel.Error == "" {
 			panel.Restricted = restricted
 		}
@@ -324,7 +324,7 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platform
 		if strings.TrimSpace(build.ReviewID) != "" {
 			continue
 		}
-		dashboard.Builds = append(dashboard.Builds, uiTenantDashboardBuild{
+		dashboard.Builds = append(dashboard.Builds, DashboardBuild{
 			BuildID:         build.BuildID,
 			TenantID:        build.TenantID,
 			EnvironmentID:   build.EnvironmentID,
@@ -342,9 +342,9 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *platform
 	})
 }
 
-func loadTenantDashboardAuditEvents(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabAudit}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAuditEvents); restricted != "" {
+func loadTenantDashboardAuditEvents(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) {
+	panel := DashboardPanel{Tab: tenantDashboardTabAudit}
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadAuditEvents); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
@@ -359,7 +359,7 @@ func loadTenantDashboardAuditEvents(ctx context.Context, client *platformclient.
 }
 
 // No reported capability set leaves every read attemptable.
-func restrictedTenantDashboardRead(capabilities model.PlatformCapabilities, read string) string {
+func RestrictedRead(capabilities model.PlatformCapabilities, read string) string {
 	if !capabilities.Known() {
 		return ""
 	}
@@ -380,7 +380,7 @@ func tenantDashboardReadError(read string, err error) string {
 func tenantDashboardIdentityFailure(err error) (state, message string) {
 	switch {
 	case errors.Is(err, platformclient.ErrPlatformForbidden):
-		return tenantPlatformStateNoPermission, "You do not have access to this tenant's dashboard. Ask an administrator for access."
+		return StateNoPermission, "You do not have access to this tenant's dashboard. Ask an administrator for access."
 	case errors.Is(err, platformclient.ErrPlatformUnauthorized):
 		switch platformclient.PlatformAuthErrorCode(err) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
@@ -392,10 +392,10 @@ func tenantDashboardIdentityFailure(err error) (state, message string) {
 	}
 }
 
-func tenantDashboardAuditEvents(events []platformclient.PlatformAuditEvent) []uiTenantDashboardAudit {
-	converted := make([]uiTenantDashboardAudit, 0, len(events))
+func tenantDashboardAuditEvents(events []platformclient.PlatformAuditEvent) []DashboardAudit {
+	converted := make([]DashboardAudit, 0, len(events))
 	for _, event := range events {
-		converted = append(converted, uiTenantDashboardAudit{
+		converted = append(converted, DashboardAudit{
 			Type:      event.Type,
 			Actor:     event.ExternalUserID,
 			Action:    tenantDashboardAuditAction(event),
@@ -425,8 +425,8 @@ func tenantDashboardTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }
 
-func (a *App) tenantDashboardUsernameHint(alias string) string {
-	provider, err := cloud.ResolveCloudProvider(a.deps.store, strings.TrimSpace(alias))
+func (s *Service) tenantDashboardUsernameHint(alias string) string {
+	provider, err := cloud.ResolveCloudProvider(s.d.Store, strings.TrimSpace(alias))
 	if err != nil {
 		return ""
 	}

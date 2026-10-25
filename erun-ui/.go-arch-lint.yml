@@ -33,15 +33,23 @@ exclude:
 components:
   headlessserver:
     in: "headlessserver"
+  internal-tenant:
+    in: "internal/tenant"
   internal-uimodel:
     in: "internal/uimodel"
   root:
     in: "."
 
 deps:
+  internal-tenant:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-sophium-erun-erun-common
   root:
     mayDependOn:
       - headlessserver
+      - internal-tenant
       - internal-uimodel
     canUse:
       - cgo

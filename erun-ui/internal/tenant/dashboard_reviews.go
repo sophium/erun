@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 
 // loadTenantDashboardReviewFilterCounts counts Mine and Waiting regardless of the
 // active filter; a failed count stays unset, never a false zero.
-func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
-	if strings.TrimSpace(userID) == "" || restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews) != "" {
+func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, userID string) {
+	if strings.TrimSpace(userID) == "" || RestrictedRead(capabilities, ReadReviews) != "" {
 		return
 	}
 	if mine, err := client.ListReviews(ctx, platformclient.PlatformReviewFilter{AuthorUserID: userID}); err == nil {
@@ -33,16 +33,16 @@ type reviewsLoadOutcome struct {
 	restricted string
 }
 
-func loadTenantDashboardReviews(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, filter platformclient.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
+func loadTenantDashboardReviews(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, filter platformclient.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
+	panel := DashboardPanel{Tab: tenantDashboardTabReviews}
+	if restricted := RestrictedRead(capabilities, ReadReviews); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return reviewsLoadOutcome{restricted: restricted}
 	}
 	reviews, err := client.ListReviews(ctx, filter)
 	if err != nil {
-		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
+		panel.Error = tenantDashboardReadError(ReadReviews, err)
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return reviewsLoadOutcome{err: err}
 	}
@@ -52,11 +52,11 @@ func loadTenantDashboardReviews(ctx context.Context, client *platformclient.Plat
 }
 
 // A review without a readable comment list gets no count rather than a false zero.
-func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
+func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard, reviewsOutcome reviewsLoadOutcome) {
 	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
 		return
 	}
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) != "" {
+	if RestrictedRead(capabilities, ReadComments) != "" {
 		return
 	}
 	counts := fetchReviewThreadCountsConcurrently(ctx, client, reviewsOutcome.reviews)
@@ -100,11 +100,11 @@ func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformcl
 	return counts
 }
 
-// maxConcurrentReviewBuildReads keeps a big tenant within tenantDashboardTimeout.
+// maxConcurrentReviewBuildReads keeps a big tenant within RequestTimeout.
 const maxConcurrentReviewBuildReads = 8
 
 // Every read runs to completion; the first failure is reported in review order.
-func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []model.PlatformReview) ([]uiTenantDashboardBuild, error) {
+func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []model.PlatformReview) ([]DashboardBuild, error) {
 	perReview := make([][]model.PlatformBuild, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
 	var wg sync.WaitGroup
@@ -134,10 +134,10 @@ func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.P
 	}
 	wg.Wait()
 
-	builds := make([]uiTenantDashboardBuild, 0, len(reviews))
+	builds := make([]DashboardBuild, 0, len(reviews))
 	for i, review := range reviews {
 		for _, build := range perReview[i] {
-			builds = append(builds, uiTenantDashboardBuild{
+			builds = append(builds, DashboardBuild{
 				BuildID:    build.BuildID,
 				TenantID:   build.TenantID,
 				ReviewID:   build.ReviewID,
@@ -154,8 +154,8 @@ func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.P
 	return builds, firstErr
 }
 
-func tenantDashboardReviews(reviews []model.PlatformReview, usernames map[string]string) []uiTenantDashboardReview {
-	converted := make([]uiTenantDashboardReview, 0, len(reviews))
+func tenantDashboardReviews(reviews []model.PlatformReview, usernames map[string]string) []DashboardReview {
+	converted := make([]DashboardReview, 0, len(reviews))
 	for _, review := range reviews {
 		converted = append(converted, tenantDashboardReviewWithUsername(review, usernames))
 	}
@@ -163,14 +163,14 @@ func tenantDashboardReviews(reviews []model.PlatformReview, usernames map[string
 }
 
 // Write paths use the base converter unresolved.
-func tenantDashboardReviewWithUsername(review model.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
+func tenantDashboardReviewWithUsername(review model.PlatformReview, usernames map[string]string) DashboardReview {
 	converted := tenantDashboardReview(review)
 	converted.AuthorUsername = usernames[review.AuthorUserID]
 	return converted
 }
 
-func tenantDashboardReview(review model.PlatformReview) uiTenantDashboardReview {
-	return uiTenantDashboardReview{
+func tenantDashboardReview(review model.PlatformReview) DashboardReview {
+	return DashboardReview{
 		ReviewID:          review.ReviewID,
 		TenantID:          review.TenantID,
 		AuthorUserID:      review.AuthorUserID,

@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -28,8 +28,8 @@ const (
 	tenantEnrollmentTenantMismatch = tenantPlatformStateTenantMismatch
 )
 
-// uiInviteRequest mirrors platformclient.PlatformInviteRequest for the frontend.
-type uiInviteRequest struct {
+// InviteRequest mirrors platformclient.PlatformInviteRequest for the frontend.
+type InviteRequest struct {
 	InviteRequestID   string `json:"inviteRequestId"`
 	Issuer            string `json:"issuer"`
 	Subject           string `json:"subject"`
@@ -46,8 +46,8 @@ type uiInviteRequest struct {
 	UpdatedAt         string `json:"updatedAt,omitempty"`
 }
 
-func inviteRequestToUI(request platformclient.PlatformInviteRequest) uiInviteRequest {
-	return uiInviteRequest{
+func inviteRequestToUI(request platformclient.PlatformInviteRequest) InviteRequest {
+	return InviteRequest{
 		InviteRequestID:   request.InviteRequestID,
 		Issuer:            request.Issuer,
 		Subject:           request.Subject,
@@ -65,8 +65,8 @@ func inviteRequestToUI(request platformclient.PlatformInviteRequest) uiInviteReq
 	}
 }
 
-// uiSubmitInviteRequestInput omits identity: it comes from the verified bearer.
-type uiSubmitInviteRequestInput struct {
+// SubmitInviteRequestInput omits identity: it comes from the verified bearer.
+type SubmitInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	Kind            string `json:"kind"`
 	TenantName      string `json:"tenantName"`
@@ -74,35 +74,35 @@ type uiSubmitInviteRequestInput struct {
 	Note            string `json:"note,omitempty"`
 }
 
-// uiInviteRequestRateLimited is a state to render, not a fault.
-type uiInviteRequestRateLimited struct {
+// InviteRequestRateLimited is a state to render, not a fault.
+type InviteRequestRateLimited struct {
 	RetryAfterSeconds int `json:"retryAfterSeconds"`
 }
 
-// uiSubmitInviteRequestOutcome carries exactly one of Request or RateLimited.
-type uiSubmitInviteRequestOutcome struct {
-	Request     *uiInviteRequest            `json:"request,omitempty"`
-	RateLimited *uiInviteRequestRateLimited `json:"rateLimited,omitempty"`
+// SubmitInviteRequestOutcome carries exactly one of Request or RateLimited.
+type SubmitInviteRequestOutcome struct {
+	Request     *InviteRequest            `json:"request,omitempty"`
+	RateLimited *InviteRequestRateLimited `json:"rateLimited,omitempty"`
 }
 
 // SubmitTenantInviteRequest submits, or updates a pending, invite request.
-func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSubmitInviteRequestOutcome, error) {
+func (s *Service) SubmitTenantInviteRequest(input SubmitInviteRequestInput) (SubmitInviteRequestOutcome, error) {
 	tenant, err := uimodel.RequireTenant("requesting an invitation", input.Tenant)
 	if err != nil {
-		return uiSubmitInviteRequestOutcome{}, err
+		return SubmitInviteRequestOutcome{}, err
 	}
 	kind := strings.TrimSpace(input.Kind)
 	if kind != platformclient.PlatformInviteRequestKindJoinTenant && kind != platformclient.PlatformInviteRequestKindCreateTenant {
-		return uiSubmitInviteRequestOutcome{}, fmt.Errorf("requesting an invitation requires a kind of %q or %q, got %q", platformclient.PlatformInviteRequestKindJoinTenant, platformclient.PlatformInviteRequestKindCreateTenant, kind)
+		return SubmitInviteRequestOutcome{}, fmt.Errorf("requesting an invitation requires a kind of %q or %q, got %q", platformclient.PlatformInviteRequestKindJoinTenant, platformclient.PlatformInviteRequestKindCreateTenant, kind)
 	}
 	tenantName := strings.TrimSpace(input.TenantName)
 	if tenantName == "" {
-		return uiSubmitInviteRequestOutcome{}, errors.New("requesting an invitation requires a tenant name")
+		return SubmitInviteRequestOutcome{}, errors.New("requesting an invitation requires a tenant name")
 	}
 
-	client, ctx, cancel, err := a.tenantPlatformClientForIdentityCall(tenant)
+	client, ctx, cancel, err := s.tenantPlatformClientForIdentityCall(tenant)
 	if err != nil {
-		return uiSubmitInviteRequestOutcome{}, err
+		return SubmitInviteRequestOutcome{}, err
 	}
 	defer cancel()
 
@@ -116,12 +116,12 @@ func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSub
 		var statusErr *platformclient.PlatformStatusError
 		if errors.Is(err, platformclient.ErrPlatformRateLimited) && errors.As(err, &statusErr) {
 			seconds := inviteRequestRetryAfterSeconds(ctx, client, statusErr)
-			return uiSubmitInviteRequestOutcome{RateLimited: &uiInviteRequestRateLimited{RetryAfterSeconds: seconds}}, nil
+			return SubmitInviteRequestOutcome{RateLimited: &InviteRequestRateLimited{RetryAfterSeconds: seconds}}, nil
 		}
-		return uiSubmitInviteRequestOutcome{}, err
+		return SubmitInviteRequestOutcome{}, err
 	}
 	ui := inviteRequestToUI(request)
-	return uiSubmitInviteRequestOutcome{Request: &ui}, nil
+	return SubmitInviteRequestOutcome{Request: &ui}, nil
 }
 
 // defaultInviteRequestRetryAfterSeconds applies when Retry-After is unparseable;
@@ -140,18 +140,18 @@ func inviteRequestRetryAfterSeconds(ctx context.Context, client *platformclient.
 	return defaultInviteRequestRetryAfterSeconds
 }
 
-// uiTenantInput selects which local tenant's platform identity to use.
-type uiTenantInput struct {
+// TenantInput selects which local tenant's platform identity to use.
+type TenantInput struct {
 	Tenant string `json:"tenant"`
 }
 
 // GetMyTenantInviteRequest returns the caller's latest invite request, or nil.
-func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, error) {
+func (s *Service) GetMyTenantInviteRequest(input TenantInput) (*InviteRequest, error) {
 	tenant, err := uimodel.RequireTenant("checking your invitation request", input.Tenant)
 	if err != nil {
 		return nil, err
 	}
-	client, ctx, cancel, err := a.tenantPlatformClientForIdentityCall(tenant)
+	client, ctx, cancel, err := s.tenantPlatformClientForIdentityCall(tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -168,73 +168,73 @@ func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, e
 	return &ui, nil
 }
 
-var noInviteRequest *uiInviteRequest
+var noInviteRequest *InviteRequest
 
-// uiDecideInviteRequestInput identifies the request being decided.
-type uiDecideInviteRequestInput struct {
+// DecideInviteRequestInput identifies the request being decided.
+type DecideInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	InviteRequestID string `json:"inviteRequestId"`
 }
 
 // ApproveTenantInviteRequest enrolls the requester and mints their invite.
-func (a *App) ApproveTenantInviteRequest(input uiDecideInviteRequestInput) (uiInviteRequest, error) {
+func (s *Service) ApproveTenantInviteRequest(input DecideInviteRequestInput) (InviteRequest, error) {
 	tenant, err := uimodel.RequireTenant("issuing an invitation", input.Tenant)
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	inviteRequestID := strings.TrimSpace(input.InviteRequestID)
 	if inviteRequestID == "" {
-		return uiInviteRequest{}, errors.New("issuing an invitation requires an invite request id")
+		return InviteRequest{}, errors.New("issuing an invitation requires an invite request id")
 	}
-	ctx := a.context()
-	client, ctx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, ctx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	defer cancel()
 	request, err := client.ApproveInviteRequest(ctx, inviteRequestID)
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	return inviteRequestToUI(request), nil
 }
 
-// uiDeclineInviteRequestInput requires a reason so the decline reaches the requester.
-type uiDeclineInviteRequestInput struct {
+// DeclineInviteRequestInput requires a reason so the decline reaches the requester.
+type DeclineInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	InviteRequestID string `json:"inviteRequestId"`
 	Reason          string `json:"reason"`
 }
 
 // DeclineTenantInviteRequest declines a pending request with a reason.
-func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiInviteRequest, error) {
+func (s *Service) DeclineTenantInviteRequest(input DeclineInviteRequestInput) (InviteRequest, error) {
 	tenant, err := uimodel.RequireTenant("declining an invitation request", input.Tenant)
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	inviteRequestID := strings.TrimSpace(input.InviteRequestID)
 	if inviteRequestID == "" {
-		return uiInviteRequest{}, errors.New("declining an invitation request requires an invite request id")
+		return InviteRequest{}, errors.New("declining an invitation request requires an invite request id")
 	}
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
-		return uiInviteRequest{}, errors.New("declining an invitation request requires a reason")
+		return InviteRequest{}, errors.New("declining an invitation request requires a reason")
 	}
-	ctx := a.context()
-	client, ctx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, ctx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	defer cancel()
 	request, err := client.DeclineInviteRequest(ctx, inviteRequestID, platformclient.PlatformDeclineInviteRequestParams{Reason: reason})
 	if err != nil {
-		return uiInviteRequest{}, err
+		return InviteRequest{}, err
 	}
 	return inviteRequestToUI(request), nil
 }
 
-// uiTenantPlatformEnrollmentStatus drives one sidebar row's status icon.
-type uiTenantPlatformEnrollmentStatus struct {
+// EnrollmentStatus drives one sidebar row's status icon.
+type EnrollmentStatus struct {
 	Tenant        string `json:"tenant"`
 	State         string `json:"state"`
 	DeclineReason string `json:"declineReason,omitempty"`
@@ -244,21 +244,21 @@ type uiTenantPlatformEnrollmentStatus struct {
 	PlatformTenant string `json:"platformTenant,omitempty"`
 }
 
-// uiListTenantPlatformEnrollmentStatusesInput names the tenants to resolve.
-type uiListTenantPlatformEnrollmentStatusesInput struct {
+// ListEnrollmentStatusesInput names the tenants to resolve.
+type ListEnrollmentStatusesInput struct {
 	Tenants []string `json:"tenants"`
 }
 
 // ListTenantPlatformEnrollmentStatuses resolves each tenant best effort; a
 // failed round trip reports unknown, never local-only.
-func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnrollmentStatusesInput) []uiTenantPlatformEnrollmentStatus {
-	statuses := make([]uiTenantPlatformEnrollmentStatus, 0, len(input.Tenants))
+func (s *Service) ListTenantPlatformEnrollmentStatuses(input ListEnrollmentStatusesInput) []EnrollmentStatus {
+	statuses := make([]EnrollmentStatus, 0, len(input.Tenants))
 	for _, tenant := range input.Tenants {
 		tenant = strings.TrimSpace(tenant)
 		if tenant == "" {
 			continue
 		}
-		statuses = append(statuses, a.tenantPlatformEnrollmentStatus(tenant))
+		statuses = append(statuses, s.tenantPlatformEnrollmentStatus(tenant))
 	}
 	return statuses
 }
@@ -272,20 +272,20 @@ func tenantPlatformHost(apiURL string) string {
 	return parsed.Host
 }
 
-func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnrollmentStatus {
-	status := uiTenantPlatformEnrollmentStatus{Tenant: tenant, State: tenantEnrollmentLocalOnly}
-	resolution, err := a.resolveTenantPlatform(tenant, "")
-	if err != nil || resolution.state != tenantPlatformStateReady {
+func (s *Service) tenantPlatformEnrollmentStatus(tenant string) EnrollmentStatus {
+	status := EnrollmentStatus{Tenant: tenant, State: tenantEnrollmentLocalOnly}
+	resolution, err := s.Platform(tenant, "")
+	if err != nil || resolution.State != StateReady {
 		return status
 	}
 
-	status.PlatformHost = tenantPlatformHost(resolution.apiURL)
+	status.PlatformHost = tenantPlatformHost(resolution.APIURL)
 
-	ctx := a.context()
-	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
+	ctx := s.d.Context()
+	requestCtx, cancel := context.WithTimeout(ctx, RequestTimeout)
 	defer cancel()
 
-	whoami, whoamiErr := resolution.client.Whoami(requestCtx)
+	whoami, whoamiErr := resolution.Client.Whoami(requestCtx)
 	if whoamiErr == nil {
 		// A nil error is not enough: the credential may resolve to another tenant.
 		if mismatched := tenantDashboardTenantMismatch(tenant, whoami.TenantName); mismatched != "" {
@@ -310,7 +310,7 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 			return status
 		}
 		// NOT_ENROLLED, or an older platform's unclassified 401.
-		return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.client, status)
+		return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.Client, status)
 	}
 	status.State = tenantEnrollmentUnknown
 	return status
@@ -318,7 +318,7 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 
 // tenantPlatformEnrollmentStatusFromInviteRequest runs once whoami showed the
 // identity is verified but not enrolled.
-func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *platformclient.PlatformClient, status uiTenantPlatformEnrollmentStatus) uiTenantPlatformEnrollmentStatus {
+func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *platformclient.PlatformClient, status EnrollmentStatus) EnrollmentStatus {
 	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
 		if errors.Is(err, platformclient.ErrPlatformNotFound) {
@@ -343,7 +343,7 @@ func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client
 // loadTenantDashboardMyInviteRequest needs only the bearer, so it runs
 // regardless of PlatformState; failures go to MyInviteRequestError rather than
 // reading as never submitted.
-func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformclient.PlatformClient, dashboard *uiTenantDashboard) {
+func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformclient.PlatformClient, dashboard *Dashboard) {
 	request, err := client.MyInviteRequest(ctx)
 	switch {
 	case err == nil:
@@ -360,15 +360,15 @@ func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformcli
 
 // tenantPlatformClientForIdentityCall accepts not-enrolled and no-permission
 // identities; only a resolution without a bearer is refused.
-func (a *App) tenantPlatformClientForIdentityCall(tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
-	resolution, err := a.resolveTenantPlatform(tenant, "")
+func (s *Service) tenantPlatformClientForIdentityCall(tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
+	resolution, err := s.Platform(tenant, "")
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if resolution.client == nil {
-		return nil, nil, nil, fmt.Errorf("tenant platform is not ready (%s); connect and sign in first", resolution.state)
+	if resolution.Client == nil {
+		return nil, nil, nil, fmt.Errorf("tenant platform is not ready (%s); connect and sign in first", resolution.State)
 	}
-	ctx := a.context()
-	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
-	return resolution.client, requestCtx, cancel, nil
+	ctx := s.d.Context()
+	requestCtx, cancel := context.WithTimeout(ctx, RequestTimeout)
+	return resolution.Client, requestCtx, cancel, nil
 }

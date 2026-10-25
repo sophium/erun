@@ -9,9 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
-func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, error) {
+func loadAPILog(ctx context.Context, input tenantsvc.DashboardInput) (string, error) {
 	kubernetesContext := strings.TrimSpace(input.KubernetesContext)
 	tenant := strings.TrimSpace(input.Tenant)
 	environment := strings.TrimSpace(input.Environment)
@@ -19,7 +20,7 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 		return loadAPILogFromKubernetes(ctx, kubernetesContext, tenant, environment)
 	}
 	if mcpURL := strings.TrimSpace(input.MCPURL); mcpURL != "" {
-		return loadAPILogFromMCP(ctx, mcpURL, input.mcpBearer)
+		return loadAPILogFromMCP(ctx, mcpURL, input.MCPBearer)
 	}
 	return "", fmt.Errorf("tenant dashboard needs a Kubernetes context or MCP URL to load API logs")
 }

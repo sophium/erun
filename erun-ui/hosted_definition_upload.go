@@ -8,9 +8,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
-const hostedDefinitionUploadTimeout = tenantDashboardTimeout
+const hostedDefinitionUploadTimeout = tenantsvc.RequestTimeout
 
 // uiHostedDefinitionUpload carries LocalChange so the panel updates without a
 // second read.
@@ -48,7 +49,7 @@ func (a *App) uploadHostedDefinition(ctx context.Context, tenant, environment st
 }
 
 func (a *App) runHostedDefinitionUpload(ctx context.Context, tenant, environment string) (uiHostedDefinitionUpload, error) {
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	client, requestCtx, cancel, err := a.tenant.Client(ctx, tenant)
 	if err != nil {
 		return uiHostedDefinitionUpload{}, err
 	}
@@ -96,7 +97,7 @@ func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 		return
 	}
 	// Check readiness first so an unsigned machine is not notified on every write.
-	if resolution, resolveErr := a.resolveTenantPlatform(tenant, ""); resolveErr != nil || resolution.state != tenantPlatformStateReady {
+	if resolution, resolveErr := a.tenant.Platform(tenant, ""); resolveErr != nil || resolution.State != tenantsvc.StateReady {
 		return
 	}
 

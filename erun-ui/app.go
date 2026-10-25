@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -75,7 +76,7 @@ type erunUIDeps struct {
 	readEnvironmentJobOutput  func(context.Context, string, string, model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
 	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
 	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)
-	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
+	loadAPILog                func(context.Context, tenantsvc.DashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
 	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error)
 	workspaceSyncInterval     time.Duration
@@ -184,6 +185,8 @@ type App struct {
 
 	// restartControl is nil when the bind failed or startup has not run.
 	restartControl *restartControlServer
+
+	tenant *tenantsvc.Service
 }
 
 // SetEmitter overrides event emission; headless uses it for SSE.
@@ -255,6 +258,14 @@ func NewApp(deps erunUIDeps) *App {
 		go app.pollActivityContainerStatuses(context.Background(), entry)
 	}
 	app.contribute = newContributeStore(deps.contributeStatePath)
+	app.tenant = tenantsvc.New(tenantsvc.Deps{
+		Store:                 deps.store,
+		Cloud:                 deps.cloudDeps,
+		Context:               app.context,
+		MCPBearer:             app.mcpBearer,
+		LoadAPILog:            deps.loadAPILog,
+		ConfiguredERunAliases: app.configuredERunAliases,
+	})
 	if app.identity == nil {
 		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}

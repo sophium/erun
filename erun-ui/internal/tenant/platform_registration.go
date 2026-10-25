@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // mapping cannot be guessed safely through a form.
 
 // The write routes the Registration tab gates on, in the same canonical
-// "METHOD /path" form tenant_dashboard.go's read routes use.
+// "METHOD /path" form dashboard.go's read routes use.
 const (
 	tenantDashboardWriteCreateContext = "POST /v1/contexts"
 	// tenantDashboardWriteRegisterEnvironment also gates preview, which hits the
@@ -37,12 +37,12 @@ const (
 
 // loadTenantDashboardRegistration degrades each list independently and hides
 // the tab only when nothing is readable or writable.
-func loadTenantDashboardRegistration(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardRegistration(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) {
 	loadTenantDashboardRegistrationCapabilities(capabilities, dashboard)
 	contextsRestricted := loadTenantDashboardContexts(ctx, client, capabilities, dashboard)
 	environmentsRestricted := loadTenantDashboardEnvironments(ctx, client, capabilities, dashboard)
 
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabRegistration}
+	panel := DashboardPanel{Tab: tenantDashboardTabRegistration}
 	nothingToRead := contextsRestricted != "" && environmentsRestricted != ""
 	nothingToWrite := !dashboard.CanCreateContext && !dashboard.CanRegisterEnvironment
 	if nothingToRead && nothingToWrite {
@@ -51,18 +51,18 @@ func loadTenantDashboardRegistration(ctx context.Context, client *platformclient
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-func loadTenantDashboardRegistrationCapabilities(capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
-	dashboard.CanCreateContext = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateContext) == ""
-	dashboard.CanRegisterEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteRegisterEnvironment) == ""
-	dashboard.CanDeployEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeployEnvironment) == ""
-	dashboard.CanStopEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteStopEnvironment) == ""
-	dashboard.CanDeleteEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeleteEnvironment) == ""
+func loadTenantDashboardRegistrationCapabilities(capabilities model.PlatformCapabilities, dashboard *Dashboard) {
+	dashboard.CanCreateContext = RestrictedRead(capabilities, tenantDashboardWriteCreateContext) == ""
+	dashboard.CanRegisterEnvironment = RestrictedRead(capabilities, tenantDashboardWriteRegisterEnvironment) == ""
+	dashboard.CanDeployEnvironment = RestrictedRead(capabilities, tenantDashboardWriteDeployEnvironment) == ""
+	dashboard.CanStopEnvironment = RestrictedRead(capabilities, tenantDashboardWriteStopEnvironment) == ""
+	dashboard.CanDeleteEnvironment = RestrictedRead(capabilities, tenantDashboardWriteDeleteEnvironment) == ""
 }
 
 // loadTenantDashboardContexts returns the restriction for the tab-level hide
 // decision.
-func loadTenantDashboardContexts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
-	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadContexts)
+func loadTenantDashboardContexts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) string {
+	restricted := RestrictedRead(capabilities, tenantDashboardReadContexts)
 	if restricted != "" {
 		dashboard.ContextsRestricted = restricted
 		return restricted
@@ -76,8 +76,8 @@ func loadTenantDashboardContexts(ctx context.Context, client *platformclient.Pla
 	return ""
 }
 
-func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
-	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadEnvironments)
+func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) string {
+	restricted := RestrictedRead(capabilities, tenantDashboardReadEnvironments)
 	if restricted != "" {
 		dashboard.EnvironmentsRestricted = restricted
 		return restricted
@@ -91,16 +91,16 @@ func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient
 	return ""
 }
 
-func uiPlatformContexts(contexts []model.PlatformContext) []uiPlatformContext {
-	converted := make([]uiPlatformContext, 0, len(contexts))
+func uiPlatformContexts(contexts []model.PlatformContext) []PlatformContext {
+	converted := make([]PlatformContext, 0, len(contexts))
 	for _, cloudContext := range contexts {
 		converted = append(converted, uiPlatformContextFrom(cloudContext))
 	}
 	return converted
 }
 
-func uiPlatformContextFrom(cloudContext model.PlatformContext) uiPlatformContext {
-	return uiPlatformContext{
+func uiPlatformContextFrom(cloudContext model.PlatformContext) PlatformContext {
+	return PlatformContext{
 		ContextID:          cloudContext.ContextID,
 		Name:               cloudContext.Name,
 		Provider:           cloudContext.Provider,
@@ -113,16 +113,16 @@ func uiPlatformContextFrom(cloudContext model.PlatformContext) uiPlatformContext
 	}
 }
 
-func uiPlatformEnvironments(environments []model.PlatformEnvironment) []uiPlatformEnvironment {
-	converted := make([]uiPlatformEnvironment, 0, len(environments))
+func uiPlatformEnvironments(environments []model.PlatformEnvironment) []PlatformEnvironment {
+	converted := make([]PlatformEnvironment, 0, len(environments))
 	for _, environment := range environments {
 		converted = append(converted, uiPlatformEnvironmentFrom(environment))
 	}
 	return converted
 }
 
-func uiPlatformEnvironmentFrom(environment model.PlatformEnvironment) uiPlatformEnvironment {
-	return uiPlatformEnvironment{
+func uiPlatformEnvironmentFrom(environment model.PlatformEnvironment) PlatformEnvironment {
+	return PlatformEnvironment{
 		EnvironmentID:     environment.EnvironmentID,
 		Name:              environment.Name,
 		Type:              environment.Type,
@@ -161,22 +161,22 @@ func platformActionMessage(err error) string {
 
 // CreatePlatformContext registers a cloud context, or with Preview only
 // returns its plan.
-func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatformContextOutcome, error) {
+func (s *Service) CreatePlatformContext(input CreatePlatformContextInput) (PlatformContextOutcome, error) {
 	tenant, err := uimodel.RequireTenant("creating a cloud context", input.Tenant)
 	if err != nil {
-		return uiPlatformContextOutcome{}, err
+		return PlatformContextOutcome{}, err
 	}
 	name := strings.TrimSpace(input.Name)
 	alias := strings.TrimSpace(input.CloudProviderAlias)
 	region := strings.TrimSpace(input.Region)
 	if name == "" || alias == "" || region == "" {
-		return uiPlatformContextOutcome{}, fmt.Errorf("context name, cloud provider alias, and region are required")
+		return PlatformContextOutcome{}, fmt.Errorf("context name, cloud provider alias, and region are required")
 	}
 
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiPlatformContextOutcome{}, err
+		return PlatformContextOutcome{}, err
 	}
 	defer cancel()
 
@@ -191,11 +191,11 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 	})
 	if err != nil {
 		if kind := platformOutcomeKind(err); kind != "" {
-			return uiPlatformContextOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
+			return PlatformContextOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
 		}
-		return uiPlatformContextOutcome{}, operatorPlatformError(actionCreateContext, err)
+		return PlatformContextOutcome{}, operatorPlatformError(actionCreateContext, err)
 	}
-	outcome := uiPlatformContextOutcome{Kind: "accepted", Plan: result.Plan}
+	outcome := PlatformContextOutcome{Kind: "accepted", Plan: result.Plan}
 	if result.Context != nil {
 		createdContext := uiPlatformContextFrom(*result.Context)
 		outcome.Context = &createdContext
@@ -205,7 +205,7 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 
 // createEnvironmentParams is shared so preview and register never send
 // different fields for the same input.
-func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (model.PlatformCreateEnvironmentParams, error) {
+func createEnvironmentParams(input RegisterPlatformEnvironmentInput) (model.PlatformCreateEnvironmentParams, error) {
 	name := strings.TrimSpace(input.Name)
 	envType := strings.TrimSpace(input.Type)
 	if name == "" || envType == "" {
@@ -223,105 +223,105 @@ func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (model.Pl
 
 // PreviewPlatformEnvironment returns the plan without creating anything;
 // QuotaOk reports whether register would succeed.
-func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformProvisionResult, error) {
+func (s *Service) PreviewPlatformEnvironment(input RegisterPlatformEnvironmentInput) (PlatformProvisionResult, error) {
 	tenant, err := uimodel.RequireTenant("previewing a hosted environment", input.Tenant)
 	if err != nil {
-		return uiPlatformProvisionResult{}, err
+		return PlatformProvisionResult{}, err
 	}
 	params, err := createEnvironmentParams(input)
 	if err != nil {
-		return uiPlatformProvisionResult{}, err
+		return PlatformProvisionResult{}, err
 	}
 
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiPlatformProvisionResult{}, err
+		return PlatformProvisionResult{}, err
 	}
 	defer cancel()
 
 	result, err := client.PreviewCreateEnvironment(requestCtx, params)
 	if err != nil {
-		return uiPlatformProvisionResult{}, operatorPlatformError(actionPreviewEnv, err)
+		return PlatformProvisionResult{}, operatorPlatformError(actionPreviewEnv, err)
 	}
-	return uiPlatformProvisionResult{Plan: result.Plan, QuotaOk: result.QuotaOk}, nil
+	return PlatformProvisionResult{Plan: result.Plan, QuotaOk: result.QuotaOk}, nil
 }
 
 // RegisterPlatformEnvironment registers, or with Adopt records, a hosted
 // environment; a quota cap is a "conflict" outcome, not an error.
-func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformEnvironmentOutcome, error) {
+func (s *Service) RegisterPlatformEnvironment(input RegisterPlatformEnvironmentInput) (PlatformEnvironmentOutcome, error) {
 	tenant, err := uimodel.RequireTenant("registering a hosted environment", input.Tenant)
 	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
+		return PlatformEnvironmentOutcome{}, err
 	}
 	params, err := createEnvironmentParams(input)
 	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
+		return PlatformEnvironmentOutcome{}, err
 	}
 
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
+		return PlatformEnvironmentOutcome{}, err
 	}
 	defer cancel()
 
 	environment, err := client.CreateEnvironment(requestCtx, params)
 	if err != nil {
 		if kind := platformOutcomeKind(err); kind != "" {
-			return uiPlatformEnvironmentOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
+			return PlatformEnvironmentOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
 		}
-		return uiPlatformEnvironmentOutcome{}, operatorPlatformError(actionRegisterEnv, err)
+		return PlatformEnvironmentOutcome{}, operatorPlatformError(actionRegisterEnv, err)
 	}
 	converted := uiPlatformEnvironmentFrom(environment)
-	return uiPlatformEnvironmentOutcome{Kind: "accepted", Environment: &converted}, nil
+	return PlatformEnvironmentOutcome{Kind: "accepted", Environment: &converted}, nil
 }
 
 // DeployPlatformEnvironment starts a server-side deploy of a runtime environment.
-func (a *App) DeployPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+func (s *Service) DeployPlatformEnvironment(input PlatformEnvironmentActionInput) (PlatformEnvironmentOutcome, error) {
+	return s.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
 		return client.DeployEnvironment(requestCtx, environmentID, model.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
 	})
 }
 
 // StopPlatformEnvironment scales a runtime environment to zero.
-func (a *App) StopPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+func (s *Service) StopPlatformEnvironment(input PlatformEnvironmentActionInput) (PlatformEnvironmentOutcome, error) {
+	return s.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
 		return client.StopEnvironment(requestCtx, environmentID)
 	})
 }
 
 // DeletePlatformEnvironment tears down a hosted environment; the UI confirms first.
-func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+func (s *Service) DeletePlatformEnvironment(input PlatformEnvironmentActionInput) (PlatformEnvironmentOutcome, error) {
+	return s.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
 		return client.DeleteEnvironment(requestCtx, environmentID)
 	})
 }
 
-func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
+func (s *Service) platformEnvironmentAction(input PlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error)) (PlatformEnvironmentOutcome, error) {
 	tenant, err := uimodel.RequireTenant(string(action), input.Tenant)
 	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
+		return PlatformEnvironmentOutcome{}, err
 	}
 	environmentID := strings.TrimSpace(input.EnvironmentID)
 	if environmentID == "" {
-		return uiPlatformEnvironmentOutcome{}, fmt.Errorf("environment id is required")
+		return PlatformEnvironmentOutcome{}, fmt.Errorf("environment id is required")
 	}
 
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
+		return PlatformEnvironmentOutcome{}, err
 	}
 	defer cancel()
 
 	environment, err := call(client, requestCtx, environmentID)
 	if err != nil {
 		if kind := platformOutcomeKind(err); kind != "" {
-			return uiPlatformEnvironmentOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
+			return PlatformEnvironmentOutcome{Kind: kind, Message: platformActionMessage(err)}, nil
 		}
-		return uiPlatformEnvironmentOutcome{}, operatorPlatformError(action, err)
+		return PlatformEnvironmentOutcome{}, operatorPlatformError(action, err)
 	}
 	converted := uiPlatformEnvironmentFrom(environment)
-	return uiPlatformEnvironmentOutcome{Kind: "accepted", Environment: &converted}, nil
+	return PlatformEnvironmentOutcome{Kind: "accepted", Environment: &converted}, nil
 }

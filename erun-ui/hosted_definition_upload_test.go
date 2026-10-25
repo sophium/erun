@@ -114,6 +114,12 @@ func isolateHostedUploadConfig(t *testing.T) string {
 	return home
 }
 
+const (
+	testERunAlias   = "erun+api.test.example@erun"
+	testERunIssuer  = "https://auth.erun.example"
+	testERunSubject = "user-subject-1"
+)
+
 func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	t.Helper()
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())

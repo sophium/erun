@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
-const hostedDefinitionDriftTimeout = tenantDashboardTimeout
+const hostedDefinitionDriftTimeout = tenantsvc.RequestTimeout
 
 // hostedDefinitionDriftFor compares the hosted marker with the platform's
 // revision; it writes nothing.
@@ -22,7 +23,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 		return uiHostedDefinitionDrift{Error: fmt.Sprintf("%s/%s is not marked as hosted, so there is nothing to compare", tenant, environment)}
 	}
 
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	client, requestCtx, cancel, err := a.tenant.Client(ctx, tenant)
 	if err != nil {
 		return uiHostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,

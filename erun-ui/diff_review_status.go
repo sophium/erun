@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
 // Resolves the diff panel's review-status chip from the same platform reads the Reviews tab uses.
@@ -56,7 +57,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 		return uiDiffReviewStatus{State: diffReviewStateUnavailable}, nil
 	}
 	ctx := a.context()
-	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
+	requestCtx, cancel := context.WithTimeout(ctx, tenantsvc.RequestTimeout)
 	defer cancel()
 
 	platform, early, err := a.resolveDiffReviewPlatform(requestCtx, tenant)
@@ -100,26 +101,26 @@ type diffReviewPlatform struct {
 // resolveDiffReviewPlatform returns the client and capabilities, or an early status when
 // the platform is not ready or reviews are not readable (erun-ui/AGENTS.md, Professional UX).
 func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (diffReviewPlatform, *uiDiffReviewStatus, error) {
-	resolution, err := a.resolveTenantPlatform(tenant, "")
+	resolution, err := a.tenant.Platform(tenant, "")
 	if err != nil {
 		return diffReviewPlatform{}, nil, err
 	}
-	if resolution.state != tenantPlatformStateReady {
-		return diffReviewPlatform{}, &uiDiffReviewStatus{State: diffReviewStateUnavailable, PlatformState: resolution.state}, nil
+	if resolution.State != tenantsvc.StateReady {
+		return diffReviewPlatform{}, &uiDiffReviewStatus{State: diffReviewStateUnavailable, PlatformState: resolution.State}, nil
 	}
-	whoami, err := resolution.client.Whoami(ctx)
+	whoami, err := resolution.Client.Whoami(ctx)
 	if err != nil {
 		return diffReviewPlatform{}, nil, err
 	}
-	canAdvance := restrictedTenantDashboardRead(whoami.Capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
-	if restricted := restrictedTenantDashboardRead(whoami.Capabilities, tenantDashboardReadReviews); restricted != "" {
+	canAdvance := tenantsvc.RestrictedRead(whoami.Capabilities, tenantsvc.WriteAdvanceMergeQueue) == ""
+	if restricted := tenantsvc.RestrictedRead(whoami.Capabilities, tenantsvc.ReadReviews); restricted != "" {
 		return diffReviewPlatform{}, &uiDiffReviewStatus{
 			State:                diffReviewStateUnavailable,
-			PlatformState:        tenantPlatformStateNoPermission,
+			PlatformState:        tenantsvc.StateNoPermission,
 			CanAdvanceMergeQueue: canAdvance,
 		}, nil
 	}
-	return diffReviewPlatform{client: resolution.client, capabilities: whoami.Capabilities, canAdvance: canAdvance}, nil, nil
+	return diffReviewPlatform{client: resolution.Client, capabilities: whoami.Capabilities, canAdvance: canAdvance}, nil, nil
 }
 
 func applyDiffReviewLadderState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, status *uiDiffReviewStatus) {
@@ -144,7 +145,7 @@ func applyDiffReviewLadderState(ctx context.Context, client *platformclient.Plat
 // applyDiffReviewReadyState marks a READY review Blocked when threads are unresolved,
 // matching merge-queue/advance's gate; otherwise Ready with its queue position.
 func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, status *uiDiffReviewStatus) {
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
+	if tenantsvc.RestrictedRead(capabilities, tenantsvc.ReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
 			count := reviewpkg.CountUnresolvedThreads(comments)
 			status.UnresolvedThreads = &count
@@ -155,11 +156,11 @@ func applyDiffReviewReadyState(ctx context.Context, client *platformclient.Platf
 		return
 	}
 	status.State = diffReviewStateReady
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) == "" {
+	if tenantsvc.RestrictedRead(capabilities, tenantsvc.ReadMergeQueue) == "" {
 		if queue, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{
 			Repository: review.Repository, TargetBranch: review.TargetBranch,
 		}); err == nil {
-			status.QueuePosition = reviewQueuePosition(queue, review.ReviewID)
+			status.QueuePosition = tenantsvc.QueuePosition(queue, review.ReviewID)
 		}
 	}
 }

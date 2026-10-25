@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"strings"
@@ -17,7 +17,7 @@ const erunTestPlatformAPIURL = "https://api.erunpaas.com"
 const erunTestAlias = "erun+api.erunpaas.com@erun"
 
 // connectTestApp builds an app whose tenant attaches only non-erun aliases.
-func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubUIStore) {
+func connectTestApp(t *testing.T, tenant string, attached []string) (*Service, stubStore) {
 	t.Helper()
 	rootConfig := configpkg.ERunConfig{}
 	tenantConfig := model.TenantConfig{Name: tenant}
@@ -25,13 +25,13 @@ func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubU
 		tenantConfig.CloudProviderAliases = append([]string(nil), attached...)
 		tenantConfig.PrimaryCloudProviderAlias = attached[0]
 	}
-	store := stubUIStore{
+	store := stubStore{
 		config:  &rootConfig,
 		tenants: map[string]model.TenantConfig{tenant: tenantConfig},
 	}
-	app := NewApp(erunUIDeps{
-		store: store,
-		cloudDeps: cloud.CloudDependencies{
+	app := newTestService(t, Deps{
+		Store: store,
+		Cloud: cloud.CloudDependencies{
 			FetchPlatformInfo: func(_ core.Context, apiURL string) (model.PlatformInfo, error) {
 				if apiURL != erunTestPlatformAPIURL {
 					t.Fatalf("platform discovery went to %q, want %q", apiURL, erunTestPlatformAPIURL)
@@ -50,25 +50,25 @@ func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubU
 	return app, store
 }
 
-func loadTenantDashboardFor(t *testing.T, app *App, tenant string) uiTenantDashboard {
+func loadTenantDashboardFor(t *testing.T, app *Service, tenant string) Dashboard {
 	t.Helper()
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: tenant})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: tenant})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard(%s): %v", tenant, err)
 	}
 	return dashboard
 }
 
-func loadTenantConfigFor(t *testing.T, app *App, tenant string) model.TenantConfig {
+func loadTenantConfigFor(t *testing.T, app *Service, tenant string) model.TenantConfig {
 	t.Helper()
-	config, _, err := app.deps.store.LoadTenantConfig(tenant)
+	config, _, err := app.d.Store.LoadTenantConfig(tenant)
 	if err != nil {
 		t.Fatalf("LoadTenantConfig(%s): %v", tenant, err)
 	}
 	return config
 }
 
-func requirePlatformState(t *testing.T, app *App, tenant, want, when string) {
+func requirePlatformState(t *testing.T, app *Service, tenant, want, when string) {
 	t.Helper()
 	dashboard := loadTenantDashboardFor(t, app, tenant)
 	if dashboard.PlatformState != want {
@@ -93,9 +93,9 @@ func countErunAliases(aliases []string) int {
 	return count
 }
 
-func connectToTestPlatform(t *testing.T, app *App, tenant string) uiCloudProviderStatus {
+func connectToTestPlatform(t *testing.T, app *Service, tenant string) model.CloudProviderStatus {
 	t.Helper()
-	status, err := app.ConnectERunPlatform(uiConnectERunPlatformInput{
+	status, err := app.ConnectERunPlatform(ConnectERunPlatformInput{
 		APIURL: erunTestPlatformAPIURL,
 		Tenant: tenant,
 	})
@@ -152,7 +152,7 @@ func TestConnectERunPlatformWithoutATenantAttachesGlobally(t *testing.T) {
 	const tenant = "erun"
 	app, store := connectTestApp(t, tenant, []string{"team+aws"})
 
-	if _, err := app.ConnectERunPlatform(uiConnectERunPlatformInput{APIURL: erunTestPlatformAPIURL}); err != nil {
+	if _, err := app.ConnectERunPlatform(ConnectERunPlatformInput{APIURL: erunTestPlatformAPIURL}); err != nil {
 		t.Fatalf("ConnectERunPlatform without a tenant failed: %v", err)
 	}
 

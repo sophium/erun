@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"encoding/json"
@@ -104,7 +104,7 @@ func TestCreateReviewOpensAReviewFromThePushedBranch(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+	review, err := tenantDashboardApp(t, server.URL).CreateReview(CreateReviewInput{
 		Tenant: "frs",
 		Name:   "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
@@ -117,7 +117,7 @@ func TestCreateReviewOpensAReviewFromThePushedBranch(t *testing.T) {
 }
 
 func TestCreateReviewRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReview(uiCreateReviewInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).CreateReview(CreateReviewInput{
 		Name: "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -132,7 +132,7 @@ func TestCreateReviewRequiresNameAndBothBranches(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+	_, err := tenantDashboardApp(t, server.URL).CreateReview(CreateReviewInput{
 		Tenant: "frs",
 		Name:   "", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
@@ -145,7 +145,7 @@ func TestCreateReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	server := reviewWriteAPI(t, map[string]bool{"POST /v1/reviews": true})
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+	_, err := tenantDashboardApp(t, server.URL).CreateReview(CreateReviewInput{
 		Tenant: "frs",
 		Name:   "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
@@ -155,7 +155,7 @@ func TestCreateReviewSurfacesForbiddenAsAnError(t *testing.T) {
 }
 
 func TestCloseReviewRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CloseReview(uiCloseReviewInput{ReviewID: "review-1"})
+	_, err := newTestService(t, Deps{Store: stubStore{}}).CloseReview(CloseReviewInput{ReviewID: "review-1"})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCloseReviewTransitionsToClosed(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t, server.URL).CloseReview(uiCloseReviewInput{
+	review, err := tenantDashboardApp(t, server.URL).CloseReview(CloseReviewInput{
 		Tenant: "frs", ReviewID: "review-1",
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	server := reviewWriteAPI(t, map[string]bool{"PATCH /v1/reviews/review-1/status": true})
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CloseReview(uiCloseReviewInput{
+	_, err := tenantDashboardApp(t, server.URL).CloseReview(CloseReviewInput{
 		Tenant: "frs", ReviewID: "review-1",
 	})
 	if err == nil {
@@ -192,7 +192,7 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 }
 
 func TestAdvanceMergeQueueRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).AdvanceMergeQueue(uiAdvanceMergeQueueInput{Repository: "https://github.com/org/repo", TargetBranch: "main"})
+	_, err := newTestService(t, Deps{Store: stubStore{}}).AdvanceMergeQueue(AdvanceMergeQueueInput{Repository: "https://github.com/org/repo", TargetBranch: "main"})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -205,7 +205,7 @@ func TestAdvanceMergeQueueAdvancesTheTargetBranchsHead(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(AdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "main",
 	})
 	if err != nil {
@@ -223,7 +223,7 @@ func TestAdvanceMergeQueueRequiresATargetBranch(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(AdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo",
 	})
 	if err == nil || !strings.Contains(err.Error(), "target branch is required") {
@@ -246,7 +246,7 @@ func TestAdvanceMergeQueuePassesTheRepository(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+	if _, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(AdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/sophium/erun", TargetBranch: "main",
 	}); err != nil {
 		t.Fatalf("AdvanceMergeQueue failed: %v", err)
@@ -261,7 +261,7 @@ func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(AdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked",
 	})
 	if err != nil {
@@ -278,7 +278,7 @@ func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(AdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "occupied",
 	})
 	if err == nil {
@@ -295,7 +295,7 @@ func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
 }
 
 func TestOverrideAdvanceMergeQueueRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).OverrideAdvanceMergeQueue(OverrideAdvanceMergeQueueInput{
 		Repository: "https://github.com/org/repo", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -310,7 +310,7 @@ func TestOverrideAdvanceMergeQueueBypassesTheGate(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
+	review, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(OverrideAdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
 	})
 	if err != nil {
@@ -325,7 +325,7 @@ func TestOverrideAdvanceMergeQueueRequiresAReason(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
+	_, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(OverrideAdvanceMergeQueueInput{
 		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked",
 	})
 	if err == nil || !strings.Contains(err.Error(), "a reason is required") {
@@ -334,7 +334,7 @@ func TestOverrideAdvanceMergeQueueRequiresAReason(t *testing.T) {
 }
 
 func TestCreateReviewCommentRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewComment(uiCreateReviewCommentInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).CreateReviewComment(CreateReviewCommentInput{
 		ReviewID: "review-1", CommitID: "abc123", FilePath: "main.go", Line: 10, Body: "why this line?",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -349,7 +349,7 @@ func TestCreateReviewCommentStartsATopLevelThreadWithNoParent(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	comment, err := tenantDashboardApp(t, server.URL).CreateReviewComment(uiCreateReviewCommentInput{
+	comment, err := tenantDashboardApp(t, server.URL).CreateReviewComment(CreateReviewCommentInput{
 		Tenant:   "frs",
 		ReviewID: "review-1", CommitID: "abc123", FilePath: "main.go", Line: 10,
 		Body: "why this line?",
@@ -369,7 +369,7 @@ func TestCreateReviewCommentRequiresADiffLineAnchor(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CreateReviewComment(uiCreateReviewCommentInput{
+	_, err := tenantDashboardApp(t, server.URL).CreateReviewComment(CreateReviewCommentInput{
 		Tenant:   "frs",
 		ReviewID: "review-1", Body: "why this line?",
 	})
@@ -427,7 +427,7 @@ func TestReviewDetailReportsCanCloseAlongsideCanComment(t *testing.T) {
 
 // Each direction names its own operation in the error.
 func TestResolveReviewCommentRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).ResolveReviewComment(uiUpdateReviewCommentStatusInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).ResolveReviewComment(UpdateReviewCommentStatusInput{
 		ReviewID: "review-1", CommentID: "comment-1",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -439,7 +439,7 @@ func TestResolveReviewCommentRequiresATenant(t *testing.T) {
 }
 
 func TestUnresolveReviewCommentRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).UnresolveReviewComment(uiUpdateReviewCommentStatusInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).UnresolveReviewComment(UpdateReviewCommentStatusInput{
 		ReviewID: "review-1", CommentID: "comment-1",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {

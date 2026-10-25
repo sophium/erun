@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"encoding/json"
@@ -47,7 +47,7 @@ func TestEnrollERunPlatformUserRendersTheAdministratorHandoff(t *testing.T) {
 			defer server.Close()
 			app := testERunPlatformAliasApp(t, server.URL)
 
-			_, err := app.EnrollERunPlatformUser(uiPlatformUserEnrollInput{
+			_, err := app.EnrollERunPlatformUser(PlatformUserEnrollInput{
 				Username: "jane",
 				Issuer:   testERunIssuer,
 				Subject:  testERunSubject,
@@ -85,7 +85,7 @@ func TestEnrollERunPlatformUserKeepsTheRawErrorForUnexpectedFailures(t *testing.
 			defer server.Close()
 			app := testERunPlatformAliasApp(t, server.URL)
 
-			_, err := app.EnrollERunPlatformUser(uiPlatformUserEnrollInput{
+			_, err := app.EnrollERunPlatformUser(PlatformUserEnrollInput{
 				Username: "jane",
 				Issuer:   testERunIssuer,
 				Subject:  testERunSubject,

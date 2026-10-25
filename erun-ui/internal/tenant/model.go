@@ -1,11 +1,11 @@
-package main
+package tenant
 
 import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-type uiTenantDashboardInput struct {
+type DashboardInput struct {
 	Tenant            string `json:"tenant"`
 	Environment       string `json:"environment,omitempty"`
 	MCPURL            string `json:"mcpUrl,omitempty"`
@@ -16,11 +16,11 @@ type uiTenantDashboardInput struct {
 	ReviewFilterMine        bool `json:"reviewFilterMine,omitempty"`
 	ReviewFilterWaitingOnMe bool `json:"reviewFilterWaitingOnMe,omitempty"`
 
-	// mcpBearer is set server-side and unexported so it never crosses the Wails boundary.
-	mcpBearer string
+	// MCPBearer is set server-side; json:"-" keeps it off the Wails boundary both ways.
+	MCPBearer string `json:"-"`
 }
 
-type uiTenantDashboard struct {
+type Dashboard struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment,omitempty"`
 	APIURL      string `json:"apiUrl,omitempty"`
@@ -28,7 +28,7 @@ type uiTenantDashboard struct {
 	APIError    string `json:"apiError,omitempty"`
 	APILog      string `json:"apiLog,omitempty"`
 	APILogError string `json:"apiLogError,omitempty"`
-	// PlatformState is empty when the platform resolved (see tenantPlatformStateReady).
+	// PlatformState is empty when the platform resolved (see StateReady).
 	PlatformState        string   `json:"platformState,omitempty"`
 	PlatformAliasChoices []string `json:"platformAliasChoices,omitempty"`
 	PlatformAlias        string   `json:"platformAlias,omitempty"`
@@ -38,18 +38,18 @@ type uiTenantDashboard struct {
 	PlatformSubject string `json:"platformSubject,omitempty"`
 	// AccessRemedies maps a restricted route to the grant that would allow it.
 	AccessRemedies map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
-	User           *uiTenantDashboardUser                         `json:"user,omitempty"`
+	User           *DashboardUser                                 `json:"user,omitempty"`
 	// Users is the tenant roster, distinct from the caller's own User.
-	Users      []uiTenantDashboardUser   `json:"users,omitempty"`
-	Reviews    []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds     []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	Users      []DashboardUser   `json:"users,omitempty"`
+	Reviews    []DashboardReview `json:"reviews,omitempty"`
+	MergeQueue []DashboardReview `json:"mergeQueue,omitempty"`
+	Builds     []DashboardBuild  `json:"builds,omitempty"`
 	// Pipeline groups jobs and reviews by issue; planned work appears only here.
-	Pipeline             []uiPipelineIssue        `json:"pipeline,omitempty"`
-	AuditEvents          []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
-	Panels               []uiTenantDashboardPanel `json:"panels,omitempty"`
-	CanCreateReview      bool                     `json:"canCreateReview"`
-	CanAdvanceMergeQueue bool                     `json:"canAdvanceMergeQueue"`
+	Pipeline             []PipelineIssue  `json:"pipeline,omitempty"`
+	AuditEvents          []DashboardAudit `json:"auditEvents,omitempty"`
+	Panels               []DashboardPanel `json:"panels,omitempty"`
+	CanCreateReview      bool             `json:"canCreateReview"`
+	CanAdvanceMergeQueue bool             `json:"canAdvanceMergeQueue"`
 	// CanOverrideMergeQueue is a separate, usually narrower grant than CanAdvanceMergeQueue.
 	CanOverrideMergeQueue bool `json:"canOverrideMergeQueue"`
 	// Review counts are nil, not 0, when reviews or the user id are unreadable.
@@ -57,12 +57,12 @@ type uiTenantDashboard struct {
 	WaitingOnMeReviewCount *int `json:"waitingOnMeReviewCount,omitempty"`
 	// Contexts and Environments are platform objects, unrelated to local config,
 	// and each degrades independently.
-	Contexts               []uiPlatformContext     `json:"contexts,omitempty"`
-	ContextsRestricted     string                  `json:"contextsRestricted,omitempty"`
-	ContextsError          string                  `json:"contextsError,omitempty"`
-	Environments           []uiPlatformEnvironment `json:"environments,omitempty"`
-	EnvironmentsRestricted string                  `json:"environmentsRestricted,omitempty"`
-	EnvironmentsError      string                  `json:"environmentsError,omitempty"`
+	Contexts               []PlatformContext     `json:"contexts,omitempty"`
+	ContextsRestricted     string                `json:"contextsRestricted,omitempty"`
+	ContextsError          string                `json:"contextsError,omitempty"`
+	Environments           []PlatformEnvironment `json:"environments,omitempty"`
+	EnvironmentsRestricted string                `json:"environmentsRestricted,omitempty"`
+	EnvironmentsError      string                `json:"environmentsError,omitempty"`
 	// Previewing an environment shares CanRegisterEnvironment's gate.
 	CanCreateContext       bool `json:"canCreateContext"`
 	CanRegisterEnvironment bool `json:"canRegisterEnvironment"`
@@ -71,19 +71,19 @@ type uiTenantDashboard struct {
 	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
 	// MyInviteRequest is nil both when none exists and when the read failed;
 	// MyInviteRequestError tells them apart.
-	MyInviteRequest      *uiInviteRequest `json:"myInviteRequest,omitempty"`
-	MyInviteRequestError string           `json:"myInviteRequestError,omitempty"`
+	MyInviteRequest      *InviteRequest `json:"myInviteRequest,omitempty"`
+	MyInviteRequestError string         `json:"myInviteRequestError,omitempty"`
 	// PendingInviteRequestCount is nil, not 0, when the queue is unreadable.
-	InviteRequests            []uiInviteRequest `json:"inviteRequests,omitempty"`
-	PendingInviteRequestCount *int              `json:"pendingInviteRequestCount,omitempty"`
-	CanApproveInviteRequests  bool              `json:"canApproveInviteRequests"`
-	CanDeclineInviteRequests  bool              `json:"canDeclineInviteRequests"`
+	InviteRequests            []InviteRequest `json:"inviteRequests,omitempty"`
+	PendingInviteRequestCount *int            `json:"pendingInviteRequestCount,omitempty"`
+	CanApproveInviteRequests  bool            `json:"canApproveInviteRequests"`
+	CanDeclineInviteRequests  bool            `json:"canDeclineInviteRequests"`
 	// InviteRequestRateLimitWindowSeconds is best effort; 0 when unread.
 	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds,omitempty"`
 }
 
-// uiPlatformContext mirrors platformclient.PlatformContext.
-type uiPlatformContext struct {
+// PlatformContext mirrors platformclient.PlatformContext.
+type PlatformContext struct {
 	ContextID          string `json:"contextId"`
 	Name               string `json:"name"`
 	Provider           string `json:"provider"`
@@ -95,8 +95,8 @@ type uiPlatformContext struct {
 	ProvisionError     string `json:"provisionError,omitempty"`
 }
 
-// uiPlatformEnvironment mirrors platformclient.PlatformEnvironment.
-type uiPlatformEnvironment struct {
+// PlatformEnvironment mirrors platformclient.PlatformEnvironment.
+type PlatformEnvironment struct {
 	EnvironmentID     string `json:"environmentId"`
 	Name              string `json:"name"`
 	Type              string `json:"type"`
@@ -109,7 +109,7 @@ type uiPlatformEnvironment struct {
 	DeleteError       string `json:"deleteError,omitempty"`
 }
 
-type uiCreatePlatformContextInput struct {
+type CreatePlatformContextInput struct {
 	Tenant             string `json:"tenant"`
 	Name               string `json:"name"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
@@ -120,22 +120,22 @@ type uiCreatePlatformContextInput struct {
 	Preview            bool   `json:"preview,omitempty"`
 }
 
-// uiPlatformContextOutcome: "conflict"/"unavailable" are expected refusals, not errors.
-type uiPlatformContextOutcome struct {
-	Kind    string             `json:"kind"`
-	Context *uiPlatformContext `json:"context,omitempty"`
-	Plan    []string           `json:"plan,omitempty"`
-	Message string             `json:"message,omitempty"`
+// PlatformContextOutcome: "conflict"/"unavailable" are expected refusals, not errors.
+type PlatformContextOutcome struct {
+	Kind    string           `json:"kind"`
+	Context *PlatformContext `json:"context,omitempty"`
+	Plan    []string         `json:"plan,omitempty"`
+	Message string           `json:"message,omitempty"`
 }
 
-// uiPlatformProvisionResult mirrors platformclient.PlatformProvisionResult.
-type uiPlatformProvisionResult struct {
+// PlatformProvisionResult mirrors platformclient.PlatformProvisionResult.
+type PlatformProvisionResult struct {
 	Plan    []string `json:"plan"`
 	QuotaOk bool     `json:"quotaOk"`
 }
 
-// uiRegisterPlatformEnvironmentInput backs both register and preview, so they cannot diverge.
-type uiRegisterPlatformEnvironmentInput struct {
+// RegisterPlatformEnvironmentInput backs both register and preview, so they cannot diverge.
+type RegisterPlatformEnvironmentInput struct {
 	Tenant            string `json:"tenant"`
 	Name              string `json:"name"`
 	Type              string `json:"type"`
@@ -145,29 +145,29 @@ type uiRegisterPlatformEnvironmentInput struct {
 	Adopt             bool   `json:"adopt,omitempty"`
 }
 
-// uiPlatformEnvironmentActionInput.Version applies to deploy only.
-type uiPlatformEnvironmentActionInput struct {
+// PlatformEnvironmentActionInput.Version applies to deploy only.
+type PlatformEnvironmentActionInput struct {
 	Tenant        string `json:"tenant"`
 	EnvironmentID string `json:"environmentId"`
 	Version       string `json:"version,omitempty"`
 }
 
-// uiPlatformEnvironmentOutcome: "conflict"/"unavailable" are expected refusals, not errors.
-type uiPlatformEnvironmentOutcome struct {
-	Kind        string                 `json:"kind"`
-	Environment *uiPlatformEnvironment `json:"environment,omitempty"`
-	Message     string                 `json:"message,omitempty"`
+// PlatformEnvironmentOutcome: "conflict"/"unavailable" are expected refusals, not errors.
+type PlatformEnvironmentOutcome struct {
+	Kind        string               `json:"kind"`
+	Environment *PlatformEnvironment `json:"environment,omitempty"`
+	Message     string               `json:"message,omitempty"`
 }
 
-// uiTenantDashboardPanel separates Restricted (hidden) from Error (shown) per panel.
-type uiTenantDashboardPanel struct {
+// DashboardPanel separates Restricted (hidden) from Error (shown) per panel.
+type DashboardPanel struct {
 	Tab string `json:"tab"`
 	// Restricted names the denied read in canonical form ("GET /v1/audit-events").
 	Restricted string `json:"restricted,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
-type uiTenantDashboardUser struct {
+type DashboardUser struct {
 	TenantID string `json:"tenantId"`
 	// TenantName is set on the caller's own row only.
 	TenantName string   `json:"tenantName,omitempty"`
@@ -180,7 +180,7 @@ type uiTenantDashboardUser struct {
 	UpdatedAt  string   `json:"updatedAt,omitempty"`
 }
 
-type uiTenantDashboardReview struct {
+type DashboardReview struct {
 	ReviewID     string `json:"reviewId"`
 	TenantID     string `json:"tenantId"`
 	AuthorUserID string `json:"authorUserId,omitempty"`
@@ -203,7 +203,7 @@ type uiTenantDashboardReview struct {
 	UpdatedAt         string `json:"updatedAt,omitempty"`
 }
 
-type uiTenantDashboardBuild struct {
+type DashboardBuild struct {
 	BuildID         string                     `json:"buildId"`
 	TenantID        string                     `json:"tenantId"`
 	ReviewID        string                     `json:"reviewId,omitempty"`
@@ -218,33 +218,33 @@ type uiTenantDashboardBuild struct {
 	UpdatedAt       string                     `json:"updatedAt,omitempty"`
 }
 
-type uiTenantDashboardAudit struct {
+type DashboardAudit struct {
 	Type      string `json:"type"`
 	Actor     string `json:"actor,omitempty"`
 	Action    string `json:"action"`
 	CreatedAt string `json:"createdAt,omitempty"`
 }
 
-// uiPipelineIssue: an empty IssueKey groups work with no issue.
-type uiPipelineIssue struct {
-	IssueKey string           `json:"issueKey"`
-	Items    []uiPipelineItem `json:"items"`
+// PipelineIssue: an empty IssueKey groups work with no issue.
+type PipelineIssue struct {
+	IssueKey string         `json:"issueKey"`
+	Items    []PipelineItem `json:"items"`
 }
 
-// uiPipelineItem has exactly one of Job or Review; Rung is the platform's
+// PipelineItem has exactly one of Job or Review; Rung is the platform's
 // label, never re-derived here.
-type uiPipelineItem struct {
+type PipelineItem struct {
 	IssueKey string `json:"issueKey"`
 	// Empty IssueRefSource means the platform stated no link.
-	IssueRef       string            `json:"issueRef,omitempty"`
-	IssueRefSource string            `json:"issueRefSource,omitempty"`
-	Rung           string            `json:"rung"`
-	Job            *uiPipelineJob    `json:"job,omitempty"`
-	Review         *uiPipelineReview `json:"review,omitempty"`
+	IssueRef       string          `json:"issueRef,omitempty"`
+	IssueRefSource string          `json:"issueRefSource,omitempty"`
+	Rung           string          `json:"rung"`
+	Job            *PipelineJob    `json:"job,omitempty"`
+	Review         *PipelineReview `json:"review,omitempty"`
 }
 
-// uiPipelineJob has no branch, and nothing derives one.
-type uiPipelineJob struct {
+// PipelineJob has no branch, and nothing derives one.
+type PipelineJob struct {
 	JobID     string `json:"jobId"`
 	JobType   string `json:"jobType"`
 	IssueRef  string `json:"issueRef,omitempty"`
@@ -256,7 +256,7 @@ type uiPipelineJob struct {
 	EndedAt   string `json:"endedAt,omitempty"`
 }
 
-type uiPipelineReview struct {
+type PipelineReview struct {
 	ReviewID     string `json:"reviewId"`
 	Repository   string `json:"repository,omitempty"`
 	Name         string `json:"name"`
@@ -265,47 +265,47 @@ type uiPipelineReview struct {
 	Status       string `json:"status"`
 }
 
-type uiReviewDetailInput struct {
+type ReviewDetailInput struct {
 	Tenant   string `json:"tenant"`
 	ReviewID string `json:"reviewId"`
 }
 
-// uiReviewDetail's sub-reads degrade independently.
-type uiReviewDetail struct {
+// ReviewDetail's sub-reads degrade independently.
+type ReviewDetail struct {
 	ReviewID           string                                         `json:"reviewId"`
 	APIError           string                                         `json:"apiError,omitempty"`
 	Restricted         string                                         `json:"restricted,omitempty"`
 	AccessRemedies     map[string]platformclient.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
 	Error              string                                         `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview                       `json:"review,omitempty"`
-	Comments           []uiReviewComment                              `json:"comments,omitempty"`
+	Review             *DashboardReview                               `json:"review,omitempty"`
+	Comments           []ReviewComment                                `json:"comments,omitempty"`
 	CommentsRestricted string                                         `json:"commentsRestricted,omitempty"`
 	CommentsError      string                                         `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild                       `json:"builds,omitempty"`
+	Builds             []DashboardBuild                               `json:"builds,omitempty"`
 	BuildsRestricted   string                                         `json:"buildsRestricted,omitempty"`
 	BuildsError        string                                         `json:"buildsError,omitempty"`
 	// QueuePosition is 1-based; 0 means not queued.
 	QueuePosition int `json:"queuePosition,omitempty"`
 	// UnresolvedThreads is valid only when Comments loaded.
-	UnresolvedThreads   int          `json:"unresolvedThreads,omitempty"`
-	CanComment          bool         `json:"canComment"`
-	CanClose            bool         `json:"canClose"`
-	CanResolveComments  bool         `json:"canResolveComments"`
-	Reviewers           []uiReviewer `json:"reviewers,omitempty"`
-	ReviewersRestricted string       `json:"reviewersRestricted,omitempty"`
-	ReviewersError      string       `json:"reviewersError,omitempty"`
-	CanAssignReviewers  bool         `json:"canAssignReviewers"`
-	CanRemoveReviewers  bool         `json:"canRemoveReviewers"`
+	UnresolvedThreads   int        `json:"unresolvedThreads,omitempty"`
+	CanComment          bool       `json:"canComment"`
+	CanClose            bool       `json:"canClose"`
+	CanResolveComments  bool       `json:"canResolveComments"`
+	Reviewers           []Reviewer `json:"reviewers,omitempty"`
+	ReviewersRestricted string     `json:"reviewersRestricted,omitempty"`
+	ReviewersError      string     `json:"reviewersError,omitempty"`
+	CanAssignReviewers  bool       `json:"canAssignReviewers"`
+	CanRemoveReviewers  bool       `json:"canRemoveReviewers"`
 	// AvailableReviewers constrains the picker so a cross-tenant userId cannot be submitted.
-	AvailableReviewers []uiReviewer `json:"availableReviewers,omitempty"`
+	AvailableReviewers []Reviewer `json:"availableReviewers,omitempty"`
 }
 
-type uiReviewer struct {
+type Reviewer struct {
 	UserID   string `json:"userId"`
 	Username string `json:"username,omitempty"`
 }
 
-type uiReviewComment struct {
+type ReviewComment struct {
 	CommentID       string `json:"commentId"`
 	CreatorUserID   string `json:"creatorUserId,omitempty"`
 	CreatorUsername string `json:"creatorUsername,omitempty"`
@@ -318,15 +318,15 @@ type uiReviewComment struct {
 	CreatedAt       string `json:"createdAt,omitempty"`
 }
 
-// uiUpdateReviewCommentStatusInput.CommentID must be a thread root.
-type uiUpdateReviewCommentStatusInput struct {
+// UpdateReviewCommentStatusInput.CommentID must be a thread root.
+type UpdateReviewCommentStatusInput struct {
 	Tenant    string `json:"tenant"`
 	ReviewID  string `json:"reviewId"`
 	CommentID string `json:"commentId"`
 }
 
-// uiCreateReviewReplyInput copies its anchor from the parent comment.
-type uiCreateReviewReplyInput struct {
+// CreateReviewReplyInput copies its anchor from the parent comment.
+type CreateReviewReplyInput struct {
 	Tenant          string `json:"tenant"`
 	ReviewID        string `json:"reviewId"`
 	ParentCommentID string `json:"parentCommentId"`
@@ -336,9 +336,9 @@ type uiCreateReviewReplyInput struct {
 	Body            string `json:"body"`
 }
 
-// uiCreateReviewInput's SourceBranch must already be pushed; without Repository
+// CreateReviewInput's SourceBranch must already be pushed; without Repository
 // the review cannot join a merge queue.
-type uiCreateReviewInput struct {
+type CreateReviewInput struct {
 	Tenant       string `json:"tenant"`
 	Repository   string `json:"repository"`
 	Name         string `json:"name"`
@@ -346,19 +346,19 @@ type uiCreateReviewInput struct {
 	SourceBranch string `json:"sourceBranch"`
 }
 
-type uiCloseReviewInput struct {
+type CloseReviewInput struct {
 	Tenant   string `json:"tenant"`
 	ReviewID string `json:"reviewId"`
 }
 
-type uiAdvanceMergeQueueInput struct {
+type AdvanceMergeQueueInput struct {
 	Tenant string `json:"tenant"`
 	// Repository and TargetBranch together name one queue; both are required.
 	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
 }
 
-type uiOverrideAdvanceMergeQueueInput struct {
+type OverrideAdvanceMergeQueueInput struct {
 	Tenant       string `json:"tenant"`
 	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
@@ -366,21 +366,21 @@ type uiOverrideAdvanceMergeQueueInput struct {
 	Reason string `json:"reason"`
 }
 
-// uiAddReviewerInput.UserID must be enrolled in the caller's tenant.
-type uiAddReviewerInput struct {
+// AddReviewerInput.UserID must be enrolled in the caller's tenant.
+type AddReviewerInput struct {
 	Tenant   string `json:"tenant"`
 	ReviewID string `json:"reviewId"`
 	UserID   string `json:"userId"`
 }
 
-type uiRemoveReviewerInput struct {
+type RemoveReviewerInput struct {
 	Tenant   string `json:"tenant"`
 	ReviewID string `json:"reviewId"`
 	UserID   string `json:"userId"`
 }
 
-// uiCreateReviewCommentInput starts a new top-level thread on a diff line.
-type uiCreateReviewCommentInput struct {
+// CreateReviewCommentInput starts a new top-level thread on a diff line.
+type CreateReviewCommentInput struct {
 	Tenant   string `json:"tenant"`
 	ReviewID string `json:"reviewId"`
 	CommitID string `json:"commitId"`

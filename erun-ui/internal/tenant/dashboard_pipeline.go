@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 
 // loadTenantDashboardPipeline reads GET /v1/pipeline: jobs and reviews unioned by
 // issue. It never adds rows to the merge queue.
-func loadTenantDashboardPipeline(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
-	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabPipeline}
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadPipeline); restricted != "" {
+func loadTenantDashboardPipeline(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *Dashboard) {
+	panel := DashboardPanel{Tab: tenantDashboardTabPipeline}
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadPipeline); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
@@ -26,10 +26,10 @@ func loadTenantDashboardPipeline(ctx context.Context, client *platformclient.Pla
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-func tenantDashboardPipeline(issues []platformclient.PlatformPipelineIssue) []uiPipelineIssue {
-	converted := make([]uiPipelineIssue, 0, len(issues))
+func tenantDashboardPipeline(issues []platformclient.PlatformPipelineIssue) []PipelineIssue {
+	converted := make([]PipelineIssue, 0, len(issues))
 	for _, issue := range issues {
-		converted = append(converted, uiPipelineIssue{
+		converted = append(converted, PipelineIssue{
 			IssueKey: issue.IssueKey,
 			Items:    tenantDashboardPipelineItems(issue.Items),
 		})
@@ -37,10 +37,10 @@ func tenantDashboardPipeline(issues []platformclient.PlatformPipelineIssue) []ui
 	return converted
 }
 
-func tenantDashboardPipelineItems(items []platformclient.PlatformPipelineItem) []uiPipelineItem {
-	converted := make([]uiPipelineItem, 0, len(items))
+func tenantDashboardPipelineItems(items []platformclient.PlatformPipelineItem) []PipelineItem {
+	converted := make([]PipelineItem, 0, len(items))
 	for _, item := range items {
-		converted = append(converted, uiPipelineItem{
+		converted = append(converted, PipelineItem{
 			IssueKey:       item.IssueKey,
 			IssueRef:       item.IssueRef,
 			IssueRefSource: item.IssueRefSource,
@@ -53,11 +53,11 @@ func tenantDashboardPipelineItems(items []platformclient.PlatformPipelineItem) [
 }
 
 // A missing half stays nil; an empty synthesised one would render as a blank record.
-func tenantDashboardPipelineJob(job *platformclient.PlatformPipelineJob) *uiPipelineJob {
+func tenantDashboardPipelineJob(job *platformclient.PlatformPipelineJob) *PipelineJob {
 	if job == nil {
 		return nil
 	}
-	return &uiPipelineJob{
+	return &PipelineJob{
 		JobID:     job.JobID,
 		JobType:   job.JobType,
 		IssueRef:  job.IssueRef,
@@ -78,11 +78,11 @@ func tenantDashboardOptionalTime(value *time.Time) string {
 	return tenantDashboardTime(*value)
 }
 
-func tenantDashboardPipelineReview(review *platformclient.PlatformPipelineReview) *uiPipelineReview {
+func tenantDashboardPipelineReview(review *platformclient.PlatformPipelineReview) *PipelineReview {
 	if review == nil {
 		return nil
 	}
-	return &uiPipelineReview{
+	return &PipelineReview{
 		ReviewID:     review.ReviewID,
 		Repository:   review.Repository,
 		Name:         review.Name,

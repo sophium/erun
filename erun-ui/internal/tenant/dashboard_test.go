@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"net/http"
@@ -56,12 +56,12 @@ func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabi
 
 // testERunPlatformAliasApp uses a real temp-dir secret store so the real
 // refresh_token grant path mints the token.
-func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
+func testERunPlatformAliasApp(t *testing.T, apiURL string) *Service {
 	t.Helper()
 	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]model.TenantConfig{"frs": {Name: "frs"}})
 }
 
-func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]model.TenantConfig) *App {
+func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]model.TenantConfig) *Service {
 	t.Helper()
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
@@ -75,9 +75,9 @@ func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants ma
 		Username: "erun",
 		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}
-	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: tenants},
-		cloudDeps: cloud.CloudDependencies{
+	return newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: tenants},
+		Cloud: cloud.CloudDependencies{
 			CloudSecretStore: secrets,
 			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
@@ -95,15 +95,15 @@ const (
 	testERunSubject = "user-subject-1"
 )
 
-func testAWSAliasApp(t *testing.T) *App {
+func testAWSAliasApp(t *testing.T) *Service {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")
 	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team",
 	}}}
-	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
-		cloudDeps: cloud.CloudDependencies{
+	return newTestService(t, Deps{
+		Store: stubStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
+		Cloud: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
 			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
 				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
@@ -112,21 +112,21 @@ func testAWSAliasApp(t *testing.T) *App {
 	})
 }
 
-func tenantDashboardApp(t *testing.T, apiURL string) *App {
+func tenantDashboardApp(t *testing.T, apiURL string) *Service {
 	t.Helper()
 	return testERunPlatformAliasApp(t, apiURL)
 }
 
-func loadTenantDashboardFrom(t *testing.T, app *App) uiTenantDashboard {
+func loadTenantDashboardFrom(t *testing.T, app *Service) Dashboard {
 	t.Helper()
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
 	return dashboard
 }
 
-func panelFor(t *testing.T, dashboard uiTenantDashboard, tab string) uiTenantDashboardPanel {
+func panelFor(t *testing.T, dashboard Dashboard, tab string) DashboardPanel {
 	t.Helper()
 	for _, panel := range dashboard.Panels {
 		if panel.Tab == tab {
@@ -134,7 +134,7 @@ func panelFor(t *testing.T, dashboard uiTenantDashboard, tab string) uiTenantDas
 		}
 	}
 	t.Fatalf("no %q panel in %+v", tab, dashboard.Panels)
-	return uiTenantDashboardPanel{}
+	return DashboardPanel{}
 }
 
 func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
@@ -173,11 +173,11 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 		t.Fatalf("expected only the reads the caller may make (plus the identity-scoped invite-request/config reads, which need no capability), got %q", got)
 	}
 	queue := panelFor(t, dashboard, tenantDashboardTabQueue)
-	if queue.Restricted != tenantDashboardReadMergeQueue {
+	if queue.Restricted != ReadMergeQueue {
 		t.Fatalf("expected the merge queue panel to name the missing read, got %+v", queue)
 	}
 	builds := panelFor(t, dashboard, tenantDashboardTabBuilds)
-	if builds.Restricted != tenantDashboardReadReviews {
+	if builds.Restricted != ReadReviews {
 		t.Fatalf("expected the builds panel to name the missing read, got %+v", builds)
 	}
 	pipeline := panelFor(t, dashboard, tenantDashboardTabPipeline)
@@ -308,7 +308,7 @@ func TestTenantDashboardUsersPanelListsTheTenantRoster(t *testing.T) {
 	}
 }
 
-func assertTenantDashboardRoster(t *testing.T, dashboard uiTenantDashboard) {
+func assertTenantDashboardRoster(t *testing.T, dashboard Dashboard) {
 	t.Helper()
 	if len(dashboard.Users) != 3 {
 		t.Fatalf("expected the tenant's three users, got %d: %+v", len(dashboard.Users), dashboard.Users)

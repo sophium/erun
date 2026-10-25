@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"context"
@@ -12,19 +12,19 @@ import (
 )
 
 // LoadReviewDetail loads one review's detail; each sub-read degrades independently.
-func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error) {
+func (s *Service) LoadReviewDetail(input ReviewDetailInput) (ReviewDetail, error) {
 	tenant, err := uimodel.RequireTenant("loading review detail", input.Tenant)
 	if err != nil {
-		return uiReviewDetail{}, err
+		return ReviewDetail{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
-		return uiReviewDetail{}, fmt.Errorf("review id is required")
+		return ReviewDetail{}, fmt.Errorf("review id is required")
 	}
 
-	detail := uiReviewDetail{ReviewID: reviewID}
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	detail := ReviewDetail{ReviewID: reviewID}
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
 		detail.APIError = err.Error()
 		return detail, nil
@@ -39,7 +39,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	capabilities := whoami.Capabilities
 	usernames := tenantDashboardUsernames(requestCtx, client, capabilities)
 
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReview); restricted != "" {
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadReview); restricted != "" {
 		detail.Restricted = restricted
 		detail.AccessRemedies = loadAccessRemedies(requestCtx, client, capabilities, whoami.UserID, restricted)
 		return detail, nil
@@ -56,11 +56,11 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	loadReviewDetailBuilds(requestCtx, client, capabilities, reviewID, review.Name, &detail)
 	loadReviewDetailReviewers(requestCtx, client, capabilities, reviewID, usernames, &detail)
 	detail.QueuePosition = loadReviewDetailQueuePosition(requestCtx, client, capabilities, review, reviewID)
-	detail.CanComment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteComment) == ""
-	detail.CanClose = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewStatus) == ""
-	detail.CanResolveComments = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCommentStatus) == ""
-	detail.CanAssignReviewers = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewers) == ""
-	detail.CanRemoveReviewers = restrictedTenantDashboardRead(capabilities, tenantDashboardRemoveReviewers) == ""
+	detail.CanComment = RestrictedRead(capabilities, tenantDashboardWriteComment) == ""
+	detail.CanClose = RestrictedRead(capabilities, tenantDashboardWriteReviewStatus) == ""
+	detail.CanResolveComments = RestrictedRead(capabilities, tenantDashboardWriteCommentStatus) == ""
+	detail.CanAssignReviewers = RestrictedRead(capabilities, tenantDashboardWriteReviewers) == ""
+	detail.CanRemoveReviewers = RestrictedRead(capabilities, tenantDashboardRemoveReviewers) == ""
 	if detail.CanAssignReviewers {
 		detail.AvailableReviewers = tenantDashboardEnrolledReviewerChoices(requestCtx, client, capabilities)
 	}
@@ -70,8 +70,8 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 }
 
 // loadReviewDetailReviewers degrades independently of the rest of the detail.
-func loadReviewDetailReviewers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
+func loadReviewDetailReviewers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *ReviewDetail) {
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
 		detail.ReviewersRestricted = restricted
 		return
 	}
@@ -80,46 +80,46 @@ func loadReviewDetailReviewers(ctx context.Context, client *platformclient.Platf
 		detail.ReviewersError = tenantDashboardReadError(tenantDashboardReadReviewers, err)
 		return
 	}
-	converted := make([]uiReviewer, 0, len(reviewers))
+	converted := make([]Reviewer, 0, len(reviewers))
 	for _, reviewer := range reviewers {
-		converted = append(converted, uiReviewer{UserID: reviewer.UserID, Username: usernames[reviewer.UserID]})
+		converted = append(converted, Reviewer{UserID: reviewer.UserID, Username: usernames[reviewer.UserID]})
 	}
 	detail.Reviewers = converted
 }
 
 // tenantDashboardEnrolledReviewerChoices is best effort: nil leaves the picker empty
 // rather than failing the detail.
-func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) []uiReviewer {
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
+func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) []Reviewer {
+	if RestrictedRead(capabilities, tenantDashboardReadUsers) != "" {
 		return nil
 	}
 	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		return nil
 	}
-	choices := make([]uiReviewer, 0, len(users))
+	choices := make([]Reviewer, 0, len(users))
 	for _, user := range users {
-		choices = append(choices, uiReviewer{UserID: user.UserID, Username: user.Username})
+		choices = append(choices, Reviewer{UserID: user.UserID, Username: user.Username})
 	}
 	return choices
 }
 
-func loadReviewDetailComments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments); restricted != "" {
+func loadReviewDetailComments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *ReviewDetail) {
+	if restricted := RestrictedRead(capabilities, ReadComments); restricted != "" {
 		detail.CommentsRestricted = restricted
 		return
 	}
 	comments, err := client.ListComments(ctx, reviewID)
 	if err != nil {
-		detail.CommentsError = tenantDashboardReadError(tenantDashboardReadComments, err)
+		detail.CommentsError = tenantDashboardReadError(ReadComments, err)
 		return
 	}
 	detail.Comments = tenantDashboardComments(comments, usernames)
 	detail.UnresolvedThreads = reviewpkg.CountUnresolvedThreads(comments)
 }
 
-func loadReviewDetailBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {
-	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
+func loadReviewDetailBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *ReviewDetail) {
+	if restricted := RestrictedRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
 		detail.BuildsRestricted = restricted
 		return
 	}
@@ -134,7 +134,7 @@ func loadReviewDetailBuilds(ctx context.Context, client *platformclient.Platform
 // loadReviewDetailQueuePosition reports 0 on denial or failure: the position is
 // supplemental.
 func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, reviewID string) int {
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
+	if RestrictedRead(capabilities, ReadMergeQueue) != "" {
 		return 0
 	}
 	queue, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{
@@ -143,33 +143,33 @@ func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.P
 	if err != nil {
 		return 0
 	}
-	return reviewQueuePosition(queue, reviewID)
+	return QueuePosition(queue, reviewID)
 }
 
 // CreateReviewReply returns a real error so the frontend keeps the draft until it
 // succeeds.
-func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment, error) {
+func (s *Service) CreateReviewReply(input CreateReviewReplyInput) (ReviewComment, error) {
 	tenant, err := uimodel.RequireTenant("replying to a review comment", input.Tenant)
 	if err != nil {
-		return uiReviewComment{}, err
+		return ReviewComment{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
-		return uiReviewComment{}, fmt.Errorf("review id is required")
+		return ReviewComment{}, fmt.Errorf("review id is required")
 	}
 	parentCommentID := strings.TrimSpace(input.ParentCommentID)
 	if parentCommentID == "" {
-		return uiReviewComment{}, fmt.Errorf("parent comment id is required")
+		return ReviewComment{}, fmt.Errorf("parent comment id is required")
 	}
 	body := strings.TrimSpace(input.Body)
 	if body == "" {
-		return uiReviewComment{}, fmt.Errorf("reply body is required")
+		return ReviewComment{}, fmt.Errorf("reply body is required")
 	}
 
-	ctx := a.context()
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	ctx := s.d.Context()
+	client, requestCtx, cancel, err := s.Client(ctx, tenant)
 	if err != nil {
-		return uiReviewComment{}, err
+		return ReviewComment{}, err
 	}
 	defer cancel()
 
@@ -181,15 +181,15 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 		ParentCommentID: parentCommentID,
 	})
 	if err != nil {
-		return uiReviewComment{}, operatorPlatformError(actionCommentReview, err)
+		return ReviewComment{}, operatorPlatformError(actionCommentReview, err)
 	}
 	return tenantDashboardComment(comment), nil
 }
 
-func tenantDashboardBuildsForReview(builds []model.PlatformBuild, reviewName string) []uiTenantDashboardBuild {
-	converted := make([]uiTenantDashboardBuild, 0, len(builds))
+func tenantDashboardBuildsForReview(builds []model.PlatformBuild, reviewName string) []DashboardBuild {
+	converted := make([]DashboardBuild, 0, len(builds))
 	for _, build := range builds {
-		converted = append(converted, uiTenantDashboardBuild{
+		converted = append(converted, DashboardBuild{
 			BuildID:    build.BuildID,
 			TenantID:   build.TenantID,
 			ReviewID:   build.ReviewID,
@@ -205,22 +205,22 @@ func tenantDashboardBuildsForReview(builds []model.PlatformBuild, reviewName str
 	return converted
 }
 
-func tenantDashboardComments(comments []model.PlatformComment, usernames map[string]string) []uiReviewComment {
-	converted := make([]uiReviewComment, 0, len(comments))
+func tenantDashboardComments(comments []model.PlatformComment, usernames map[string]string) []ReviewComment {
+	converted := make([]ReviewComment, 0, len(comments))
 	for _, comment := range comments {
 		converted = append(converted, tenantDashboardCommentWithUsername(comment, usernames))
 	}
 	return converted
 }
 
-func tenantDashboardCommentWithUsername(comment model.PlatformComment, usernames map[string]string) uiReviewComment {
+func tenantDashboardCommentWithUsername(comment model.PlatformComment, usernames map[string]string) ReviewComment {
 	converted := tenantDashboardComment(comment)
 	converted.CreatorUsername = usernames[comment.CreatorUserID]
 	return converted
 }
 
-func tenantDashboardComment(comment model.PlatformComment) uiReviewComment {
-	return uiReviewComment{
+func tenantDashboardComment(comment model.PlatformComment) ReviewComment {
+	return ReviewComment{
 		CommentID:       comment.CommentID,
 		CreatorUserID:   comment.CreatorUserID,
 		Status:          comment.Status,
@@ -233,8 +233,8 @@ func tenantDashboardComment(comment model.PlatformComment) uiReviewComment {
 	}
 }
 
-// reviewQueuePosition returns the 1-based position, or 0 when not queued.
-func reviewQueuePosition(queue []model.PlatformReview, reviewID string) int {
+// QueuePosition returns the 1-based position, or 0 when not queued.
+func QueuePosition(queue []model.PlatformReview, reviewID string) int {
 	for i, review := range queue {
 		if review.ReviewID == reviewID {
 			return i + 1

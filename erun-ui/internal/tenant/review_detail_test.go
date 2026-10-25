@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"errors"
@@ -56,9 +56,9 @@ func reviewDetailAPI(t *testing.T, forbidden map[string]bool) *httptest.Server {
 	}))
 }
 
-func loadReviewDetailFrom(t *testing.T, app *App) uiReviewDetail {
+func loadReviewDetailFrom(t *testing.T, app *Service) ReviewDetail {
 	t.Helper()
-	detail, err := app.LoadReviewDetail(uiReviewDetailInput{Tenant: "frs", ReviewID: "review-1"})
+	detail, err := app.LoadReviewDetail(ReviewDetailInput{Tenant: "frs", ReviewID: "review-1"})
 	if err != nil {
 		t.Fatalf("LoadReviewDetail failed: %v", err)
 	}
@@ -66,7 +66,7 @@ func loadReviewDetailFrom(t *testing.T, app *App) uiReviewDetail {
 }
 
 func TestLoadReviewDetailRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).LoadReviewDetail(uiReviewDetailInput{ReviewID: "review-1"})
+	_, err := newTestService(t, Deps{Store: stubStore{}}).LoadReviewDetail(ReviewDetailInput{ReviewID: "review-1"})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestCreateReviewReplyCopiesTheParentThreadsAnchor(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	comment, err := tenantDashboardApp(t, server.URL).CreateReviewReply(uiCreateReviewReplyInput{
+	comment, err := tenantDashboardApp(t, server.URL).CreateReviewReply(CreateReviewReplyInput{
 		Tenant: "frs", ReviewID: "review-1", ParentCommentID: "comment-1",
 		CommitID: "abc123", FilePath: "main.go", Line: 42,
 		Body: "fixed, thanks",
@@ -145,7 +145,7 @@ func TestCreateReviewReplyCopiesTheParentThreadsAnchor(t *testing.T) {
 }
 
 func TestCreateReviewReplyRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewReply(uiCreateReviewReplyInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).CreateReviewReply(CreateReviewReplyInput{
 		ReviewID: "review-1", ParentCommentID: "comment-1", Body: "fixed, thanks",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -160,7 +160,7 @@ func TestCreateReviewReplyRequiresABody(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CreateReviewReply(uiCreateReviewReplyInput{
+	_, err := tenantDashboardApp(t, server.URL).CreateReviewReply(CreateReviewReplyInput{
 		Tenant: "frs", ReviewID: "review-1", ParentCommentID: "comment-1", Body: "   ",
 	})
 	if err == nil || !strings.Contains(err.Error(), "reply body is required") {

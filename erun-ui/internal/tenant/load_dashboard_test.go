@@ -1,15 +1,11 @@
-package main
+package tenant
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,7 +17,7 @@ func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T)
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -36,7 +32,7 @@ func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) 
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -56,7 +52,7 @@ func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testin
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -76,7 +72,7 @@ func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testin
 	assertTenantDashboardRowsAreEmpty(t, &dashboard)
 }
 
-func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *uiTenantDashboard) {
+func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *Dashboard) {
 	t.Helper()
 	for _, rows := range []struct {
 		name string
@@ -160,7 +156,7 @@ func erunPlatformDashboardHandler(t *testing.T, requests *[]string, platformTena
 	}
 }
 
-func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
+func assertERunPlatformDashboard(t *testing.T, dashboard Dashboard, requests []string) {
 	t.Helper()
 
 	assertERunPlatformDashboardUser(t, dashboard)
@@ -179,7 +175,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 }
 
 // The platform tenant name is asserted even when it matches; the header always renders it.
-func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) {
+func assertERunPlatformDashboardUser(t *testing.T, dashboard Dashboard) {
 	t.Helper()
 	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 {
 		t.Fatalf("unexpected dashboard user: %+v", dashboard.User)
@@ -189,7 +185,7 @@ func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) 
 	}
 }
 
-func assertERunPlatformDashboardPipeline(t *testing.T, issues []uiPipelineIssue) {
+func assertERunPlatformDashboardPipeline(t *testing.T, issues []PipelineIssue) {
 	t.Helper()
 	if len(issues) != 1 || issues[0].IssueKey != "sophium/erun#2683" || len(issues[0].Items) != 2 {
 		t.Fatalf("unexpected pipeline: %+v", issues)
@@ -198,7 +194,7 @@ func assertERunPlatformDashboardPipeline(t *testing.T, issues []uiPipelineIssue)
 	assertERunPlatformDashboardOpenReview(t, issues[0].Items[1])
 }
 
-func assertERunPlatformDashboardPlannedJob(t *testing.T, planned uiPipelineItem) {
+func assertERunPlatformDashboardPlannedJob(t *testing.T, planned PipelineItem) {
 	t.Helper()
 	if planned.Job == nil || planned.Review != nil {
 		t.Fatalf("expected the planned item to be a job and only a job, got %+v", planned)
@@ -211,7 +207,7 @@ func assertERunPlatformDashboardPlannedJob(t *testing.T, planned uiPipelineItem)
 	}
 }
 
-func assertERunPlatformDashboardOpenReview(t *testing.T, open uiPipelineItem) {
+func assertERunPlatformDashboardOpenReview(t *testing.T, open PipelineItem) {
 	t.Helper()
 	if open.Review == nil || open.Job != nil {
 		t.Fatalf("expected the review item to be a review and only a review, got %+v", open)
@@ -221,7 +217,7 @@ func assertERunPlatformDashboardOpenReview(t *testing.T, open uiPipelineItem) {
 	}
 }
 
-func assertERunPlatformDashboardAuditEvents(t *testing.T, events []uiTenantDashboardAudit) {
+func assertERunPlatformDashboardAuditEvents(t *testing.T, events []DashboardAudit) {
 	t.Helper()
 	if len(events) != 1 || events[0].Actor != "subject-1" || events[0].Action != "GET /v1/reviews" {
 		t.Fatalf("unexpected audit events: %+v", events)
@@ -235,14 +231,14 @@ func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T)
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	app.deps.loadAPILog = func(_ context.Context, input uiTenantDashboardInput) (string, error) {
+	app.d.LoadAPILog = func(_ context.Context, input DashboardInput) (string, error) {
 		if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
 			t.Fatalf("unexpected log input: %+v", input)
 		}
 		return "auth rejected token", nil
 	}
 
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{
 		Tenant: "frs",
 		MCPURL: "http://127.0.0.1:17000/mcp",
 	})
@@ -275,11 +271,11 @@ func TestLoadTenantDashboardAPILogErrorNamesTheReadThatFailed(t *testing.T) {
 
 	const rawError = "exit status 1: kubectl stub: no cluster in the Playwright harness"
 	app := testERunPlatformAliasApp(t, server.URL)
-	app.deps.loadAPILog = func(_ context.Context, _ uiTenantDashboardInput) (string, error) {
+	app.d.LoadAPILog = func(_ context.Context, _ DashboardInput) (string, error) {
 		return "", errors.New(rawError)
 	}
 
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{
 		Tenant: "frs",
 		MCPURL: "http://127.0.0.1:17000/mcp",
 	})
@@ -335,7 +331,7 @@ func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAs
 			defer server.Close()
 
 			app := testERunPlatformAliasApp(t, server.URL)
-			dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+			dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 			if err != nil {
 				t.Fatalf("LoadTenantDashboard failed: %v", err)
 			}
@@ -370,7 +366,7 @@ func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *t
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -386,7 +382,7 @@ func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *t
 // the platform read with the AWS identity.
 func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
 	app := testAWSAliasApp(t)
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	dashboard, err := app.LoadTenantDashboard(DashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -395,86 +391,5 @@ func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
 	}
 	if dashboard.APIURL != "" || dashboard.PlatformAlias != "" {
 		t.Fatalf("expected no platform URL or alias to be reported, got %+v", dashboard)
-	}
-}
-
-func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
-	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
-		got := strings.Join(args, "\n")
-		// The API runs in <tenant>-api (open.APIDeploymentName), not <tenant>-devops.
-		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\n-l\napp=frs-api\n--prefix\n-c\nerun-backend-api\n--tail\n400"
-		if got != want {
-			t.Fatalf("unexpected kubectl args:\n%s", got)
-		}
-		return "api log from pod\n", 0
-	})+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	log, err := loadAPILog(context.Background(), uiTenantDashboardInput{
-		Tenant:            "frs",
-		Environment:       "prod",
-		MCPURL:            "http://127.0.0.1:17000/mcp",
-		KubernetesContext: "cluster-dev",
-	})
-	if err != nil {
-		t.Fatalf("loadAPILog failed: %v", err)
-	}
-	if log != "api log from pod" {
-		t.Fatalf("unexpected log: %q", log)
-	}
-}
-
-func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
-	t.Helper()
-	dir := t.TempDir()
-	argsPath := filepath.Join(dir, "kubectl.args")
-	outputPath := filepath.Join(dir, "kubectl.output")
-	exitPath := filepath.Join(dir, "kubectl.exit")
-	writeFakeKubectlStub(t, dir, argsPath, outputPath, exitPath)
-	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "-l", "app=frs-api", "--prefix", "-c", "erun-backend-api", "--tail", "400"})
-	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
-		t.Fatalf("write fake kubectl output failed: %v", err)
-	}
-	if err := os.WriteFile(exitPath, []byte(fmt.Sprintf("%d", code)), 0o644); err != nil {
-		t.Fatalf("write fake kubectl exit failed: %v", err)
-	}
-	t.Cleanup(func() {
-		data, err := os.ReadFile(argsPath)
-		if err != nil {
-			t.Fatalf("read fake kubectl args failed: %v", err)
-		}
-		normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
-		handler(strings.Split(strings.TrimSpace(normalized), "\n"))
-	})
-	return dir
-}
-
-// writeFakeKubectlStub installs a recording kubectl on PATH. On Windows it must be a
-// .cmd with CRLF endings (PATHEXT lookup; cmd.exe mis-parses LF labels).
-func writeFakeKubectlStub(t *testing.T, dir, argsPath, outputPath, exitPath string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		script := "@echo off\r\n" +
-			"type nul > \"" + argsPath + "\"\r\n" +
-			":loop\r\n" +
-			"if \"%~1\"==\"\" goto after\r\n" +
-			">> \"" + argsPath + "\" echo(%~1\r\n" +
-			"shift\r\n" +
-			"goto loop\r\n" +
-			":after\r\n" +
-			"type \"" + outputPath + "\"\r\n" +
-			"set /p code=< \"" + exitPath + "\"\r\n" +
-			"exit /b %code%\r\n"
-		if err := os.WriteFile(filepath.Join(dir, "kubectl.cmd"), []byte(script), 0o755); err != nil {
-			t.Fatalf("write fake kubectl failed: %v", err)
-		}
-		return
-	}
-	script := `#!/bin/sh
-printf '%s\n' "$@" >"` + argsPath + `"
-cat "` + outputPath + `"
-exit "$(cat "` + exitPath + `")"
-`
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake kubectl failed: %v", err)
 	}
 }

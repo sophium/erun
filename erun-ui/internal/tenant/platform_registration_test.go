@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"errors"
@@ -38,7 +38,7 @@ func TestRegisterPlatformEnvironmentRegisters(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+	outcome, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(RegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime",
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ func TestRegisterPlatformEnvironmentReportsQuotaCapAsAConflict(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+	outcome, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(RegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime",
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestRegisterPlatformEnvironmentReportsQuotaCapAsAConflict(t *testing.T) {
 }
 
 func TestRegisterPlatformEnvironmentRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+	_, err := newTestService(t, Deps{Store: stubStore{}}).RegisterPlatformEnvironment(RegisterPlatformEnvironmentInput{
 		Name: "prod", Type: "runtime",
 	})
 	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
@@ -85,7 +85,7 @@ func TestRegisterPlatformEnvironmentRequiresNameAndType(t *testing.T) {
 	server := registrationWriteAPI(nil, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{Tenant: "frs"})
+	_, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(RegisterPlatformEnvironmentInput{Tenant: "frs"})
 	if err == nil || !strings.Contains(err.Error(), "are required") {
 		t.Fatalf("expected a required-fields error, got %v", err)
 	}
@@ -99,7 +99,7 @@ func TestDeployPlatformEnvironmentReportsUnavailable(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).DeployPlatformEnvironment(uiPlatformEnvironmentActionInput{
+	outcome, err := tenantDashboardApp(t, server.URL).DeployPlatformEnvironment(PlatformEnvironmentActionInput{
 		Tenant: "frs", EnvironmentID: "env-1",
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestDeployPlatformEnvironmentDeploys(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).DeployPlatformEnvironment(uiPlatformEnvironmentActionInput{
+	outcome, err := tenantDashboardApp(t, server.URL).DeployPlatformEnvironment(PlatformEnvironmentActionInput{
 		Tenant: "frs", EnvironmentID: "env-1",
 	})
 	if err != nil {
@@ -136,7 +136,7 @@ func TestStopPlatformEnvironmentRequiresAnEnvironmentID(t *testing.T) {
 	server := registrationWriteAPI(nil, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).StopPlatformEnvironment(uiPlatformEnvironmentActionInput{Tenant: "frs"})
+	_, err := tenantDashboardApp(t, server.URL).StopPlatformEnvironment(PlatformEnvironmentActionInput{Tenant: "frs"})
 	if err == nil || !strings.Contains(err.Error(), "environment id is required") {
 		t.Fatalf("expected an environment-id-required error, got %v", err)
 	}
@@ -150,7 +150,7 @@ func TestDeletePlatformEnvironmentReportsConflict(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).DeletePlatformEnvironment(uiPlatformEnvironmentActionInput{
+	outcome, err := tenantDashboardApp(t, server.URL).DeletePlatformEnvironment(PlatformEnvironmentActionInput{
 		Tenant: "frs", EnvironmentID: "env-1",
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func TestCreatePlatformContextPreviewsWithoutCreating(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	outcome, err := tenantDashboardApp(t, server.URL).CreatePlatformContext(uiCreatePlatformContextInput{
+	outcome, err := tenantDashboardApp(t, server.URL).CreatePlatformContext(CreatePlatformContextInput{
 		Tenant: "frs", Name: "prod", CloudProviderAlias: "aws-main", Region: "eu-west-2", Preview: true,
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestCreatePlatformContextRequiresNameAliasAndRegion(t *testing.T) {
 	server := registrationWriteAPI(nil, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).CreatePlatformContext(uiCreatePlatformContextInput{Tenant: "frs"})
+	_, err := tenantDashboardApp(t, server.URL).CreatePlatformContext(CreatePlatformContextInput{Tenant: "frs"})
 	if err == nil || !strings.Contains(err.Error(), "are required") {
 		t.Fatalf("expected a required-fields error, got %v", err)
 	}
@@ -204,7 +204,7 @@ func TestPreviewPlatformEnvironmentAlwaysReportsAPlan(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	result, err := tenantDashboardApp(t, server.URL).PreviewPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+	result, err := tenantDashboardApp(t, server.URL).PreviewPlatformEnvironment(RegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime",
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func TestPreviewPlatformEnvironmentAlwaysReportsAPlan(t *testing.T) {
 }
 
 func TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister(t *testing.T) {
-	input := uiRegisterPlatformEnvironmentInput{
+	input := RegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime", ContextID: "ctx-1", RuntimeVersion: "1.2.3",
 	}
 	var registerBody, previewBody string
@@ -262,7 +262,7 @@ func TestRegisterPlatformEnvironmentSendsAdopt(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+	_, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(RegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime", KubernetesContext: "primary", Adopt: true,
 	})
 	if err != nil {

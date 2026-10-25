@@ -1,4 +1,4 @@
-package main
+package tenant
 
 import (
 	"encoding/json"
@@ -20,7 +20,7 @@ func TestSubmitTenantInviteRequestSucceeds(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+	outcome, err := app.SubmitTenantInviteRequest(SubmitInviteRequestInput{
 		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
 	})
 	if err != nil {
@@ -36,7 +36,7 @@ func TestSubmitTenantInviteRequestSucceeds(t *testing.T) {
 
 func TestSubmitTenantInviteRequestRejectsInvalidKind(t *testing.T) {
 	app := testERunPlatformAliasApp(t, "https://api.example.test")
-	if _, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+	if _, err := app.SubmitTenantInviteRequest(SubmitInviteRequestInput{
 		Tenant: "frs", Kind: "SOMETHING_ELSE", TenantName: "acme",
 	}); err == nil {
 		t.Fatal("expected an error for an invalid kind")
@@ -51,7 +51,7 @@ func TestSubmitTenantInviteRequestRateLimited(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+	outcome, err := app.SubmitTenantInviteRequest(SubmitInviteRequestInput{
 		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
 	})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWind
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+	outcome, err := app.SubmitTenantInviteRequest(SubmitInviteRequestInput{
 		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
 	})
 	if err != nil {
@@ -107,7 +107,7 @@ func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterOrConfigUsesDefaul
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+	outcome, err := app.SubmitTenantInviteRequest(SubmitInviteRequestInput{
 		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestGetMyTenantInviteRequestNoneYet(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	request, err := app.GetMyTenantInviteRequest(uiTenantInput{Tenant: "frs"})
+	request, err := app.GetMyTenantInviteRequest(TenantInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("GetMyTenantInviteRequest: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestGetMyTenantInviteRequestFound(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	request, err := app.GetMyTenantInviteRequest(uiTenantInput{Tenant: "frs"})
+	request, err := app.GetMyTenantInviteRequest(TenantInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("GetMyTenantInviteRequest: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGetMyTenantInviteRequestFound(t *testing.T) {
 
 func TestDeclineTenantInviteRequestRequiresReason(t *testing.T) {
 	app := testERunPlatformAliasApp(t, "https://api.example.test")
-	if _, err := app.DeclineTenantInviteRequest(uiDeclineInviteRequestInput{
+	if _, err := app.DeclineTenantInviteRequest(DeclineInviteRequestInput{
 		Tenant: "frs", InviteRequestID: "req-1", Reason: "   ",
 	}); err == nil {
 		t.Fatal("expected an error for an empty decline reason")
@@ -171,7 +171,7 @@ func TestDeclineTenantInviteRequestSendsReason(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	request, err := app.DeclineTenantInviteRequest(uiDeclineInviteRequestInput{
+	request, err := app.DeclineTenantInviteRequest(DeclineInviteRequestInput{
 		Tenant: "frs", InviteRequestID: "req-1", Reason: "not now",
 	})
 	if err != nil {
@@ -189,14 +189,14 @@ func TestApproveTenantInviteRequestConflict(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	if _, err := app.ApproveTenantInviteRequest(uiDecideInviteRequestInput{Tenant: "frs", InviteRequestID: "req-1"}); err == nil {
+	if _, err := app.ApproveTenantInviteRequest(DecideInviteRequestInput{Tenant: "frs", InviteRequestID: "req-1"}); err == nil {
 		t.Fatal("expected an error when the request was already decided")
 	}
 }
 
 func TestListTenantPlatformEnrollmentStatusesNotConnectedIsLocalOnly(t *testing.T) {
 	app := testAWSAliasApp(t)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentLocalOnly {
 		t.Fatalf("expected local-only for a tenant with no erun platform alias, got %+v", statuses)
 	}
@@ -210,7 +210,7 @@ func TestListTenantPlatformEnrollmentStatusesEnrolled(t *testing.T) {
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
 		t.Fatalf("expected enrolled once whoami succeeds, got %+v", statuses)
 	}
@@ -228,7 +228,7 @@ func TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheL
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentTenantMismatch {
 		t.Fatalf("expected no enrolment claim for a platform tenant that is not the local one, got %+v", statuses)
 	}
@@ -248,7 +248,7 @@ func TestListTenantPlatformEnrollmentStatusesEnrolledForTheMatchingPlatformTenan
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
 		t.Fatalf("expected enrolled when the platform names the local tenant back, got %+v", statuses)
 	}
@@ -264,7 +264,7 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnWhoamiFault(t *testing.T) 
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
 		t.Fatalf("expected unknown when whoami fails for a reason other than unauthorized/forbidden, got %+v", statuses)
 	}
@@ -282,7 +282,7 @@ func TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden(t *testin
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
 		t.Fatalf("expected enrolled when whoami reports forbidden, got %+v", statuses)
 	}
@@ -304,7 +304,7 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnUnresolvedOrFailedAuth(t *
 			defer server.Close()
 
 			app := testERunPlatformAliasApp(t, server.URL)
-			statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+			statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 			if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
 				t.Fatalf("expected unknown for %s, got %+v", code, statuses)
 			}
@@ -326,7 +326,7 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnMyInviteRequestFault(t *te
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
 		t.Fatalf("expected unknown when MyInviteRequest fails for a reason other than not-found, got %+v", statuses)
 	}
@@ -346,7 +346,7 @@ func TestListTenantPlatformEnrollmentStatusesLocalOnlyWhenNeverRequested(t *test
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
-	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentLocalOnly {
 		t.Fatalf("expected local-only when the identity is verified but never requested, got %+v", statuses)
 	}
@@ -378,7 +378,7 @@ func TestListTenantPlatformEnrollmentStatusesPendingAndDeclined(t *testing.T) {
 			defer server.Close()
 
 			app := testERunPlatformAliasApp(t, server.URL)
-			statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+			statuses := app.ListTenantPlatformEnrollmentStatuses(ListEnrollmentStatusesInput{Tenants: []string{"frs"}})
 			if len(statuses) != 1 || statuses[0].State != tc.wantState || statuses[0].DeclineReason != tc.wantReason {
 				t.Fatalf("unexpected statuses: %+v", statuses)
 			}
